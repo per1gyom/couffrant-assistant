@@ -1087,3 +1087,56 @@ def test_outlook_unread(request: Request):
         token=token,
     )
     return result
+
+@app.get("/test-create-last-reply-draft")
+def test_create_last_reply_draft(request: Request):
+    token = request.session.get("access_token")
+    if not token:
+        return RedirectResponse("/login?next=/test-create-last-reply-draft")
+
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+
+    c.execute("""
+        SELECT id, message_id, subject, from_email
+        FROM mail_memory
+        ORDER BY id DESC
+        LIMIT 1
+    """)
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return {"error": "Aucun mail en base. Lance d'abord /ingest-mails-fast"}
+
+    reply_body = """
+<div style="font-family:Arial, sans-serif; font-size:14px; color:#222;">
+    <div>Bonjour,</div>
+    <br>
+    <div>Merci pour votre message.</div>
+    <div>Je reviens vers vous rapidement.</div>
+    <br>
+    <div>Solairement,</div>
+    <div><strong>Guillaume Perrin</strong></div>
+</div>
+"""
+
+    result = perform_outlook_action(
+        action="create_reply_draft",
+        params={
+            "message_id": row["message_id"],
+            "reply_body": reply_body,
+        },
+        token=token,
+    )
+
+    return {
+        "status": result.get("status"),
+        "action": result.get("action"),
+        "draft_id": result.get("draft_id"),
+        "source_mail_id": row["id"],
+        "source_subject": row["subject"],
+        "source_from": row["from_email"],
+        "message": result.get("message"),
+    }
