@@ -4,6 +4,9 @@ from app.config import ODOO_URL, ODOO_API_KEY
 
 
 def odoo_call(model: str, method: str, args: list = [], kwargs: dict = {}) -> any:
+    import urllib3
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
     response = requests.post(
         f"{ODOO_URL}/web/dataset/call_kw",
         headers={
@@ -21,6 +24,7 @@ def odoo_call(model: str, method: str, args: list = [], kwargs: dict = {}) -> an
             },
         },
         timeout=30,
+        verify=False,
     )
     response.raise_for_status()
     result = response.json()
