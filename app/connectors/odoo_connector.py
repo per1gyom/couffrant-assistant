@@ -1,11 +1,12 @@
 import requests
 import json
+import urllib3
 from app.config import ODOO_URL, ODOO_API_KEY
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 def odoo_call(model: str, method: str, args: list = [], kwargs: dict = {}) -> any:
-    import urllib3
-    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     response = requests.post(
         f"{ODOO_URL}/web/dataset/call_kw/{model}/{method}",
@@ -30,10 +31,15 @@ def odoo_call(model: str, method: str, args: list = [], kwargs: dict = {}) -> an
         timeout=30,
         verify=False,
     )
-    response.raise_for_status()
+
+    if response.status_code != 200:
+        raise Exception(f"Odoo HTTP {response.status_code}: {response.text[:500]}")
+
     result = response.json()
+
     if "error" in result:
-        raise Exception(f"Odoo error: {result['error']}")
+        raise Exception(f"Odoo error: {json.dumps(result['error'])[:500]}")
+
     return result.get("result")
 
 
@@ -73,7 +79,7 @@ def get_tasks_by_project(project_id: int) -> list:
 
 
 def update_project_date(project_id: int, date_start: str, date_end: str) -> bool:
-    result = odoo_call(
+    return odoo_call(
         model="project.project",
         method="write",
         args=[[project_id], {
@@ -81,11 +87,10 @@ def update_project_date(project_id: int, date_start: str, date_end: str) -> bool
             "date": date_end,
         }]
     )
-    return result
 
 
 def add_note_to_partner(partner_id: int, note: str) -> bool:
-    result = odoo_call(
+    return odoo_call(
         model="mail.message",
         method="create",
         args=[{
@@ -95,7 +100,6 @@ def add_note_to_partner(partner_id: int, note: str) -> bool:
             "message_type": "comment",
         }]
     )
-    return result
 
 
 def perform_odoo_action(action: str, params: dict) -> dict:
