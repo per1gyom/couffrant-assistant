@@ -16,6 +16,7 @@ from app.feedback_store import init_db, add_global_instruction, get_global_instr
 from app.mail_memory_store import init_mail_db, insert_mail, mail_exists
 from app.assistant_analyzer import analyze_single_mail
 from app.dashboard_service import get_dashboard
+from app.connectors.outlook_connector import perform_outlook_action
 
 DB_PATH = ASSISTANT_DB_PATH
 
@@ -1073,3 +1074,16 @@ def assistant_dashboard_readable(days: int = 2):
     """
 
     return HTMLResponse(content=html)
+
+@app.get("/test-outlook-unread")
+def test_outlook_unread(request: Request):
+    token = request.session.get("access_token")
+    if not token:
+        return RedirectResponse("/login?next=/test-outlook-unread")
+
+    result = perform_outlook_action(
+        action="list_unread_messages",
+        params={"top": 5},
+        token=token,
+    )
+    return result
