@@ -2,7 +2,10 @@ import sqlite3
 import json
 from datetime import datetime
 
-DB_PATH = "assistant.db"
+from app.config import ASSISTANT_DB_PATH
+
+DB_PATH = ASSISTANT_DB_PATH
+
 
 def ensure_mail_memory_columns():
     conn = sqlite3.connect(DB_PATH)
@@ -20,10 +23,13 @@ def ensure_mail_memory_columns():
 
     for column_name, column_type in columns_to_add.items():
         if column_name not in existing_columns:
-            c.execute(f"ALTER TABLE mail_memory ADD COLUMN {column_name} {column_type}")
+            c.execute(
+                f"ALTER TABLE mail_memory ADD COLUMN {column_name} {column_type}"
+            )
 
     conn.commit()
     conn.close()
+
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -66,8 +72,9 @@ def init_mail_db():
     """)
 
     conn.commit()
-    ensure_mail_memory_columns()
     conn.close()
+
+    ensure_mail_memory_columns()
 
 
 def mail_exists(message_id: str) -> bool:
@@ -85,15 +92,29 @@ def insert_mail(data: dict):
 
     c.execute("""
     INSERT INTO mail_memory (
-    message_id, thread_id, received_at,
-    from_email, subject, display_title,
-    category, priority, reason, suggested_action,
-    short_summary, references_json, group_hints_json,
-    confidence, needs_review, raw_body_preview,
-    analysis_status, created_at,
-
-    needs_reply, reply_urgency, reply_reason,
-    suggested_reply_subject, suggested_reply
+        message_id,
+        thread_id,
+        received_at,
+        from_email,
+        subject,
+        display_title,
+        category,
+        priority,
+        reason,
+        suggested_action,
+        short_summary,
+        references_json,
+        group_hints_json,
+        confidence,
+        needs_review,
+        raw_body_preview,
+        analysis_status,
+        created_at,
+        needs_reply,
+        reply_urgency,
+        reply_reason,
+        suggested_reply_subject,
+        suggested_reply
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         data["message_id"],
@@ -114,8 +135,7 @@ def insert_mail(data: dict):
         data.get("raw_body_preview"),
         data.get("analysis_status", "pending"),
         datetime.utcnow().isoformat(),
-
-        data.get("needs_reply", False),
+        int(data.get("needs_reply", False)),
         data.get("reply_urgency"),
         data.get("reply_reason"),
         data.get("suggested_reply_subject"),
