@@ -2,9 +2,13 @@ import sqlite3
 from collections import defaultdict
 from datetime import datetime, timedelta
 
+from app.config import ASSISTANT_DB_PATH
+
+DB_PATH = ASSISTANT_DB_PATH
+
 
 def get_conn():
-    conn = sqlite3.connect("assistant.db")
+    conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -34,7 +38,12 @@ def build_group_key(item: dict) -> str:
             return "raccordement|enedis-engie"
         return f"raccordement|{title}"
 
-    if "rt connecting" in title or "rt-connecting" in title or "rt-connecting" in sender or "rt-connecting.fr" in sender:
+    if (
+        "rt connecting" in title
+        or "rt-connecting" in title
+        or "rt-connecting" in sender
+        or "rt-connecting.fr" in sender
+    ):
         return "business|rt-connecting"
 
     if "adiwatt" in title or "webinair" in title or "webinaire" in title:
@@ -125,9 +134,22 @@ def get_dashboard(days: int = 2) -> dict:
     start_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
 
     c.execute("""
-        SELECT id, message_id, received_at, from_email, display_title, category, priority,
-               reason, suggested_action, short_summary, suggested_reply,
-               response_type, missing_fields, confidence_level, raw_body_preview
+        SELECT
+            id,
+            message_id,
+            received_at,
+            from_email,
+            display_title,
+            category,
+            priority,
+            reason,
+            suggested_action,
+            short_summary,
+            suggested_reply,
+            response_type,
+            missing_fields,
+            confidence_level,
+            raw_body_preview
         FROM mail_memory
         WHERE received_at >= ?
         ORDER BY received_at DESC
@@ -142,7 +164,16 @@ def get_dashboard(days: int = 2) -> dict:
 
     grouped_items = []
     for _, items in groups.items():
-        items_sorted = sorted(items, key=lambda x: x["received_at"], reverse=True)
+        items_sorted = sorted(
+            items,
+            key=lambda x: x["received_at"] or "",
+            reverse=True,
+        )
+
+        missing_fields = items_sorted[0].get("missing_fields")
+        if not missing_fields:
+            missing_fields = []
+
         grouped_items.append({
             "id": items_sorted[0].get("id"),
             "topic": choose_group_title(items_sorted),
@@ -151,18 +182,21 @@ def get_dashboard(days: int = 2) -> dict:
             "action": choose_group_action(items_sorted),
             "summary": build_summary(items_sorted),
             "mail_count": len(items_sorted),
-            "latest_date": items_sorted[0]["received_at"],
-            "category": items_sorted[0]["category"],
-            "senders": list(dict.fromkeys([i["from_email"] for i in items_sorted])),
+            "latest_date": items_sorted[0].get("received_at"),
+            "category": items_sorted[0].get("category"),
+            "senders": list(dict.fromkeys([i.get("from_email") for i in items_sorted if i.get("from_email")])),
             "suggested_reply": items_sorted[0].get("suggested_reply"),
             "response_type": items_sorted[0].get("response_type"),
-            "missing_fields": items_sorted[0].get("missing_fields", []),
+            "missing_fields": missing_fields,
             "confidence_level": items_sorted[0].get("confidence_level"),
             "raw_body_preview": items_sorted[0].get("raw_body_preview"),
         })
 
     priority_order = {"haute": 0, "moyenne": 1, "basse": 2}
-    grouped_items.sort(key=lambda x: (priority_order[x["priority"]], x["latest_date"]), reverse=False)
+    grouped_items.sort(
+        key=lambda x: (priority_order.get(x["priority"], 99), x.get("latest_date") or ""),
+        reverse=False,
+    )
 
     def compute_business_priority(item: dict) -> str:
         title = (item.get("topic") or "").lower()
