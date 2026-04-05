@@ -1,0 +1,11 @@
+uvicorn
+fastapi
+uvicorn[standard]
+requests
+msal
+python-multipart
+python-dotenv
+itsdangerous
+pydantic
+starlette
+openai
