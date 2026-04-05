@@ -424,6 +424,91 @@ def ingest_mails(request: Request):
         inserted += 1
     return {"inserted": inserted}
 
+@app.get("/build-style-profile")
+def build_style_profile(request: Request):
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("""
+        SELECT subject, to_email, body_preview
+        FROM sent_mail_memory
+        ORDER BY sent_at DESC
+        LIMIT 100
+    """)
+    rows = [dict(row) for row in c.fetchall()]
+    conn.close()
+
+    if not rows:
+        return {"error": "Aucun mail envoyé en mémoire"}
+
+    mails_text = "\n\n".join([
+        f"Sujet : {r['subject']}\nDestinataire : {r['to_email']}\nContenu : {r['body_preview']}"
+        for r in rows
+    ])
+
+    response = client.messages.create(
+        model=ANTHROPIC_MODEL_SMART,
+        max_tokens=2048,
+        messages=[
+            {
+                "role": "user",
+                "content": f"""Analyse ces {len(rows)} emails envoyés par Guillaume Perrin de Couffrant Solar.
+
+{mails_text}
+
+Produis un profil détaillé de son style de communication :
+
+1. Style d'écriture
+- longueur typique des mails
+- ton (formel, direct, chaleureux...)
+- formules d'ouverture préférées
+- formules de clôture préférées
+- niveau de détail
+
+2. Vocabulaire métier
+- termes techniques récurrents
+- expressions caractéristiques
+- abréviations utilisées
+
+3. Clients et interlocuteurs récurrents
+- types d'interlocuteurs principaux
+- sujets récurrents par type
+
+4. Comportements de communication
+- délais de réponse habituels si visibles
+- sujets traités en priorité
+- sujets délégués ou ignorés
+
+5. Recommandations pour Aria
+- comment écrire comme Guillaume
+- ce qu'il faut éviter
+- ce qui lui ressemble"""
+            }
+        ]
+    )
+
+    profile_text = response.content[0].text
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS aria_profile (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_type TEXT,
+            content TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    c.execute("DELETE FROM aria_profile WHERE profile_type = 'style'")
+    c.execute("""
+        INSERT INTO aria_profile (profile_type, content)
+        VALUES ('style', ?)
+    """, (profile_text,))
+    conn.commit()
+    conn.close()
+
+    return {"status": "ok", "profile": profile_text}
+
 @app.get("/learn-sent-mails")
 def learn_sent_mails(request: Request, top: int = 50):
     token = request.session.get("access_token")
