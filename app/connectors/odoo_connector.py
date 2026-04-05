@@ -8,21 +8,25 @@ def odoo_call(model: str, method: str, args: list = [], kwargs: dict = {}) -> an
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     response = requests.post(
-        f"{ODOO_URL}/web/dataset/call_kw",
+        f"{ODOO_URL}/web/dataset/call_kw/{model}/{method}",
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {ODOO_API_KEY}",
         },
         json={
             "jsonrpc": "2.0",
+            "id": 1,
             "method": "call",
             "params": {
                 "model": model,
                 "method": method,
                 "args": args,
-                "kwargs": kwargs,
+                "kwargs": {
+                    **kwargs,
+                    "context": {},
+                },
             },
         },
+        auth=(ODOO_API_KEY, ""),
         timeout=30,
         verify=False,
     )
