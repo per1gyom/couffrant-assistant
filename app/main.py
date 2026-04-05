@@ -145,11 +145,13 @@ def health():
 
 @app.get("/login")
 def login(request: Request, next: str = "/me"):
-    return {
-        "REDIRECT_URI_used": REDIRECT_URI,
-        "AUTHORITY_used": AUTHORITY,
-        "GRAPH_SCOPES_used": GRAPH_SCOPES,
-    }
+    msal_app = build_msal_app()
+    auth_url = msal_app.get_authorization_request_url(
+        scopes=GRAPH_SCOPES,
+        redirect_uri=REDIRECT_URI,
+        state=next,
+    )
+    return RedirectResponse(auth_url)
 
 
 @app.get("/auth/callback")
