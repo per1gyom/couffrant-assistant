@@ -424,6 +424,77 @@ def ingest_mails(request: Request):
         inserted += 1
     return {"inserted": inserted}
 
+@app.get("/learn-sent-mails")
+def learn_sent_mails(request: Request, top: int = 50):
+    token = request.session.get("access_token")
+    if not token:
+        return RedirectResponse("/login?next=/learn-sent-mails")
+
+    try:
+        data = graph_get(
+            token,
+            "/me/mailFolders/SentItems/messages",
+            params={
+                "$top": top,
+                "$select": "id,subject,from,receivedDateTime,bodyPreview,toRecipients",
+                "$orderby": "receivedDateTime DESC",
+            },
+        )
+    except requests.HTTPError:
+        request.session.pop("access_token", None)
+        return RedirectResponse("/login?next=/learn-sent-mails")
+
+    messages = data.get("value", [])
+    inserted = 0
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS sent_mail_memory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id TEXT UNIQUE,
+            sent_at TEXT,
+            to_email TEXT,
+            subject TEXT,
+            body_preview TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    conn.commit()
+
+    for msg in messages:
+        message_id = msg["id"]
+        c.execute("SELECT 1 FROM sent_mail_memory WHERE message_id = ?", (message_id,))
+        if c.fetchone():
+            continue
+
+        to_recipients = msg.get("toRecipients", [])
+        to_email = to_recipients[0].get("emailAddress", {}).get("address", "") if to_recipients else ""
+
+        try:
+            c.execute("""
+                INSERT INTO sent_mail_memory
+                (message_id, sent_at, to_email, subject, body_preview)
+                VALUES (?, ?, ?, ?, ?)
+            """, (
+                message_id,
+                msg.get("receivedDateTime"),
+                to_email,
+                msg.get("subject"),
+                msg.get("bodyPreview"),
+            ))
+            inserted += 1
+        except Exception:
+            continue
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "inserted": inserted,
+        "total_fetched": len(messages),
+        "message": f"{inserted} mails envoyés mémorisés"
+    }
 
 @app.get("/summary")
 def summary(request: Request):
