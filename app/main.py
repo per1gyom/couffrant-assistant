@@ -43,6 +43,34 @@ def startup_event():
 def health():
     return {"status": "ok"}
 
+@app.get("/init-db")
+def init_db_now():
+    from app.mail_memory_store import init_mail_db
+    init_mail_db()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS sent_mail_memory (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message_id TEXT UNIQUE,
+            sent_at TEXT,
+            to_email TEXT,
+            subject TEXT,
+            body_preview TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS aria_profile (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_type TEXT,
+            content TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    conn.commit()
+    conn.close()
+    return {"status": "tables créées"}
 
 @app.post("/aria")
 def aria(payload: AriaQuery):
@@ -135,7 +163,6 @@ Si tu repères un problème ou une opportunité importante, signale-le même si 
     conn.close()
 
     return {"answer": aria_response}
-
 
 @app.get("/login")
 def login(request: Request, next: str = "/me"):
