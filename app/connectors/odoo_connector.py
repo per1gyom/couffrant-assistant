@@ -6,13 +6,39 @@ from app.config import ODOO_URL, ODOO_API_KEY
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
+def odoo_authenticate() -> str:
+    response = requests.post(
+        f"{ODOO_URL}/web/session/authenticate",
+        headers={"Content-Type": "application/json"},
+        json={
+            "jsonrpc": "2.0",
+            "method": "call",
+            "params": {
+                "db": ODOO_DB,
+                "login": ODOO_LOGIN,
+                "password": ODOO_PASSWORD,
+            },
+        },
+        verify=False,
+        timeout=30,
+    )
+    result = response.json()
+    if "error" in result:
+        raise Exception(f"Auth Odoo failed: {result['error']}")
+    session_id = response.cookies.get("session_id")
+    if not session_id:
+        raise Exception("Pas de session_id reçu")
+    return session_id
+
+
 def odoo_call(model: str, method: str, args: list = [], kwargs: dict = {}) -> any:
+    urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+    session_id = odoo_authenticate()
 
     response = requests.post(
         f"{ODOO_URL}/web/dataset/call_kw/{model}/{method}",
-        headers={
-            "Content-Type": "application/json",
-        },
+        headers={"Content-Type": "application/json"},
+        cookies={"session_id": session_id},
         json={
             "jsonrpc": "2.0",
             "id": 1,
@@ -21,22 +47,17 @@ def odoo_call(model: str, method: str, args: list = [], kwargs: dict = {}) -> an
                 "model": model,
                 "method": method,
                 "args": args,
-                "kwargs": {
-                    **kwargs,
-                    "context": {},
-                },
+                "kwargs": {**kwargs, "context": {}},
             },
         },
-        auth=(ODOO_API_KEY, ""),
-        timeout=30,
         verify=False,
+        timeout=30,
     )
 
     if response.status_code != 200:
         raise Exception(f"Odoo HTTP {response.status_code}: {response.text[:500]}")
 
     result = response.json()
-
     if "error" in result:
         raise Exception(f"Odoo error: {json.dumps(result['error'])[:500]}")
 

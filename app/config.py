@@ -22,3 +22,6 @@ ANTHROPIC_MODEL_FAST = os.getenv("ANTHROPIC_MODEL_FAST", "claude-haiku-4-5-20251
 ANTHROPIC_MODEL_SMART = os.getenv("ANTHROPIC_MODEL_SMART", "claude-sonnet-4-6")
 ODOO_URL = os.getenv("ODOO_URL", "").strip()
 ODOO_API_KEY = os.getenv("ODOO_API_KEY", "").strip()
+ODOO_DB = os.getenv("ODOO_DB", "").strip()
+ODOO_LOGIN = os.getenv("ODOO_LOGIN", "").strip()
+ODOO_PASSWORD = os.getenv("ODOO_PASSWORD", "").strip()
