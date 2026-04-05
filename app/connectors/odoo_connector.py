@@ -1,7 +1,7 @@
 import requests
 import json
 import urllib3
-from app.config import ODOO_URL, ODOO_API_KEY
+from app.config import ODOO_URL, ODOO_API_KEY, ODOO_DB, ODOO_LOGIN, ODOO_PASSWORD
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
