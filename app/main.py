@@ -986,3 +986,87 @@ def list_mail_folders(request: Request):
         request.session.pop("access_token", None)
         return RedirectResponse("/login?next=/list-mail-folders")
     return data.get("value", [])
+
+@app.get("/learn-archive-mails")
+def learn_archive_mails(request: Request, top: int = 100, skip: int = 0):
+    token = request.session.get("access_token")
+    if not token:
+        return RedirectResponse("/login?next=/learn-archive-mails")
+
+    folder_id = "AQMkAGEwZmJhNTllLWQ3MjUtNDg4ADQtYjdhMi1jMGEyZjRiNmFkNWEALgAAA-6yBmE1L7hGi--BXSl5S2sBAIyf8uOKE0VAkKv1dN8K6xgAAAIBRQAAAA=="
+
+    try:
+        data = graph_get(
+            token,
+            f"/me/mailFolders/{folder_id}/messages",
+            params={
+                "$top": top,
+                "$skip": skip,
+                "$select": "id,subject,from,receivedDateTime,bodyPreview",
+                "$orderby": "receivedDateTime DESC",
+            },
+        )
+    except requests.HTTPError:
+        request.session.pop("access_token", None)
+        return RedirectResponse("/login?next=/learn-archive-mails")
+
+    messages = data.get("value", [])
+    inserted = 0
+    skipped_noise = 0
+    conn = get_pg_conn()
+    c = conn.cursor()
+
+    skip_keywords = [
+        "noreply", "no-reply", "donotreply", "newsletter", "unsubscribe",
+        "se désabonner", "notification", "mailer-daemon", "marketing",
+        "promo", "offre spéciale", "linkedin", "twitter", "facebook",
+        "instagram", "jobteaser", "indeed", "welcometothejungle",
+        "calendly", "zoom", "teams", "webinar", "webinaire",
+        "satisfaction", "avis client", "enquête", "survey",
+    ]
+
+    for msg in messages:
+        message_id = msg["id"]
+        c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
+        if c.fetchone():
+            continue
+
+        from_email = msg.get("from", {}).get("emailAddress", {}).get("address", "").lower()
+        subject = (msg.get("subject") or "").lower()
+        body = (msg.get("bodyPreview") or "").lower()
+        full_text = f"{from_email} {subject} {body}"
+
+        if any(kw in full_text for kw in skip_keywords):
+            skipped_noise += 1
+            continue
+
+        try:
+            c.execute("""
+                INSERT INTO mail_memory
+                (message_id, received_at, from_email, subject,
+                 raw_body_preview, analysis_status, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (message_id) DO NOTHING
+            """, (
+                message_id,
+                msg.get("receivedDateTime"),
+                msg.get("from", {}).get("emailAddress", {}).get("address", ""),
+                msg.get("subject"),
+                msg.get("bodyPreview"),
+                "archive_raw",
+                datetime.utcnow().isoformat(),
+            ))
+            inserted += 1
+        except Exception:
+            continue
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "inserted": inserted,
+        "skipped_noise": skipped_noise,
+        "total_fetched": len(messages),
+        "skip": skip,
+        "message": f"{inserted} mails archivés utiles stockés, {skipped_noise} bruits ignorés"
+    }
