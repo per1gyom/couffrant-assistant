@@ -1,16 +1,7 @@
-import sqlite3
+import json
 from collections import defaultdict
 from datetime import datetime, timedelta
-
-from app.config import ASSISTANT_DB_PATH
-
-DB_PATH = ASSISTANT_DB_PATH
-
-
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+from app.database import get_pg_conn
 
 
 def normalize_text(text: str) -> str:
@@ -57,13 +48,11 @@ def build_group_key(item: dict) -> str:
 
 def choose_group_title(items: list[dict]) -> str:
     first = items[0]
-    key_text = " ".join(
-        [
-            normalize_text(first.get("display_title", "")),
-            (first.get("from_email") or "").lower(),
-            first.get("category", ""),
-        ]
-    )
+    key_text = " ".join([
+        normalize_text(first.get("display_title", "")),
+        (first.get("from_email") or "").lower(),
+        first.get("category", ""),
+    ])
 
     if "rt connecting" in key_text or "rt-connecting" in key_text:
         return "RT Connecting"
@@ -128,34 +117,24 @@ def build_summary(items: list[dict]) -> str:
 
 
 def get_dashboard(days: int = 2) -> dict:
-    conn = get_conn()
+    conn = get_pg_conn()
     c = conn.cursor()
 
     start_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
 
     c.execute("""
         SELECT
-            id,
-            message_id,
-            received_at,
-            from_email,
-            display_title,
-            category,
-            priority,
-            reason,
-            suggested_action,
-            short_summary,
-            suggested_reply,
-            response_type,
-            missing_fields,
-            confidence_level,
+            id, message_id, received_at, from_email, display_title,
+            category, priority, reason, suggested_action, short_summary,
+            suggested_reply, response_type, missing_fields, confidence_level,
             raw_body_preview
         FROM mail_memory
-        WHERE received_at >= ?
+        WHERE received_at >= %s
         ORDER BY received_at DESC
     """, (start_date,))
 
-    rows = [dict(row) for row in c.fetchall()]
+    columns = [desc[0] for desc in c.description]
+    rows = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()
 
     groups = defaultdict(list)
@@ -173,6 +152,11 @@ def get_dashboard(days: int = 2) -> dict:
         missing_fields = items_sorted[0].get("missing_fields")
         if not missing_fields:
             missing_fields = []
+        elif isinstance(missing_fields, str):
+            try:
+                missing_fields = json.loads(missing_fields)
+            except Exception:
+                missing_fields = []
 
         grouped_items.append({
             "id": items_sorted[0].get("id"),
@@ -204,16 +188,12 @@ def get_dashboard(days: int = 2) -> dict:
 
         if category == "raccordement":
             return "urgent"
-
         if "commande" in title or "retard" in title or "annulation" in title:
             return "urgent"
-
         if category in ["reunion", "interne", "commercial"]:
             return "a_traiter"
-
         if category == "notification":
             return "faible"
-
         return "a_traiter"
 
     urgent = []
@@ -222,7 +202,6 @@ def get_dashboard(days: int = 2) -> dict:
 
     for item in grouped_items:
         business_priority = compute_business_priority(item)
-
         if business_priority == "urgent":
             urgent.append(item)
         elif business_priority == "a_traiter":
