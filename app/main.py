@@ -1,6 +1,5 @@
 import os
 import requests
-import sqlite3
 import json
 from datetime import datetime, timedelta
 
@@ -12,8 +11,7 @@ from pydantic import BaseModel
 from app.auth import build_msal_app
 from app.config import (
     GRAPH_SCOPES, REDIRECT_URI, SESSION_SECRET,
-    ASSISTANT_DB_PATH, AUTHORITY,
-    ANTHROPIC_MODEL_SMART
+    AUTHORITY, ANTHROPIC_MODEL_SMART
 )
 from app.graph_client import graph_get
 from app.ai_client import summarize_messages, analyze_single_mail_with_ai, client
@@ -22,8 +20,7 @@ from app.mail_memory_store import init_mail_db, insert_mail, mail_exists
 from app.assistant_analyzer import analyze_single_mail
 from app.dashboard_service import get_dashboard
 from app.connectors.outlook_connector import perform_outlook_action
-
-DB_PATH = ASSISTANT_DB_PATH
+from app.database import get_pg_conn, init_postgres
 
 app = FastAPI(title="Couffrant Solar Assistant")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
@@ -35,6 +32,7 @@ class AriaQuery(BaseModel):
 
 @app.on_event("startup")
 def startup_event():
+    init_postgres()
     init_db()
     init_mail_db()
 
@@ -43,41 +41,18 @@ def startup_event():
 def health():
     return {"status": "ok"}
 
+
 @app.get("/init-db")
 def init_db_now():
-    from app.mail_memory_store import init_mail_db
-    init_mail_db()
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS sent_mail_memory (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            message_id TEXT UNIQUE,
-            sent_at TEXT,
-            to_email TEXT,
-            subject TEXT,
-            body_preview TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS aria_profile (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            profile_type TEXT,
-            content TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    conn.commit()
-    conn.close()
+    init_postgres()
     return {"status": "tables créées"}
+
 
 @app.post("/aria")
 def aria(payload: AriaQuery):
     instructions = get_global_instructions()
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
         SELECT display_title, category, priority, short_summary, suggested_reply
@@ -85,19 +60,17 @@ def aria(payload: AriaQuery):
         ORDER BY id DESC
         LIMIT 10
     """)
-    mails = [dict(row) for row in c.fetchall()]
-    conn.close()
+    columns = [desc[0] for desc in c.description]
+    mails = [dict(zip(columns, row)) for row in c.fetchall()]
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
     c.execute("""
         SELECT user_input, aria_response
         FROM aria_memory
         ORDER BY id DESC
         LIMIT 5
     """)
-    memory = [dict(row) for row in c.fetchall()]
+    columns = [desc[0] for desc in c.description]
+    memory = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()
 
     context = {
@@ -143,26 +116,22 @@ Si tu repères un problème ou une opportunité importante, signale-le même si 
     response = client.messages.create(
         model=ANTHROPIC_MODEL_SMART,
         max_tokens=2048,
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
+        messages=[{"role": "user", "content": prompt}]
     )
 
     aria_response = response.content[0].text
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
         INSERT INTO aria_memory (user_input, aria_response)
-        VALUES (?, ?)
+        VALUES (%s, %s)
     """, (payload.query, aria_response))
     conn.commit()
     conn.close()
 
     return {"answer": aria_response}
+
 
 @app.get("/login")
 def login(request: Request, next: str = "/me"):
@@ -179,17 +148,14 @@ def login(request: Request, next: str = "/me"):
 def auth_callback(request: Request, code: str | None = None, state: str | None = None):
     if not code:
         return HTMLResponse("Code manquant", status_code=400)
-
     msal_app = build_msal_app()
     result = msal_app.acquire_token_by_authorization_code(
         code,
         scopes=GRAPH_SCOPES,
         redirect_uri=REDIRECT_URI,
     )
-
     if "access_token" not in result:
         return HTMLResponse(str(result), status_code=400)
-
     request.session["access_token"] = result["access_token"]
     return RedirectResponse(state or "/me")
 
@@ -209,8 +175,7 @@ def me(request: Request):
 
 @app.get("/memory")
 def memory():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
         SELECT message_id, received_at, from_email, subject, display_title,
@@ -219,14 +184,15 @@ def memory():
         ORDER BY id DESC
         LIMIT 20
     """)
-    rows = [dict(row) for row in c.fetchall()]
+    columns = [desc[0] for desc in c.description]
+    rows = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()
     return rows
 
 
 @app.get("/rebuild-memory")
 def rebuild_memory():
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_pg_conn()
     c = conn.cursor()
     c.execute("DELETE FROM mail_memory")
     conn.commit()
@@ -241,8 +207,7 @@ def assistant_dashboard(days: int = 2):
 
 @app.get("/reply-queue")
 def reply_queue():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
         SELECT id, received_at, from_email, subject, display_title,
@@ -252,15 +217,15 @@ def reply_queue():
         WHERE needs_reply = 1
         ORDER BY id DESC
     """)
-    rows = [dict(row) for row in c.fetchall()]
+    columns = [desc[0] for desc in c.description]
+    rows = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()
     return rows
 
 
 @app.get("/reply-learning")
 def reply_learning():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
         SELECT id, mail_subject, mail_from, category, ai_reply, final_reply, created_at
@@ -268,66 +233,59 @@ def reply_learning():
         ORDER BY id DESC
         LIMIT 20
     """)
-    rows = [dict(row) for row in c.fetchall()]
+    columns = [desc[0] for desc in c.description]
+    rows = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()
     return rows
 
 
 @app.get("/digest")
 def digest(days: int = 2):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_pg_conn()
     c = conn.cursor()
     start_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
     c.execute("""
         SELECT received_at, from_email, display_title, category, priority,
                reason, suggested_action, short_summary
         FROM mail_memory
-        WHERE received_at >= ?
+        WHERE received_at >= %s
         ORDER BY received_at DESC
     """, (start_date,))
-    rows = [dict(row) for row in c.fetchall()]
+    columns = [desc[0] for desc in c.description]
+    rows = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()
     return {"days": days, "count": len(rows), "items": rows}
 
 
 @app.get("/digest-readable", response_class=HTMLResponse)
 def digest_readable(days: int = 2):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_pg_conn()
     c = conn.cursor()
     start_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
     c.execute("""
         SELECT received_at, from_email, display_title, category, priority,
                reason, suggested_action, short_summary
         FROM mail_memory
-        WHERE received_at >= ?
+        WHERE received_at >= %s
         ORDER BY received_at DESC
     """, (start_date,))
-    rows = [dict(row) for row in c.fetchall()]
+    columns = [desc[0] for desc in c.description]
+    rows = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()
 
-    html = f"""
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <title>Digest {days} jours</title>
-        <style>
-            body {{ font-family: Arial, sans-serif; margin: 30px; background: #f7f7f7; color: #222; }}
-            .card {{ background: white; border-radius: 10px; padding: 16px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
-            .title {{ font-size: 18px; font-weight: bold; margin-bottom: 8px; }}
-            .high {{ color: #c62828; }} .medium {{ color: #ef6c00; }} .low {{ color: #888; }}
-            .line {{ margin: 4px 0; }} .label {{ font-weight: bold; }}
-        </style>
-    </head>
-    <body>
-        <h1>Digest sur {days} jours</h1>
-        <div style="color:#666;margin-bottom:20px;">{len(rows)} mails analysés</div>
-    """
+    html = f"""<html><head><meta charset="utf-8"><title>Digest {days} jours</title>
+    <style>
+        body {{ font-family: Arial, sans-serif; margin: 30px; background: #f7f7f7; color: #222; }}
+        .card {{ background: white; border-radius: 10px; padding: 16px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
+        .title {{ font-size: 18px; font-weight: bold; margin-bottom: 8px; }}
+        .high {{ color: #c62828; }} .medium {{ color: #ef6c00; }} .low {{ color: #888; }}
+        .line {{ margin: 4px 0; }} .label {{ font-weight: bold; }}
+    </style></head><body>
+    <h1>Digest sur {days} jours</h1>
+    <div style="color:#666;margin-bottom:20px;">{len(rows)} mails analysés</div>"""
     for item in rows:
         cls = "high" if item["priority"] == "haute" else "medium" if item["priority"] == "moyenne" else "low"
-        html += f"""
-        <div class="card">
+        html += f"""<div class="card">
             <div class="title {cls}">{item['display_title']}</div>
             <div class="line"><span class="label">Date :</span> {item['received_at']}</div>
             <div class="line"><span class="label">Expéditeur :</span> {item['from_email']}</div>
@@ -335,8 +293,7 @@ def digest_readable(days: int = 2):
             <div class="line"><span class="label">Raison :</span> {item['reason']}</div>
             <div class="line"><span class="label">Action :</span> {item['suggested_action']}</div>
             <div class="line"><span class="label">Résumé :</span> {item['short_summary']}</div>
-        </div>
-        """
+        </div>"""
     html += "</body></html>"
     return html
 
@@ -451,10 +408,66 @@ def ingest_mails(request: Request):
         inserted += 1
     return {"inserted": inserted}
 
+
+@app.get("/learn-sent-mails")
+def learn_sent_mails(request: Request, top: int = 50):
+    token = request.session.get("access_token")
+    if not token:
+        return RedirectResponse("/login?next=/learn-sent-mails")
+    try:
+        data = graph_get(
+            token,
+            "/me/mailFolders/SentItems/messages",
+            params={
+                "$top": top,
+                "$select": "id,subject,from,receivedDateTime,bodyPreview,toRecipients",
+                "$orderby": "receivedDateTime DESC",
+            },
+        )
+    except requests.HTTPError:
+        request.session.pop("access_token", None)
+        return RedirectResponse("/login?next=/learn-sent-mails")
+
+    messages = data.get("value", [])
+    inserted = 0
+    conn = get_pg_conn()
+    c = conn.cursor()
+
+    for msg in messages:
+        message_id = msg["id"]
+        c.execute("SELECT 1 FROM sent_mail_memory WHERE message_id = %s", (message_id,))
+        if c.fetchone():
+            continue
+        to_recipients = msg.get("toRecipients", [])
+        to_email = to_recipients[0].get("emailAddress", {}).get("address", "") if to_recipients else ""
+        try:
+            c.execute("""
+                INSERT INTO sent_mail_memory (message_id, sent_at, to_email, subject, body_preview)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (message_id) DO NOTHING
+            """, (
+                message_id,
+                msg.get("receivedDateTime"),
+                to_email,
+                msg.get("subject"),
+                msg.get("bodyPreview"),
+            ))
+            inserted += 1
+        except Exception:
+            continue
+
+    conn.commit()
+    conn.close()
+    return {
+        "inserted": inserted,
+        "total_fetched": len(messages),
+        "message": f"{inserted} mails envoyés mémorisés"
+    }
+
+
 @app.get("/build-style-profile")
 def build_style_profile(request: Request):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
         SELECT subject, to_email, body_preview
@@ -462,7 +475,8 @@ def build_style_profile(request: Request):
         ORDER BY sent_at DESC
         LIMIT 100
     """)
-    rows = [dict(row) for row in c.fetchall()]
+    columns = [desc[0] for desc in c.description]
+    rows = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()
 
     if not rows:
@@ -476,10 +490,9 @@ def build_style_profile(request: Request):
     response = client.messages.create(
         model=ANTHROPIC_MODEL_SMART,
         max_tokens=2048,
-        messages=[
-            {
-                "role": "user",
-                "content": f"""Analyse ces {len(rows)} emails envoyés par Guillaume Perrin de Couffrant Solar.
+        messages=[{
+            "role": "user",
+            "content": f"""Analyse ces {len(rows)} emails envoyés par Guillaume Perrin de Couffrant Solar.
 
 {mails_text}
 
@@ -510,103 +523,23 @@ Produis un profil détaillé de son style de communication :
 - comment écrire comme Guillaume
 - ce qu'il faut éviter
 - ce qui lui ressemble"""
-            }
-        ]
+        }]
     )
 
     profile_text = response.content[0].text
 
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_pg_conn()
     c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS aria_profile (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            profile_type TEXT,
-            content TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
     c.execute("DELETE FROM aria_profile WHERE profile_type = 'style'")
     c.execute("""
         INSERT INTO aria_profile (profile_type, content)
-        VALUES ('style', ?)
-    """, (profile_text,))
+        VALUES (%s, %s)
+    """, ('style', profile_text))
     conn.commit()
     conn.close()
 
     return {"status": "ok", "profile": profile_text}
 
-@app.get("/learn-sent-mails")
-def learn_sent_mails(request: Request, top: int = 50):
-    token = request.session.get("access_token")
-    if not token:
-        return RedirectResponse("/login?next=/learn-sent-mails")
-
-    try:
-        data = graph_get(
-            token,
-            "/me/mailFolders/SentItems/messages",
-            params={
-                "$top": top,
-                "$select": "id,subject,from,receivedDateTime,bodyPreview,toRecipients",
-                "$orderby": "receivedDateTime DESC",
-            },
-        )
-    except requests.HTTPError:
-        request.session.pop("access_token", None)
-        return RedirectResponse("/login?next=/learn-sent-mails")
-
-    messages = data.get("value", [])
-    inserted = 0
-
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS sent_mail_memory (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            message_id TEXT UNIQUE,
-            sent_at TEXT,
-            to_email TEXT,
-            subject TEXT,
-            body_preview TEXT,
-            created_at TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    conn.commit()
-
-    for msg in messages:
-        message_id = msg["id"]
-        c.execute("SELECT 1 FROM sent_mail_memory WHERE message_id = ?", (message_id,))
-        if c.fetchone():
-            continue
-
-        to_recipients = msg.get("toRecipients", [])
-        to_email = to_recipients[0].get("emailAddress", {}).get("address", "") if to_recipients else ""
-
-        try:
-            c.execute("""
-                INSERT INTO sent_mail_memory
-                (message_id, sent_at, to_email, subject, body_preview)
-                VALUES (?, ?, ?, ?, ?)
-            """, (
-                message_id,
-                msg.get("receivedDateTime"),
-                to_email,
-                msg.get("subject"),
-                msg.get("bodyPreview"),
-            ))
-            inserted += 1
-        except Exception:
-            continue
-
-    conn.commit()
-    conn.close()
-
-    return {
-        "inserted": inserted,
-        "total_fetched": len(messages),
-        "message": f"{inserted} mails envoyés mémorisés"
-    }
 
 @app.get("/summary")
 def summary(request: Request):
@@ -671,8 +604,7 @@ def summary_readable(request: Request):
         for item in items:
             cls = "title-high" if item["priority"] == "haute" else "title-medium" if item["priority"] == "moyenne" else "title-low"
             count_html = f"<div class='badge'>{item['mail_count']} mails liés</div>" if item.get("mail_count", 1) > 1 else ""
-            html_section += f"""
-            <div class="card">
+            html_section += f"""<div class="card">
                 {count_html}
                 <div class="title {cls}">{item['display_title']}</div>
                 <div class="line"><span class="label">Expéditeur :</span> {item['from']}</div>
@@ -680,46 +612,39 @@ def summary_readable(request: Request):
                 <div class="line"><span class="label">Raison :</span> {item['reason']}</div>
                 <div class="line"><span class="label">Action :</span> {item['suggested_action']}</div>
                 <div class="line"><span class="label">Résumé :</span> {item['short_summary']}</div>
-            </div>
-            """
+            </div>"""
         return html_section
 
     instructions_html = "".join(f"<li>{i}</li>" for i in instructions[:10])
 
     html = f"""<!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="utf-8">
-    <title>Résumé des mails</title>
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 30px; background: #f7f7f7; color: #222; }}
-        .card {{ background: white; border-radius: 10px; padding: 18px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); position: relative; }}
-        .title {{ font-size: 18px; font-weight: bold; margin-bottom: 10px; }}
-        .title-high {{ color: #c62828; }} .title-medium {{ color: #ef6c00; }} .title-low {{ color: #c9a400; }}
-        .line {{ margin: 4px 0; }} .label {{ font-weight: bold; }}
-        .empty {{ color: #777; font-style: italic; margin-bottom: 12px; }}
-        .panel {{ background: white; border-radius: 10px; padding: 18px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
-        textarea {{ width: 100%; min-height: 90px; padding: 10px; box-sizing: border-box; margin-top: 8px; }}
-        button {{ margin-top: 10px; padding: 10px 14px; border: none; border-radius: 8px; cursor: pointer; }}
-        .badge {{ position: absolute; right: 14px; top: 14px; background: #eef3ff; color: #335; font-size: 12px; padding: 5px 8px; border-radius: 999px; }}
-    </style>
-</head>
-<body>
-    <h1>Résumé des mails</h1>
-    <div style="color:#666;margin-bottom:25px;">{result['count']} cartes analysées</div>
-    <div class="panel">
-        <h2>Apprendre à l'assistant</h2>
-        <form method="post" action="/instruction">
-            <label for="instruction">Donne une consigne globale en langage naturel :</label>
-            <textarea id="instruction" name="instruction" placeholder="Exemple : regroupe davantage les mails liés à RT Connecting"></textarea>
-            <button type="submit">Enregistrer la consigne</button>
-        </form>
-    </div>
-    <div class="panel">
-        <h2>Consignes mémorisées</h2>
-        <ul>{instructions_html or '<li>Aucune consigne enregistrée pour le moment.</li>'}</ul>
-    </div>
-"""
+<html lang="fr"><head><meta charset="utf-8"><title>Résumé des mails</title>
+<style>
+    body {{ font-family: Arial, sans-serif; margin: 30px; background: #f7f7f7; color: #222; }}
+    .card {{ background: white; border-radius: 10px; padding: 18px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); position: relative; }}
+    .title {{ font-size: 18px; font-weight: bold; margin-bottom: 10px; }}
+    .title-high {{ color: #c62828; }} .title-medium {{ color: #ef6c00; }} .title-low {{ color: #c9a400; }}
+    .line {{ margin: 4px 0; }} .label {{ font-weight: bold; }}
+    .empty {{ color: #777; font-style: italic; margin-bottom: 12px; }}
+    .panel {{ background: white; border-radius: 10px; padding: 18px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
+    textarea {{ width: 100%; min-height: 90px; padding: 10px; box-sizing: border-box; margin-top: 8px; }}
+    button {{ margin-top: 10px; padding: 10px 14px; border: none; border-radius: 8px; cursor: pointer; }}
+    .badge {{ position: absolute; right: 14px; top: 14px; background: #eef3ff; color: #335; font-size: 12px; padding: 5px 8px; border-radius: 999px; }}
+</style></head><body>
+<h1>Résumé des mails</h1>
+<div style="color:#666;margin-bottom:25px;">{result['count']} cartes analysées</div>
+<div class="panel">
+    <h2>Apprendre à l'assistant</h2>
+    <form method="post" action="/instruction">
+        <label for="instruction">Donne une consigne globale en langage naturel :</label>
+        <textarea id="instruction" name="instruction"></textarea>
+        <button type="submit">Enregistrer la consigne</button>
+    </form>
+</div>
+<div class="panel">
+    <h2>Consignes mémorisées</h2>
+    <ul>{instructions_html or '<li>Aucune consigne enregistrée pour le moment.</li>'}</ul>
+</div>"""
     html += render_section("🔴 Urgents", urgents)
     html += render_section("🟠 À traiter", moyens)
     html += render_section("🟡 Secondaires", faibles)
@@ -729,8 +654,7 @@ def summary_readable(request: Request):
 
 @app.get("/reply-learning-readable", response_class=HTMLResponse)
 def reply_learning_readable():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
         SELECT id, mail_subject, mail_from, category, ai_reply, final_reply, created_at
@@ -738,11 +662,11 @@ def reply_learning_readable():
         ORDER BY id DESC
         LIMIT 50
     """)
-    rows = [dict(row) for row in c.fetchall()]
+    columns = [desc[0] for desc in c.description]
+    rows = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()
 
-    html = """
-    <html><head><meta charset="utf-8"><title>Mémoire des corrections</title>
+    html = """<html><head><meta charset="utf-8"><title>Mémoire des corrections</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 30px; background: #f7f7f7; color: #222; }
         .card { background: white; border-radius: 10px; padding: 16px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
@@ -752,11 +676,9 @@ def reply_learning_readable():
         .btn { display:inline-block; margin-bottom:20px; background:#1f6feb; color:white; text-decoration:none; padding:10px 14px; border-radius:8px; font-weight:bold; }
     </style></head><body>
     <a class="btn" href="/assistant-dashboard-readable">⬅ Retour dashboard</a>
-    <h1>Mémoire des corrections</h1>
-    """
+    <h1>Mémoire des corrections</h1>"""
     for row in rows:
-        html += f"""
-        <div class="card">
+        html += f"""<div class="card">
             <div class="title">{row['mail_subject']}</div>
             <div class="line"><span class="label">Expéditeur :</span> {row['mail_from']}</div>
             <div class="line"><span class="label">Catégorie :</span> {row['category']}</div>
@@ -765,20 +687,18 @@ def reply_learning_readable():
             <div class="box">{row['ai_reply'] or ''}</div>
             <div class="line" style="margin-top:10px;"><span class="label">Réponse finale corrigée :</span></div>
             <div class="box">{row['final_reply'] or ''}</div>
-        </div>
-        """
+        </div>"""
     html += "</body></html>"
     return HTMLResponse(content=html)
 
 
 @app.post("/save-reply-correction/{mail_id}")
 def save_reply_correction(mail_id: int, final_reply: str = Form(...)):
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
         SELECT subject, from_email, raw_body_preview, category, suggested_reply
-        FROM mail_memory WHERE id = ?
+        FROM mail_memory WHERE id = %s
     """, (mail_id,))
     row = c.fetchone()
     if not row:
@@ -787,10 +707,9 @@ def save_reply_correction(mail_id: int, final_reply: str = Form(...)):
     c.execute("""
         INSERT INTO reply_learning_memory
         (mail_subject, mail_from, mail_body_preview, category, ai_reply, final_reply)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (row["subject"], row["from_email"], row["raw_body_preview"],
-          row["category"], row["suggested_reply"], final_reply))
-    c.execute("UPDATE mail_memory SET suggested_reply = ? WHERE id = ?", (final_reply, mail_id))
+        VALUES (%s, %s, %s, %s, %s, %s)
+    """, (row[0], row[1], row[2], row[3], row[4], final_reply))
+    c.execute("UPDATE mail_memory SET suggested_reply = %s WHERE id = %s", (final_reply, mail_id))
     conn.commit()
     conn.close()
     return RedirectResponse("/assistant-dashboard-readable", status_code=303)
@@ -798,9 +717,9 @@ def save_reply_correction(mail_id: int, final_reply: str = Form(...)):
 
 @app.get("/validate-reply/{mail_id}")
 def validate_reply(mail_id: int):
-    conn = sqlite3.connect(DB_PATH)
+    conn = get_pg_conn()
     c = conn.cursor()
-    c.execute("UPDATE mail_memory SET reply_status='validated' WHERE id=?", (mail_id,))
+    c.execute("UPDATE mail_memory SET reply_status='validated' WHERE id=%s", (mail_id,))
     conn.commit()
     conn.close()
     return RedirectResponse("/assistant-dashboard-readable", status_code=303)
@@ -812,25 +731,24 @@ def send_reply(mail_id: int, request: Request):
     if not token:
         return RedirectResponse(f"/login?next=/send-reply/{mail_id}")
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
+    conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
         SELECT from_email, suggested_reply, suggested_reply_subject, reply_status
-        FROM mail_memory WHERE id = ?
+        FROM mail_memory WHERE id = %s
     """, (mail_id,))
     row = c.fetchone()
 
     if not row:
         conn.close()
         return {"error": "Mail non trouvé"}
-    if row["reply_status"] != "validated":
+    if row[3] != "validated":
         conn.close()
         return {"error": "Réponse non validée"}
 
     html_body = f"""
 <div style="font-family:Arial, sans-serif; font-size:14px; color:#222;">
-    <div style="white-space:pre-line;">{row["suggested_reply"]}</div>
+    <div style="white-space:pre-line;">{row[1]}</div>
     <br><br>
     <div>Solairement,</div>
     <div style="font-weight:bold; margin-top:8px;">Guillaume Perrin</div>
@@ -840,17 +758,16 @@ def send_reply(mail_id: int, request: Request):
         <img src="https://www.couffrant-solar.fr/signature/logo-couffrant-solar.jpg"
              alt="Couffrant Solar" style="max-width:420px; height:auto; border:0;">
     </div>
-</div>
-"""
+</div>"""
     try:
         resp = requests.post(
             "https://graph.microsoft.com/v1.0/me/sendMail",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json={
                 "message": {
-                    "subject": row["suggested_reply_subject"],
+                    "subject": row[2],
                     "body": {"contentType": "HTML", "content": html_body},
-                    "toRecipients": [{"emailAddress": {"address": row["from_email"]}}]
+                    "toRecipients": [{"emailAddress": {"address": row[0]}}]
                 }
             },
             timeout=30,
@@ -858,7 +775,7 @@ def send_reply(mail_id: int, request: Request):
         if resp.status_code != 202:
             conn.close()
             return {"error": "Echec envoi mail", "status_code": resp.status_code, "details": resp.text}
-        c.execute("UPDATE mail_memory SET reply_status='sent' WHERE id=?", (mail_id,))
+        c.execute("UPDATE mail_memory SET reply_status='sent' WHERE id=%s", (mail_id,))
         conn.commit()
     finally:
         conn.close()
@@ -887,22 +804,17 @@ def assistant_dashboard_readable(days: int = 2):
             edit_html = ""
             if item.get("suggested_reply"):
                 mail_id = item.get("id", "")
-                actions_html = f"""
-                <div style="margin-top:10px;" onclick="event.stopPropagation()">
+                actions_html = f"""<div style="margin-top:10px;" onclick="event.stopPropagation()">
                     <a href="/validate-reply/{mail_id}" onclick="localStorage.setItem('open_dashboard_card','{detail_id}');event.stopPropagation();" style="margin-right:10px;">✅ Valider</a>
                     <a href="/send-reply/{mail_id}" onclick="localStorage.setItem('open_dashboard_card','{detail_id}');event.stopPropagation();" style="margin-right:10px;">📤 Envoyer</a>
-                </div>
-                """
-                edit_html = f"""
-                <form method="post" action="/save-reply-correction/{mail_id}" style="margin-top:10px;" onclick="event.stopPropagation()" onsubmit="localStorage.setItem('open_dashboard_card','{detail_id}')">
+                </div>"""
+                edit_html = f"""<form method="post" action="/save-reply-correction/{mail_id}" style="margin-top:10px;" onclick="event.stopPropagation()" onsubmit="localStorage.setItem('open_dashboard_card','{detail_id}')">
                     <div><b>✏️ Modifier la réponse :</b></div>
                     <textarea name="final_reply" onclick="event.stopPropagation()" style="width:100%;min-height:120px;margin-top:6px;">{item.get("suggested_reply", "")}</textarea>
                     <button type="submit" onclick="event.stopPropagation()" style="margin-top:8px;">💾 Enregistrer correction</button>
-                </form>
-                """
+                </form>"""
 
-            html += f"""
-            <div onclick="toggle('{detail_id}')" style="background:white;border-radius:10px;padding:16px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,0.08);cursor:pointer;">
+            html += f"""<div onclick="toggle('{detail_id}')" style="background:white;border-radius:10px;padding:16px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,0.08);cursor:pointer;">
                 <div style="font-size:20px;font-weight:bold;color:{color};margin-bottom:8px;">{item['topic']}</div>
                 <div><b>Priorité :</b> {item['priority']}</div>
                 <div><b>Catégorie :</b> {item['category']}</div>
@@ -922,48 +834,42 @@ def assistant_dashboard_readable(days: int = 2):
                     {edit_html}
                     {actions_html}
                 </div>
-            </div>
-            """
+            </div>"""
         return html
 
     html = f"""<!DOCTYPE html>
-<html><head>
-    <meta charset="utf-8">
-    <title>Assistant Dashboard</title>
-    <script>
-    function toggle(id) {{
-        var el = document.getElementById(id);
-        if (!el) return;
-        if (el.style.display === "none" || el.style.display === "") {{
-            el.style.display = "block";
-            localStorage.setItem("open_dashboard_card", id);
-        }} else {{
-            el.style.display = "none";
-            localStorage.removeItem("open_dashboard_card");
-        }}
+<html><head><meta charset="utf-8"><title>Assistant Dashboard</title>
+<script>
+function toggle(id) {{
+    var el = document.getElementById(id);
+    if (!el) return;
+    if (el.style.display === "none" || el.style.display === "") {{
+        el.style.display = "block";
+        localStorage.setItem("open_dashboard_card", id);
+    }} else {{
+        el.style.display = "none";
+        localStorage.removeItem("open_dashboard_card");
     }}
-    window.addEventListener("load", function () {{
-        var openId = localStorage.getItem("open_dashboard_card");
-        if (openId) {{ var el = document.getElementById(openId); if (el) el.style.display = "block"; }}
-    }});
-    </script>
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 30px; background: #f7f7f7; color: #222; }}
-        h1 {{ margin-bottom: 10px; }} h2 {{ margin-top: 30px; }}
-        .topbar {{ display: flex; gap: 10px; align-items: center; margin-bottom: 20px; }}
-        .btn {{ display: inline-block; background: #1f6feb; color: white; text-decoration: none; padding: 10px 14px; border-radius: 8px; font-weight: bold; }}
-        .btn:hover {{ opacity: 0.9; }}
-    </style>
-</head>
-<body>
-    <h1>Assistant Dashboard</h1>
-    <div class="topbar">
-        <a class="btn" href="/ingest-mails-fast">🔄 Rafraîchir</a>
-        <a class="btn" href="/assistant-dashboard-readable">📨 File réponses</a>
-        <a class="btn" href="/reply-learning-readable">🧠 Mémoire corrections</a>
-    </div>
-    <div style="color:#666;margin-bottom:20px;">{dashboard['count']} sujets sur {days} jours</div>
-"""
+}}
+window.addEventListener("load", function () {{
+    var openId = localStorage.getItem("open_dashboard_card");
+    if (openId) {{ var el = document.getElementById(openId); if (el) el.style.display = "block"; }}
+}});
+</script>
+<style>
+    body {{ font-family: Arial, sans-serif; margin: 30px; background: #f7f7f7; color: #222; }}
+    h1 {{ margin-bottom: 10px; }} h2 {{ margin-top: 30px; }}
+    .topbar {{ display: flex; gap: 10px; align-items: center; margin-bottom: 20px; }}
+    .btn {{ display: inline-block; background: #1f6feb; color: white; text-decoration: none; padding: 10px 14px; border-radius: 8px; font-weight: bold; }}
+    .btn:hover {{ opacity: 0.9; }}
+</style></head><body>
+<h1>Assistant Dashboard</h1>
+<div class="topbar">
+    <a class="btn" href="/ingest-mails-fast">🔄 Rafraîchir</a>
+    <a class="btn" href="/assistant-dashboard-readable">📨 File réponses</a>
+    <a class="btn" href="/reply-learning-readable">🧠 Mémoire corrections</a>
+</div>
+<div style="color:#666;margin-bottom:20px;">{dashboard['count']} sujets sur {days} jours</div>"""
     html += render_block("🔴 Urgents", dashboard["urgent"])
     html += render_block("🟠 À suivre", dashboard["normal"])
     html += render_block("⚪ Secondaires", dashboard["low"])
@@ -979,42 +885,6 @@ def test_outlook_unread(request: Request):
     return perform_outlook_action("list_unread_messages", {"top": 5}, token)
 
 
-@app.get("/test-create-last-reply-draft")
-def test_create_last_reply_draft(request: Request):
-    token = request.session.get("access_token")
-    if not token:
-        return RedirectResponse("/login?next=/test-create-last-reply-draft")
-
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-    c.execute("SELECT id, message_id, subject, from_email FROM mail_memory ORDER BY id DESC LIMIT 1")
-    row = c.fetchone()
-    conn.close()
-
-    if not row:
-        return {"error": "Aucun mail en base. Lance d'abord /ingest-mails-fast"}
-
-    reply_body = """
-<div style="font-family:Arial, sans-serif; font-size:14px; color:#222;">
-    <div>Bonjour,</div><br>
-    <div>Merci pour votre message.</div>
-    <div>Je reviens vers vous rapidement.</div><br>
-    <div>Solairement,</div>
-    <div><strong>Guillaume Perrin</strong></div>
-</div>
-"""
-    result = perform_outlook_action("create_reply_draft", {"message_id": row["message_id"], "reply_body": reply_body}, token)
-    return {
-        "status": result.get("status"),
-        "action": result.get("action"),
-        "draft_id": result.get("draft_id"),
-        "source_mail_id": row["id"],
-        "source_subject": row["subject"],
-        "source_from": row["from_email"],
-        "message": result.get("message"),
-    }
-
 @app.get("/test-odoo")
 def test_odoo():
     from app.connectors.odoo_connector import perform_odoo_action
@@ -1023,5 +893,3 @@ def test_odoo():
         params={"email": "guillaume@couffrant-solar.fr"}
     )
     return result
-
-DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
