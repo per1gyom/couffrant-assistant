@@ -178,6 +178,18 @@ def analyze_single_mail_with_ai(message: dict, instructions: list[str] | None = 
     learning_examples = get_learning_examples(hint_category, limit=3)
     learning_text = build_learning_text(learning_examples)
 
+    style_profile = ""
+    try:
+        conn_profile = sqlite3.connect(ASSISTANT_DB_PATH)
+        c_profile = conn_profile.cursor()
+        c_profile.execute("SELECT content FROM aria_profile WHERE profile_type = 'style' ORDER BY id DESC LIMIT 1")
+        row = c_profile.fetchone()
+        if row:
+            style_profile = row[0]
+        conn_profile.close()
+    except Exception:
+        pass
+
     system_instructions = f"""
 Tu es Aria, l'assistante stratégique et opérationnelle de Couffrant Solar.
 
@@ -200,6 +212,9 @@ Contexte client Odoo :
 - Mentionne le nom du client et le chantier concerné si disponibles
 - Si plusieurs chantiers existent, identifie lequel est concerné par le mail
 - Si client_trouve = false, traite le mail sans données CRM
+
+Profil de style de Guillaume :
+{style_profile[:1500] if style_profile else "Profil non encore chargé — écrire de façon directe et concise"}
 
 Personnalité :
 - professionnelle, directe, claire, fiable, pragmatique, orientée solution
