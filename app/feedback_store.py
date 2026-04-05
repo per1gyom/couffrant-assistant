@@ -1,29 +1,9 @@
-import sqlite3
-from pathlib import Path
-
-DB_PATH = Path(__file__).resolve().parent.parent / "assistant_memory.db"
-
-
-def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+from app.database import get_pg_conn
 
 
 def init_db():
-    conn = get_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS global_instructions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        instruction TEXT NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    conn.commit()
-    conn.close()
+    from app.database import init_postgres
+    init_postgres()
 
 
 def add_global_instruction(instruction: str):
@@ -31,10 +11,10 @@ def add_global_instruction(instruction: str):
     if not instruction:
         return
 
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute(
-        "INSERT INTO global_instructions (instruction) VALUES (?)",
+    conn = get_pg_conn()
+    c = conn.cursor()
+    c.execute(
+        "INSERT INTO global_instructions (instruction) VALUES (%s)",
         (instruction,),
     )
     conn.commit()
@@ -42,14 +22,14 @@ def add_global_instruction(instruction: str):
 
 
 def get_global_instructions(limit: int = 20) -> list[str]:
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("""
+    conn = get_pg_conn()
+    c = conn.cursor()
+    c.execute("""
         SELECT instruction
         FROM global_instructions
         ORDER BY id DESC
-        LIMIT ?
+        LIMIT %s
     """, (limit,))
-    rows = cur.fetchall()
+    rows = c.fetchall()
     conn.close()
-    return [row["instruction"] for row in rows]
+    return [row[0] for row in rows]
