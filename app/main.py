@@ -464,6 +464,70 @@ def learn_sent_mails(request: Request, top: int = 50):
         "message": f"{inserted} mails envoyés mémorisés"
     }
 
+@app.get("/learn-inbox-mails")
+def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
+    token = request.session.get("access_token")
+    if not token:
+        return RedirectResponse("/login?next=/learn-inbox-mails")
+
+    try:
+        data = graph_get(
+            token,
+            "/me/mailFolders/inbox/messages",
+            params={
+                "$top": top,
+                "$skip": skip,
+                "$select": "id,subject,from,receivedDateTime,bodyPreview,toRecipients",
+                "$orderby": "receivedDateTime DESC",
+            },
+        )
+    except requests.HTTPError:
+        request.session.pop("access_token", None)
+        return RedirectResponse("/login?next=/learn-inbox-mails")
+
+    messages = data.get("value", [])
+    inserted = 0
+    conn = get_pg_conn()
+    c = conn.cursor()
+
+    for msg in messages:
+        message_id = msg["id"]
+        c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
+        if c.fetchone():
+            continue
+
+        from_email = msg.get("from", {}).get("emailAddress", {}).get("address", "")
+
+        try:
+            c.execute("""
+                INSERT INTO mail_memory
+                (message_id, received_at, from_email, subject, body_preview,
+                 raw_body_preview, analysis_status, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (message_id) DO NOTHING
+            """, (
+                message_id,
+                msg.get("receivedDateTime"),
+                from_email,
+                msg.get("subject"),
+                msg.get("bodyPreview"),
+                msg.get("bodyPreview"),
+                "inbox_raw",
+                datetime.utcnow().isoformat(),
+            ))
+            inserted += 1
+        except Exception:
+            continue
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "inserted": inserted,
+        "total_fetched": len(messages),
+        "skip": skip,
+        "message": f"{inserted} mails reçus mémorisés"
+    }
 
 @app.get("/build-style-profile")
 def build_style_profile(request: Request):
