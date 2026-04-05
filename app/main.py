@@ -9,7 +9,7 @@ from fastapi.responses import RedirectResponse, HTMLResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.auth import build_msal_app
-from app.config import GRAPH_SCOPES, REDIRECT_URI, SESSION_SECRET, ASSISTANT_DB_PATH
+from app.config import GRAPH_SCOPES, REDIRECT_URI, SESSION_SECRET, ASSISTANT_DB_PATH, AUTHORITY
 from app.graph_client import graph_get
 from app.ai_client import summarize_messages, analyze_single_mail_with_ai, client, MODEL
 from app.feedback_store import init_db, add_global_instruction, get_global_instructions
@@ -147,6 +147,7 @@ def health():
 def login(request: Request, next: str = "/me"):
     return {
         "REDIRECT_URI_used": REDIRECT_URI,
+        "AUTHORITY_used": AUTHORITY,
         "GRAPH_SCOPES_used": GRAPH_SCOPES,
     }
 
