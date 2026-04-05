@@ -4,6 +4,26 @@ from datetime import datetime
 
 DB_PATH = "assistant.db"
 
+def ensure_mail_memory_columns():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    columns_to_add = {
+        "response_type": "TEXT",
+        "missing_fields": "TEXT",
+        "confidence_level": "TEXT",
+        "reply_status": "TEXT DEFAULT 'pending'",
+    }
+
+    c.execute("PRAGMA table_info(mail_memory)")
+    existing_columns = {row[1] for row in c.fetchall()}
+
+    for column_name, column_type in columns_to_add.items():
+        if column_name not in existing_columns:
+            c.execute(f"ALTER TABLE mail_memory ADD COLUMN {column_name} {column_type}")
+
+    conn.commit()
+    conn.close()
 
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
@@ -46,6 +66,7 @@ def init_mail_db():
     """)
 
     conn.commit()
+    ensure_mail_memory_columns()
     conn.close()
 
 
