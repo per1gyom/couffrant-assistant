@@ -9,3 +9,4 @@ itsdangerous
 pydantic
 starlette
 anthropic
+psycopg2-binary

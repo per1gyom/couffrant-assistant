@@ -1023,3 +1023,5 @@ def test_odoo():
         params={"email": "guillaume@couffrant-solar.fr"}
     )
     return result
+
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
