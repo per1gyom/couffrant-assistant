@@ -3,14 +3,11 @@ import json
 import sqlite3
 import anthropic
 
-
-DEFAULT_SIGNATURE = """
-Solairement,
+DEFAULT_SIGNATURE = """Solairement,
 
 Guillaume Perrin
 06 49 43 09 17
-www.couffrant-solar.fr
-"""
+www.couffrant-solar.fr"""
 
 from app.config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL_FAST, ANTHROPIC_MODEL_SMART
 from app.config import ASSISTANT_DB_PATH
@@ -26,80 +23,38 @@ MAIL_SCHEMA = {
         "category": {
             "type": "string",
             "enum": [
-                "raccordement",
-                "consuel",
-                "chantier",
-                "commercial",
-                "financier",
-                "fournisseur",
-                "reunion",
-                "securite",
-                "interne",
-                "notification",
-                "autre",
+                "raccordement", "consuel", "chantier", "commercial",
+                "financier", "fournisseur", "reunion", "securite",
+                "interne", "notification", "autre",
             ],
         },
-        "priority": {
-            "type": "string",
-            "enum": ["haute", "moyenne", "basse"],
-        },
+        "priority": {"type": "string", "enum": ["haute", "moyenne", "basse"]},
         "reason": {"type": "string"},
         "suggested_action": {"type": "string"},
         "short_summary": {"type": "string"},
-        "group_hints": {
-            "type": "array",
-            "items": {"type": "string"},
-        },
+        "group_hints": {"type": "array", "items": {"type": "string"}},
         "confidence": {"type": "number"},
-        "confidence_level": {
-            "type": "string",
-            "enum": ["haute", "moyenne", "basse"],
-        },
+        "confidence_level": {"type": "string", "enum": ["haute", "moyenne", "basse"]},
         "needs_review": {"type": "boolean"},
         "needs_reply": {"type": "boolean"},
-        "reply_urgency": {
-            "type": "string",
-            "enum": ["haute", "moyenne", "basse"],
-        },
+        "reply_urgency": {"type": "string", "enum": ["haute", "moyenne", "basse"]},
         "reply_reason": {"type": "string"},
         "response_type": {
             "type": "string",
             "enum": [
-                "oui_non",
-                "planification",
-                "demande_info",
-                "demande_document",
-                "accuse_reception",
-                "relance",
-                "pas_de_reponse",
-                "autre",
+                "oui_non", "planification", "demande_info", "demande_document",
+                "accuse_reception", "relance", "pas_de_reponse", "autre",
             ],
         },
-        "missing_fields": {
-            "type": "array",
-            "items": {"type": "string"},
-        },
+        "missing_fields": {"type": "array", "items": {"type": "string"}},
         "suggested_reply_subject": {"type": "string"},
         "suggested_reply": {"type": "string"},
     },
     "required": [
-        "display_title",
-        "category",
-        "priority",
-        "reason",
-        "suggested_action",
-        "short_summary",
-        "group_hints",
-        "confidence",
-        "confidence_level",
-        "needs_review",
-        "needs_reply",
-        "reply_urgency",
-        "reply_reason",
-        "response_type",
-        "missing_fields",
-        "suggested_reply_subject",
-        "suggested_reply",
+        "display_title", "category", "priority", "reason", "suggested_action",
+        "short_summary", "group_hints", "confidence", "confidence_level",
+        "needs_review", "needs_reply", "reply_urgency", "reply_reason",
+        "response_type", "missing_fields", "suggested_reply_subject", "suggested_reply",
     ],
     "additionalProperties": False,
 }
@@ -109,7 +64,6 @@ def get_learning_examples(category: str, limit: int = 3) -> list[dict]:
     conn = sqlite3.connect(ASSISTANT_DB_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
-
     c.execute("""
         SELECT mail_subject, mail_from, mail_body_preview, category, ai_reply, final_reply
         FROM reply_learning_memory
@@ -117,7 +71,6 @@ def get_learning_examples(category: str, limit: int = 3) -> list[dict]:
         ORDER BY id DESC
         LIMIT ?
     """, (category, limit))
-
     rows = [dict(row) for row in c.fetchall()]
     conn.close()
     return rows
@@ -126,11 +79,9 @@ def get_learning_examples(category: str, limit: int = 3) -> list[dict]:
 def build_learning_text(examples: list[dict]) -> str:
     if not examples:
         return "Aucun exemple utilisateur pertinent disponible."
-
     blocks = []
     for i, ex in enumerate(examples, start=1):
-        blocks.append(
-            f"""Exemple {i}
+        blocks.append(f"""Exemple {i}
 Sujet : {ex.get('mail_subject', '')}
 Expéditeur : {ex.get('mail_from', '')}
 Contenu : {ex.get('mail_body_preview', '')}
@@ -140,8 +91,7 @@ Réponse IA initiale :
 
 Réponse finale corrigée par l'utilisateur :
 {ex.get('final_reply', '')}
-"""
-        )
+""")
     return "\n\n".join(blocks)
 
 
@@ -154,7 +104,6 @@ def detect_hint_category(message: dict) -> str:
         .get("address", "")
         .lower()
     )
-
     full_text = f"{subject} {body} {sender}"
 
     if "enedis" in full_text or "engie" in full_text or "consuel" in full_text:
@@ -165,20 +114,56 @@ def detect_hint_category(message: dict) -> str:
         return "reunion"
     if "fournisseur" in full_text or "kstar" in full_text:
         return "fournisseur"
-
     return "autre"
+
+
+def get_odoo_context(sender_email: str) -> dict:
+    try:
+        from app.connectors.odoo_connector import perform_odoo_action
+
+        partner = perform_odoo_action(
+            action="get_partner_by_email",
+            params={"email": sender_email}
+        )
+
+        if not partner.get("result"):
+            return {"client_trouve": False}
+
+        p = partner["result"]
+        partner_id = p["id"]
+
+        projects = perform_odoo_action(
+            action="get_projects_by_partner",
+            params={"partner_id": partner_id}
+        )
+
+        return {
+            "client_trouve": True,
+            "client_nom": p.get("name"),
+            "client_email": p.get("email"),
+            "client_telephone": p.get("phone"),
+            "client_ville": p.get("city"),
+            "chantiers": projects.get("result", []),
+        }
+
+    except Exception as e:
+        return {"client_trouve": False, "erreur": str(e)}
 
 
 def analyze_single_mail_with_ai(message: dict, instructions: list[str] | None = None) -> dict:
     instructions = instructions or []
 
+    sender_email = (
+        message.get("from", {})
+        .get("emailAddress", {})
+        .get("address", "Expéditeur inconnu")
+    )
+
+    odoo_context = get_odoo_context(sender_email)
+
     payload = {
         "subject": message.get("subject", ""),
-        "from": (
-            message.get("from", {})
-            .get("emailAddress", {})
-            .get("address", "Expéditeur inconnu")
-        ),
+        "from": sender_email,
         "receivedDateTime": message.get("receivedDateTime", ""),
         "bodyPreview": message.get("bodyPreview", ""),
         "body": (
@@ -186,6 +171,7 @@ def analyze_single_mail_with_ai(message: dict, instructions: list[str] | None = 
             if isinstance(message.get("body"), dict)
             else message.get("body", "")
         ),
+        "odoo_context": odoo_context,
     }
 
     hint_category = detect_hint_category(message)
@@ -193,76 +179,44 @@ def analyze_single_mail_with_ai(message: dict, instructions: list[str] | None = 
     learning_text = build_learning_text(learning_examples)
 
     system_instructions = f"""
-Tu es Aria, l’assistante stratégique et opérationnelle de Couffrant Solar.
+Tu es Aria, l'assistante stratégique et opérationnelle de Couffrant Solar.
 
 Analyse un seul mail et retourne uniquement un JSON strict conforme au schéma.
 
 Ta mission :
 - comprendre rapidement le besoin réel
 - qualifier le mail correctement
-- détecter s’il faut répondre
+- détecter s'il faut répondre
 - proposer une réponse directement exploitable
 - aider Guillaume à gagner du temps et à décider vite
 
+Règles absolues :
+- Tu proposes toujours, Guillaume décide toujours
+- Tu n'exécutes aucune action sans validation explicite de Guillaume
+- Ne jamais inventer une information absente du mail ou du contexte Odoo
+
+Contexte client Odoo :
+- Si odoo_context.client_trouve = true, utilise les données pour personnaliser l'analyse et la réponse
+- Mentionne le nom du client et le chantier concerné si disponibles
+- Si plusieurs chantiers existent, identifie lequel est concerné par le mail
+- Si client_trouve = false, traite le mail sans données CRM
+
 Personnalité :
-- professionnelle
-- directe
-- claire
-- fiable
-- intelligente
-- pragmatique
-- orientée solution
-- avec une pointe d’humour subtil uniquement si le contexte s’y prête
+- professionnelle, directe, claire, fiable, pragmatique, orientée solution
+- avec une pointe d'humour subtil uniquement si le contexte s'y prête
+- jamais sur un sujet sensible, conflictuel, financier ou litige
 
 Règles de communication :
 - pas de blabla inutile
-- pas de tournures trop génériques ou trop robotiques
-- privilégier des réponses concrètes, naturelles et directement exploitables
+- réponses concrètes, naturelles et directement exploitables
 - phrases simples, fluides et professionnelles
-- rester prudent si une information manque ou si le contexte est ambigu
-- ne jamais inventer une information absente du mail
 - ne jamais ajouter de signature dans suggested_reply
 - écrire comme Guillaume pourrait répondre : naturel, direct, efficace
 
 Règles métier :
 - raccordement / Enedis / Engie / Consuel = souvent priorité haute
-- notifications marketing, newsletters, jobs, publicité, promos = notification
+- notifications marketing, newsletters = notification, priorité basse
 - si tu hésites, choisis "autre"
-- résumés propres, sans signature parasite
-- s’inspirer fortement du style des corrections utilisateur si elles sont pertinentes
-
-Humour :
-- autorisé uniquement s’il est léger, discret et pertinent
-- jamais sur un sujet sensible, conflictuel, financier, administratif sérieux, litige ou client mécontent
-- jamais forcé
-- au maximum une petite touche
-
-Tu dois produire les champs suivants :
-- display_title : titre court lisible pour le dashboard
-- category : catégorie métier
-- priority : haute / moyenne / basse
-- reason : pourquoi ce niveau de priorité
-- suggested_action : action concrète recommandée
-- short_summary : résumé très court et utile
-- group_hints : mots-clés utiles pour regrouper les mails
-- confidence : nombre entre 0 et 1
-- confidence_level : haute / moyenne / basse
-- needs_review : true si le mail est ambigu, sensible ou incertain
-- needs_reply : true si une réponse est attendue
-- reply_urgency : haute / moyenne / basse
-- reply_reason : pourquoi une réponse est nécessaire
-- response_type :
-  - oui_non
-  - planification
-  - demande_info
-  - demande_document
-  - accuse_reception
-  - relance
-  - pas_de_reponse
-  - autre
-- missing_fields : liste des informations manquantes pour répondre proprement
-- suggested_reply_subject : sujet proposé si réponse nécessaire
-- suggested_reply : réponse proposée, naturelle, professionnelle, sans signature
 
 Consignes utilisateur :
 {json.dumps(instructions, ensure_ascii=False)}
@@ -278,11 +232,6 @@ Si aucune réponse n'est nécessaire :
 - missing_fields = []
 - suggested_reply_subject = ""
 - suggested_reply = ""
-
-Si une information manque pour répondre correctement :
-- remplir missing_fields
-- rester prudent
-- ne jamais inventer
 """.strip()
 
     response = client.messages.create(
