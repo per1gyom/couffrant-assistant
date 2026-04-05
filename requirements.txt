@@ -8,4 +8,4 @@ python-dotenv
 itsdangerous
 pydantic
 starlette
-openai
+anthropic

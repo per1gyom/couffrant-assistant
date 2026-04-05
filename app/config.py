@@ -17,5 +17,6 @@ GRAPH_SCOPES = os.getenv("GRAPH_SCOPES", "User.Read Mail.Read Calendars.Read").s
 SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me")
 ASSISTANT_DB_PATH = os.getenv("ASSISTANT_DB_PATH", "assistant.db")
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4.1-mini")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
+ANTHROPIC_MODEL_FAST = os.getenv("ANTHROPIC_MODEL_FAST", "claude-haiku-4-5-20251001")
+ANTHROPIC_MODEL_SMART = os.getenv("ANTHROPIC_MODEL_SMART", "claude-sonnet-4-6")

@@ -117,21 +117,31 @@ Si tu identifies dans le contexte des probl√®mes, risques, oublis ou opportunit√
 - ne signale que ce qui a une vraie valeur
 """.strip()
 
-    response = client.responses.create(
-        model=MODEL,
-        input=prompt,
+    response = client.messages.create(
+        model=ANTHROPIC_MODEL_SMART,
+        max_tokens=2048,
+        messages=[
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
     )
+
+    aria_response = response.content[0].text
+
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
 
     c.execute("""
     INSERT INTO aria_memory (user_input, aria_response)
     VALUES (?, ?)
-    """, (payload.query, response.output_text))
+    """, (payload.query, aria_response))
 
     conn.commit()
     conn.close()
-    return {"answer": response.output_text}
+
+    return {"answer": aria_response}
 
 @app.on_event("startup")
 def startup_event():

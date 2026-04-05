@@ -1,16 +1,22 @@
 import os
 import json
 import sqlite3
-from openai import OpenAI
+import anthropic
 
-DEFAULT_SIGNATURE = """Solairement,
+
+DEFAULT_SIGNATURE = """
+Solairement,
 
 Guillaume Perrin
 06 49 43 09 17
-www.couffrant-solar.fr"""
+www.couffrant-solar.fr
+"""
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-MODEL = os.getenv("OPENAI_MODEL", "gpt-5.4")
+from app.config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL_FAST, ANTHROPIC_MODEL_SMART
+from app.config import ASSISTANT_DB_PATH
+
+client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+MODEL = ANTHROPIC_MODEL_FAST
 
 
 MAIL_SCHEMA = {
@@ -279,21 +285,19 @@ Si une information manque pour répondre correctement :
 - ne jamais inventer
 """.strip()
 
-    response = client.responses.create(
+    response = client.messages.create(
         model=MODEL,
-        instructions=system_instructions,
-        input=json.dumps(payload, ensure_ascii=False),
-        text={
-            "format": {
-                "type": "json_schema",
-                "name": "single_mail_analysis",
-                "schema": MAIL_SCHEMA,
-                "strict": True,
+        max_tokens=1024,
+        system=system_instructions,
+        messages=[
+            {
+                "role": "user",
+                "content": json.dumps(payload, ensure_ascii=False)
             }
-        },
+        ]
     )
 
-    return json.loads(response.output_text)
+    return json.loads(response.content[0].text)
 
 
 def summarize_messages(messages: list[dict], instructions: list[str] | None = None) -> dict:
