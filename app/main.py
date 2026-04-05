@@ -974,3 +974,15 @@ def test_odoo():
         params={"email": "guillaume@couffrant-solar.fr"}
     )
     return result
+
+@app.get("/list-mail-folders")
+def list_mail_folders(request: Request):
+    token = request.session.get("access_token")
+    if not token:
+        return RedirectResponse("/login?next=/list-mail-folders")
+    try:
+        data = graph_get(token, "/me/mailFolders")
+    except requests.HTTPError:
+        request.session.pop("access_token", None)
+        return RedirectResponse("/login?next=/list-mail-folders")
+    return data.get("value", [])
