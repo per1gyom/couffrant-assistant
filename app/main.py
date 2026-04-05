@@ -831,3 +831,12 @@ def test_create_last_reply_draft(request: Request):
         "source_from": row["from_email"],
         "message": result.get("message"),
     }
+
+@app.get("/test-odoo")
+def test_odoo():
+    from app.connectors.odoo_connector import perform_odoo_action
+    result = perform_odoo_action(
+        action="get_partner_by_email",
+        params={"email": "guillaume@couffrant-solar.fr"}
+    )
+    return result
