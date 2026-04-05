@@ -62,12 +62,33 @@ def init_mail_db():
         raw_body_preview TEXT,
         analysis_status TEXT,
         created_at TEXT,
-
         needs_reply INTEGER,
         reply_urgency TEXT,
         reply_reason TEXT,
         suggested_reply_subject TEXT,
         suggested_reply TEXT
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS aria_memory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_input TEXT,
+        aria_response TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
+    )
+    """)
+
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS reply_learning_memory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mail_subject TEXT,
+        mail_from TEXT,
+        mail_body_preview TEXT,
+        category TEXT,
+        ai_reply TEXT,
+        final_reply TEXT,
+        created_at TEXT DEFAULT (datetime('now'))
     )
     """)
 
