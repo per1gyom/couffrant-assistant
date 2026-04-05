@@ -487,8 +487,18 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
 
     messages = data.get("value", [])
     inserted = 0
+    skipped_noise = 0
     conn = get_pg_conn()
     c = conn.cursor()
+
+    skip_keywords = [
+        "noreply", "no-reply", "donotreply", "newsletter", "unsubscribe",
+        "se désabonner", "notification", "mailer-daemon", "marketing",
+        "promo", "offre spéciale", "linkedin", "twitter", "facebook",
+        "instagram", "jobteaser", "indeed", "welcometothejungle",
+        "calendly", "zoom", "teams", "webinar", "webinaire",
+        "satisfaction", "avis client", "enquête", "survey",
+    ]
 
     for msg in messages:
         message_id = msg["id"]
@@ -496,21 +506,27 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
         if c.fetchone():
             continue
 
-        from_email = msg.get("from", {}).get("emailAddress", {}).get("address", "")
+        from_email = msg.get("from", {}).get("emailAddress", {}).get("address", "").lower()
+        subject = (msg.get("subject") or "").lower()
+        body = (msg.get("bodyPreview") or "").lower()
+        full_text = f"{from_email} {subject} {body}"
+
+        if any(kw in full_text for kw in skip_keywords):
+            skipped_noise += 1
+            continue
 
         try:
             c.execute("""
                 INSERT INTO mail_memory
-                (message_id, received_at, from_email, subject, body_preview,
+                (message_id, received_at, from_email, subject,
                  raw_body_preview, analysis_status, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (message_id) DO NOTHING
             """, (
                 message_id,
                 msg.get("receivedDateTime"),
-                from_email,
+                msg.get("from", {}).get("emailAddress", {}).get("address", ""),
                 msg.get("subject"),
-                msg.get("bodyPreview"),
                 msg.get("bodyPreview"),
                 "inbox_raw",
                 datetime.utcnow().isoformat(),
@@ -524,9 +540,10 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
 
     return {
         "inserted": inserted,
+        "skipped_noise": skipped_noise,
         "total_fetched": len(messages),
         "skip": skip,
-        "message": f"{inserted} mails reçus mémorisés"
+        "message": f"{inserted} mails utiles stockés, {skipped_noise} bruits ignorés"
     }
 
 @app.get("/build-style-profile")
