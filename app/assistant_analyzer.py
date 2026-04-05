@@ -31,10 +31,6 @@ def analyze_single_mail(message: dict) -> dict:
     reason = "Mail à qualifier."
     suggested_action = "Lire et qualifier"
 
-    # =====================
-    # LOGIQUE EXISTANTE
-    # =====================
-
     if domain_matches(sender, LOW_PRIORITY_DOMAINS):
         category = "notification"
         priority = "basse"
@@ -59,17 +55,12 @@ def analyze_single_mail(message: dict) -> dict:
         reason = "Mail interne détecté."
         suggested_action = "Relire si suivi nécessaire"
 
-    # =====================
-    # NOUVELLE LOGIQUE REPONSE
-    # =====================
-
     needs_reply = False
-    reply_urgency = "faible"
+    reply_urgency = "basse"
     reply_reason = ""
     suggested_reply_subject = f"Re: {subject}"
     suggested_reply = ""
 
-    # Détection simple améliorée
     if (
         "?" in full_text
         or "merci de" in full_text
@@ -81,24 +72,21 @@ def analyze_single_mail(message: dict) -> dict:
         reply_urgency = "haute" if priority == "haute" else "moyenne"
         reply_reason = "Le mail contient une demande ou une question."
 
-        # éviter newsletters / marketing
         if "rt connecting" in full_text or "newsletter" in full_text:
             needs_reply = False
 
-        # Réponse simple générique
         if needs_reply:
-                suggested_reply = (
+            suggested_reply = (
                 "Bonjour,\n\n"
-                "Nous avons bien pris en compte votre message et revenons vers vous rapidement avec les éléments nécessaires.\n\n"
+                "Nous avons bien pris en compte votre message et revenons vers vous "
+                "rapidement avec les éléments nécessaires.\n\n"
                 "Solairement,"
             )
 
-    # Cas raccordement (plus spécifique)
     if category == "raccordement":
         needs_reply = True
         reply_urgency = "haute"
         reply_reason = "Sujet raccordement nécessitant un suivi."
-
         suggested_reply = (
             "Bonjour,\n\n"
             "Nous avons bien pris en compte votre demande concernant le raccordement. "
@@ -113,8 +101,12 @@ def analyze_single_mail(message: dict) -> dict:
         "reason": reason,
         "suggested_action": suggested_action,
         "short_summary": body_preview[:180] + ("..." if len(body_preview) > 180 else ""),
-
-        # NOUVEAUX CHAMPS
+        "group_hints": [],
+        "confidence": 0.5,
+        "confidence_level": "moyenne",
+        "needs_review": False,
+        "response_type": "autre",
+        "missing_fields": [],
         "needs_reply": needs_reply,
         "reply_urgency": reply_urgency,
         "reply_reason": reply_reason,

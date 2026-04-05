@@ -106,7 +106,7 @@ MAIL_SCHEMA = {
 
 
 def get_learning_examples(category: str, limit: int = 3) -> list[dict]:
-    conn = sqlite3.connect("assistant.db")
+    conn = sqlite3.connect(ASSISTANT_DB_PATH)
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
