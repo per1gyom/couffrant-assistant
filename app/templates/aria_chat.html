@@ -185,6 +185,30 @@
             display: block;
         }
         .speak-btn:hover { color: #888; }
+        .triage-bar {
+            display: none;
+            gap: 8px;
+            padding: 10px 16px;
+            background: #0d1117;
+            border-top: 1px solid #333;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        .triage-bar.visible { display: flex; }
+        .triage-btn {
+            padding: 10px 20px;
+            border-radius: 20px;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+            transition: opacity 0.2s;
+        }
+        .triage-btn:hover { opacity: 0.85; }
+        .triage-btn.skip { background: #333; color: #aaa; }
+        .triage-btn.archive { background: #1565c0; color: white; }
+        .triage-btn.delete { background: #c62828; color: white; }
+        .triage-btn.reply { background: #2e7d32; color: white; }
         .stop-btn {
             position: fixed;
             bottom: 90px;
@@ -220,6 +244,7 @@
     <button class="quick-btn" onclick="quickAsk('Y a-t-il des chantiers à risque en ce moment ?')">⚡ Chantiers</button>
     <button class="quick-btn" onclick="quickAsk('Fais-moi un point sur la semaine')">📊 Point semaine</button>
     <button class="quick-btn" onclick="quickAsk('Quelles sont les relances à faire ?')">🔔 Relances</button>
+    <button class="quick-btn" onclick="startTriage()">📋 Trier mes mails</button>
 </div>
 
 <div class="messages" id="messages">
@@ -228,6 +253,13 @@
 Je suis Aria, votre assistante Couffrant Solar.
 
 Je surveille vos mails, vos chantiers et votre activité. Posez-moi n'importe quelle question ou donnez-moi un ordre — je suis là pour vous faire gagner du temps.</div>
+</div>
+
+<div class="triage-bar" id="triageBar">
+    <button class="triage-btn skip" onclick="handleTriage('skip')">⏭ Passer</button>
+    <button class="triage-btn archive" onclick="handleTriage('archive')">📁 Archiver</button>
+    <button class="triage-btn delete" onclick="handleTriage('delete')">🗑 Supprimer</button>
+    <button class="triage-btn reply" onclick="handleTriage('reply')">✉️ Répondre</button>
 </div>
 
 <button class="stop-btn" id="stopBtn" onclick="stopSpeech()">⏹</button>
@@ -248,14 +280,19 @@ const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('sendBtn');
 const micBtn = document.getElementById('micBtn');
 const stopBtn = document.getElementById('stopBtn');
+const triageBar = document.getElementById('triageBar');
 
 let recognition = null;
 let isListening = false;
 let currentAudio = null;
+let speakAborted = false;
+let triageQueue = [];
+let triageCurrent = null;
 
+// VOIX
 function speak(text) {
-    stopSpeech();
-    stopBtn.classList.add('visible');
+    speakAborted = false;
+    stopBtn.classList.add('visible'); // Visible immédiatement dès le début
 
     fetch('/speak', {
         method: 'POST',
@@ -267,6 +304,10 @@ function speak(text) {
         return r.blob();
     })
     .then(blob => {
+        if (speakAborted) {
+            stopBtn.classList.remove('visible');
+            return;
+        }
         if (blob.size < 100) {
             stopBtn.classList.remove('visible');
             return;
@@ -274,21 +315,44 @@ function speak(text) {
         const url = URL.createObjectURL(blob);
         currentAudio = new Audio(url);
         currentAudio.oncanplaythrough = () => {
+            if (speakAborted) {
+                stopBtn.classList.remove('visible');
+                return;
+            }
             currentAudio.play().catch(() => stopBtn.classList.remove('visible'));
         };
-        currentAudio.onended = () => stopBtn.classList.remove('visible');
+        currentAudio.onended = () => {
+            stopBtn.classList.remove('visible');
+            // Si on est en mode triage, on attend la fin de la lecture
+        };
         currentAudio.onerror = () => stopBtn.classList.remove('visible');
     })
     .catch(() => stopBtn.classList.remove('visible'));
 }
 
 function stopSpeech() {
-    window.speechSynthesis.cancel();
+    speakAborted = true;
     if (currentAudio) {
         currentAudio.pause();
         currentAudio = null;
     }
+    window.speechSynthesis.cancel();
     stopBtn.classList.remove('visible');
+}
+
+// TEXTE
+function cleanText(text) {
+    return text
+        .replace(/#{1,6}\s+/g, '')
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/\*(.*?)\*/g, '$1')
+        .replace(/`(.*?)`/g, '$1')
+        .replace(/---+/g, '')
+        .replace(/\|.*?\|/g, '')
+        .replace(/^\s*[-•]\s/gm, '')
+        .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
 }
 
 function autoResize(el) {
@@ -305,20 +369,6 @@ function handleKey(e) {
 
 function scrollToBottom() {
     messagesEl.scrollTop = messagesEl.scrollHeight;
-}
-
-function cleanText(text) {
-    return text
-        .replace(/#{1,6}\s+/g, '')
-        .replace(/\*\*(.*?)\*\*/g, '$1')
-        .replace(/\*(.*?)\*/g, '$1')
-        .replace(/`(.*?)`/g, '$1')
-        .replace(/---+/g, '')
-        .replace(/\|.*?\|/g, '')
-        .replace(/^\s*[-•]\s/gm, '')
-        .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
 }
 
 function addMessage(text, type) {
@@ -352,6 +402,7 @@ function addLoading() {
     return div;
 }
 
+// CHAT
 async function sendMessage() {
     const text = inputEl.value.trim();
     if (!text) return;
@@ -386,6 +437,88 @@ function quickAsk(text) {
     sendMessage();
 }
 
+// TRIAGE
+async function startTriage() {
+    stopSpeech();
+    triageBar.classList.remove('visible');
+
+    const response = await fetch('/triage-queue');
+    const data = await response.json();
+    triageQueue = data.mails || [];
+
+    if (triageQueue.length === 0) {
+        const msg = "Aucun mail à trier. Ta boîte est propre !";
+        addMessage(msg, 'aria');
+        speak(msg);
+        return;
+    }
+
+    const intro = `${triageQueue.length} mails à trier. On commence.`;
+    addMessage(intro, 'aria');
+    speak(intro);
+    setTimeout(() => nextTriage(), 1500);
+}
+
+function nextTriage() {
+    if (triageQueue.length === 0) {
+        triageBar.classList.remove('visible');
+        const msg = "Triage terminé. Boîte traitée.";
+        addMessage(msg, 'aria');
+        speak(msg);
+        triageCurrent = null;
+        return;
+    }
+
+    triageCurrent = triageQueue.shift();
+    const from = triageCurrent.from_email || "Inconnu";
+    const subject = triageCurrent.subject || "(Sans objet)";
+    const preview = triageCurrent.raw_body_preview || "";
+    const restant = triageQueue.length;
+
+    const msg = `De : ${from}\nSujet : ${subject}\n\n${preview.slice(0, 200)}\n\n— Que je fasse ? (${restant} restants)`;
+    addMessage(msg, 'aria');
+    speak(msg);
+    triageBar.classList.add('visible');
+}
+
+async function handleTriage(action) {
+    if (!triageCurrent) return;
+    triageBar.classList.remove('visible');
+
+    const messageId = triageCurrent.message_id;
+    const subject = triageCurrent.subject || "ce mail";
+
+    if (action === 'skip') {
+        addMessage("Passé.", 'aria');
+        setTimeout(() => nextTriage(), 500);
+        return;
+    }
+
+    const actionMap = {
+        'archive': `Archive le mail ${messageId}`,
+        'delete': `Supprime le mail ${messageId}`,
+        'reply': `Prépare une réponse pour le mail ${messageId} - sujet : ${subject}`,
+    };
+
+    const loading = addLoading();
+    try {
+        const response = await fetch('/aria', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query: actionMap[action] })
+        });
+        const data = await response.json();
+        loading.remove();
+        addMessage(data.answer, 'aria');
+        speak(data.answer);
+    } catch (err) {
+        loading.remove();
+    }
+
+    setTimeout(() => nextTriage(), 2000);
+}
+
+// MICRO
 function toggleMic() {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
         alert('Utilisez Safari sur iPhone pour la dictée vocale.');
