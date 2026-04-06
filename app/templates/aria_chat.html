@@ -175,16 +175,23 @@
         .quick-btn:hover { background: #2a2a4e; }
         .speak-btn {
             background: none;
-            border: none;
-            color: #555;
+            border: 1px solid #333;
+            color: #888;
             cursor: pointer;
-            font-size: 13px;
-            padding: 4px 8px;
-            border-radius: 8px;
-            margin-top: 6px;
-            display: block;
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            margin-top: 8px;
+            display: inline-block;
+            transition: all 0.2s;
         }
-        .speak-btn:hover { color: #888; }
+        .speak-btn:hover { color: #bbb; border-color: #555; }
+        .speak-btn.playing {
+            background: #c62828;
+            border-color: #c62828;
+            color: white;
+            animation: pulse-red 1s infinite;
+        }
         .triage-bar {
             display: none;
             gap: 8px;
@@ -209,6 +216,7 @@
         .triage-btn.archive { background: #1565c0; color: white; }
         .triage-btn.delete { background: #c62828; color: white; }
         .triage-btn.reply { background: #2e7d32; color: white; }
+        /* Bouton stop global - toujours en bas à droite pendant lecture */
         .stop-btn {
             position: fixed;
             bottom: 90px;
@@ -217,16 +225,18 @@
             color: white;
             border: none;
             border-radius: 50%;
-            width: 52px;
-            height: 52px;
-            font-size: 22px;
+            width: 56px;
+            height: 56px;
+            font-size: 24px;
             cursor: pointer;
             display: none;
             align-items: center;
             justify-content: center;
-            z-index: 100;
-            box-shadow: 0 2px 12px rgba(198,40,40,0.5);
+            z-index: 1000;
+            box-shadow: 0 4px 16px rgba(198,40,40,0.6);
+            transition: transform 0.1s;
         }
+        .stop-btn:active { transform: scale(0.92); }
         .stop-btn.visible { display: flex; }
     </style>
 </head>
@@ -250,23 +260,24 @@
 <div class="messages" id="messages">
     <div class="message aria">Bonjour Guillaume 👋
 
-Je suis Aria, votre assistante Couffrant Solar.
+Je suis Aria, ton assistante Couffrant Solar.
 
-Je surveille vos mails, vos chantiers et votre activité. Posez-moi n'importe quelle question ou donnez-moi un ordre — je suis là pour vous faire gagner du temps.</div>
+Je surveille tes mails, tes chantiers et ton activité. Pose-moi n'importe quelle question ou donne-moi un ordre.</div>
 </div>
 
 <div class="triage-bar" id="triageBar">
     <button class="triage-btn skip" onclick="handleTriage('skip')">⏭ Passer</button>
     <button class="triage-btn archive" onclick="handleTriage('archive')">📁 Archiver</button>
-    <button class="triage-btn delete" onclick="handleTriage('delete')">🗑 Supprimer</button>
+    <button class="triage-btn delete" onclick="handleTriage('delete')">🗑 Corbeille</button>
     <button class="triage-btn reply" onclick="handleTriage('reply')">✉️ Répondre</button>
 </div>
 
+<!-- Bouton stop global - visible pendant toute lecture audio -->
 <button class="stop-btn" id="stopBtn" onclick="stopSpeech()">⏹</button>
 
 <div class="input-area">
     <div class="input-wrap">
-        <textarea id="input" placeholder="Posez une question à Aria..." rows="1"
+        <textarea id="input" placeholder="Pose une question à Aria..." rows="1"
             onkeydown="handleKey(event)"
             oninput="autoResize(this)"></textarea>
         <button class="btn-mic" id="micBtn" onclick="toggleMic()" title="Dicter">🎤</button>
@@ -286,13 +297,27 @@ let recognition = null;
 let isListening = false;
 let currentAudio = null;
 let speakAborted = false;
+let currentSpeakBtn = null; // Bouton du message en cours de lecture
 let triageQueue = [];
 let triageCurrent = null;
 
+// ─────────────────────────────
 // VOIX
-function speak(text) {
+// ─────────────────────────────
+
+function speak(text, btn) {
+    // Arrête tout audio en cours avant de lancer le nouveau
+    stopSpeech();
+
     speakAborted = false;
-    stopBtn.classList.add('visible'); // Visible immédiatement dès le début
+    stopBtn.classList.add('visible');
+
+    // Met à jour le bouton du message en cours
+    currentSpeakBtn = btn || null;
+    if (currentSpeakBtn) {
+        currentSpeakBtn.textContent = '⏹ Stop';
+        currentSpeakBtn.classList.add('playing');
+    }
 
     fetch('/speak', {
         method: 'POST',
@@ -304,30 +329,26 @@ function speak(text) {
         return r.blob();
     })
     .then(blob => {
-        if (speakAborted) {
-            stopBtn.classList.remove('visible');
-            return;
-        }
-        if (blob.size < 100) {
-            stopBtn.classList.remove('visible');
-            return;
-        }
+        if (speakAborted) { resetSpeakUI(); return; }
+        if (blob.size < 100) { resetSpeakUI(); return; }
         const url = URL.createObjectURL(blob);
         currentAudio = new Audio(url);
-        currentAudio.oncanplaythrough = () => {
-            if (speakAborted) {
-                stopBtn.classList.remove('visible');
-                return;
-            }
-            currentAudio.play().catch(() => stopBtn.classList.remove('visible'));
-        };
-        currentAudio.onended = () => {
-            stopBtn.classList.remove('visible');
-            // Si on est en mode triage, on attend la fin de la lecture
-        };
-        currentAudio.onerror = () => stopBtn.classList.remove('visible');
+        currentAudio.onended = () => resetSpeakUI();
+        currentAudio.onerror = () => resetSpeakUI();
+        if (!speakAborted) {
+            currentAudio.play().catch(() => resetSpeakUI());
+        }
     })
-    .catch(() => stopBtn.classList.remove('visible'));
+    .catch(() => resetSpeakUI());
+}
+
+function resetSpeakUI() {
+    stopBtn.classList.remove('visible');
+    if (currentSpeakBtn) {
+        currentSpeakBtn.textContent = '🔊 Écouter';
+        currentSpeakBtn.classList.remove('playing');
+        currentSpeakBtn = null;
+    }
 }
 
 function stopSpeech() {
@@ -336,11 +357,14 @@ function stopSpeech() {
         currentAudio.pause();
         currentAudio = null;
     }
-    window.speechSynthesis.cancel();
-    stopBtn.classList.remove('visible');
+    window.speechSynthesis && window.speechSynthesis.cancel();
+    resetSpeakUI();
 }
 
+// ─────────────────────────────
 // TEXTE
+// ─────────────────────────────
+
 function cleanText(text) {
     return text
         .replace(/#{1,6}\s+/g, '')
@@ -351,6 +375,7 @@ function cleanText(text) {
         .replace(/\|.*?\|/g, '')
         .replace(/^\s*[-•]\s/gm, '')
         .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
+        .replace(/✔️|\u274c|📧/g, '') // retire les emoji d’action
         .replace(/\n{3,}/g, '\n\n')
         .trim();
 }
@@ -384,7 +409,14 @@ function addMessage(text, type) {
         const speakBtn = document.createElement('button');
         speakBtn.className = 'speak-btn';
         speakBtn.textContent = '🔊 Écouter';
-        speakBtn.onclick = () => speak(text);
+        // Passe le bouton lui-même pour toggle stop/play
+        speakBtn.onclick = () => {
+            if (speakBtn.classList.contains('playing')) {
+                stopSpeech();
+            } else {
+                speak(text, speakBtn);
+            }
+        };
         div.appendChild(speakBtn);
     }
 
@@ -402,7 +434,10 @@ function addLoading() {
     return div;
 }
 
+// ─────────────────────────────
 // CHAT
+// ─────────────────────────────
+
 async function sendMessage() {
     const text = inputEl.value.trim();
     if (!text) return;
@@ -422,8 +457,10 @@ async function sendMessage() {
         });
         const data = await response.json();
         loading.remove();
-        addMessage(data.answer, 'aria');
-        speak(data.answer);
+        const msgDiv = addMessage(data.answer, 'aria');
+        // Auto-lecture de la réponse
+        const btn = msgDiv.querySelector('.speak-btn');
+        speak(data.answer, btn);
     } catch (err) {
         loading.remove();
         addMessage("Erreur de connexion à Aria. Réessayez.", 'aria');
@@ -437,7 +474,10 @@ function quickAsk(text) {
     sendMessage();
 }
 
+// ─────────────────────────────
 // TRIAGE
+// ─────────────────────────────
+
 async function startTriage() {
     stopSpeech();
     triageBar.classList.remove('visible');
@@ -450,14 +490,14 @@ async function startTriage() {
 
     if (triageQueue.length === 0) {
         const msg = "Aucun mail dans ta boîte de réception.";
-        addMessage(msg, 'aria');
-        speak(msg);
+        const msgDiv = addMessage(msg, 'aria');
+        speak(msg, msgDiv.querySelector('.speak-btn'));
         return;
     }
 
     const intro = `${triageQueue.length} mails dans ta boîte. On commence par le plus récent.`;
-    addMessage(intro, 'aria');
-    speak(intro);
+    const introDiv = addMessage(intro, 'aria');
+    speak(intro, introDiv.querySelector('.speak-btn'));
     setTimeout(() => nextTriage(), 1500);
 }
 
@@ -465,8 +505,8 @@ function nextTriage() {
     if (triageQueue.length === 0) {
         triageBar.classList.remove('visible');
         const msg = "Triage terminé. Boîte traitée.";
-        addMessage(msg, 'aria');
-        speak(msg);
+        const msgDiv = addMessage(msg, 'aria');
+        speak(msg, msgDiv.querySelector('.speak-btn'));
         triageCurrent = null;
         return;
     }
@@ -478,27 +518,28 @@ function nextTriage() {
     const restant = triageQueue.length;
 
     const msg = `De : ${from}\nSujet : ${subject}\n\n${preview.slice(0, 200)}\n\n— Que je fasse ? (${restant} restants)`;
-    addMessage(msg, 'aria');
-    speak(msg);
+    const msgDiv = addMessage(msg, 'aria');
+    speak(msg, msgDiv.querySelector('.speak-btn'));
     triageBar.classList.add('visible');
 }
 
 async function handleTriage(action) {
     if (!triageCurrent) return;
     triageBar.classList.remove('visible');
+    stopSpeech();
 
     const messageId = triageCurrent.message_id;
     const subject = triageCurrent.subject || "ce mail";
 
     if (action === 'skip') {
-        addMessage("Passé.", 'aria');
+        const msgDiv = addMessage("Passé.", 'aria');
         setTimeout(() => nextTriage(), 500);
         return;
     }
 
     const actionMap = {
         'archive': `Archive le mail ${messageId}`,
-        'delete': `Supprime le mail ${messageId}`,
+        'delete': `Supprime (corbeille) le mail ${messageId}`,
         'reply': `Prépare une réponse pour le mail ${messageId} - sujet : ${subject}`,
     };
 
@@ -511,16 +552,19 @@ async function handleTriage(action) {
         });
         const data = await response.json();
         loading.remove();
-        addMessage(data.answer, 'aria');
-        speak(data.answer);
+        const msgDiv = addMessage(data.answer, 'aria');
+        speak(data.answer, msgDiv.querySelector('.speak-btn'));
     } catch (err) {
         loading.remove();
     }
 
-    setTimeout(() => nextTriage(), 2000);
+    setTimeout(() => nextTriage(), 3000);
 }
 
+// ─────────────────────────────
 // MICRO
+// ─────────────────────────────
+
 function toggleMic() {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
         alert('Utilisez Safari sur iPhone pour la dictée vocale.');
