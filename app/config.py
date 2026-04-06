@@ -12,8 +12,7 @@ AUTHORITY = os.getenv("AUTHORITY", "").strip()
 if not AUTHORITY and TENANT_ID:
     AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 
-GRAPH_SCOPES = os.getenv("GRAPH_SCOPES", "User.Read Mail.Read Calendars.Read").split()
-
+GRAPH_SCOPES = os.getenv("GRAPH_SCOPES", "User.Read User.Read.All Mail.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite Contacts.ReadWrite Files.ReadWrite.All Sites.ReadWrite.All Tasks.ReadWrite Chat.ReadWrite ChannelMessage.ReadWrite Team.ReadBasic.All Presence.Read.All offline_access").split(
 SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me")
 ASSISTANT_DB_PATH = os.getenv("ASSISTANT_DB_PATH", "assistant.db")
 
@@ -29,3 +28,5 @@ DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 GMAIL_CLIENT_ID = os.getenv("GMAIL_CLIENT_ID", "").strip()
 GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET", "").strip()
 GMAIL_REDIRECT_URI = os.getenv("GMAIL_REDIRECT_URI", "").strip()
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
