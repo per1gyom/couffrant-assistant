@@ -221,7 +221,17 @@ def health():
 
 
 @app.get("/chat", response_class=HTMLResponse)
-def chat(request: Request):
+def chat(request: Request, pwd: str = ""):
+    if pwd != "couffrant2026":
+        return HTMLResponse("""
+        <html><body style="background:#0a0a0a;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial">
+        <form method="get">
+            <input name="pwd" type="password" placeholder="Mot de passe" 
+            style="padding:12px;border-radius:8px;border:none;font-size:16px">
+            <button type="submit" style="padding:12px 20px;background:#1565c0;color:white;border:none;border-radius:8px;margin-left:8px;cursor:pointer">
+            Accéder</button>
+        </form></body></html>
+        """)
     with open("app/templates/aria_chat.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
