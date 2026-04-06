@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from pydantic import BaseModel
 
@@ -21,8 +22,6 @@ from app.assistant_analyzer import analyze_single_mail
 from app.dashboard_service import get_dashboard
 from app.connectors.outlook_connector import perform_outlook_action
 from app.database import get_pg_conn, init_postgres
-from fastapi.templating import Jinja2Templates
-from fastapi.staticfiles import StaticFiles
 
 templates = Jinja2Templates(directory="app/templates")
 
@@ -33,9 +32,6 @@ app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
 class AriaQuery(BaseModel):
     query: str
 
-@app.get("/chat", response_class=HTMLResponse)
-def chat(request: Request):
-    return templates.TemplateResponse("aria_chat.html", {"request": request})
 
 @app.on_event("startup")
 def startup_event():
@@ -47,6 +43,11 @@ def startup_event():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/chat", response_class=HTMLResponse)
+def chat(request: Request):
+    return templates.TemplateResponse("aria_chat.html", {"request": request})
 
 
 @app.get("/init-db")
