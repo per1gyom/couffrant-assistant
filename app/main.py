@@ -21,7 +21,7 @@ from app.assistant_analyzer import analyze_single_mail
 from app.dashboard_service import get_dashboard
 from app.connectors.outlook_connector import perform_outlook_action
 from app.database import get_pg_conn, init_postgres
-from fastapi import Body
+from fastapi import FastAPI, Request, Form, Body
 
 
 app = FastAPI(title="Couffrant Solar Assistant")
@@ -75,14 +75,6 @@ def speak_text(payload: dict = Body(...)):
         io.BytesIO(response.content),
         media_type="audio/mpeg",
     )
-
-function stopSpeech() {
-    if (currentAudio) {
-        currentAudio.pause();
-        currentAudio.currentTime = 0;
-    }
-    stopBtn.classList.remove('visible');
-}
 
 @app.on_event("startup")
 def startup_event():
