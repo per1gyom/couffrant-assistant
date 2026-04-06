@@ -33,35 +33,32 @@ class AriaQuery(BaseModel):
 
 @app.post("/speak")
 def speak_text(payload: dict = Body(...)):
-    import os
+    import os, re, io
     from fastapi.responses import StreamingResponse
-    import re
-    import io
-    ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
-    ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "")
-    from fastapi.responses import StreamingResponse
-    import io
-    import re
+
+    api_key = os.environ.get("ELEVENLABS_API_KEY", "")
+    voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "")
+
+    if not api_key or not voice_id:
+        return {"error": f"Clés manquantes: api_key={'ok' if api_key else 'VIDE'}, voice_id={'ok' if voice_id else 'VIDE'}"}
 
     text = payload.get("text", "")
-
     clean = re.sub(r'#{1,6}\s+', '', text)
     clean = re.sub(r'\*\*(.*?)\*\*', r'\1', clean)
     clean = re.sub(r'\*(.*?)\*', r'\1', clean)
     clean = re.sub(r'`(.*?)`', r'\1', clean)
     clean = re.sub(r'---+', '', clean)
     clean = re.sub(r'\|.*?\|', '', clean)
-    clean = re.sub(r'^\s*[-•]\s', '', clean, flags=re.MULTILINE)
-    clean = clean.strip()
+    clean = clean.strip()[:2500]
 
-    response = requests.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
+    resp = requests.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
         headers={
-            "xi-api-key": ELEVENLABS_API_KEY,
+            "xi-api-key": api_key,
             "Content-Type": "application/json",
         },
         json={
-            "text": clean[:2500],
+            "text": clean,
             "model_id": "eleven_multilingual_v2",
             "voice_settings": {
                 "stability": 0.5,
@@ -73,11 +70,11 @@ def speak_text(payload: dict = Body(...)):
         timeout=30,
     )
 
-    if response.status_code != 200:
-        return {"error": "ElevenLabs error"}
+    if resp.status_code != 200:
+        return {"error": f"ElevenLabs {resp.status_code}", "detail": resp.text[:200]}
 
     return StreamingResponse(
-        io.BytesIO(response.content),
+        io.BytesIO(resp.content),
         media_type="audio/mpeg",
     )
 
