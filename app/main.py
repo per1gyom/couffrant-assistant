@@ -21,6 +21,12 @@ from app.assistant_analyzer import analyze_single_mail
 from app.dashboard_service import get_dashboard
 from app.connectors.outlook_connector import perform_outlook_action
 from app.database import get_pg_conn, init_postgres
+from app.memory_manager import (
+    get_hot_summary, rebuild_hot_summary,
+    get_contact_card, get_all_contact_cards, rebuild_contacts,
+    get_style_examples, save_style_example, learn_from_correction, load_sent_mails_to_style,
+    purge_old_mails
+)
 
 
 app = FastAPI(title="Couffrant Solar Assistant")
@@ -40,6 +46,7 @@ def startup_event():
     import threading
     def auto_ingest():
         import time
+        cycle = 0
         while True:
             try:
                 from app.token_manager import get_valid_microsoft_token
@@ -95,6 +102,16 @@ def startup_event():
                             "suggested_reply": item.get("suggested_reply"),
                             "mailbox_source": "outlook",
                         })
+
+                # Reconstruction résumé chaud toutes les 20 minutes (40 cycles de 30s)
+                cycle += 1
+                if cycle % 40 == 0:
+                    try:
+                        rebuild_hot_summary()
+                        print("[Memory] Résumé chaud reconstruit")
+                    except Exception as e:
+                        print(f"[Memory] Erreur résumé chaud: {e}")
+
             except Exception as e:
                 print(f"[AutoIngest] Erreur: {e}")
 
@@ -182,7 +199,7 @@ def aria(payload: AriaQuery):
                short_summary, suggested_reply, raw_body_preview, received_at, mailbox_source
         FROM mail_memory
         ORDER BY received_at DESC NULLS LAST
-        LIMIT 15
+        LIMIT 10
     """)
     columns = [desc[0] for desc in c.description]
     mails_from_db = [dict(zip(columns, row)) for row in c.fetchall()]
@@ -208,12 +225,28 @@ def aria(payload: AriaQuery):
     profile = profile_row[0] if profile_row else ""
     conn.close()
 
+    # COUCHE 1 — Résumé chaud
+    hot_summary = get_hot_summary()
+
+    # COUCHE 2 — Fiche contact si un nom est mentionné dans la question
+    contact_card = ""
+    query_lower = payload.query.lower()
+    # Interlocuteurs connus de Guillaume
+    known_contacts = ["arlène", "arlene", "sabrina", "benoit", "maxence", "pinto", "enedis",
+                      "adiwatt", "triangle", "eleria", "consuel", "socotec", "charlotte"]
+    for name in known_contacts:
+        if name in query_lower:
+            contact_card = get_contact_card(name)
+            if contact_card:
+                break
+
+    # Style — exemples pertinents
+    style_examples = get_style_examples(context=payload.query[:100] if "répond" in query_lower or "rédige" in query_lower or "écris" in query_lower else "")
+
     # Token Microsoft — refresh automatique
     outlook_token = get_valid_microsoft_token()
 
-    # *** MAILS OUTLOOK EN TEMPS RÉEL ***
-    # On récupère les 20 derniers mails Outlook inbox directement depuis l'API
-    # Cela garantit qu'Aria voit toujours les mails récents même si l'ingestion a raté
+    # MAILS OUTLOOK EN TEMPS RÉEL
     outlook_live_mails = []
     if outlook_token:
         try:
@@ -258,50 +291,51 @@ def aria(payload: AriaQuery):
         messages.append({"role": "assistant", "content": h["aria_response"]})
     messages.append({"role": "user", "content": payload.query})
 
-    # Prompt système
+    # Prompt système — mémoire 3 couches intégrée
     system = f"""Tu es Aria, l'assistante personnelle de Guillaume Perrin, dirigeant de Couffrant Solar.
 
-Guillaume dirige une PME de 8 personnes dans le photovoltaïque. Il est direct, efficace, va à l'essentiel. Il déteste les réponses longues quand ce n'est pas nécessaire. Il veut être compris rapidement. Il tutoie Aria.
+Guillaume dirige une PME de 8 personnes dans le photovoltaïque. Il est direct, va à l'essentiel, déteste les réponses longues inutiles. Il tutoie Aria.
 
-Ce que tu sais sur Guillaume :
-{profile[:1000] if profile else "Profil en cours de construction."}
+Ce que tu sais sur Guillaume (profil style) :
+{profile[:600] if profile else "Profil en cours de construction."}
+
+=== SITUATION ACTUELLE (résumé chaud — mis à jour toutes les 20 min) ===
+{hot_summary if hot_summary else "Résumé en cours de construction — pas encore généré."}
+
+{f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}
+
+{f"=== EXEMPLES DE STYLE (pour rédiger comme Guillaume) ==={chr(10)}{style_examples}" if style_examples else ""}
 
 Comment tu fonctionnes :
-- Tu réponds naturellement, sans structure imposée. Tu adaptes ta longueur au contexte.
-- Tu es directe, honnête, sans blabla.
-- Guillaume décide toujours. Tu proposes et tu exécutes sur ordre explicite.
-- Tu retiens le contexte — si Guillaume dit "oui", "vas-y", "fais-le", tu exécutes la dernière action proposée.
+- Tu réponds naturellement, sans structure imposée.
+- Tu es directe, honnête. Guillaume décide toujours.
+- Si Guillaume dit "oui", "vas-y", "fais-le" → tu exécutes la dernière action proposée.
 - Tu ne dis jamais "c'est fait" sans confirmation réelle de l'API.
+- Pour rédiger un mail, inspire-toi des exemples de style ci-dessus.
 
 {"Tu as accès complet à Microsoft 365 de Guillaume." if outlook_token else "Tu n'as pas de connexion Microsoft active."}
 
-IMPORTANT — identifiants des mails :
-- `message_id` : longue chaîne Outlook (AAMkAGEw...) — TOUJOURS utiliser pour les actions
-- `db_id` : entier court — JAMAIS utiliser pour les actions
-- `mailbox_source` : "outlook" (actions possibles) ou "gmail_perso" (lecture seule)
+IDENTIFIANTS MAILS — CRITIQUE :
+- `message_id` : longue chaîne Outlook (AAMkAGEw...) → TOUJOURS utiliser pour les actions
+- `db_id` : entier court → JAMAIS utiliser pour les actions
+- `mailbox_source` : "outlook" (actions possibles) | "gmail_perso" (lecture seule)
 
-Actions sur mails Outlook :
-- Supprimer : [ACTION:DELETE:message_id]
-- Archiver : [ACTION:ARCHIVE:message_id]
-- Marquer lu : [ACTION:READ:message_id]
-- Répondre : [ACTION:REPLY:message_id:texte]
-- Lire corps complet : [ACTION:READBODY:message_id]
+Actions mails Outlook :
+- [ACTION:DELETE:message_id] | [ACTION:ARCHIVE:message_id] | [ACTION:READ:message_id]
+- [ACTION:REPLY:message_id:texte] | [ACTION:READBODY:message_id]
 
-Actions agenda :
-- Créer RDV : [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
-
-Actions tâches :
-- Créer tâche : [ACTION:CREATE_TASK:titre]
+Actions agenda : [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
+Actions tâches : [ACTION:CREATE_TASK:titre]
 
 Règle : propose avant d'agir, SAUF si Guillaume dit "fais-le", "vas-y", "oui", "supprime", "archive", "envoie".
 
 Agenda aujourd'hui ({datetime.now().strftime('%A %d %B %Y')}) :
-{json.dumps(agenda_today, ensure_ascii=False, default=str) if agenda_today else "Aucun RDV aujourd'hui."}
+{json.dumps(agenda_today, ensure_ascii=False, default=str) if agenda_today else "Aucun RDV."}
 
-=== MAILS OUTLOOK EN TEMPS RÉEL (boîte de réception — {len(outlook_live_mails)} mails) ===
-{json.dumps(outlook_live_mails, ensure_ascii=False, default=str) if outlook_live_mails else "Aucun mail Outlook récupéré (token inactif)."}
+=== MAILS OUTLOOK EN TEMPS RÉEL ({len(outlook_live_mails)} mails inbox) ===
+{json.dumps(outlook_live_mails, ensure_ascii=False, default=str) if outlook_live_mails else "Aucun mail Outlook récupéré."}
 
-=== MAILS EN BASE (Gmail + historique Outlook) ===
+=== MAILS EN BASE — Gmail + historique Outlook ===
 {json.dumps(mails_from_db, ensure_ascii=False, default=str)}
 
 Consignes de Guillaume :
@@ -361,6 +395,12 @@ Consignes de Guillaume :
                 continue
             try:
                 result = perform_outlook_action("send_reply", {"message_id": msg_id, "reply_body": reply_text}, outlook_token)
+                if result.get("status") == "ok":
+                    # Apprendre du mail envoyé — enrichit automatiquement le style
+                    try:
+                        learn_from_correction(original="", corrected=reply_text, context="réponse mail")
+                    except Exception:
+                        pass
                 actions_confirmed.append("✅ Réponse envoyée" if result.get("status") == "ok" else f"❌ {result.get('message')}")
             except Exception as e:
                 actions_confirmed.append(f"❌ Erreur envoi : {str(e)[:100]}")
@@ -411,6 +451,103 @@ Consignes de Guillaume :
     conn.close()
 
     return {"answer": clean_response, "actions": actions_confirmed}
+
+
+# ─────────────────────────────────────────────
+# ENDPOINTS MÉMOIRE INTELLIGENTE
+# ─────────────────────────────────────────────
+
+@app.get("/build-memory")
+def build_memory():
+    """Reconstruit toute la mémoire intelligente : résumé chaud + fiches contacts + style."""
+    results = {}
+    try:
+        summary = rebuild_hot_summary()
+        results["hot_summary"] = "✅ Résumé chaud reconstruit"
+        results["summary_preview"] = summary[:200]
+    except Exception as e:
+        results["hot_summary"] = f"❌ Erreur : {str(e)[:100]}"
+
+    try:
+        count = rebuild_contacts()
+        results["contacts"] = f"✅ {count} fiches contacts créées/mises à jour"
+    except Exception as e:
+        results["contacts"] = f"❌ Erreur : {str(e)[:100]}"
+
+    try:
+        added = load_sent_mails_to_style(limit=50)
+        results["style"] = f"✅ {added} exemples de style chargés"
+    except Exception as e:
+        results["style"] = f"❌ Erreur : {str(e)[:100]}"
+
+    return results
+
+
+@app.get("/memory-status")
+def memory_status():
+    """État actuel de la mémoire intelligente."""
+    conn = get_pg_conn()
+    c = conn.cursor()
+
+    c.execute("SELECT content, updated_at FROM aria_hot_summary WHERE id = 1")
+    row = c.fetchone()
+    hot_summary_info = {
+        "exists": bool(row and row[0]),
+        "preview": (row[0] or "")[:150] if row else "",
+        "updated_at": str(row[1]) if row else None
+    }
+
+    c.execute("SELECT COUNT(*) FROM aria_contacts")
+    contacts_count = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM aria_style_examples")
+    style_count = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM mail_memory")
+    mails_count = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM sent_mail_memory")
+    sent_count = c.fetchone()[0]
+
+    conn.close()
+
+    return {
+        "couche_1_resume_chaud": hot_summary_info,
+        "couche_2_contacts": {"count": contacts_count},
+        "style_examples": {"count": style_count},
+        "mail_memory": {"count": mails_count},
+        "sent_mail_memory": {"count": sent_count},
+    }
+
+
+@app.get("/contacts")
+def list_contacts():
+    """Liste toutes les fiches contacts."""
+    return get_all_contact_cards()
+
+
+@app.get("/purge-memory")
+def purge_memory(days: int = 90):
+    """Purge les mails bruts de plus de N jours de la base locale.
+    Les vrais mails restent dans Outlook et Gmail."""
+    deleted = purge_old_mails(days=days)
+    return {
+        "status": "ok",
+        "deleted": deleted,
+        "message": f"{deleted} mails bruts supprimés de la base locale (restent dans Outlook/Gmail)"
+    }
+
+
+@app.post("/learn-style")
+def learn_style(payload: dict = Body(...)):
+    """Enregistre manuellement un exemple de style validé par Guillaume."""
+    situation = payload.get("situation", "mail envoyé")
+    text = payload.get("text", "")
+    tags = payload.get("tags", "")
+    if not text:
+        return {"error": "Texte manquant"}
+    save_style_example(situation=situation, example_text=text, tags=tags, quality_score=2.0)
+    return {"status": "ok", "message": "Exemple de style sauvegardé"}
 
 
 @app.get("/login")
@@ -498,13 +635,13 @@ def memory():
 
 
 @app.get("/rebuild-memory")
-def rebuild_memory():
+def rebuild_memory_mails():
     conn = get_pg_conn()
     c = conn.cursor()
     c.execute("DELETE FROM mail_memory")
     conn.commit()
     conn.close()
-    return {"status": "memory_cleared"}
+    return {"status": "mail_memory_cleared"}
 
 
 @app.get("/assistant-dashboard")
@@ -557,7 +694,6 @@ def ingest_mails_fast(request: Request):
     except requests.HTTPError:
         request.session.pop("access_token", None)
         return RedirectResponse("/login?next=/ingest-mails-fast")
-
     messages = data.get("value", [])
     inserted = 0
     for msg in messages:
@@ -606,7 +742,6 @@ def ingest_mails(request: Request):
     except requests.HTTPError:
         request.session.pop("access_token", None)
         return RedirectResponse("/login?next=/ingest-mails")
-
     messages = data.get("value", [])
     inserted = 0
     instructions = get_global_instructions()
@@ -660,7 +795,6 @@ def learn_sent_mails(request: Request, top: int = 50):
     except requests.HTTPError:
         request.session.pop("access_token", None)
         return RedirectResponse("/login?next=/learn-sent-mails")
-
     messages = data.get("value", [])
     inserted = 0
     conn = get_pg_conn()
@@ -699,7 +833,6 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
     except requests.HTTPError:
         request.session.pop("access_token", None)
         return RedirectResponse("/login?next=/learn-inbox-mails")
-
     messages = data.get("value", [])
     inserted = 0
     skipped_noise = 0
