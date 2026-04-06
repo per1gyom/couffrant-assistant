@@ -39,16 +39,8 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.4; }
         }
-        .header-title {
-            font-size: 18px;
-            font-weight: 600;
-            color: #fff;
-        }
-        .header-sub {
-            font-size: 12px;
-            color: #666;
-            margin-left: auto;
-        }
+        .header-title { font-size: 18px; font-weight: 600; color: #fff; }
+        .header-sub { font-size: 12px; color: #666; margin-left: auto; }
         .messages {
             flex: 1;
             overflow-y: auto;
@@ -84,10 +76,7 @@
             color: #666;
             align-self: flex-start;
         }
-        .dots span {
-            animation: blink 1.4s infinite;
-            font-size: 20px;
-        }
+        .dots span { animation: blink 1.4s infinite; font-size: 20px; }
         .dots span:nth-child(2) { animation-delay: 0.2s; }
         .dots span:nth-child(3) { animation-delay: 0.4s; }
         @keyframes blink {
@@ -189,13 +178,32 @@
             border: none;
             color: #555;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 13px;
             padding: 4px 8px;
             border-radius: 8px;
             margin-top: 6px;
             display: block;
         }
         .speak-btn:hover { color: #888; }
+        .stop-btn {
+            position: fixed;
+            bottom: 90px;
+            right: 16px;
+            background: #c62828;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 52px;
+            height: 52px;
+            font-size: 22px;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            box-shadow: 0 2px 12px rgba(198,40,40,0.5);
+        }
+        .stop-btn.visible { display: flex; }
     </style>
 </head>
 <body>
@@ -222,6 +230,8 @@ Je suis Aria, votre assistante Couffrant Solar.
 Je surveille vos mails, vos chantiers et votre activité. Posez-moi n'importe quelle question ou donnez-moi un ordre — je suis là pour vous faire gagner du temps.</div>
 </div>
 
+<button class="stop-btn" id="stopBtn" onclick="stopSpeech()">⏹</button>
+
 <div class="input-area">
     <div class="input-wrap">
         <textarea id="input" placeholder="Posez une question à Aria..." rows="1"
@@ -237,10 +247,43 @@ const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('sendBtn');
 const micBtn = document.getElementById('micBtn');
+const stopBtn = document.getElementById('stopBtn');
 
 let recognition = null;
 let isListening = false;
-let isSpeaking = false;
+
+function cleanText(text) {
+    return text
+        .replace(/#{1,6}\s+/g, '')
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/\*(.*?)\*/g, '$1')
+        .replace(/`(.*?)`/g, '$1')
+        .replace(/---+/g, '')
+        .replace(/\|.*?\|/g, '')
+        .replace(/^\s*[-•]\s/gm, '')
+        .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function speak(text) {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const clean = cleanText(text);
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.lang = 'fr-FR';
+    utterance.rate = 1.05;
+    utterance.pitch = 1;
+    utterance.onstart = () => stopBtn.classList.add('visible');
+    utterance.onend = () => stopBtn.classList.remove('visible');
+    utterance.onerror = () => stopBtn.classList.remove('visible');
+    window.speechSynthesis.speak(utterance);
+}
+
+function stopSpeech() {
+    window.speechSynthesis.cancel();
+    stopBtn.classList.remove('visible');
+}
 
 function autoResize(el) {
     el.style.height = 'auto';
@@ -304,7 +347,7 @@ async function sendMessage() {
         });
         const data = await response.json();
         loading.remove();
-        const msg = addMessage(data.answer, 'aria');
+        addMessage(data.answer, 'aria');
         speak(data.answer);
     } catch (err) {
         loading.remove();
@@ -319,20 +362,9 @@ function quickAsk(text) {
     sendMessage();
 }
 
-function speak(text) {
-    if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = 'fr-FR';
-        utterance.rate = 1.05;
-        utterance.pitch = 1;
-        window.speechSynthesis.speak(utterance);
-    }
-}
-
 function toggleMic() {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        alert('La dictée vocale n\'est pas disponible sur ce navigateur. Utilisez Safari sur iPhone.');
+        alert('Utilisez Safari sur iPhone pour la dictée vocale.');
         return;
     }
 
