@@ -33,7 +33,10 @@ class AriaQuery(BaseModel):
 
 @app.post("/speak")
 def speak_text(payload: dict = Body(...)):
-    from app.config import ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID
+    import os
+    from fastapi.responses import StreamingResponse
+    ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "")
+    ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "")
     from fastapi.responses import StreamingResponse
     import io
     import re
