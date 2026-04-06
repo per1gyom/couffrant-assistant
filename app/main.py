@@ -1190,6 +1190,7 @@ def learn_archive_mails(request: Request, top: int = 100, skip: int = 0):
 @app.get("/learn-gmail-all")
 def learn_gmail_all(request: Request, max_results: int = 100, page_token: str = None):
     from app.connectors.gmail_connector import gmail_get_messages, gmail_get_message, refresh_gmail_token
+    from app.config import ANTHROPIC_MODEL_FAST
 
     conn = get_pg_conn()
     c = conn.cursor()
@@ -1229,6 +1230,7 @@ def learn_gmail_all(request: Request, max_results: int = 100, page_token: str = 
     next_page_token = data.get("nextPageToken")
     inserted = 0
     skipped_noise = 0
+    skipped_ai = 0
 
     skip_keywords = [
         "noreply", "no-reply", "donotreply", "newsletter", "unsubscribe",
@@ -1257,9 +1259,27 @@ def learn_gmail_all(request: Request, max_results: int = 100, page_token: str = 
             snippet = detail.get("snippet", "")
 
             full_text = f"{from_email} {subject} {snippet}".lower()
+
+            # Niveau 1 — filtre mots-clés gratuit
             if any(kw in full_text for kw in skip_keywords):
                 skipped_noise += 1
                 continue
+
+            # Niveau 2 — analyse Claude Haiku
+            try:
+                decision = client.messages.create(
+                    model=ANTHROPIC_MODEL_FAST,
+                    max_tokens=5,
+                    messages=[{
+                        "role": "user",
+                        "content": f"Mail de : {from_email}\nSujet : {subject}\nContenu : {snippet[:200]}\n\nCe mail est-il pertinent pour un chef d'entreprise dans le solaire photovoltaïque ? Réponds uniquement OUI ou NON."
+                    }]
+                )
+                if "NON" in decision.content[0].text.upper():
+                    skipped_ai += 1
+                    continue
+            except Exception:
+                pass
 
             c.execute("""
                 INSERT INTO mail_memory
@@ -1288,7 +1308,8 @@ def learn_gmail_all(request: Request, max_results: int = 100, page_token: str = 
     return {
         "inserted": inserted,
         "skipped_noise": skipped_noise,
+        "skipped_ai": skipped_ai,
         "total_fetched": len(messages),
         "next_page_token": next_page_token,
-        "message": f"{inserted} mails Gmail utiles stockés, {skipped_noise} bruits ignorés"
+        "message": f"{inserted} stockés, {skipped_noise} bruits filtrés, {skipped_ai} rejetés par IA"
     }
