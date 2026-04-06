@@ -21,6 +21,10 @@ from app.assistant_analyzer import analyze_single_mail
 from app.dashboard_service import get_dashboard
 from app.connectors.outlook_connector import perform_outlook_action
 from app.database import get_pg_conn, init_postgres
+from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
+
+templates = Jinja2Templates(directory="app/templates")
 
 app = FastAPI(title="Couffrant Solar Assistant")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
@@ -29,6 +33,9 @@ app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
 class AriaQuery(BaseModel):
     query: str
 
+@app.get("/chat", response_class=HTMLResponse)
+def chat(request: Request):
+    return templates.TemplateResponse("aria_chat.html", {"request": request})
 
 @app.on_event("startup")
 def startup_event():
