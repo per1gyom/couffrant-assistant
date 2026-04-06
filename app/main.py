@@ -170,12 +170,13 @@ def speak_text(payload: dict = Body(...)):
 @app.post("/aria")
 def aria(payload: AriaQuery):
     import re
+    from app.token_manager import get_valid_microsoft_token
     instructions = get_global_instructions()
 
     conn = get_pg_conn()
     c = conn.cursor()
 
-    # Mails récents — on renomme 'id' en 'db_id' pour éviter la confusion avec message_id
+    # Mails depuis la base (Gmail + Outlook déjà ingérés)
     c.execute("""
         SELECT id as db_id, message_id, from_email, display_title, category, priority,
                short_summary, suggested_reply, raw_body_preview, received_at, mailbox_source
@@ -184,7 +185,7 @@ def aria(payload: AriaQuery):
         LIMIT 15
     """)
     columns = [desc[0] for desc in c.description]
-    mails = [dict(zip(columns, row)) for row in c.fetchall()]
+    mails_from_db = [dict(zip(columns, row)) for row in c.fetchall()]
 
     # Historique conversation (8 derniers échanges)
     c.execute("""
@@ -205,18 +206,40 @@ def aria(payload: AriaQuery):
     """)
     profile_row = c.fetchone()
     profile = profile_row[0] if profile_row else ""
-
-    # Token Microsoft
-    c.execute("""
-        SELECT access_token FROM oauth_tokens
-        WHERE provider = 'microsoft'
-        ORDER BY updated_at DESC LIMIT 1
-    """)
-    token_row = c.fetchone()
-    outlook_token = token_row[0] if token_row else None
     conn.close()
 
-    # Agenda du jour si token disponible
+    # Token Microsoft — refresh automatique
+    outlook_token = get_valid_microsoft_token()
+
+    # *** MAILS OUTLOOK EN TEMPS RÉEL ***
+    # On récupère les 20 derniers mails Outlook inbox directement depuis l'API
+    # Cela garantit qu'Aria voit toujours les mails récents même si l'ingestion a raté
+    outlook_live_mails = []
+    if outlook_token:
+        try:
+            data = graph_get(
+                outlook_token,
+                "/me/mailFolders/inbox/messages",
+                params={
+                    "$top": 20,
+                    "$select": "id,subject,from,receivedDateTime,bodyPreview,isRead",
+                    "$orderby": "receivedDateTime DESC",
+                },
+            )
+            for msg in data.get("value", []):
+                outlook_live_mails.append({
+                    "message_id": msg["id"],
+                    "from_email": msg.get("from", {}).get("emailAddress", {}).get("address", ""),
+                    "subject": msg.get("subject", "(Sans objet)"),
+                    "raw_body_preview": msg.get("bodyPreview", ""),
+                    "received_at": msg.get("receivedDateTime", ""),
+                    "is_read": msg.get("isRead", False),
+                    "mailbox_source": "outlook",
+                })
+        except Exception as e:
+            print(f"[Aria] Erreur récupération Outlook live: {e}")
+
+    # Agenda du jour
     agenda_today = []
     if outlook_token:
         try:
@@ -235,49 +258,51 @@ def aria(payload: AriaQuery):
         messages.append({"role": "assistant", "content": h["aria_response"]})
     messages.append({"role": "user", "content": payload.query})
 
-    # Prompt système libéré
+    # Prompt système
     system = f"""Tu es Aria, l'assistante personnelle de Guillaume Perrin, dirigeant de Couffrant Solar.
 
-Guillaume dirige une PME de 8 personnes dans le photovoltaïque. Il est direct, efficace, va à l'essentiel. Il déteste les réponses longues et structurées quand ce n'est pas nécessaire. Il veut être compris rapidement et que les choses avancent. Il tutoie Aria.
+Guillaume dirige une PME de 8 personnes dans le photovoltaïque. Il est direct, efficace, va à l'essentiel. Il déteste les réponses longues quand ce n'est pas nécessaire. Il veut être compris rapidement. Il tutoie Aria.
 
 Ce que tu sais sur Guillaume :
 {profile[:1000] if profile else "Profil en cours de construction."}
 
 Comment tu fonctionnes :
 - Tu réponds naturellement, sans structure imposée. Tu adaptes ta longueur au contexte.
-- Tu es directe, honnête, sans blabla. Tu dis ce que tu penses vraiment.
+- Tu es directe, honnête, sans blabla.
 - Guillaume décide toujours. Tu proposes et tu exécutes sur ordre explicite.
-- Tu retiens le contexte de la conversation — si Guillaume dit "oui", "vas-y", "fais-le", tu exécutes la dernière action proposée.
-- Tu ne répètes jamais ce que tu viens de dire.
-- Si tu fais une action, tu le confirmes seulement après avoir reçu la confirmation de l'API (status ok). Tu ne dis jamais "c'est fait" sans confirmation réelle.
+- Tu retiens le contexte — si Guillaume dit "oui", "vas-y", "fais-le", tu exécutes la dernière action proposée.
+- Tu ne dis jamais "c'est fait" sans confirmation réelle de l'API.
 
-{"Tu as accès complet à Microsoft 365 de Guillaume (Outlook, agenda, Teams, OneDrive, tâches)." if outlook_token else "Tu n'as pas de connexion Microsoft active."}
+{"Tu as accès complet à Microsoft 365 de Guillaume." if outlook_token else "Tu n'as pas de connexion Microsoft active."}
 
-IMPORTANT sur les mails : chaque mail a deux identifiants :
-- `db_id` : un entier court (ex: 839) — c'est l'ID interne de la base de données, NE JAMAIS utiliser pour les actions
-- `message_id` : une longue chaîne (ex: AAMkAGEw...) — c'est le VRAI ID Outlook, TOUJOURS utiliser pour les actions
-- `mailbox_source` : "outlook" ou "gmail_perso" — les actions Outlook ne fonctionnent QUE sur les mails Outlook
+IMPORTANT — identifiants des mails :
+- `message_id` : longue chaîne Outlook (AAMkAGEw...) — TOUJOURS utiliser pour les actions
+- `db_id` : entier court — JAMAIS utiliser pour les actions
+- `mailbox_source` : "outlook" (actions possibles) ou "gmail_perso" (lecture seule)
 
-Actions disponibles sur les mails Outlook UNIQUEMENT (mailbox_source="outlook") :
+Actions sur mails Outlook :
 - Supprimer : [ACTION:DELETE:message_id]
 - Archiver : [ACTION:ARCHIVE:message_id]
 - Marquer lu : [ACTION:READ:message_id]
 - Répondre : [ACTION:REPLY:message_id:texte]
-- Lire le corps complet : [ACTION:READBODY:message_id]
+- Lire corps complet : [ACTION:READBODY:message_id]
 
-Actions disponibles sur l'agenda :
-- Créer un RDV : [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
+Actions agenda :
+- Créer RDV : [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
 
-Actions disponibles sur les tâches :
-- Créer une tâche : [ACTION:CREATE_TASK:titre]
+Actions tâches :
+- Créer tâche : [ACTION:CREATE_TASK:titre]
 
-Règle : propose toujours l'action avant de l'exécuter, SAUF si Guillaume dit "fais-le", "vas-y", "oui", "supprime", "archive", "envoie", "confirme".
+Règle : propose avant d'agir, SAUF si Guillaume dit "fais-le", "vas-y", "oui", "supprime", "archive", "envoie".
 
 Agenda aujourd'hui ({datetime.now().strftime('%A %d %B %Y')}) :
 {json.dumps(agenda_today, ensure_ascii=False, default=str) if agenda_today else "Aucun RDV aujourd'hui."}
 
-Mails récents (15 derniers) — utilise TOUJOURS le champ message_id pour les actions :
-{json.dumps(mails, ensure_ascii=False, default=str)}
+=== MAILS OUTLOOK EN TEMPS RÉEL (boîte de réception — {len(outlook_live_mails)} mails) ===
+{json.dumps(outlook_live_mails, ensure_ascii=False, default=str) if outlook_live_mails else "Aucun mail Outlook récupéré (token inactif)."}
+
+=== MAILS EN BASE (Gmail + historique Outlook) ===
+{json.dumps(mails_from_db, ensure_ascii=False, default=str)}
 
 Consignes de Guillaume :
 {chr(10).join(instructions) if instructions else "Aucune consigne particulière."}
@@ -294,73 +319,64 @@ Consignes de Guillaume :
     actions_confirmed = []
 
     def is_valid_outlook_id(msg_id: str) -> bool:
-        """Vérifie que c'est un vrai ID Outlook (long) et non un ID PostgreSQL (court)"""
         return len(msg_id.strip()) > 20
 
-    # Parser et exécuter les actions si token disponible
     if outlook_token:
-        # DELETE
         for msg_id in re.findall(r'\[ACTION:DELETE:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
-                actions_confirmed.append(f"❌ ID invalide pour suppression : utilise message_id et non db_id")
+                actions_confirmed.append("❌ ID invalide pour suppression")
                 continue
             try:
                 result = perform_outlook_action("delete_message", {"message_id": msg_id}, outlook_token)
-                actions_confirmed.append(f"✅ Supprimé" if result.get("status") == "ok" else f"❌ Suppression échouée : {result.get('message')}")
+                actions_confirmed.append("✅ Supprimé" if result.get("status") == "ok" else f"❌ {result.get('message')}")
             except Exception as e:
                 actions_confirmed.append(f"❌ Erreur suppression : {str(e)[:100]}")
 
-        # ARCHIVE
         for msg_id in re.findall(r'\[ACTION:ARCHIVE:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
-                actions_confirmed.append(f"❌ ID invalide pour archivage : utilise message_id et non db_id")
+                actions_confirmed.append("❌ ID invalide pour archivage")
                 continue
             try:
                 result = perform_outlook_action("archive_message", {"message_id": msg_id}, outlook_token)
-                actions_confirmed.append(f"✅ Archivé" if result.get("status") == "ok" else f"❌ Archivage échoué : {result.get('message')}")
+                actions_confirmed.append("✅ Archivé" if result.get("status") == "ok" else f"❌ {result.get('message')}")
             except Exception as e:
                 actions_confirmed.append(f"❌ Erreur archivage : {str(e)[:100]}")
 
-        # READ
         for msg_id in re.findall(r'\[ACTION:READ:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
                 continue
             try:
                 result = perform_outlook_action("mark_as_read", {"message_id": msg_id}, outlook_token)
-                actions_confirmed.append(f"✅ Marqué lu" if result.get("status") == "ok" else f"❌ Erreur")
+                actions_confirmed.append("✅ Marqué lu" if result.get("status") == "ok" else "❌ Erreur")
             except Exception as e:
                 actions_confirmed.append(f"❌ Erreur : {str(e)[:100]}")
 
-        # REPLY
         for match in re.finditer(r'\[ACTION:REPLY:([^:]+):([^\]]+)\]', aria_response):
             msg_id, reply_text = match.group(1).strip(), match.group(2).strip()
             if not is_valid_outlook_id(msg_id):
-                actions_confirmed.append(f"❌ ID invalide pour réponse : utilise message_id et non db_id")
+                actions_confirmed.append("❌ ID invalide pour réponse")
                 continue
             try:
                 result = perform_outlook_action("send_reply", {"message_id": msg_id, "reply_body": reply_text}, outlook_token)
-                actions_confirmed.append(f"✅ Réponse envoyée" if result.get("status") == "ok" else f"❌ Envoi échoué : {result.get('message')}")
+                actions_confirmed.append("✅ Réponse envoyée" if result.get("status") == "ok" else f"❌ {result.get('message')}")
             except Exception as e:
                 actions_confirmed.append(f"❌ Erreur envoi : {str(e)[:100]}")
 
-        # READBODY — lire le corps complet (Outlook uniquement)
         for msg_id in re.findall(r'\[ACTION:READBODY:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
-                actions_confirmed.append(f"❌ ID invalide pour lecture corps : utilise message_id Outlook")
+                actions_confirmed.append("❌ ID invalide pour lecture corps")
                 continue
             try:
                 result = perform_outlook_action("get_message_body", {"message_id": msg_id}, outlook_token)
                 if result.get("status") == "ok":
-                    body_preview = result.get("body_text", "")[:800]
-                    actions_confirmed.append(f"📧 Corps du mail :\n{body_preview}")
+                    actions_confirmed.append(f"📧 Corps du mail :\n{result.get('body_text', '')[:800]}")
             except Exception as e:
                 actions_confirmed.append(f"❌ Erreur lecture corps : {str(e)[:100]}")
 
-        # CREATEEVENT
         for match in re.finditer(r'\[ACTION:CREATEEVENT:([^\]]+)\]', aria_response):
             parts = match.group(1).split('|')
             if len(parts) >= 3:
@@ -369,25 +385,22 @@ Consignes de Guillaume :
                     result = perform_outlook_action("create_calendar_event", {
                         "subject": parts[0], "start": parts[1], "end": parts[2], "attendees": attendees
                     }, outlook_token)
-                    actions_confirmed.append(f"✅ RDV créé" if result.get("status") == "ok" else f"❌ Création RDV échouée")
+                    actions_confirmed.append("✅ RDV créé" if result.get("status") == "ok" else "❌ Création RDV échouée")
                 except Exception as e:
                     actions_confirmed.append(f"❌ Erreur agenda : {str(e)[:100]}")
 
-        # CREATE_TASK
         for title in re.findall(r'\[ACTION:CREATE_TASK:([^\]]+)\]', aria_response):
             try:
                 result = perform_outlook_action("create_todo_task", {"title": title.strip()}, outlook_token)
-                actions_confirmed.append(f"✅ Tâche créée" if result.get("status") == "ok" else f"❌ Tâche échouée")
+                actions_confirmed.append("✅ Tâche créée" if result.get("status") == "ok" else "❌ Tâche échouée")
             except Exception as e:
                 actions_confirmed.append(f"❌ Erreur tâche : {str(e)[:100]}")
 
-    # Nettoyer les balises d'action de la réponse affichée
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]+\]', '', aria_response).strip()
 
     if actions_confirmed:
         clean_response += "\n\n" + "\n".join(actions_confirmed)
 
-    # Sauvegarder dans la mémoire
     conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
