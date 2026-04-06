@@ -1,4 +1,3 @@
-import os
 import psycopg2
 import psycopg2.extras
 from app.config import DATABASE_URL
@@ -42,7 +41,8 @@ def init_postgres():
             response_type TEXT,
             missing_fields TEXT,
             confidence_level TEXT,
-            reply_status TEXT DEFAULT 'pending'
+            reply_status TEXT DEFAULT 'pending',
+            mailbox_source TEXT DEFAULT 'outlook'
         )
     """)
 
@@ -96,6 +96,21 @@ def init_postgres():
             created_at TIMESTAMP DEFAULT NOW()
         )
     """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS gmail_tokens (
+            id SERIAL PRIMARY KEY,
+            email TEXT,
+            access_token TEXT,
+            refresh_token TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
+    try:
+        c.execute("ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS mailbox_source TEXT DEFAULT 'outlook'")
+    except Exception:
+        conn.rollback()
 
     conn.commit()
     conn.close()
