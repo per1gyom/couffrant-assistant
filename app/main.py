@@ -965,6 +965,95 @@ def test_outlook_unread(request: Request):
         return RedirectResponse("/login?next=/test-outlook-unread")
     return perform_outlook_action("list_unread_messages", {"top": 5}, token)
 
+@app.get("/login/gmail")
+def login_gmail():
+    from app.connectors.gmail_connector import get_gmail_auth_url
+    auth_url = get_gmail_auth_url()
+    return RedirectResponse(auth_url)
+
+
+@app.get("/auth/gmail/callback")
+def auth_gmail_callback(request: Request, code: str | None = None):
+    if not code:
+        return HTMLResponse("Code manquant", status_code=400)
+
+    from app.connectors.gmail_connector import exchange_code_for_tokens
+    tokens = exchange_code_for_tokens(code)
+
+    access_token = tokens.get("access_token")
+    refresh_token = tokens.get("refresh_token")
+
+    conn = get_pg_conn()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS gmail_tokens (
+            id SERIAL PRIMARY KEY,
+            email TEXT,
+            access_token TEXT,
+            refresh_token TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    c.execute("DELETE FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
+    c.execute("""
+        INSERT INTO gmail_tokens (email, access_token, refresh_token)
+        VALUES (%s, %s, %s)
+    """, ("per1.guillaume@gmail.com", access_token, refresh_token))
+    conn.commit()
+    conn.close()
+
+    return {"status": "ok", "message": "Gmail connecté avec succès !"}
+
+
+@app.get("/ingest-gmail")
+def ingest_gmail(request: Request):
+    from app.connectors.gmail_connector import gmail_get_messages, gmail_get_message, refresh_gmail_token
+
+    conn = get_pg_conn()
+    c = conn.cursor()
+    c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return {"error": "Gmail non connecté — va sur /login/gmail d'abord"}
+
+    access_token = row[0]
+    refresh_token = row[1]
+
+    try:
+        messages = gmail_get_messages(access_token, max_results=10)
+    except Exception:
+        access_token = refresh_gmail_token(refresh_token)
+        messages = gmail_get_messages(access_token, max_results=10)
+
+    inserted = 0
+    conn = get_pg_conn()
+    c = conn.cursor()
+
+    skip_keywords = [
+        "noreply", "no-reply", "donotreply", "newsletter", "unsubscribe",
+        "se désabonner", "notification", "mailer-daemon", "marketing",
+        "promo", "offre spéciale", "linkedin", "twitter", "facebook",
+        "instagram", "jobteaser", "indeed", "welcometothejungle",
+    ]
+
+    for msg in messages:
+        message_id = msg["id"]
+        c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
+        if c.fetchone():
+            continue
+
+        try:
+            detail = gmail_get_message(access_token, message_id)
+            headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
+            subject = headers.get("Subject", "(Sans objet)")
+            from_email = headers.get("From", "")
+            date = headers.get("Date", "")
+            snippet = detail.get("snippet", "")
+
+            full_text = f"{from_email} {subject} {snippet}".lower()
+            if any(kw in full_text for kw in skip_keywords):
 
 @app.get("/test-odoo")
 def test_odoo():
