@@ -21,6 +21,7 @@ from app.assistant_analyzer import analyze_single_mail
 from app.dashboard_service import get_dashboard
 from app.connectors.outlook_connector import perform_outlook_action
 from app.database import get_pg_conn, init_postgres
+from fastapi import Body
 
 
 app = FastAPI(title="Couffrant Solar Assistant")
@@ -30,6 +31,58 @@ app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
 class AriaQuery(BaseModel):
     query: str
 
+@app.post("/speak")
+def speak_text(payload: dict = Body(...)):
+    from app.config import ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID
+    from fastapi.responses import StreamingResponse
+    import io
+    import re
+
+    text = payload.get("text", "")
+
+    clean = re.sub(r'#{1,6}\s+', '', text)
+    clean = re.sub(r'\*\*(.*?)\*\*', r'\1', clean)
+    clean = re.sub(r'\*(.*?)\*', r'\1', clean)
+    clean = re.sub(r'`(.*?)`', r'\1', clean)
+    clean = re.sub(r'---+', '', clean)
+    clean = re.sub(r'\|.*?\|', '', clean)
+    clean = re.sub(r'^\s*[-•]\s', '', clean, flags=re.MULTILINE)
+    clean = clean.strip()
+
+    response = requests.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
+        headers={
+            "xi-api-key": ELEVENLABS_API_KEY,
+            "Content-Type": "application/json",
+        },
+        json={
+            "text": clean[:2500],
+            "model_id": "eleven_multilingual_v2",
+            "voice_settings": {
+                "stability": 0.5,
+                "similarity_boost": 0.8,
+                "style": 0.2,
+                "use_speaker_boost": True
+            }
+        },
+        timeout=30,
+    )
+
+    if response.status_code != 200:
+        return {"error": "ElevenLabs error"}
+
+    return StreamingResponse(
+        io.BytesIO(response.content),
+        media_type="audio/mpeg",
+    )
+
+function stopSpeech() {
+    if (currentAudio) {
+        currentAudio.pause();
+        currentAudio.currentTime = 0;
+    }
+    stopBtn.classList.remove('visible');
+}
 
 @app.on_event("startup")
 def startup_event():
@@ -1101,6 +1154,51 @@ def ingest_gmail(request: Request):
     conn.close()
 
     return {"inserted": inserted, "total_fetched": len(messages)}
+
+@app.post("/speak")
+def speak_text(payload: dict = Body(...)):
+    from app.config import ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID
+    from fastapi.responses import StreamingResponse
+    from fastapi import Body
+    import re
+    import io
+
+    text = payload.get("text", "")
+    clean = re.sub(r'#{1,6}\s+', '', text)
+    clean = re.sub(r'\*\*(.*?)\*\*', r'\1', clean)
+    clean = re.sub(r'\*(.*?)\*', r'\1', clean)
+    clean = re.sub(r'`(.*?)`', r'\1', clean)
+    clean = re.sub(r'---+', '', clean)
+    clean = re.sub(r'\|.*?\|', '', clean)
+    clean = re.sub(r'^\s*[-•]\s', '', clean, flags=re.MULTILINE)
+    clean = clean.strip()
+
+    resp = requests.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
+        headers={
+            "xi-api-key": ELEVENLABS_API_KEY,
+            "Content-Type": "application/json",
+        },
+        json={
+            "text": clean[:2500],
+            "model_id": "eleven_multilingual_v2",
+            "voice_settings": {
+                "stability": 0.5,
+                "similarity_boost": 0.8,
+                "style": 0.2,
+                "use_speaker_boost": True
+            }
+        },
+        timeout=30,
+    )
+
+    if resp.status_code != 200:
+        return {"error": "ElevenLabs error", "detail": resp.text}
+
+    return StreamingResponse(
+        io.BytesIO(resp.content),
+        media_type="audio/mpeg",
+    )
 
 @app.get("/test-odoo")
 def test_odoo():
