@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import RedirectResponse, HTMLResponse
-from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 from pydantic import BaseModel
 
@@ -23,7 +22,6 @@ from app.dashboard_service import get_dashboard
 from app.connectors.outlook_connector import perform_outlook_action
 from app.database import get_pg_conn, init_postgres
 
-templates = Jinja2Templates(directory="app/templates")
 
 app = FastAPI(title="Couffrant Solar Assistant")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
@@ -47,7 +45,8 @@ def health():
 
 @app.get("/chat", response_class=HTMLResponse)
 def chat(request: Request):
-    return templates.TemplateResponse("aria_chat.html", {"request": request})
+    with open("app/templates/aria_chat.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
 
 
 @app.get("/init-db")
