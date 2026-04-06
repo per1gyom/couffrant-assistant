@@ -31,6 +31,35 @@ app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
 class AriaQuery(BaseModel):
     query: str
 
+@app.get("/test-elevenlabs")
+def test_elevenlabs():
+    import os
+    api_key = os.environ.get("ELEVENLABS_API_KEY", "")
+    voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "")
+    
+    resp = requests.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+        headers={
+            "xi-api-key": api_key,
+            "Content-Type": "application/json",
+        },
+        json={
+            "text": "Bonjour Guillaume.",
+            "model_id": "eleven_multilingual_v2",
+            "voice_settings": {
+                "stability": 0.5,
+                "similarity_boost": 0.8,
+            }
+        },
+        timeout=30,
+    )
+    return {
+        "status_code": resp.status_code,
+        "response": resp.text[:500],
+        "api_key_length": len(api_key),
+        "voice_id": voice_id,
+    }
+
 @app.post("/speak")
 def speak_text(payload: dict = Body(...)):
     import os, re, io
