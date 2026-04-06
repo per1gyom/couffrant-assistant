@@ -1186,3 +1186,109 @@ def learn_archive_mails(request: Request, top: int = 100, skip: int = 0):
         "skip": skip,
         "message": f"{inserted} mails archivés utiles stockés, {skipped_noise} bruits ignorés"
     }
+
+@app.get("/learn-gmail-all")
+def learn_gmail_all(request: Request, max_results: int = 100, page_token: str = None):
+    from app.connectors.gmail_connector import gmail_get_messages, gmail_get_message, refresh_gmail_token
+
+    conn = get_pg_conn()
+    c = conn.cursor()
+    c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return {"error": "Gmail non connecté"}
+
+    access_token = row[0]
+    refresh_token = row[1]
+
+    try:
+        response = requests.get(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={
+                "maxResults": max_results,
+                "pageToken": page_token,
+            },
+            timeout=30,
+        )
+        if response.status_code == 401:
+            access_token = refresh_gmail_token(refresh_token)
+            response = requests.get(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={"maxResults": max_results, "pageToken": page_token},
+                timeout=30,
+            )
+        data = response.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+    messages = data.get("messages", [])
+    next_page_token = data.get("nextPageToken")
+    inserted = 0
+    skipped_noise = 0
+
+    skip_keywords = [
+        "noreply", "no-reply", "donotreply", "newsletter", "unsubscribe",
+        "se désabonner", "notification", "mailer-daemon", "marketing",
+        "promo", "offre spéciale", "linkedin", "twitter", "facebook",
+        "instagram", "jobteaser", "indeed", "welcometothejungle",
+        "calendly", "zoom", "teams", "webinar", "webinaire",
+        "satisfaction", "avis client", "enquête", "survey",
+    ]
+
+    conn = get_pg_conn()
+    c = conn.cursor()
+
+    for msg in messages:
+        message_id = msg["id"]
+        c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
+        if c.fetchone():
+            continue
+
+        try:
+            detail = gmail_get_message(access_token, message_id)
+            headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
+            subject = headers.get("Subject", "(Sans objet)")
+            from_email = headers.get("From", "")
+            date = headers.get("Date", "")
+            snippet = detail.get("snippet", "")
+
+            full_text = f"{from_email} {subject} {snippet}".lower()
+            if any(kw in full_text for kw in skip_keywords):
+                skipped_noise += 1
+                continue
+
+            c.execute("""
+                INSERT INTO mail_memory
+                (message_id, received_at, from_email, subject,
+                 raw_body_preview, analysis_status, mailbox_source, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (message_id) DO NOTHING
+            """, (
+                message_id,
+                date,
+                from_email,
+                subject,
+                snippet,
+                "gmail_raw",
+                "gmail_perso",
+                datetime.utcnow().isoformat(),
+            ))
+            inserted += 1
+        except Exception:
+            conn.rollback()
+            continue
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "inserted": inserted,
+        "skipped_noise": skipped_noise,
+        "total_fetched": len(messages),
+        "next_page_token": next_page_token,
+        "message": f"{inserted} mails Gmail utiles stockés, {skipped_noise} bruits ignorés"
+    }
