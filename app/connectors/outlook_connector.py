@@ -2,8 +2,21 @@ import requests
 
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 
-# ID du dossier Archive de Guillaume
 ARCHIVE_FOLDER_ID = "AQMkAGEwZmJhNTllLWQ3MjUtNDg4ADQtYjdhMi1jMGEyZjRiNmFkNWEALgAAA-6yBmE1L7hGi--BXSl5S2sBAIyf8uOKE0VAkKv1dN8K6xgAAAIBRQAAAA=="
+
+SIGNATURE_HTML = """
+<div style="font-family:Arial, sans-serif; font-size:13px; color:#222; margin-top:20px; border-top:1px solid #e0e0e0; padding-top:12px;">
+    <div style="margin-bottom:2px;">Solairement,</div>
+    <div style="font-weight:bold; font-size:14px; margin-bottom:6px;">Guillaume Perrin</div>
+    <div style="color:#555; margin-bottom:2px;">&#128222; 06 49 43 09 17</div>
+    <div style="color:#555; margin-bottom:8px;">&#127758; <a href="https://www.couffrant-solar.fr" style="color:#2e7d32; text-decoration:none;">www.couffrant-solar.fr</a></div>
+    <div>
+        <img src="https://couffrant-solar.fr/wp-content/uploads/2025/04/cropped-logo-couffrant-solar-1.png"
+             alt="Couffrant Solar"
+             style="max-width:280px; height:auto; border:0; margin-top:4px;">
+    </div>
+</div>
+"""
 
 
 def _headers(token: str) -> dict:
@@ -59,15 +72,20 @@ def _graph_delete(token: str, path: str) -> bool:
     return response.status_code == 204
 
 
-def perform_outlook_action(action: str, params: dict, token: str) -> dict:
+def _build_email_html(body: str) -> str:
+    """Construit le HTML complet d'un mail avec la signature Couffrant Solar."""
+    return f"""<div style="font-family:Arial, sans-serif; font-size:14px; color:#222;">
+    <div style="white-space:pre-line;">{body}</div>
+    {SIGNATURE_HTML}
+</div>"""
 
-    # --- MAILS ---
+
+def perform_outlook_action(action: str, params: dict, token: str) -> dict:
 
     if action == "list_unread_messages":
         top = params.get("top", 10)
         data = _graph_get(
-            token,
-            "/me/mailFolders/inbox/messages",
+            token, "/me/mailFolders/inbox/messages",
             params={
                 "$top": top,
                 "$filter": "isRead eq false",
@@ -75,18 +93,12 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
                 "$select": "id,subject,from,receivedDateTime,isRead,bodyPreview",
             },
         )
-        return {
-            "status": "ok",
-            "action": action,
-            "count": len(data.get("value", [])),
-            "items": data.get("value", []),
-        }
+        return {"status": "ok", "action": action, "count": len(data.get("value", [])), "items": data.get("value", [])}
 
     if action == "get_message_body":
         message_id = params["message_id"]
         data = _graph_get(
-            token,
-            f"/me/messages/{message_id}",
+            token, f"/me/messages/{message_id}",
             params={"$select": "id,subject,from,receivedDateTime,body,bodyPreview,toRecipients"},
         )
         body_content = data.get("body", {}).get("content", "")
@@ -94,9 +106,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         body_text = re.sub(r'<[^>]+>', ' ', body_content)
         body_text = re.sub(r'\s+', ' ', body_text).strip()
         return {
-            "status": "ok",
-            "action": action,
-            "message_id": message_id,
+            "status": "ok", "action": action, "message_id": message_id,
             "subject": data.get("subject", ""),
             "from": data.get("from", {}).get("emailAddress", {}).get("address", ""),
             "body_text": body_text[:3000],
@@ -109,11 +119,10 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         draft = _graph_post(token, f"/me/messages/{message_id}/createReply", {})
         draft_id = draft.get("id")
         if not draft_id:
-            return {"status": "error", "message": "Impossible de créer le brouillon Outlook."}
-        patch_body = {"body": {"contentType": "HTML", "content": reply_body}}
-        if params.get("subject_override"):
-            patch_body["subject"] = params["subject_override"]
-        _graph_patch(token, f"/me/messages/{draft_id}", patch_body)
+            return {"status": "error", "message": "Impossible de créer le brouillon."}
+        _graph_patch(token, f"/me/messages/{draft_id}", {
+            "body": {"contentType": "HTML", "content": _build_email_html(reply_body)}
+        })
         return {"status": "ok", "action": action, "draft_id": draft_id, "message": "Brouillon créé."}
 
     if action == "mark_as_read":
@@ -123,75 +132,38 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
 
     if action == "move_message":
         message_id = params["message_id"]
-        moved = _graph_post(
-            token,
-            f"/me/messages/{message_id}/move",
-            {"destinationId": params["destination_folder_id"]},
-        )
+        moved = _graph_post(token, f"/me/messages/{message_id}/move", {"destinationId": params["destination_folder_id"]})
         return {"status": "ok", "action": action, "new_message_id": moved.get("id"), "message": "Mail déplacé."}
 
     if action == "delete_message":
-        # Déplace vers la corbeille (Deleted Items) — récupérable
+        # Déplace vers la corbeille Outlook (récupérable)
         message_id = params["message_id"]
         try:
-            moved = _graph_post(
-                token,
-                f"/me/messages/{message_id}/move",
-                {"destinationId": "deleteditems"},
-            )
-            return {
-                "status": "ok",
-                "action": action,
-                "new_message_id": moved.get("id"),
-                "message": "Mail déplacé vers la corbeille (récupérable).",
-            }
+            moved = _graph_post(token, f"/me/messages/{message_id}/move", {"destinationId": "deleteditems"})
+            return {"status": "ok", "action": action, "new_message_id": moved.get("id"), "message": "Mail mis à la corbeille (récupérable)."}
         except Exception as e:
             return {"status": "error", "action": action, "message": f"Échec : {str(e)}"}
 
     if action == "delete_message_permanent":
-        # Suppression définitive — utiliser avec précaution
         message_id = params["message_id"]
         success = _graph_delete(token, f"/me/messages/{message_id}")
-        return {
-            "status": "ok" if success else "error",
-            "action": action,
-            "message": "Mail supprimé définitivement." if success else "Échec suppression.",
-        }
+        return {"status": "ok" if success else "error", "action": action, "message": "Mail supprimé définitivement." if success else "Échec suppression."}
 
     if action == "archive_message":
         message_id = params["message_id"]
         try:
-            moved = _graph_post(
-                token,
-                f"/me/messages/{message_id}/move",
-                {"destinationId": ARCHIVE_FOLDER_ID},
-            )
-            return {
-                "status": "ok",
-                "action": action,
-                "new_message_id": moved.get("id"),
-                "message": "Mail archivé.",
-            }
+            moved = _graph_post(token, f"/me/messages/{message_id}/move", {"destinationId": ARCHIVE_FOLDER_ID})
+            return {"status": "ok", "action": action, "new_message_id": moved.get("id"), "message": "Mail archivé."}
         except Exception as e:
             return {"status": "error", "action": action, "message": f"Échec archivage : {str(e)}"}
 
     if action == "send_reply":
         message_id = params["message_id"]
         reply_body = params.get("reply_body", "")
-        html_body = f"""
-<div style="font-family:Arial, sans-serif; font-size:14px; color:#222;">
-    <div style="white-space:pre-line;">{reply_body}</div>
-    <br><br>
-    <div>Solairement,</div>
-    <div style="font-weight:bold; margin-top:8px;">Guillaume Perrin</div>
-    <div>06 49 43 09 17</div>
-    <div><a href="https://www.couffrant-solar.fr">www.couffrant-solar.fr</a></div>
-</div>"""
         try:
             _graph_post(
-                token,
-                f"/me/messages/{message_id}/reply",
-                {"message": {"body": {"contentType": "HTML", "content": html_body}}}
+                token, f"/me/messages/{message_id}/reply",
+                {"message": {"body": {"contentType": "HTML", "content": _build_email_html(reply_body)}}}
             )
             return {"status": "ok", "action": action, "message": "Réponse envoyée avec succès."}
         except Exception as e:
@@ -201,23 +173,13 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         to_email = params["to_email"]
         subject = params["subject"]
         body = params.get("body", "")
-        html_body = f"""
-<div style="font-family:Arial, sans-serif; font-size:14px; color:#222;">
-    <div style="white-space:pre-line;">{body}</div>
-    <br><br>
-    <div>Solairement,</div>
-    <div style="font-weight:bold; margin-top:8px;">Guillaume Perrin</div>
-    <div>06 49 43 09 17</div>
-    <div><a href="https://www.couffrant-solar.fr">www.couffrant-solar.fr</a></div>
-</div>"""
         try:
             _graph_post(
-                token,
-                "/me/sendMail",
+                token, "/me/sendMail",
                 {
                     "message": {
                         "subject": subject,
-                        "body": {"contentType": "HTML", "content": html_body},
+                        "body": {"contentType": "HTML", "content": _build_email_html(body)},
                         "toRecipients": [{"emailAddress": {"address": to_email}}]
                     }
                 }
@@ -226,44 +188,29 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         except Exception as e:
             return {"status": "error", "action": action, "message": f"Échec envoi : {str(e)}"}
 
-    # --- AGENDA ---
-
     if action == "list_calendar_events":
         from datetime import datetime, timezone, timedelta
         start = params.get("start", datetime.now(timezone.utc).isoformat())
         end = params.get("end", (datetime.now(timezone.utc) + timedelta(days=7)).isoformat())
-        data = _graph_get(
-            token,
-            "/me/calendarView",
-            params={
-                "startDateTime": start,
-                "endDateTime": end,
-                "$select": "id,subject,start,end,location,organizer,attendees,bodyPreview",
-                "$orderby": "start/dateTime",
-                "$top": params.get("top", 20),
-            }
-        )
+        data = _graph_get(token, "/me/calendarView", params={
+            "startDateTime": start, "endDateTime": end,
+            "$select": "id,subject,start,end,location,organizer,attendees,bodyPreview",
+            "$orderby": "start/dateTime", "$top": params.get("top", 20),
+        })
         return {"status": "ok", "action": action, "count": len(data.get("value", [])), "items": data.get("value", [])}
 
     if action == "create_calendar_event":
         try:
-            event = _graph_post(
-                token,
-                "/me/events",
-                {
-                    "subject": params.get("subject", "Nouveau RDV"),
-                    "start": {"dateTime": params.get("start"), "timeZone": "Europe/Paris"},
-                    "end": {"dateTime": params.get("end"), "timeZone": "Europe/Paris"},
-                    "body": {"contentType": "Text", "content": params.get("body", "")},
-                    "attendees": [
-                        {"emailAddress": {"address": email}, "type": "required"}
-                        for email in params.get("attendees", [])
-                    ]
-                }
-            )
-            return {"status": "ok", "action": action, "event_id": event.get("id"), "message": f"RDV '{params.get('subject')}' créé."}
+            event = _graph_post(token, "/me/events", {
+                "subject": params.get("subject", "Nouveau RDV"),
+                "start": {"dateTime": params.get("start"), "timeZone": "Europe/Paris"},
+                "end": {"dateTime": params.get("end"), "timeZone": "Europe/Paris"},
+                "body": {"contentType": "Text", "content": params.get("body", "")},
+                "attendees": [{"emailAddress": {"address": e}, "type": "required"} for e in params.get("attendees", [])]
+            })
+            return {"status": "ok", "action": action, "event_id": event.get("id"), "message": f"RDV créé."}
         except Exception as e:
-            return {"status": "error", "action": action, "message": f"Échec création RDV : {str(e)}"}
+            return {"status": "error", "action": action, "message": f"Échec RDV : {str(e)}"}
 
     if action == "update_calendar_event":
         event_id = params["event_id"]
@@ -282,8 +229,6 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         event_id = params["event_id"]
         success = _graph_delete(token, f"/me/events/{event_id}")
         return {"status": "ok" if success else "error", "message": "RDV supprimé." if success else "Échec."}
-
-    # --- TEAMS ---
 
     if action == "list_teams_chats":
         data = _graph_get(token, "/me/chats", params={"$expand": "members", "$top": 20})
@@ -308,19 +253,16 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         data = _graph_get(token, "/users", params={"$filter": f"startswith(displayName,'{name}')", "$select": "id,displayName,mail"})
         return {"status": "ok", "action": action, "items": data.get("value", [])}
 
-    # --- ONEDRIVE ---
-
     if action == "list_onedrive_files":
         path = params.get("path", "root")
         endpoint = "/me/drive/root/children" if path == "root" else f"/me/drive/root:/{path}:/children"
         data = _graph_get(token, endpoint, params={"$top": 50})
-        return {
-            "status": "ok", "action": action,
-            "items": [{"name": f.get("name"), "id": f.get("id"), "size": f.get("size"),
-                       "type": "folder" if "folder" in f else "file",
-                       "modified": f.get("lastModifiedDateTime"), "webUrl": f.get("webUrl")}
-                      for f in data.get("value", [])]
-        }
+        return {"status": "ok", "action": action, "items": [
+            {"name": f.get("name"), "id": f.get("id"), "size": f.get("size"),
+             "type": "folder" if "folder" in f else "file",
+             "modified": f.get("lastModifiedDateTime"), "webUrl": f.get("webUrl")}
+            for f in data.get("value", [])
+        ]}
 
     if action == "move_onedrive_file":
         file_id = params["file_id"]
@@ -347,8 +289,6 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         success = _graph_delete(token, f"/me/drive/items/{file_id}")
         return {"status": "ok" if success else "error", "message": "Fichier supprimé." if success else "Échec."}
 
-    # --- CONTACTS ---
-
     if action == "list_contacts":
         data = _graph_get(token, "/me/contacts", params={"$top": 50, "$select": "displayName,emailAddresses,mobilePhone,businessPhones,companyName,jobTitle"})
         return {"status": "ok", "action": action, "items": data.get("value", [])}
@@ -361,8 +301,6 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
             "$top": 10
         })
         return {"status": "ok", "action": action, "items": data.get("value", [])}
-
-    # --- TACHES ---
 
     if action == "list_todo_tasks":
         lists_data = _graph_get(token, "/me/todo/lists")
