@@ -442,18 +442,20 @@ async function startTriage() {
     stopSpeech();
     triageBar.classList.remove('visible');
 
+    const loading = addLoading();
     const response = await fetch('/triage-queue');
     const data = await response.json();
+    loading.remove();
     triageQueue = data.mails || [];
 
     if (triageQueue.length === 0) {
-        const msg = "Aucun mail à trier. Ta boîte est propre !";
+        const msg = "Aucun mail dans ta boîte de réception.";
         addMessage(msg, 'aria');
         speak(msg);
         return;
     }
 
-    const intro = `${triageQueue.length} mails à trier. On commence.`;
+    const intro = `${triageQueue.length} mails dans ta boîte. On commence par le plus récent.`;
     addMessage(intro, 'aria');
     speak(intro);
     setTimeout(() => nextTriage(), 1500);

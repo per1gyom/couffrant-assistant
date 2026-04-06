@@ -31,6 +31,40 @@ app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
 class AriaQuery(BaseModel):
     query: str
 
+@app.get("/triage-queue")
+def triage_queue():
+    from app.token_manager import get_valid_microsoft_token
+    from app.graph_client import graph_get
+
+    token = get_valid_microsoft_token()
+    if not token:
+        return {"mails": [], "count": 0, "error": "Token Microsoft manquant"}
+
+    try:
+        data = graph_get(
+            token,
+            "/me/mailFolders/inbox/messages",
+            params={
+                "$top": 50,
+                "$select": "id,subject,from,receivedDateTime,bodyPreview,isRead",
+                "$orderby": "receivedDateTime DESC",
+            },
+        )
+        messages = data.get("value", [])
+        mails = []
+        for msg in messages:
+            mails.append({
+                "message_id": msg["id"],
+                "from_email": msg.get("from", {}).get("emailAddress", {}).get("address", ""),
+                "subject": msg.get("subject", "(Sans objet)"),
+                "raw_body_preview": msg.get("bodyPreview", ""),
+                "received_at": msg.get("receivedDateTime", ""),
+                "is_read": msg.get("isRead", False),
+            })
+        return {"mails": mails, "count": len(mails)}
+    except Exception as e:
+        return {"mails": [], "count": 0, "error": str(e)}
+
 @app.get("/test-elevenlabs")
 def test_elevenlabs():
     import os
