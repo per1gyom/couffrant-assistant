@@ -255,40 +255,37 @@ let currentAudio = null;
 
 function speak(text) {
     stopSpeech();
-    if (!('speechSynthesis' in window)) return;
-    
-    const clean = cleanText(text);
-    const utterance = new SpeechSynthesisUtterance(clean);
-    utterance.lang = 'fr-FR';
-    utterance.rate = 0.95;
-    utterance.pitch = 1.1;
-    
-    // Cherche une voix française de qualité
-    const voices = window.speechSynthesis.getVoices();
-    const frVoice = voices.find(v => v.lang.startsWith('fr') && v.localService) 
-                 || voices.find(v => v.lang.startsWith('fr'));
-    if (frVoice) utterance.voice = frVoice;
-    
-    utterance.onstart = () => stopBtn.classList.add('visible');
-    utterance.onend = () => stopBtn.classList.remove('visible');
-    utterance.onerror = () => stopBtn.classList.remove('visible');
-    
-    window.speechSynthesis.speak(utterance);
+    stopBtn.classList.add('visible');
+
+    fetch('/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: text })
+    })
+    .then(r => {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.blob();
+    })
+    .then(blob => {
+        if (blob.size < 100) {
+            stopBtn.classList.remove('visible');
+            return;
+        }
+        const url = URL.createObjectURL(blob);
+        currentAudio = new Audio(url);
+        currentAudio.oncanplaythrough = () => {
+            currentAudio.play().catch(() => stopBtn.classList.remove('visible'));
+        };
+        currentAudio.onended = () => stopBtn.classList.remove('visible');
+        currentAudio.onerror = () => stopBtn.classList.remove('visible');
+    })
+    .catch(() => stopBtn.classList.remove('visible'));
 }
 
 function stopSpeech() {
     window.speechSynthesis.cancel();
     if (currentAudio) {
         currentAudio.pause();
-        currentAudio = null;
-    }
-    stopBtn.classList.remove('visible');
-}
-
-function stopSpeech() {
-    if (currentAudio) {
-        currentAudio.pause();
-        currentAudio.currentTime = 0;
         currentAudio = null;
     }
     stopBtn.classList.remove('visible');
