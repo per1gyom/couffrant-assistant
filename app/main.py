@@ -249,25 +249,39 @@ def aria(payload: AriaQuery):
 
     conn = get_pg_conn()
     c = conn.cursor()
+
+    # Mails récents
     c.execute("""
-        SELECT id, message_id, display_title, category, priority, short_summary, suggested_reply, raw_body_preview
+        SELECT id, message_id, from_email, display_title, category, priority, 
+               short_summary, suggested_reply, raw_body_preview, received_at
         FROM mail_memory
-        ORDER BY id DESC
-        LIMIT 20
+        ORDER BY received_at DESC NULLS LAST
+        LIMIT 15
     """)
     columns = [desc[0] for desc in c.description]
     mails = [dict(zip(columns, row)) for row in c.fetchall()]
 
+    # Historique conversation
     c.execute("""
         SELECT user_input, aria_response
         FROM aria_memory
         ORDER BY id DESC
-        LIMIT 5
+        LIMIT 8
     """)
     columns = [desc[0] for desc in c.description]
-    memory = [dict(zip(columns, row)) for row in c.fetchall()]
+    history = [dict(zip(columns, row)) for row in c.fetchall()]
+    history.reverse()
 
-    # Récupère le token Microsoft depuis la base
+    # Profil Guillaume
+    c.execute("""
+        SELECT content FROM aria_profile
+        WHERE profile_type = 'style'
+        ORDER BY id DESC LIMIT 1
+    """)
+    profile_row = c.fetchone()
+    profile = profile_row[0] if profile_row else ""
+
+    # Token Microsoft
     c.execute("""
         SELECT access_token FROM oauth_tokens
         WHERE provider = 'microsoft'
@@ -277,71 +291,86 @@ def aria(payload: AriaQuery):
     outlook_token = token_row[0] if token_row else None
     conn.close()
 
-    context = {
-        "recent_mails": mails,
-        "instructions": instructions,
-        "memory": memory,
-        "has_outlook_access": outlook_token is not None,
-    }
+    # Construit l'historique comme messages alternés
+    messages = []
+    for h in history:
+        messages.append({"role": "user", "content": h["user_input"]})
+        messages.append({"role": "assistant", "content": h["aria_response"]})
+    messages.append({"role": "user", "content": payload.query})
 
-    prompt = f"""
-Tu es Aria, assistante stratégique et opérationnelle de Couffrant Solar.
-Tu aides Guillaume à piloter son activité avec clarté, efficacité et bon sens.
+    # Prompt système — naturel, sans cage
+    system = f"""Tu es Aria, l'assistante personnelle de Guillaume Perrin, dirigeant de Couffrant Solar.
 
-Règles absolues :
-- Tu proposes toujours, Guillaume décide toujours
-- Tu écris comme une assistante expérimentée, pas comme une IA
-- Tu es directe, synthétique, utile, sans blabla
-- Tu ne répètes jamais la même chose deux fois de suite
+Guillaume dirige une entreprise de 8 personnes spécialisée dans le photovoltaïque. Il est direct, efficace, va à l'essentiel. Il n'aime pas les réponses longues et structurées quand ce n'est pas nécessaire. Il veut être compris rapidement et que les choses avancent.
 
-{"Tu as accès en écriture à la boîte Outlook de Guillaume." if outlook_token else "Tu n'as pas de token Outlook actif."}
+Ce que tu sais sur lui :
+{profile[:800] if profile else "Profil en cours de construction."}
 
-Si Guillaume te demande d'agir sur un mail (supprimer, archiver, répondre, marquer lu), tu peux le faire en incluant dans ta réponse une balise d'action :
+Tes règles de fonctionnement :
+- Tu réponds naturellement, sans structure imposée. Pas de "1. Priorités 2. Risques 3. Recommandations" sauf si c'est vraiment utile.
+- Tu adaptes ta réponse au contexte — courte si la question est simple, développée si le sujet le mérite.
+- Tu es directe, honnête, sans blabla. Tu dis ce que tu penses vraiment.
+- Guillaume décide toujours. Tu proposes, tu exécutes sur ordre.
+- Tu ne répètes jamais ce que tu viens de dire.
+- Si tu ne sais pas quelque chose, tu le dis simplement.
+
+{f"Tu as accès à la boîte Outlook de Guillaume et tu peux agir dessus." if outlook_token else "Tu n'as pas de connexion Outlook active en ce moment."}
+
+Pour agir sur les mails, utilise ces balises dans ta réponse :
 - Supprimer : [ACTION:DELETE:message_id]
-- Archiver : [ACTION:ARCHIVE:message_id]
+- Archiver : [ACTION:ARCHIVE:message_id]  
 - Marquer lu : [ACTION:READ:message_id]
-- Répondre : [ACTION:REPLY:message_id]
+- Répondre : [ACTION:REPLY:message_id:texte]
 
-Le message_id est disponible dans le contexte des mails. Propose toujours l'action avant de l'exécuter sauf si Guillaume dit explicitement "fais-le" ou "supprime" ou "archive".
+Demande toujours confirmation avant d'agir, sauf si Guillaume dit explicitement "fais-le", "vas-y", "oui", "supprime", "archive", "envoie".
 
-Contexte disponible :
-{json.dumps(context, ensure_ascii=False)}
+Contexte actuel — mails récents :
+{json.dumps(mails, ensure_ascii=False, default=str)}
 
-Question de Guillaume :
-{payload.query}
-""".strip()
+Consignes de Guillaume :
+{chr(10).join(instructions) if instructions else "Aucune consigne particulière."}
+"""
 
     response = client.messages.create(
         model=ANTHROPIC_MODEL_SMART,
         max_tokens=2048,
-        messages=[{"role": "user", "content": prompt}]
+        system=system,
+        messages=messages,
     )
 
     aria_response = response.content[0].text
     actions_executed = []
+    actions_confirmed = []
 
-    # Parser les actions dans la réponse
+    # Parser et exécuter les actions
     if outlook_token:
         action_pattern = re.findall(r'\[ACTION:(\w+):([^\]:]+)(?::([^\]]*))?\]', aria_response)
         for action_type, message_id, extra in action_pattern:
             try:
+                result = {}
                 if action_type == "DELETE":
                     result = perform_outlook_action("delete_message", {"message_id": message_id}, outlook_token)
-                    actions_executed.append(f"Supprimé : {message_id}")
                 elif action_type == "ARCHIVE":
                     result = perform_outlook_action("archive_message", {"message_id": message_id}, outlook_token)
-                    actions_executed.append(f"Archivé : {message_id}")
                 elif action_type == "READ":
                     result = perform_outlook_action("mark_as_read", {"message_id": message_id}, outlook_token)
-                    actions_executed.append(f"Lu : {message_id}")
                 elif action_type == "REPLY" and extra:
                     result = perform_outlook_action("send_reply", {"message_id": message_id, "reply_body": extra}, outlook_token)
-                    actions_executed.append(f"Répondu : {message_id}")
-            except Exception as e:
-                actions_executed.append(f"Erreur {action_type} {message_id}: {str(e)}")
 
-    # Nettoie les balises d'action de la réponse affichée
+                if result.get("status") == "ok":
+                    actions_confirmed.append(f"✅ {action_type} confirmé par Microsoft")
+                else:
+                    actions_confirmed.append(f"❌ {action_type} échoué : {result.get('message', 'erreur inconnue')}")
+
+            except Exception as e:
+                actions_confirmed.append(f"❌ Erreur {action_type} : {str(e)}")
+
+    # Nettoie les balises de la réponse affichée
     clean_response = re.sub(r'\[ACTION:\w+:[^\]]+\]', '', aria_response).strip()
+
+    # Ajoute les confirmations d'actions à la réponse si nécessaire
+    if actions_confirmed:
+        clean_response += "\n\n" + "\n".join(actions_confirmed)
 
     conn = get_pg_conn()
     c = conn.cursor()
@@ -354,7 +383,7 @@ Question de Guillaume :
 
     return {
         "answer": clean_response,
-        "actions": actions_executed,
+        "actions": actions_confirmed,
     }
 
 
