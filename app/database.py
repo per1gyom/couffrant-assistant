@@ -118,6 +118,53 @@ def init_postgres():
         )
     """)
 
+    # COUCHE 1 — Résumé chaud
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS aria_hot_summary (
+            id INTEGER PRIMARY KEY DEFAULT 1,
+            content TEXT,
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    # S'assurer qu'il y a toujours une ligne (upsert cible id=1)
+    c.execute("""
+        INSERT INTO aria_hot_summary (id, content, updated_at)
+        VALUES (1, '', NOW())
+        ON CONFLICT (id) DO NOTHING
+    """)
+
+    # COUCHE 2 — Fiches contacts
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS aria_contacts (
+            id SERIAL PRIMARY KEY,
+            email TEXT UNIQUE,
+            name TEXT,
+            company TEXT,
+            role TEXT,
+            summary TEXT,
+            last_seen TEXT,
+            last_subject TEXT,
+            mail_count INTEGER DEFAULT 0,
+            tags TEXT,
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
+    # STYLE — Exemples de rédaction
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS aria_style_examples (
+            id SERIAL PRIMARY KEY,
+            situation TEXT,
+            example_text TEXT,
+            tags TEXT,
+            quality_score REAL DEFAULT 1.0,
+            used_count INTEGER DEFAULT 0,
+            source TEXT DEFAULT 'sent_mail',
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
+    # Migrations
     try:
         c.execute("ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS mailbox_source TEXT DEFAULT 'outlook'")
     except Exception:
