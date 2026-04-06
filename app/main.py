@@ -1074,6 +1074,7 @@ def ingest_gmail(request: Request):
             ))
             inserted += 1
         except Exception:
+            conn.rollback()
             continue
 
     conn.commit()
