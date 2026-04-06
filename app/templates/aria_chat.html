@@ -255,42 +255,34 @@ let currentAudio = null;
 
 function speak(text) {
     stopSpeech();
-    stopBtn.classList.add('visible');
+    if (!('speechSynthesis' in window)) return;
+    
+    const clean = cleanText(text);
+    const utterance = new SpeechSynthesisUtterance(clean);
+    utterance.lang = 'fr-FR';
+    utterance.rate = 0.95;
+    utterance.pitch = 1.1;
+    
+    // Cherche une voix française de qualité
+    const voices = window.speechSynthesis.getVoices();
+    const frVoice = voices.find(v => v.lang.startsWith('fr') && v.localService) 
+                 || voices.find(v => v.lang.startsWith('fr'));
+    if (frVoice) utterance.voice = frVoice;
+    
+    utterance.onstart = () => stopBtn.classList.add('visible');
+    utterance.onend = () => stopBtn.classList.remove('visible');
+    utterance.onerror = () => stopBtn.classList.remove('visible');
+    
+    window.speechSynthesis.speak(utterance);
+}
 
-    fetch('/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: text })
-    })
-    .then(r => {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.blob();
-    })
-    .then(blob => {
-        console.log('Audio reçu, taille:', blob.size);
-        if (blob.size < 100) {
-            console.error('Audio trop petit — erreur ElevenLabs');
-            stopBtn.classList.remove('visible');
-            return;
-        }
-        const url = URL.createObjectURL(blob);
-        currentAudio = new Audio(url);
-        currentAudio.oncanplaythrough = () => {
-            currentAudio.play().catch(e => {
-                console.error('Erreur lecture:', e);
-                stopBtn.classList.remove('visible');
-            });
-        };
-        currentAudio.onended = () => stopBtn.classList.remove('visible');
-        currentAudio.onerror = (e) => {
-            console.error('Erreur audio:', e);
-            stopBtn.classList.remove('visible');
-        };
-    })
-    .catch(e => {
-        console.error('Erreur fetch:', e);
-        stopBtn.classList.remove('visible');
-    });
+function stopSpeech() {
+    window.speechSynthesis.cancel();
+    if (currentAudio) {
+        currentAudio.pause();
+        currentAudio = null;
+    }
+    stopBtn.classList.remove('visible');
 }
 
 function stopSpeech() {
