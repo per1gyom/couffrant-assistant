@@ -1,10 +1,10 @@
 import os
 import requests
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, Request, Form
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi import FastAPI, Request, Form, Body
+from fastapi.responses import RedirectResponse, HTMLResponse, StreamingResponse
 from starlette.middleware.sessions import SessionMiddleware
 from pydantic import BaseModel
 
@@ -21,7 +21,6 @@ from app.assistant_analyzer import analyze_single_mail
 from app.dashboard_service import get_dashboard
 from app.connectors.outlook_connector import perform_outlook_action
 from app.database import get_pg_conn, init_postgres
-from fastapi import FastAPI, Request, Form, Body
 
 
 app = FastAPI(title="Couffrant Solar Assistant")
@@ -31,123 +30,13 @@ app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
 class AriaQuery(BaseModel):
     query: str
 
-@app.get("/triage-queue")
-def triage_queue():
-    from app.token_manager import get_valid_microsoft_token
-    from app.graph_client import graph_get
-
-    token = get_valid_microsoft_token()
-    if not token:
-        return {"mails": [], "count": 0, "error": "Token Microsoft manquant"}
-
-    try:
-        data = graph_get(
-            token,
-            "/me/mailFolders/inbox/messages",
-            params={
-                "$top": 50,
-                "$select": "id,subject,from,receivedDateTime,bodyPreview,isRead",
-                "$orderby": "receivedDateTime DESC",
-            },
-        )
-        messages = data.get("value", [])
-        mails = []
-        for msg in messages:
-            mails.append({
-                "message_id": msg["id"],
-                "from_email": msg.get("from", {}).get("emailAddress", {}).get("address", ""),
-                "subject": msg.get("subject", "(Sans objet)"),
-                "raw_body_preview": msg.get("bodyPreview", ""),
-                "received_at": msg.get("receivedDateTime", ""),
-                "is_read": msg.get("isRead", False),
-            })
-        return {"mails": mails, "count": len(mails)}
-    except Exception as e:
-        return {"mails": [], "count": 0, "error": str(e)}
-
-@app.get("/test-elevenlabs")
-def test_elevenlabs():
-    import os
-    api_key = os.environ.get("ELEVENLABS_API_KEY", "")
-    voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "")
-    
-    resp = requests.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-        headers={
-            "xi-api-key": api_key,
-            "Content-Type": "application/json",
-        },
-        json={
-            "text": "Bonjour Guillaume.",
-            "model_id": "eleven_multilingual_v2",
-            "voice_settings": {
-                "stability": 0.5,
-                "similarity_boost": 0.8,
-            }
-        },
-        timeout=30,
-    )
-    return {
-        "status_code": resp.status_code,
-        "response": resp.text[:500],
-        "api_key_length": len(api_key),
-        "voice_id": voice_id,
-    }
-
-@app.post("/speak")
-def speak_text(payload: dict = Body(...)):
-    import os, re, io
-    from fastapi.responses import StreamingResponse
-
-    api_key = os.environ.get("ELEVENLABS_API_KEY", "")
-    voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "")
-
-    if not api_key or not voice_id:
-        return {"error": f"Clés manquantes: api_key={'ok' if api_key else 'VIDE'}, voice_id={'ok' if voice_id else 'VIDE'}"}
-
-    text = payload.get("text", "")
-    clean = re.sub(r'#{1,6}\s+', '', text)
-    clean = re.sub(r'\*\*(.*?)\*\*', r'\1', clean)
-    clean = re.sub(r'\*(.*?)\*', r'\1', clean)
-    clean = re.sub(r'`(.*?)`', r'\1', clean)
-    clean = re.sub(r'---+', '', clean)
-    clean = re.sub(r'\|.*?\|', '', clean)
-    clean = clean.strip()[:2500]
-
-    resp = requests.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-        headers={
-            "xi-api-key": api_key,
-            "Content-Type": "application/json",
-        },
-        json={
-            "text": clean,
-            "model_id": "eleven_flash_v2_5",
-            "voice_settings": {
-                "stability": 0.5,
-                "similarity_boost": 0.8,
-                "style": 0.2,
-                "use_speaker_boost": True
-            }
-        },
-        timeout=30,
-    )
-
-    if resp.status_code != 200:
-        return {"error": f"ElevenLabs {resp.status_code}", "detail": resp.text[:200]}
-
-    return StreamingResponse(
-        io.BytesIO(resp.content),
-        media_type="audio/mpeg",
-    )
 
 @app.on_event("startup")
 def startup_event():
     init_postgres()
     init_db()
     init_mail_db()
-    
-    # Démarrage scheduler ingestion automatique
+
     import threading
     def auto_ingest():
         import time
@@ -208,8 +97,8 @@ def startup_event():
                         })
             except Exception as e:
                 print(f"[AutoIngest] Erreur: {e}")
-            
-            time.sleep(30)  # toutes les 5 minutes
+
+            time.sleep(30)
 
     thread = threading.Thread(target=auto_ingest, daemon=True)
     thread.start()
@@ -218,6 +107,12 @@ def startup_event():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/init-db")
+def init_db_now():
+    init_postgres()
+    return {"status": "tables créées"}
 
 
 @app.get("/chat", response_class=HTMLResponse)
@@ -236,10 +131,40 @@ def chat(request: Request, pwd: str = ""):
         return HTMLResponse(content=f.read())
 
 
-@app.get("/init-db")
-def init_db_now():
-    init_postgres()
-    return {"status": "tables créées"}
+@app.post("/speak")
+def speak_text(payload: dict = Body(...)):
+    import re, io
+
+    api_key = os.environ.get("ELEVENLABS_API_KEY", "")
+    voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "")
+
+    if not api_key or not voice_id:
+        return {"error": "Clés ElevenLabs manquantes"}
+
+    text = payload.get("text", "")
+    clean = re.sub(r'#{1,6}\s+', '', text)
+    clean = re.sub(r'\*\*(.*?)\*\*', r'\1', clean)
+    clean = re.sub(r'\*(.*?)\*', r'\1', clean)
+    clean = re.sub(r'`(.*?)`', r'\1', clean)
+    clean = re.sub(r'---+', '', clean)
+    clean = re.sub(r'\|.*?\|', '', clean)
+    clean = clean.strip()[:2500]
+
+    resp = requests.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+        headers={"xi-api-key": api_key, "Content-Type": "application/json"},
+        json={
+            "text": clean,
+            "model_id": "eleven_flash_v2_5",
+            "voice_settings": {"stability": 0.5, "similarity_boost": 0.8, "style": 0.2, "use_speaker_boost": True}
+        },
+        timeout=30,
+    )
+
+    if resp.status_code != 200:
+        return {"error": f"ElevenLabs {resp.status_code}", "detail": resp.text[:200]}
+
+    return StreamingResponse(io.BytesIO(resp.content), media_type="audio/mpeg")
 
 
 @app.post("/aria")
@@ -252,8 +177,8 @@ def aria(payload: AriaQuery):
 
     # Mails récents
     c.execute("""
-        SELECT id, message_id, from_email, display_title, category, priority, 
-               short_summary, suggested_reply, raw_body_preview, received_at
+        SELECT id, message_id, from_email, display_title, category, priority,
+               short_summary, suggested_reply, raw_body_preview, received_at, mailbox_source
         FROM mail_memory
         ORDER BY received_at DESC NULLS LAST
         LIMIT 15
@@ -261,7 +186,7 @@ def aria(payload: AriaQuery):
     columns = [desc[0] for desc in c.description]
     mails = [dict(zip(columns, row)) for row in c.fetchall()]
 
-    # Historique conversation
+    # Historique conversation (8 derniers échanges)
     c.execute("""
         SELECT user_input, aria_response
         FROM aria_memory
@@ -291,40 +216,66 @@ def aria(payload: AriaQuery):
     outlook_token = token_row[0] if token_row else None
     conn.close()
 
-    # Construit l'historique comme messages alternés
+    # Agenda du jour si token disponible
+    agenda_today = []
+    if outlook_token:
+        try:
+            now = datetime.now(timezone.utc)
+            start = now.replace(hour=0, minute=0, second=0).isoformat()
+            end = now.replace(hour=23, minute=59, second=59).isoformat()
+            agenda_result = perform_outlook_action("list_calendar_events", {"start": start, "end": end, "top": 10}, outlook_token)
+            agenda_today = agenda_result.get("items", [])
+        except Exception:
+            pass
+
+    # Messages alternés pour l'historique
     messages = []
     for h in history:
         messages.append({"role": "user", "content": h["user_input"]})
         messages.append({"role": "assistant", "content": h["aria_response"]})
     messages.append({"role": "user", "content": payload.query})
 
-    # Prompt système — naturel, sans cage
+    # Prompt système libéré
     system = f"""Tu es Aria, l'assistante personnelle de Guillaume Perrin, dirigeant de Couffrant Solar.
 
-Guillaume dirige une entreprise de 8 personnes spécialisée dans le photovoltaïque. Il est direct, efficace, va à l'essentiel. Il n'aime pas les réponses longues et structurées quand ce n'est pas nécessaire. Il veut être compris rapidement et que les choses avancent.
+Guillaume dirige une PME de 8 personnes dans le photovoltaïque. Il est direct, efficace, va à l'essentiel. Il déteste les réponses longues et structurées quand ce n'est pas nécessaire. Il veut être compris rapidement et que les choses avancent. Il tutoie Aria.
 
-Ce que tu sais sur lui :
-{profile[:800] if profile else "Profil en cours de construction."}
+Ce que tu sais sur Guillaume :
+{profile[:1000] if profile else "Profil en cours de construction."}
 
-Tes règles de fonctionnement :
-- Tu réponds naturellement, sans structure imposée. Pas de "1. Priorités 2. Risques 3. Recommandations" sauf si c'est vraiment utile.
-- Tu adaptes ta réponse au contexte — courte si la question est simple, développée si le sujet le mérite.
+Comment tu fonctionnes :
+- Tu réponds naturellement, sans structure imposée. Tu adaptes ta longueur au contexte.
 - Tu es directe, honnête, sans blabla. Tu dis ce que tu penses vraiment.
-- Guillaume décide toujours. Tu proposes, tu exécutes sur ordre.
+- Guillaume décide toujours. Tu proposes et tu exécutes sur ordre explicite.
+- Tu retiens le contexte de la conversation — si Guillaume dit "oui", "vas-y", "fais-le", tu exécutes la dernière action proposée.
 - Tu ne répètes jamais ce que tu viens de dire.
-- Si tu ne sais pas quelque chose, tu le dis simplement.
+- Si tu fais une action, tu le confirmes seulement après avoir reçu la confirmation de l'API (status ok). Tu ne dis jamais "c'est fait" sans confirmation réelle.
 
-{f"Tu as accès à la boîte Outlook de Guillaume et tu peux agir dessus." if outlook_token else "Tu n'as pas de connexion Outlook active en ce moment."}
+{"Tu as accès complet à Microsoft 365 de Guillaume." if outlook_token else "Tu n'as pas de connexion Microsoft active."}
 
-Pour agir sur les mails, utilise ces balises dans ta réponse :
-- Supprimer : [ACTION:DELETE:message_id]
-- Archiver : [ACTION:ARCHIVE:message_id]  
-- Marquer lu : [ACTION:READ:message_id]
-- Répondre : [ACTION:REPLY:message_id:texte]
+Actions disponibles sur les mails Outlook (utilise ces balises dans ta réponse) :
+- Supprimer définitivement : [ACTION:DELETE:message_id]
+- Archiver : [ACTION:ARCHIVE:message_id]
+- Marquer comme lu : [ACTION:READ:message_id]
+- Répondre : [ACTION:REPLY:message_id:texte de la réponse]
+- Lire le corps complet : [ACTION:READBODY:message_id]
 
-Demande toujours confirmation avant d'agir, sauf si Guillaume dit explicitement "fais-le", "vas-y", "oui", "supprime", "archive", "envoie".
+Actions disponibles sur l'agenda :
+- Voir les RDV : demande-moi et je les affiche depuis le contexte ci-dessous
+- Créer un RDV : [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
 
-Contexte actuel — mails récents :
+Actions disponibles sur Teams :
+- Envoyer un message Teams : [ACTION:TEAMS_MSG:chat_id|message]
+
+Actions disponibles sur les tâches :
+- Créer une tâche : [ACTION:CREATE_TASK:titre]
+
+Règle importante : propose toujours l'action avant de l'exécuter, SAUF si Guillaume dit explicitement "fais-le", "vas-y", "oui", "supprime", "archive", "envoie", "confirme".
+
+Agenda aujourd'hui ({datetime.now().strftime('%A %d %B %Y')}) :
+{json.dumps(agenda_today, ensure_ascii=False, default=str) if agenda_today else "Aucun RDV aujourd'hui ou agenda non disponible."}
+
+Mails récents (15 derniers) :
 {json.dumps(mails, ensure_ascii=False, default=str)}
 
 Consignes de Guillaume :
@@ -339,39 +290,80 @@ Consignes de Guillaume :
     )
 
     aria_response = response.content[0].text
-    actions_executed = []
     actions_confirmed = []
 
-    # Parser et exécuter les actions
+    # Parser et exécuter les actions si token disponible
     if outlook_token:
-        action_pattern = re.findall(r'\[ACTION:(\w+):([^\]:]+)(?::([^\]]*))?\]', aria_response)
-        for action_type, message_id, extra in action_pattern:
+        # DELETE
+        for msg_id in re.findall(r'\[ACTION:DELETE:([^\]]+)\]', aria_response):
             try:
-                result = {}
-                if action_type == "DELETE":
-                    result = perform_outlook_action("delete_message", {"message_id": message_id}, outlook_token)
-                elif action_type == "ARCHIVE":
-                    result = perform_outlook_action("archive_message", {"message_id": message_id}, outlook_token)
-                elif action_type == "READ":
-                    result = perform_outlook_action("mark_as_read", {"message_id": message_id}, outlook_token)
-                elif action_type == "REPLY" and extra:
-                    result = perform_outlook_action("send_reply", {"message_id": message_id, "reply_body": extra}, outlook_token)
-
-                if result.get("status") == "ok":
-                    actions_confirmed.append(f"✅ {action_type} confirmé par Microsoft")
-                else:
-                    actions_confirmed.append(f"❌ {action_type} échoué : {result.get('message', 'erreur inconnue')}")
-
+                result = perform_outlook_action("delete_message", {"message_id": msg_id.strip()}, outlook_token)
+                actions_confirmed.append(f"✅ Supprimé" if result.get("status") == "ok" else f"❌ Suppression échouée : {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"❌ Erreur {action_type} : {str(e)}")
+                actions_confirmed.append(f"❌ Erreur suppression : {str(e)}")
 
-    # Nettoie les balises de la réponse affichée
-    clean_response = re.sub(r'\[ACTION:\w+:[^\]]+\]', '', aria_response).strip()
+        # ARCHIVE
+        for msg_id in re.findall(r'\[ACTION:ARCHIVE:([^\]]+)\]', aria_response):
+            try:
+                result = perform_outlook_action("archive_message", {"message_id": msg_id.strip()}, outlook_token)
+                actions_confirmed.append(f"✅ Archivé" if result.get("status") == "ok" else f"❌ Archivage échoué : {result.get('message')}")
+            except Exception as e:
+                actions_confirmed.append(f"❌ Erreur archivage : {str(e)}")
 
-    # Ajoute les confirmations d'actions à la réponse si nécessaire
+        # READ
+        for msg_id in re.findall(r'\[ACTION:READ:([^\]]+)\]', aria_response):
+            try:
+                result = perform_outlook_action("mark_as_read", {"message_id": msg_id.strip()}, outlook_token)
+                actions_confirmed.append(f"✅ Marqué lu" if result.get("status") == "ok" else f"❌ Erreur lecture")
+            except Exception as e:
+                actions_confirmed.append(f"❌ Erreur : {str(e)}")
+
+        # REPLY — format [ACTION:REPLY:message_id:texte]
+        for match in re.finditer(r'\[ACTION:REPLY:([^:]+):([^\]]+)\]', aria_response):
+            msg_id, reply_text = match.group(1).strip(), match.group(2).strip()
+            try:
+                result = perform_outlook_action("send_reply", {"message_id": msg_id, "reply_body": reply_text}, outlook_token)
+                actions_confirmed.append(f"✅ Réponse envoyée" if result.get("status") == "ok" else f"❌ Envoi échoué : {result.get('message')}")
+            except Exception as e:
+                actions_confirmed.append(f"❌ Erreur envoi : {str(e)}")
+
+        # READBODY — lire le corps complet d'un mail
+        for msg_id in re.findall(r'\[ACTION:READBODY:([^\]]+)\]', aria_response):
+            try:
+                result = perform_outlook_action("get_message_body", {"message_id": msg_id.strip()}, outlook_token)
+                if result.get("status") == "ok":
+                    actions_confirmed.append(f"📧 Corps du mail lu : {result.get('body_text', '')[:500]}")
+            except Exception as e:
+                actions_confirmed.append(f"❌ Erreur lecture corps : {str(e)}")
+
+        # CREATEEVENT — format [ACTION:CREATEEVENT:sujet|debut|fin|participants]
+        for match in re.finditer(r'\[ACTION:CREATEEVENT:([^\]]+)\]', aria_response):
+            parts = match.group(1).split('|')
+            if len(parts) >= 3:
+                try:
+                    attendees = parts[3].split(',') if len(parts) > 3 else []
+                    result = perform_outlook_action("create_calendar_event", {
+                        "subject": parts[0], "start": parts[1], "end": parts[2], "attendees": attendees
+                    }, outlook_token)
+                    actions_confirmed.append(f"✅ RDV créé" if result.get("status") == "ok" else f"❌ Création RDV échouée")
+                except Exception as e:
+                    actions_confirmed.append(f"❌ Erreur agenda : {str(e)}")
+
+        # CREATE_TASK
+        for title in re.findall(r'\[ACTION:CREATE_TASK:([^\]]+)\]', aria_response):
+            try:
+                result = perform_outlook_action("create_todo_task", {"title": title.strip()}, outlook_token)
+                actions_confirmed.append(f"✅ Tâche créée" if result.get("status") == "ok" else f"❌ Tâche échouée")
+            except Exception as e:
+                actions_confirmed.append(f"❌ Erreur tâche : {str(e)}")
+
+    # Nettoyer les balises d'action de la réponse affichée
+    clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]+\]', '', aria_response).strip()
+
     if actions_confirmed:
         clean_response += "\n\n" + "\n".join(actions_confirmed)
 
+    # Sauvegarder dans la mémoire
     conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
@@ -381,14 +373,11 @@ Consignes de Guillaume :
     conn.commit()
     conn.close()
 
-    return {
-        "answer": clean_response,
-        "actions": actions_confirmed,
-    }
+    return {"answer": clean_response, "actions": actions_confirmed}
 
 
 @app.get("/login")
-def login(request: Request, next: str = "/me"):
+def login(request: Request, next: str = "/chat"):
     msal_app = build_msal_app()
     auth_url = msal_app.get_authorization_request_url(
         scopes=GRAPH_SCOPES,
@@ -404,16 +393,13 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
         return HTMLResponse("Code manquant", status_code=400)
     msal_app = build_msal_app()
     result = msal_app.acquire_token_by_authorization_code(
-        code,
-        scopes=GRAPH_SCOPES,
-        redirect_uri=REDIRECT_URI,
+        code, scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI,
     )
     if "access_token" not in result:
         return HTMLResponse(str(result), status_code=400)
-    
+
     request.session["access_token"] = result["access_token"]
-    
-    # Sauvegarde token + refresh_token en base
+
     conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
@@ -424,15 +410,39 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
             refresh_token = EXCLUDED.refresh_token,
             expires_at = EXCLUDED.expires_at,
             updated_at = NOW()
-    """, (
-        "microsoft",
-        result["access_token"],
-        result.get("refresh_token", ""),
-    ))
+    """, ("microsoft", result["access_token"], result.get("refresh_token", "")))
     conn.commit()
     conn.close()
-    
-    return RedirectResponse(state or "/me")
+
+    return RedirectResponse(state or "/chat")
+
+
+@app.get("/triage-queue")
+def triage_queue():
+    from app.token_manager import get_valid_microsoft_token
+    token = get_valid_microsoft_token()
+    if not token:
+        return {"mails": [], "count": 0, "error": "Token Microsoft manquant"}
+    try:
+        data = graph_get(
+            token, "/me/mailFolders/inbox/messages",
+            params={
+                "$top": 50,
+                "$select": "id,subject,from,receivedDateTime,bodyPreview,isRead",
+                "$orderby": "receivedDateTime DESC",
+            },
+        )
+        mails = [{
+            "message_id": msg["id"],
+            "from_email": msg.get("from", {}).get("emailAddress", {}).get("address", ""),
+            "subject": msg.get("subject", "(Sans objet)"),
+            "raw_body_preview": msg.get("bodyPreview", ""),
+            "received_at": msg.get("receivedDateTime", ""),
+            "is_read": msg.get("isRead", False),
+        } for msg in data.get("value", [])]
+        return {"mails": mails, "count": len(mails)}
+    except Exception as e:
+        return {"mails": [], "count": 0, "error": str(e)}
 
 
 @app.get("/memory")
@@ -442,9 +452,7 @@ def memory():
     c.execute("""
         SELECT message_id, received_at, from_email, subject, display_title,
                category, priority, analysis_status, confidence
-        FROM mail_memory
-        ORDER BY id DESC
-        LIMIT 20
+        FROM mail_memory ORDER BY id DESC LIMIT 20
     """)
     columns = [desc[0] for desc in c.description]
     rows = [dict(zip(columns, row)) for row in c.fetchall()]
@@ -475,25 +483,7 @@ def reply_queue():
         SELECT id, received_at, from_email, subject, display_title,
                category, priority, reply_urgency, reply_reason,
                suggested_reply_subject, suggested_reply, reply_status
-        FROM mail_memory
-        WHERE needs_reply = 1
-        ORDER BY id DESC
-    """)
-    columns = [desc[0] for desc in c.description]
-    rows = [dict(zip(columns, row)) for row in c.fetchall()]
-    conn.close()
-    return rows
-
-
-@app.get("/reply-learning")
-def reply_learning():
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("""
-        SELECT id, mail_subject, mail_from, category, ai_reply, final_reply, created_at
-        FROM reply_learning_memory
-        ORDER BY id DESC
-        LIMIT 20
+        FROM mail_memory WHERE needs_reply = 1 ORDER BY id DESC
     """)
     columns = [desc[0] for desc in c.description]
     rows = [dict(zip(columns, row)) for row in c.fetchall()]
@@ -509,55 +499,12 @@ def digest(days: int = 2):
     c.execute("""
         SELECT received_at, from_email, display_title, category, priority,
                reason, suggested_action, short_summary
-        FROM mail_memory
-        WHERE received_at >= %s
-        ORDER BY received_at DESC
+        FROM mail_memory WHERE received_at >= %s ORDER BY received_at DESC
     """, (start_date,))
     columns = [desc[0] for desc in c.description]
     rows = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()
     return {"days": days, "count": len(rows), "items": rows}
-
-
-@app.get("/digest-readable", response_class=HTMLResponse)
-def digest_readable(days: int = 2):
-    conn = get_pg_conn()
-    c = conn.cursor()
-    start_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
-    c.execute("""
-        SELECT received_at, from_email, display_title, category, priority,
-               reason, suggested_action, short_summary
-        FROM mail_memory
-        WHERE received_at >= %s
-        ORDER BY received_at DESC
-    """, (start_date,))
-    columns = [desc[0] for desc in c.description]
-    rows = [dict(zip(columns, row)) for row in c.fetchall()]
-    conn.close()
-
-    html = f"""<html><head><meta charset="utf-8"><title>Digest {days} jours</title>
-    <style>
-        body {{ font-family: Arial, sans-serif; margin: 30px; background: #f7f7f7; color: #222; }}
-        .card {{ background: white; border-radius: 10px; padding: 16px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
-        .title {{ font-size: 18px; font-weight: bold; margin-bottom: 8px; }}
-        .high {{ color: #c62828; }} .medium {{ color: #ef6c00; }} .low {{ color: #888; }}
-        .line {{ margin: 4px 0; }} .label {{ font-weight: bold; }}
-    </style></head><body>
-    <h1>Digest sur {days} jours</h1>
-    <div style="color:#666;margin-bottom:20px;">{len(rows)} mails analysés</div>"""
-    for item in rows:
-        cls = "high" if item["priority"] == "haute" else "medium" if item["priority"] == "moyenne" else "low"
-        html += f"""<div class="card">
-            <div class="title {cls}">{item['display_title']}</div>
-            <div class="line"><span class="label">Date :</span> {item['received_at']}</div>
-            <div class="line"><span class="label">Expéditeur :</span> {item['from_email']}</div>
-            <div class="line"><span class="label">Catégorie :</span> {item['category']}</div>
-            <div class="line"><span class="label">Raison :</span> {item['reason']}</div>
-            <div class="line"><span class="label">Action :</span> {item['suggested_action']}</div>
-            <div class="line"><span class="label">Résumé :</span> {item['short_summary']}</div>
-        </div>"""
-    html += "</body></html>"
-    return html
 
 
 @app.get("/ingest-mails-fast")
@@ -566,15 +513,10 @@ def ingest_mails_fast(request: Request):
     if not token:
         return RedirectResponse("/login?next=/ingest-mails-fast")
     try:
-        data = graph_get(
-            token,
-            "/me/mailFolders/inbox/messages",
-            params={
-                "$top": 5,
-                "$select": "id,subject,from,receivedDateTime,bodyPreview",
-                "$orderby": "receivedDateTime DESC",
-            },
-        )
+        data = graph_get(token, "/me/mailFolders/inbox/messages", params={
+            "$top": 5, "$select": "id,subject,from,receivedDateTime,bodyPreview",
+            "$orderby": "receivedDateTime DESC",
+        })
     except requests.HTTPError:
         request.session.pop("access_token", None)
         return RedirectResponse("/login?next=/ingest-mails-fast")
@@ -607,6 +549,7 @@ def ingest_mails_fast(request: Request):
             "reply_reason": item.get("reply_reason"),
             "suggested_reply_subject": item.get("suggested_reply_subject"),
             "suggested_reply": item.get("suggested_reply"),
+            "mailbox_source": "outlook",
         })
         inserted += 1
         break
@@ -619,15 +562,10 @@ def ingest_mails(request: Request):
     if not token:
         return RedirectResponse("/login?next=/ingest-mails")
     try:
-        data = graph_get(
-            token,
-            "/me/mailFolders/inbox/messages",
-            params={
-                "$top": 1,
-                "$select": "id,subject,from,receivedDateTime,bodyPreview",
-                "$orderby": "receivedDateTime DESC",
-            },
-        )
+        data = graph_get(token, "/me/mailFolders/inbox/messages", params={
+            "$top": 1, "$select": "id,subject,from,receivedDateTime,bodyPreview",
+            "$orderby": "receivedDateTime DESC",
+        })
     except requests.HTTPError:
         request.session.pop("access_token", None)
         return RedirectResponse("/login?next=/ingest-mails")
@@ -666,6 +604,7 @@ def ingest_mails(request: Request):
             "reply_reason": item.get("reply_reason"),
             "suggested_reply_subject": item.get("suggested_reply_subject"),
             "suggested_reply": item.get("suggested_reply"),
+            "mailbox_source": "outlook",
         })
         inserted += 1
     return {"inserted": inserted}
@@ -677,15 +616,10 @@ def learn_sent_mails(request: Request, top: int = 50):
     if not token:
         return RedirectResponse("/login?next=/learn-sent-mails")
     try:
-        data = graph_get(
-            token,
-            "/me/mailFolders/SentItems/messages",
-            params={
-                "$top": top,
-                "$select": "id,subject,from,receivedDateTime,bodyPreview,toRecipients",
-                "$orderby": "receivedDateTime DESC",
-            },
-        )
+        data = graph_get(token, "/me/mailFolders/SentItems/messages", params={
+            "$top": top, "$select": "id,subject,from,receivedDateTime,bodyPreview,toRecipients",
+            "$orderby": "receivedDateTime DESC",
+        })
     except requests.HTTPError:
         request.session.pop("access_token", None)
         return RedirectResponse("/login?next=/learn-sent-mails")
@@ -694,7 +628,6 @@ def learn_sent_mails(request: Request, top: int = 50):
     inserted = 0
     conn = get_pg_conn()
     c = conn.cursor()
-
     for msg in messages:
         message_id = msg["id"]
         c.execute("SELECT 1 FROM sent_mail_memory WHERE message_id = %s", (message_id,))
@@ -705,44 +638,27 @@ def learn_sent_mails(request: Request, top: int = 50):
         try:
             c.execute("""
                 INSERT INTO sent_mail_memory (message_id, sent_at, to_email, subject, body_preview)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (message_id) DO NOTHING
-            """, (
-                message_id,
-                msg.get("receivedDateTime"),
-                to_email,
-                msg.get("subject"),
-                msg.get("bodyPreview"),
-            ))
+                VALUES (%s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING
+            """, (message_id, msg.get("receivedDateTime"), to_email, msg.get("subject"), msg.get("bodyPreview")))
             inserted += 1
         except Exception:
             continue
-
     conn.commit()
     conn.close()
-    return {
-        "inserted": inserted,
-        "total_fetched": len(messages),
-        "message": f"{inserted} mails envoyés mémorisés"
-    }
+    return {"inserted": inserted, "total_fetched": len(messages), "message": f"{inserted} mails envoyés mémorisés"}
+
 
 @app.get("/learn-inbox-mails")
 def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
     token = request.session.get("access_token")
     if not token:
         return RedirectResponse("/login?next=/learn-inbox-mails")
-
     try:
-        data = graph_get(
-            token,
-            "/me/mailFolders/inbox/messages",
-            params={
-                "$top": top,
-                "$skip": skip,
-                "$select": "id,subject,from,receivedDateTime,bodyPreview,toRecipients",
-                "$orderby": "receivedDateTime DESC",
-            },
-        )
+        data = graph_get(token, "/me/mailFolders/inbox/messages", params={
+            "$top": top, "$skip": skip,
+            "$select": "id,subject,from,receivedDateTime,bodyPreview,toRecipients",
+            "$orderby": "receivedDateTime DESC",
+        })
     except requests.HTTPError:
         request.session.pop("access_token", None)
         return RedirectResponse("/login?next=/learn-inbox-mails")
@@ -752,7 +668,6 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
     skipped_noise = 0
     conn = get_pg_conn()
     c = conn.cursor()
-
     skip_keywords = [
         "noreply", "no-reply", "donotreply", "newsletter", "unsubscribe",
         "se désabonner", "notification", "mailer-daemon", "marketing",
@@ -761,551 +676,115 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
         "calendly", "zoom", "teams", "webinar", "webinaire",
         "satisfaction", "avis client", "enquête", "survey",
     ]
-
     for msg in messages:
         message_id = msg["id"]
         c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
         if c.fetchone():
             continue
-
         from_email = msg.get("from", {}).get("emailAddress", {}).get("address", "").lower()
         subject = (msg.get("subject") or "").lower()
         body = (msg.get("bodyPreview") or "").lower()
         full_text = f"{from_email} {subject} {body}"
-
         if any(kw in full_text for kw in skip_keywords):
             skipped_noise += 1
             continue
-
         try:
             c.execute("""
-                INSERT INTO mail_memory
-                (message_id, received_at, from_email, subject,
-                 raw_body_preview, analysis_status, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (message_id) DO NOTHING
-            """, (
-                message_id,
-                msg.get("receivedDateTime"),
-                msg.get("from", {}).get("emailAddress", {}).get("address", ""),
-                msg.get("subject"),
-                msg.get("bodyPreview"),
-                "inbox_raw",
-                datetime.utcnow().isoformat(),
-            ))
+                INSERT INTO mail_memory (message_id, received_at, from_email, subject, raw_body_preview, analysis_status, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING
+            """, (message_id, msg.get("receivedDateTime"), msg.get("from", {}).get("emailAddress", {}).get("address", ""),
+                   msg.get("subject"), msg.get("bodyPreview"), "inbox_raw", datetime.utcnow().isoformat()))
             inserted += 1
         except Exception:
             continue
-
     conn.commit()
     conn.close()
+    return {"inserted": inserted, "skipped_noise": skipped_noise, "total_fetched": len(messages), "skip": skip,
+            "message": f"{inserted} mails utiles stockés, {skipped_noise} bruits ignorés"}
 
-    return {
-        "inserted": inserted,
-        "skipped_noise": skipped_noise,
-        "total_fetched": len(messages),
-        "skip": skip,
-        "message": f"{inserted} mails utiles stockés, {skipped_noise} bruits ignorés"
-    }
 
 @app.get("/build-style-profile")
 def build_style_profile(request: Request):
     conn = get_pg_conn()
     c = conn.cursor()
-    c.execute("""
-        SELECT subject, to_email, body_preview
-        FROM sent_mail_memory
-        ORDER BY sent_at DESC
-        LIMIT 100
-    """)
+    c.execute("SELECT subject, to_email, body_preview FROM sent_mail_memory ORDER BY sent_at DESC LIMIT 100")
     columns = [desc[0] for desc in c.description]
     rows = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()
-
     if not rows:
         return {"error": "Aucun mail envoyé en mémoire"}
-
-    mails_text = "\n\n".join([
-        f"Sujet : {r['subject']}\nDestinataire : {r['to_email']}\nContenu : {r['body_preview']}"
-        for r in rows
-    ])
-
+    mails_text = "\n\n".join([f"Sujet : {r['subject']}\nDestinataire : {r['to_email']}\nContenu : {r['body_preview']}" for r in rows])
     response = client.messages.create(
-        model=ANTHROPIC_MODEL_SMART,
-        max_tokens=2048,
-        messages=[{
-            "role": "user",
-            "content": f"""Analyse ces {len(rows)} emails envoyés par Guillaume Perrin de Couffrant Solar.
-
-{mails_text}
-
-Produis un profil détaillé de son style de communication :
-
-1. Style d'écriture
-- longueur typique des mails
-- ton (formel, direct, chaleureux...)
-- formules d'ouverture préférées
-- formules de clôture préférées
-- niveau de détail
-
-2. Vocabulaire métier
-- termes techniques récurrents
-- expressions caractéristiques
-- abréviations utilisées
-
-3. Clients et interlocuteurs récurrents
-- types d'interlocuteurs principaux
-- sujets récurrents par type
-
-4. Comportements de communication
-- délais de réponse habituels si visibles
-- sujets traités en priorité
-- sujets délégués ou ignorés
-
-5. Recommandations pour Aria
-- comment écrire comme Guillaume
-- ce qu'il faut éviter
-- ce qui lui ressemble"""
-        }]
+        model=ANTHROPIC_MODEL_SMART, max_tokens=2048,
+        messages=[{"role": "user", "content": f"Analyse ces {len(rows)} emails envoyés par Guillaume Perrin de Couffrant Solar.\n\n{mails_text}\n\nProduis un profil détaillé de son style de communication, ses interlocuteurs, ses habitudes, et comment Aria doit écrire pour lui ressembler."}]
     )
-
     profile_text = response.content[0].text
-
     conn = get_pg_conn()
     c = conn.cursor()
     c.execute("DELETE FROM aria_profile WHERE profile_type = 'style'")
-    c.execute("""
-        INSERT INTO aria_profile (profile_type, content)
-        VALUES (%s, %s)
-    """, ('style', profile_text))
+    c.execute("INSERT INTO aria_profile (profile_type, content) VALUES (%s, %s)", ('style', profile_text))
     conn.commit()
     conn.close()
-
     return {"status": "ok", "profile": profile_text}
-
-
-@app.get("/summary")
-def summary(request: Request):
-    token = request.session.get("access_token")
-    if not token:
-        return RedirectResponse("/login?next=/summary")
-    try:
-        data = graph_get(
-            token,
-            "/me/mailFolders/inbox/messages",
-            params={
-                "$top": 10,
-                "$select": "subject,from,receivedDateTime,isRead,bodyPreview",
-                "$orderby": "receivedDateTime DESC",
-            },
-        )
-    except requests.HTTPError:
-        request.session.pop("access_token", None)
-        return RedirectResponse("/login?next=/summary")
-    instructions = get_global_instructions()
-    messages = data.get("value", [])
-    return summarize_messages(messages, instructions=instructions)
 
 
 @app.post("/instruction")
 def add_instruction(instruction: str = Form(...)):
     add_global_instruction(instruction)
-    return RedirectResponse("/summary-readable", status_code=303)
+    return RedirectResponse("/chat", status_code=303)
 
-
-@app.get("/summary-readable", response_class=HTMLResponse)
-def summary_readable(request: Request):
-    token = request.session.get("access_token")
-    if not token:
-        return RedirectResponse("/login?next=/summary-readable")
-    try:
-        data = graph_get(
-            token,
-            "/me/mailFolders/inbox/messages",
-            params={
-                "$top": 10,
-                "$select": "subject,from,receivedDateTime,isRead,bodyPreview",
-                "$orderby": "receivedDateTime DESC",
-            },
-        )
-    except requests.HTTPError:
-        request.session.pop("access_token", None)
-        return RedirectResponse("/login?next=/summary-readable")
-
-    instructions = get_global_instructions()
-    messages = data.get("value", [])
-    result = summarize_messages(messages, instructions=instructions)
-
-    urgents = [i for i in result["items"] if i["priority"] == "haute"]
-    moyens = [i for i in result["items"] if i["priority"] == "moyenne"]
-    faibles = [i for i in result["items"] if i["priority"] not in ["haute", "moyenne"]]
-
-    def render_section(title: str, items: list[dict]) -> str:
-        html_section = f"<h2>{title}</h2>"
-        if not items:
-            return html_section + '<div class="empty">Aucun mail dans cette catégorie.</div>'
-        for item in items:
-            cls = "title-high" if item["priority"] == "haute" else "title-medium" if item["priority"] == "moyenne" else "title-low"
-            count_html = f"<div class='badge'>{item['mail_count']} mails liés</div>" if item.get("mail_count", 1) > 1 else ""
-            html_section += f"""<div class="card">
-                {count_html}
-                <div class="title {cls}">{item['display_title']}</div>
-                <div class="line"><span class="label">Expéditeur :</span> {item['from']}</div>
-                <div class="line"><span class="label">Date :</span> {item['receivedDateTime']}</div>
-                <div class="line"><span class="label">Raison :</span> {item['reason']}</div>
-                <div class="line"><span class="label">Action :</span> {item['suggested_action']}</div>
-                <div class="line"><span class="label">Résumé :</span> {item['short_summary']}</div>
-            </div>"""
-        return html_section
-
-    instructions_html = "".join(f"<li>{i}</li>" for i in instructions[:10])
-
-    html = f"""<!DOCTYPE html>
-<html lang="fr"><head><meta charset="utf-8"><title>Résumé des mails</title>
-<style>
-    body {{ font-family: Arial, sans-serif; margin: 30px; background: #f7f7f7; color: #222; }}
-    .card {{ background: white; border-radius: 10px; padding: 18px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); position: relative; }}
-    .title {{ font-size: 18px; font-weight: bold; margin-bottom: 10px; }}
-    .title-high {{ color: #c62828; }} .title-medium {{ color: #ef6c00; }} .title-low {{ color: #c9a400; }}
-    .line {{ margin: 4px 0; }} .label {{ font-weight: bold; }}
-    .empty {{ color: #777; font-style: italic; margin-bottom: 12px; }}
-    .panel {{ background: white; border-radius: 10px; padding: 18px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
-    textarea {{ width: 100%; min-height: 90px; padding: 10px; box-sizing: border-box; margin-top: 8px; }}
-    button {{ margin-top: 10px; padding: 10px 14px; border: none; border-radius: 8px; cursor: pointer; }}
-    .badge {{ position: absolute; right: 14px; top: 14px; background: #eef3ff; color: #335; font-size: 12px; padding: 5px 8px; border-radius: 999px; }}
-</style></head><body>
-<h1>Résumé des mails</h1>
-<div style="color:#666;margin-bottom:25px;">{result['count']} cartes analysées</div>
-<div class="panel">
-    <h2>Apprendre à l'assistant</h2>
-    <form method="post" action="/instruction">
-        <label for="instruction">Donne une consigne globale en langage naturel :</label>
-        <textarea id="instruction" name="instruction"></textarea>
-        <button type="submit">Enregistrer la consigne</button>
-    </form>
-</div>
-<div class="panel">
-    <h2>Consignes mémorisées</h2>
-    <ul>{instructions_html or '<li>Aucune consigne enregistrée pour le moment.</li>'}</ul>
-</div>"""
-    html += render_section("🔴 Urgents", urgents)
-    html += render_section("🟠 À traiter", moyens)
-    html += render_section("🟡 Secondaires", faibles)
-    html += "</body></html>"
-    return html
-
-
-@app.get("/reply-learning-readable", response_class=HTMLResponse)
-def reply_learning_readable():
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("""
-        SELECT id, mail_subject, mail_from, category, ai_reply, final_reply, created_at
-        FROM reply_learning_memory
-        ORDER BY id DESC
-        LIMIT 50
-    """)
-    columns = [desc[0] for desc in c.description]
-    rows = [dict(zip(columns, row)) for row in c.fetchall()]
-    conn.close()
-
-    html = """<html><head><meta charset="utf-8"><title>Mémoire des corrections</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 30px; background: #f7f7f7; color: #222; }
-        .card { background: white; border-radius: 10px; padding: 16px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-        .title { font-size: 18px; font-weight: bold; margin-bottom: 8px; }
-        .line { margin: 4px 0; } .label { font-weight: bold; }
-        .box { white-space: pre-wrap; background: #f0f0f0; padding: 10px; border-radius: 6px; margin-top: 8px; }
-        .btn { display:inline-block; margin-bottom:20px; background:#1f6feb; color:white; text-decoration:none; padding:10px 14px; border-radius:8px; font-weight:bold; }
-    </style></head><body>
-    <a class="btn" href="/assistant-dashboard-readable">⬅ Retour dashboard</a>
-    <h1>Mémoire des corrections</h1>"""
-    for row in rows:
-        html += f"""<div class="card">
-            <div class="title">{row['mail_subject']}</div>
-            <div class="line"><span class="label">Expéditeur :</span> {row['mail_from']}</div>
-            <div class="line"><span class="label">Catégorie :</span> {row['category']}</div>
-            <div class="line"><span class="label">Date :</span> {row['created_at']}</div>
-            <div class="line" style="margin-top:10px;"><span class="label">Réponse IA initiale :</span></div>
-            <div class="box">{row['ai_reply'] or ''}</div>
-            <div class="line" style="margin-top:10px;"><span class="label">Réponse finale corrigée :</span></div>
-            <div class="box">{row['final_reply'] or ''}</div>
-        </div>"""
-    html += "</body></html>"
-    return HTMLResponse(content=html)
-
-
-@app.post("/save-reply-correction/{mail_id}")
-def save_reply_correction(mail_id: int, final_reply: str = Form(...)):
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("""
-        SELECT subject, from_email, raw_body_preview, category, suggested_reply
-        FROM mail_memory WHERE id = %s
-    """, (mail_id,))
-    row = c.fetchone()
-    if not row:
-        conn.close()
-        return {"error": "mail introuvable"}
-    c.execute("""
-        INSERT INTO reply_learning_memory
-        (mail_subject, mail_from, mail_body_preview, category, ai_reply, final_reply)
-        VALUES (%s, %s, %s, %s, %s, %s)
-    """, (row[0], row[1], row[2], row[3], row[4], final_reply))
-    c.execute("UPDATE mail_memory SET suggested_reply = %s WHERE id = %s", (final_reply, mail_id))
-    conn.commit()
-    conn.close()
-    return RedirectResponse("/assistant-dashboard-readable", status_code=303)
-
-
-@app.get("/validate-reply/{mail_id}")
-def validate_reply(mail_id: int):
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("UPDATE mail_memory SET reply_status='validated' WHERE id=%s", (mail_id,))
-    conn.commit()
-    conn.close()
-    return RedirectResponse("/assistant-dashboard-readable", status_code=303)
-
-
-@app.get("/send-reply/{mail_id}")
-def send_reply(mail_id: int, request: Request):
-    token = request.session.get("access_token")
-    if not token:
-        return RedirectResponse(f"/login?next=/send-reply/{mail_id}")
-
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("""
-        SELECT from_email, suggested_reply, suggested_reply_subject, reply_status
-        FROM mail_memory WHERE id = %s
-    """, (mail_id,))
-    row = c.fetchone()
-
-    if not row:
-        conn.close()
-        return {"error": "Mail non trouvé"}
-    if row[3] != "validated":
-        conn.close()
-        return {"error": "Réponse non validée"}
-
-    html_body = f"""
-<div style="font-family:Arial, sans-serif; font-size:14px; color:#222;">
-    <div style="white-space:pre-line;">{row[1]}</div>
-    <br><br>
-    <div>Solairement,</div>
-    <div style="font-weight:bold; margin-top:8px;">Guillaume Perrin</div>
-    <div>06 49 43 09 17</div>
-    <div><a href="https://www.couffrant-solar.fr" style="color:#1f6feb;">www.couffrant-solar.fr</a></div>
-    <div style="margin-top:12px;">
-        <img src="https://www.couffrant-solar.fr/signature/logo-couffrant-solar.jpg"
-             alt="Couffrant Solar" style="max-width:420px; height:auto; border:0;">
-    </div>
-</div>"""
-    try:
-        resp = requests.post(
-            "https://graph.microsoft.com/v1.0/me/sendMail",
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={
-                "message": {
-                    "subject": row[2],
-                    "body": {"contentType": "HTML", "content": html_body},
-                    "toRecipients": [{"emailAddress": {"address": row[0]}}]
-                }
-            },
-            timeout=30,
-        )
-        if resp.status_code != 202:
-            conn.close()
-            return {"error": "Echec envoi mail", "status_code": resp.status_code, "details": resp.text}
-        c.execute("UPDATE mail_memory SET reply_status='sent' WHERE id=%s", (mail_id,))
-        conn.commit()
-    finally:
-        conn.close()
-
-    return RedirectResponse("/assistant-dashboard-readable", status_code=303)
-
-
-@app.get("/assistant-dashboard-readable", response_class=HTMLResponse)
-def assistant_dashboard_readable(days: int = 2):
-    dashboard = get_dashboard(days)
-
-    def render_block(title: str, items: list[dict]) -> str:
-        html = f"<h2>{title}</h2>"
-        if not items:
-            return html + "<p>Aucun sujet.</p>"
-
-        for i, item in enumerate(items):
-            detail_id = f"detail_{title}_{i}".replace(" ", "_")
-            color = "#c62828" if item["priority"] == "haute" else "#ef6c00" if item["priority"] == "moyenne" else "#888"
-            senders = ", ".join(item.get("senders", [])[:2])
-            if len(item.get("senders", [])) > 2:
-                senders += f" (+{len(item['senders']) - 2} autres)"
-            sender_list = "".join(f"<li>{s}</li>" for s in item.get("senders", []))
-
-            actions_html = ""
-            edit_html = ""
-            if item.get("suggested_reply"):
-                mail_id = item.get("id", "")
-                actions_html = f"""<div style="margin-top:10px;" onclick="event.stopPropagation()">
-                    <a href="/validate-reply/{mail_id}" onclick="localStorage.setItem('open_dashboard_card','{detail_id}');event.stopPropagation();" style="margin-right:10px;">✅ Valider</a>
-                    <a href="/send-reply/{mail_id}" onclick="localStorage.setItem('open_dashboard_card','{detail_id}');event.stopPropagation();" style="margin-right:10px;">📤 Envoyer</a>
-                </div>"""
-                edit_html = f"""<form method="post" action="/save-reply-correction/{mail_id}" style="margin-top:10px;" onclick="event.stopPropagation()" onsubmit="localStorage.setItem('open_dashboard_card','{detail_id}')">
-                    <div><b>✏️ Modifier la réponse :</b></div>
-                    <textarea name="final_reply" onclick="event.stopPropagation()" style="width:100%;min-height:120px;margin-top:6px;">{item.get("suggested_reply", "")}</textarea>
-                    <button type="submit" onclick="event.stopPropagation()" style="margin-top:8px;">💾 Enregistrer correction</button>
-                </form>"""
-
-            html += f"""<div onclick="toggle('{detail_id}')" style="background:white;border-radius:10px;padding:16px;margin-bottom:14px;box-shadow:0 2px 8px rgba(0,0,0,0.08);cursor:pointer;">
-                <div style="font-size:20px;font-weight:bold;color:{color};margin-bottom:8px;">{item['topic']}</div>
-                <div><b>Priorité :</b> {item['priority']}</div>
-                <div><b>Catégorie :</b> {item['category']}</div>
-                <div><b>Expéditeurs :</b> {senders}</div>
-                <div><b>Mails liés :</b> {item['mail_count']}</div>
-                <div><b>Raison :</b> {item['reason']}</div>
-                <div style="color:#1f6feb;font-weight:bold;">{"📝 Réponse prête" if item.get("suggested_reply") else ""}</div>
-                <div id="{detail_id}" onclick="event.stopPropagation()" style="display:none;margin-top:12px;padding-top:10px;border-top:1px solid #ddd;">
-                    <div><b>Action :</b> {item['action']}</div>
-                    <div><b>Type :</b> {item.get('response_type', '')}</div>
-                    <div><b>Manque :</b> {", ".join(item.get('missing_fields') or [])}</div>
-                    <div><b>Confiance :</b> {item.get('confidence_level', '')}</div>
-                    <div style="margin-top:12px;"><b>Contenu du mail :</b></div>
-                    <div style="white-space:pre-wrap;background:#f8f8f8;padding:10px;border-radius:6px;margin-top:6px;">{item.get('raw_body_preview', '')}</div>
-                    <div style="margin-top:8px;"><b>Détail expéditeurs :</b></div>
-                    <ul>{sender_list}</ul>
-                    {edit_html}
-                    {actions_html}
-                </div>
-            </div>"""
-        return html
-
-    html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Assistant Dashboard</title>
-<script>
-function toggle(id) {{
-    var el = document.getElementById(id);
-    if (!el) return;
-    if (el.style.display === "none" || el.style.display === "") {{
-        el.style.display = "block";
-        localStorage.setItem("open_dashboard_card", id);
-    }} else {{
-        el.style.display = "none";
-        localStorage.removeItem("open_dashboard_card");
-    }}
-}}
-window.addEventListener("load", function () {{
-    var openId = localStorage.getItem("open_dashboard_card");
-    if (openId) {{ var el = document.getElementById(openId); if (el) el.style.display = "block"; }}
-}});
-</script>
-<style>
-    body {{ font-family: Arial, sans-serif; margin: 30px; background: #f7f7f7; color: #222; }}
-    h1 {{ margin-bottom: 10px; }} h2 {{ margin-top: 30px; }}
-    .topbar {{ display: flex; gap: 10px; align-items: center; margin-bottom: 20px; }}
-    .btn {{ display: inline-block; background: #1f6feb; color: white; text-decoration: none; padding: 10px 14px; border-radius: 8px; font-weight: bold; }}
-    .btn:hover {{ opacity: 0.9; }}
-</style></head><body>
-<h1>Assistant Dashboard</h1>
-<div class="topbar">
-    <a class="btn" href="/ingest-mails-fast">🔄 Rafraîchir</a>
-    <a class="btn" href="/assistant-dashboard-readable">📨 File réponses</a>
-    <a class="btn" href="/reply-learning-readable">🧠 Mémoire corrections</a>
-</div>
-<div style="color:#666;margin-bottom:20px;">{dashboard['count']} sujets sur {days} jours</div>"""
-    html += render_block("🔴 Urgents", dashboard["urgent"])
-    html += render_block("🟠 À suivre", dashboard["normal"])
-    html += render_block("⚪ Secondaires", dashboard["low"])
-    html += "</body></html>"
-    return HTMLResponse(content=html)
-
-
-@app.get("/test-outlook-unread")
-def test_outlook_unread(request: Request):
-    token = request.session.get("access_token")
-    if not token:
-        return RedirectResponse("/login?next=/test-outlook-unread")
-    return perform_outlook_action("list_unread_messages", {"top": 5}, token)
 
 @app.get("/login/gmail")
 def login_gmail():
     from app.connectors.gmail_connector import get_gmail_auth_url
-    auth_url = get_gmail_auth_url()
-    return RedirectResponse(auth_url)
+    return RedirectResponse(get_gmail_auth_url())
 
 
 @app.get("/auth/gmail/callback")
 def auth_gmail_callback(request: Request, code: str | None = None):
     if not code:
         return HTMLResponse("Code manquant", status_code=400)
-
     from app.connectors.gmail_connector import exchange_code_for_tokens
     tokens = exchange_code_for_tokens(code)
-
     access_token = tokens.get("access_token")
     refresh_token = tokens.get("refresh_token")
-
     conn = get_pg_conn()
     c = conn.cursor()
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS gmail_tokens (
-            id SERIAL PRIMARY KEY,
-            email TEXT,
-            access_token TEXT,
-            refresh_token TEXT,
-            created_at TIMESTAMP DEFAULT NOW()
-        )
-    """)
     c.execute("DELETE FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
-    c.execute("""
-        INSERT INTO gmail_tokens (email, access_token, refresh_token)
-        VALUES (%s, %s, %s)
-    """, ("per1.guillaume@gmail.com", access_token, refresh_token))
+    c.execute("INSERT INTO gmail_tokens (email, access_token, refresh_token) VALUES (%s, %s, %s)",
+              ("per1.guillaume@gmail.com", access_token, refresh_token))
     conn.commit()
     conn.close()
-
     return {"status": "ok", "message": "Gmail connecté avec succès !"}
 
 
 @app.get("/ingest-gmail")
 def ingest_gmail(request: Request):
     from app.connectors.gmail_connector import gmail_get_messages, gmail_get_message, refresh_gmail_token
-
     conn = get_pg_conn()
     c = conn.cursor()
     c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
     row = c.fetchone()
     conn.close()
-
     if not row:
-        return {"error": "Gmail non connecté — va sur /login/gmail d'abord"}
-
-    access_token = row[0]
-    refresh_token = row[1]
-
+        return {"error": "Gmail non connecté"}
+    access_token, refresh_token = row[0], row[1]
     try:
         messages = gmail_get_messages(access_token, max_results=10)
     except Exception:
         access_token = refresh_gmail_token(refresh_token)
         messages = gmail_get_messages(access_token, max_results=10)
-
     inserted = 0
+    skip_keywords = ["noreply", "no-reply", "donotreply", "newsletter", "unsubscribe", "se désabonner",
+                     "notification", "mailer-daemon", "marketing", "promo", "offre spéciale",
+                     "linkedin", "twitter", "facebook", "instagram", "jobteaser", "indeed", "welcometothejungle"]
     conn = get_pg_conn()
     c = conn.cursor()
-
-    skip_keywords = [
-        "noreply", "no-reply", "donotreply", "newsletter", "unsubscribe",
-        "se désabonner", "notification", "mailer-daemon", "marketing",
-        "promo", "offre spéciale", "linkedin", "twitter", "facebook",
-        "instagram", "jobteaser", "indeed", "welcometothejungle",
-    ]
-
     for msg in messages:
         message_id = msg["id"]
         c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
         if c.fetchone():
             continue
-
         try:
             detail = gmail_get_message(access_token, message_id)
             headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
@@ -1313,90 +792,207 @@ def ingest_gmail(request: Request):
             from_email = headers.get("From", "")
             date = headers.get("Date", "")
             snippet = detail.get("snippet", "")
-
-            full_text = f"{from_email} {subject} {snippet}".lower()
-            if any(kw in full_text for kw in skip_keywords):
+            if any(kw in f"{from_email} {subject} {snippet}".lower() for kw in skip_keywords):
                 continue
-
             c.execute("""
-                INSERT INTO mail_memory
-                (message_id, received_at, from_email, subject,
-                 raw_body_preview, analysis_status, mailbox_source, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (message_id) DO NOTHING
-            """, (
-                message_id,
-                date,
-                from_email,
-                subject,
-                snippet,
-                "gmail_raw",
-                "gmail_perso",
-                datetime.utcnow().isoformat(),
-            ))
+                INSERT INTO mail_memory (message_id, received_at, from_email, subject, raw_body_preview, analysis_status, mailbox_source, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING
+            """, (message_id, date, from_email, subject, snippet, "gmail_raw", "gmail_perso", datetime.utcnow().isoformat()))
             inserted += 1
         except Exception:
             conn.rollback()
             continue
-
     conn.commit()
     conn.close()
-
     return {"inserted": inserted, "total_fetched": len(messages)}
 
-@app.post("/speak")
-def speak_text(payload: dict = Body(...)):
-    from app.config import ELEVENLABS_API_KEY, ELEVENLABS_VOICE_ID
-    from fastapi.responses import StreamingResponse
-    from fastapi import Body
-    import re
-    import io
 
-    text = payload.get("text", "")
-    clean = re.sub(r'#{1,6}\s+', '', text)
-    clean = re.sub(r'\*\*(.*?)\*\*', r'\1', clean)
-    clean = re.sub(r'\*(.*?)\*', r'\1', clean)
-    clean = re.sub(r'`(.*?)`', r'\1', clean)
-    clean = re.sub(r'---+', '', clean)
-    clean = re.sub(r'\|.*?\|', '', clean)
-    clean = re.sub(r'^\s*[-•]\s', '', clean, flags=re.MULTILINE)
-    clean = clean.strip()
+@app.get("/learn-gmail-all")
+def learn_gmail_all(request: Request, max_results: int = 100, page_token: str = None):
+    from app.connectors.gmail_connector import gmail_get_message, refresh_gmail_token
+    from app.config import ANTHROPIC_MODEL_FAST
+    conn = get_pg_conn()
+    c = conn.cursor()
+    c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return {"error": "Gmail non connecté"}
+    access_token, refresh_token = row[0], row[1]
+    try:
+        response = requests.get(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"maxResults": max_results, "pageToken": page_token}, timeout=30,
+        )
+        if response.status_code == 401:
+            access_token = refresh_gmail_token(refresh_token)
+            response = requests.get(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={"maxResults": max_results, "pageToken": page_token}, timeout=30,
+            )
+        data = response.json()
+    except Exception as e:
+        return {"error": str(e)}
+    messages = data.get("messages", [])
+    next_page_token = data.get("nextPageToken")
+    inserted = skipped_noise = skipped_ai = 0
+    skip_keywords = ["noreply", "no-reply", "donotreply", "newsletter", "unsubscribe", "se désabonner",
+                     "notification", "mailer-daemon", "marketing", "promo", "offre spéciale",
+                     "linkedin", "twitter", "facebook", "instagram", "jobteaser", "indeed", "welcometothejungle",
+                     "calendly", "zoom", "teams", "webinar", "webinaire", "satisfaction", "avis client", "enquête", "survey"]
+    conn = get_pg_conn()
+    c = conn.cursor()
+    for msg in messages:
+        message_id = msg["id"]
+        c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
+        if c.fetchone():
+            continue
+        try:
+            detail = gmail_get_message(access_token, message_id)
+            headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
+            subject = headers.get("Subject", "(Sans objet)")
+            from_email = headers.get("From", "")
+            date = headers.get("Date", "")
+            snippet = detail.get("snippet", "")
+            full_text = f"{from_email} {subject} {snippet}".lower()
+            if any(kw in full_text for kw in skip_keywords):
+                skipped_noise += 1
+                continue
+            try:
+                decision = client.messages.create(
+                    model=ANTHROPIC_MODEL_FAST, max_tokens=5,
+                    messages=[{"role": "user", "content": f"Mail de : {from_email}\nSujet : {subject}\nContenu : {snippet[:200]}\n\nCe mail est-il pertinent pour un chef d'entreprise dans le solaire photovoltaïque ? Réponds uniquement OUI ou NON."}]
+                )
+                if "NON" in decision.content[0].text.upper():
+                    skipped_ai += 1
+                    continue
+            except Exception:
+                pass
+            c.execute("""
+                INSERT INTO mail_memory (message_id, received_at, from_email, subject, raw_body_preview, analysis_status, mailbox_source, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING
+            """, (message_id, date, from_email, subject, snippet, "gmail_raw", "gmail_perso", datetime.utcnow().isoformat()))
+            inserted += 1
+        except Exception:
+            conn.rollback()
+            continue
+    conn.commit()
+    conn.close()
+    return {"inserted": inserted, "skipped_noise": skipped_noise, "skipped_ai": skipped_ai,
+            "total_fetched": len(messages), "next_page_token": next_page_token,
+            "message": f"{inserted} stockés, {skipped_noise} bruits filtrés, {skipped_ai} rejetés par IA"}
 
-    resp = requests.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}",
-        headers={
-            "xi-api-key": ELEVENLABS_API_KEY,
-            "Content-Type": "application/json",
-        },
-        json={
-            "text": clean[:2500],
-            "model_id": "eleven_multilingual_v2",
-            "voice_settings": {
-                "stability": 0.5,
-                "similarity_boost": 0.8,
-                "style": 0.2,
-                "use_speaker_boost": True
-            }
-        },
-        timeout=30,
-    )
 
-    if resp.status_code != 200:
-        return {"error": "ElevenLabs error", "detail": resp.text}
+@app.get("/learn-gmail-sent")
+def learn_gmail_sent(request: Request, max_results: int = 200, page_token: str = None):
+    from app.connectors.gmail_connector import gmail_get_message, refresh_gmail_token
+    conn = get_pg_conn()
+    c = conn.cursor()
+    c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return {"error": "Gmail non connecté"}
+    access_token, refresh_token = row[0], row[1]
+    try:
+        response = requests.get(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={"maxResults": max_results, "labelIds": "SENT", "pageToken": page_token}, timeout=30,
+        )
+        if response.status_code == 401:
+            access_token = refresh_gmail_token(refresh_token)
+            response = requests.get(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={"maxResults": max_results, "labelIds": "SENT", "pageToken": page_token}, timeout=30,
+            )
+        data = response.json()
+    except Exception as e:
+        return {"error": str(e)}
+    messages = data.get("messages", [])
+    next_page_token = data.get("nextPageToken")
+    inserted = 0
+    conn = get_pg_conn()
+    c = conn.cursor()
+    for msg in messages:
+        message_id = msg["id"]
+        c.execute("SELECT 1 FROM sent_mail_memory WHERE message_id = %s", (message_id,))
+        if c.fetchone():
+            continue
+        try:
+            detail = gmail_get_message(access_token, message_id)
+            headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
+            subject = headers.get("Subject", "(Sans objet)")
+            to_email = headers.get("To", "")
+            date = headers.get("Date", "")
+            snippet = detail.get("snippet", "")
+            c.execute("""
+                INSERT INTO sent_mail_memory (message_id, sent_at, to_email, subject, body_preview)
+                VALUES (%s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING
+            """, (message_id, date, to_email, subject, snippet))
+            inserted += 1
+        except Exception:
+            conn.rollback()
+            continue
+    conn.commit()
+    conn.close()
+    return {"inserted": inserted, "total_fetched": len(messages), "next_page_token": next_page_token,
+            "message": f"{inserted} mails envoyés Gmail mémorisés"}
 
-    return StreamingResponse(
-        io.BytesIO(resp.content),
-        media_type="audio/mpeg",
-    )
 
-@app.get("/test-odoo")
-def test_odoo():
-    from app.connectors.odoo_connector import perform_odoo_action
-    result = perform_odoo_action(
-        action="get_partner_by_email",
-        params={"email": "guillaume@couffrant-solar.fr"}
-    )
-    return result
+@app.get("/learn-archive-mails")
+def learn_archive_mails(request: Request, top: int = 100, skip: int = 0):
+    token = request.session.get("access_token")
+    if not token:
+        return RedirectResponse("/login?next=/learn-archive-mails")
+    folder_id = "AQMkAGEwZmJhNTllLWQ3MjUtNDg4ADQtYjdhMi1jMGEyZjRiNmFkNWEALgAAA-6yBmE1L7hGi--BXSl5S2sBAIyf8uOKE0VAkKv1dN8K6xgAAAIBRQAAAA=="
+    try:
+        data = graph_get(token, f"/me/mailFolders/{folder_id}/messages", params={
+            "$top": top, "$skip": skip,
+            "$select": "id,subject,from,receivedDateTime,bodyPreview",
+            "$orderby": "receivedDateTime DESC",
+        })
+    except requests.HTTPError:
+        request.session.pop("access_token", None)
+        return RedirectResponse("/login?next=/learn-archive-mails")
+    messages = data.get("value", [])
+    inserted = skipped_noise = 0
+    conn = get_pg_conn()
+    c = conn.cursor()
+    skip_keywords = ["noreply", "no-reply", "donotreply", "newsletter", "unsubscribe",
+                     "se désabonner", "notification", "mailer-daemon", "marketing",
+                     "promo", "offre spéciale", "linkedin", "twitter", "facebook",
+                     "instagram", "jobteaser", "indeed", "welcometothejungle",
+                     "calendly", "zoom", "teams", "webinar", "webinaire",
+                     "satisfaction", "avis client", "enquête", "survey"]
+    for msg in messages:
+        message_id = msg["id"]
+        c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
+        if c.fetchone():
+            continue
+        from_email = msg.get("from", {}).get("emailAddress", {}).get("address", "").lower()
+        subject = (msg.get("subject") or "").lower()
+        body = (msg.get("bodyPreview") or "").lower()
+        if any(kw in f"{from_email} {subject} {body}" for kw in skip_keywords):
+            skipped_noise += 1
+            continue
+        try:
+            c.execute("""
+                INSERT INTO mail_memory (message_id, received_at, from_email, subject, raw_body_preview, analysis_status, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING
+            """, (message_id, msg.get("receivedDateTime"), msg.get("from", {}).get("emailAddress", {}).get("address", ""),
+                   msg.get("subject"), msg.get("bodyPreview"), "archive_raw", datetime.utcnow().isoformat()))
+            inserted += 1
+        except Exception:
+            continue
+    conn.commit()
+    conn.close()
+    return {"inserted": inserted, "skipped_noise": skipped_noise, "total_fetched": len(messages), "skip": skip,
+            "message": f"{inserted} mails archivés utiles stockés, {skipped_noise} bruits ignorés"}
+
 
 @app.get("/list-mail-folders")
 def list_mail_folders(request: Request):
@@ -1410,300 +1006,21 @@ def list_mail_folders(request: Request):
         return RedirectResponse("/login?next=/list-mail-folders")
     return data.get("value", [])
 
-@app.get("/learn-archive-mails")
-def learn_archive_mails(request: Request, top: int = 100, skip: int = 0):
-    token = request.session.get("access_token")
-    if not token:
-        return RedirectResponse("/login?next=/learn-archive-mails")
 
-    folder_id = "AQMkAGEwZmJhNTllLWQ3MjUtNDg4ADQtYjdhMi1jMGEyZjRiNmFkNWEALgAAA-6yBmE1L7hGi--BXSl5S2sBAIyf8uOKE0VAkKv1dN8K6xgAAAIBRQAAAA=="
+@app.get("/test-elevenlabs")
+def test_elevenlabs():
+    api_key = os.environ.get("ELEVENLABS_API_KEY", "")
+    voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "")
+    resp = requests.post(
+        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
+        headers={"xi-api-key": api_key, "Content-Type": "application/json"},
+        json={"text": "Bonjour Guillaume.", "model_id": "eleven_flash_v2_5", "voice_settings": {"stability": 0.5, "similarity_boost": 0.8}},
+        timeout=30,
+    )
+    return {"status_code": resp.status_code, "response": resp.text[:500], "api_key_length": len(api_key), "voice_id": voice_id}
 
-    try:
-        data = graph_get(
-            token,
-            f"/me/mailFolders/{folder_id}/messages",
-            params={
-                "$top": top,
-                "$skip": skip,
-                "$select": "id,subject,from,receivedDateTime,bodyPreview",
-                "$orderby": "receivedDateTime DESC",
-            },
-        )
-    except requests.HTTPError:
-        request.session.pop("access_token", None)
-        return RedirectResponse("/login?next=/learn-archive-mails")
 
-    messages = data.get("value", [])
-    inserted = 0
-    skipped_noise = 0
-    conn = get_pg_conn()
-    c = conn.cursor()
-
-    skip_keywords = [
-        "noreply", "no-reply", "donotreply", "newsletter", "unsubscribe",
-        "se désabonner", "notification", "mailer-daemon", "marketing",
-        "promo", "offre spéciale", "linkedin", "twitter", "facebook",
-        "instagram", "jobteaser", "indeed", "welcometothejungle",
-        "calendly", "zoom", "teams", "webinar", "webinaire",
-        "satisfaction", "avis client", "enquête", "survey",
-    ]
-
-    for msg in messages:
-        message_id = msg["id"]
-        c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
-        if c.fetchone():
-            continue
-
-        from_email = msg.get("from", {}).get("emailAddress", {}).get("address", "").lower()
-        subject = (msg.get("subject") or "").lower()
-        body = (msg.get("bodyPreview") or "").lower()
-        full_text = f"{from_email} {subject} {body}"
-
-        if any(kw in full_text for kw in skip_keywords):
-            skipped_noise += 1
-            continue
-
-        try:
-            c.execute("""
-                INSERT INTO mail_memory
-                (message_id, received_at, from_email, subject,
-                 raw_body_preview, analysis_status, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (message_id) DO NOTHING
-            """, (
-                message_id,
-                msg.get("receivedDateTime"),
-                msg.get("from", {}).get("emailAddress", {}).get("address", ""),
-                msg.get("subject"),
-                msg.get("bodyPreview"),
-                "archive_raw",
-                datetime.utcnow().isoformat(),
-            ))
-            inserted += 1
-        except Exception:
-            continue
-
-    conn.commit()
-    conn.close()
-
-    return {
-        "inserted": inserted,
-        "skipped_noise": skipped_noise,
-        "total_fetched": len(messages),
-        "skip": skip,
-        "message": f"{inserted} mails archivés utiles stockés, {skipped_noise} bruits ignorés"
-    }
-
-@app.get("/learn-gmail-all")
-def learn_gmail_all(request: Request, max_results: int = 100, page_token: str = None):
-    from app.connectors.gmail_connector import gmail_get_messages, gmail_get_message, refresh_gmail_token
-    from app.config import ANTHROPIC_MODEL_FAST
-
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
-    row = c.fetchone()
-    conn.close()
-
-    if not row:
-        return {"error": "Gmail non connecté"}
-
-    access_token = row[0]
-    refresh_token = row[1]
-
-    try:
-        response = requests.get(
-            "https://gmail.googleapis.com/gmail/v1/users/me/messages",
-            headers={"Authorization": f"Bearer {access_token}"},
-            params={
-                "maxResults": max_results,
-                "pageToken": page_token,
-            },
-            timeout=30,
-        )
-        if response.status_code == 401:
-            access_token = refresh_gmail_token(refresh_token)
-            response = requests.get(
-                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
-                headers={"Authorization": f"Bearer {access_token}"},
-                params={"maxResults": max_results, "pageToken": page_token},
-                timeout=30,
-            )
-        data = response.json()
-    except Exception as e:
-        return {"error": str(e)}
-
-    messages = data.get("messages", [])
-    next_page_token = data.get("nextPageToken")
-    inserted = 0
-    skipped_noise = 0
-    skipped_ai = 0
-
-    skip_keywords = [
-        "noreply", "no-reply", "donotreply", "newsletter", "unsubscribe",
-        "se désabonner", "notification", "mailer-daemon", "marketing",
-        "promo", "offre spéciale", "linkedin", "twitter", "facebook",
-        "instagram", "jobteaser", "indeed", "welcometothejungle",
-        "calendly", "zoom", "teams", "webinar", "webinaire",
-        "satisfaction", "avis client", "enquête", "survey",
-    ]
-
-    conn = get_pg_conn()
-    c = conn.cursor()
-
-    for msg in messages:
-        message_id = msg["id"]
-        c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
-        if c.fetchone():
-            continue
-
-        try:
-            detail = gmail_get_message(access_token, message_id)
-            headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
-            subject = headers.get("Subject", "(Sans objet)")
-            from_email = headers.get("From", "")
-            date = headers.get("Date", "")
-            snippet = detail.get("snippet", "")
-
-            full_text = f"{from_email} {subject} {snippet}".lower()
-
-            # Niveau 1 — filtre mots-clés gratuit
-            if any(kw in full_text for kw in skip_keywords):
-                skipped_noise += 1
-                continue
-
-            # Niveau 2 — analyse Claude Haiku
-            try:
-                decision = client.messages.create(
-                    model=ANTHROPIC_MODEL_FAST,
-                    max_tokens=5,
-                    messages=[{
-                        "role": "user",
-                        "content": f"Mail de : {from_email}\nSujet : {subject}\nContenu : {snippet[:200]}\n\nCe mail est-il pertinent pour un chef d'entreprise dans le solaire photovoltaïque ? Réponds uniquement OUI ou NON."
-                    }]
-                )
-                if "NON" in decision.content[0].text.upper():
-                    skipped_ai += 1
-                    continue
-            except Exception:
-                pass
-
-            c.execute("""
-                INSERT INTO mail_memory
-                (message_id, received_at, from_email, subject,
-                 raw_body_preview, analysis_status, mailbox_source, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (message_id) DO NOTHING
-            """, (
-                message_id,
-                date,
-                from_email,
-                subject,
-                snippet,
-                "gmail_raw",
-                "gmail_perso",
-                datetime.utcnow().isoformat(),
-            ))
-            inserted += 1
-        except Exception:
-            conn.rollback()
-            continue
-
-    conn.commit()
-    conn.close()
-
-    return {
-        "inserted": inserted,
-        "skipped_noise": skipped_noise,
-        "skipped_ai": skipped_ai,
-        "total_fetched": len(messages),
-        "next_page_token": next_page_token,
-        "message": f"{inserted} stockés, {skipped_noise} bruits filtrés, {skipped_ai} rejetés par IA"
-    }
-
-@app.get("/learn-gmail-sent")
-def learn_gmail_sent(request: Request, max_results: int = 200, page_token: str = None):
-    from app.connectors.gmail_connector import gmail_get_message, refresh_gmail_token
-
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
-    row = c.fetchone()
-    conn.close()
-
-    if not row:
-        return {"error": "Gmail non connecté"}
-
-    access_token = row[0]
-    refresh_token = row[1]
-
-    try:
-        response = requests.get(
-            "https://gmail.googleapis.com/gmail/v1/users/me/messages",
-            headers={"Authorization": f"Bearer {access_token}"},
-            params={
-                "maxResults": max_results,
-                "labelIds": "SENT",
-                "pageToken": page_token,
-            },
-            timeout=30,
-        )
-        if response.status_code == 401:
-            access_token = refresh_gmail_token(refresh_token)
-            response = requests.get(
-                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
-                headers={"Authorization": f"Bearer {access_token}"},
-                params={"maxResults": max_results, "labelIds": "SENT", "pageToken": page_token},
-                timeout=30,
-            )
-        data = response.json()
-    except Exception as e:
-        return {"error": str(e)}
-
-    messages = data.get("messages", [])
-    next_page_token = data.get("nextPageToken")
-    inserted = 0
-
-    conn = get_pg_conn()
-    c = conn.cursor()
-
-    for msg in messages:
-        message_id = msg["id"]
-        c.execute("SELECT 1 FROM sent_mail_memory WHERE message_id = %s", (message_id,))
-        if c.fetchone():
-            continue
-
-        try:
-            detail = gmail_get_message(access_token, message_id)
-            headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
-            subject = headers.get("Subject", "(Sans objet)")
-            to_email = headers.get("To", "")
-            date = headers.get("Date", "")
-            snippet = detail.get("snippet", "")
-
-            c.execute("""
-                INSERT INTO sent_mail_memory
-                (message_id, sent_at, to_email, subject, body_preview)
-                VALUES (%s, %s, %s, %s, %s)
-                ON CONFLICT (message_id) DO NOTHING
-            """, (
-                message_id,
-                date,
-                to_email,
-                subject,
-                snippet,
-            ))
-            inserted += 1
-        except Exception:
-            conn.rollback()
-            continue
-
-    conn.commit()
-    conn.close()
-
-    return {
-        "inserted": inserted,
-        "total_fetched": len(messages),
-        "next_page_token": next_page_token,
-        "message": f"{inserted} mails envoyés Gmail mémorisés"
-    }
+@app.get("/test-odoo")
+def test_odoo():
+    from app.connectors.odoo_connector import perform_odoo_action
+    return perform_odoo_action(action="get_partner_by_email", params={"email": "guillaume@couffrant-solar.fr"})
