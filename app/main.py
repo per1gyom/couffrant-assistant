@@ -1313,3 +1313,90 @@ def learn_gmail_all(request: Request, max_results: int = 100, page_token: str = 
         "next_page_token": next_page_token,
         "message": f"{inserted} stockés, {skipped_noise} bruits filtrés, {skipped_ai} rejetés par IA"
     }
+
+@app.get("/learn-gmail-sent")
+def learn_gmail_sent(request: Request, max_results: int = 200, page_token: str = None):
+    from app.connectors.gmail_connector import gmail_get_message, refresh_gmail_token
+
+    conn = get_pg_conn()
+    c = conn.cursor()
+    c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return {"error": "Gmail non connecté"}
+
+    access_token = row[0]
+    refresh_token = row[1]
+
+    try:
+        response = requests.get(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={
+                "maxResults": max_results,
+                "labelIds": "SENT",
+                "pageToken": page_token,
+            },
+            timeout=30,
+        )
+        if response.status_code == 401:
+            access_token = refresh_gmail_token(refresh_token)
+            response = requests.get(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+                headers={"Authorization": f"Bearer {access_token}"},
+                params={"maxResults": max_results, "labelIds": "SENT", "pageToken": page_token},
+                timeout=30,
+            )
+        data = response.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+    messages = data.get("messages", [])
+    next_page_token = data.get("nextPageToken")
+    inserted = 0
+
+    conn = get_pg_conn()
+    c = conn.cursor()
+
+    for msg in messages:
+        message_id = msg["id"]
+        c.execute("SELECT 1 FROM sent_mail_memory WHERE message_id = %s", (message_id,))
+        if c.fetchone():
+            continue
+
+        try:
+            detail = gmail_get_message(access_token, message_id)
+            headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
+            subject = headers.get("Subject", "(Sans objet)")
+            to_email = headers.get("To", "")
+            date = headers.get("Date", "")
+            snippet = detail.get("snippet", "")
+
+            c.execute("""
+                INSERT INTO sent_mail_memory
+                (message_id, sent_at, to_email, subject, body_preview)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (message_id) DO NOTHING
+            """, (
+                message_id,
+                date,
+                to_email,
+                subject,
+                snippet,
+            ))
+            inserted += 1
+        except Exception:
+            conn.rollback()
+            continue
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "inserted": inserted,
+        "total_fetched": len(messages),
+        "next_page_token": next_page_token,
+        "message": f"{inserted} mails envoyés Gmail mémorisés"
+    }
