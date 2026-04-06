@@ -107,6 +107,17 @@ def init_postgres():
         )
     """)
 
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS oauth_tokens (
+            id SERIAL PRIMARY KEY,
+            provider TEXT,
+            access_token TEXT,
+            refresh_token TEXT,
+            expires_at TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
     try:
         c.execute("ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS mailbox_source TEXT DEFAULT 'outlook'")
     except Exception:

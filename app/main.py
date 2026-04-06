@@ -164,6 +164,19 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     if "access_token" not in result:
         return HTMLResponse(str(result), status_code=400)
     request.session["access_token"] = result["access_token"]
+    conn = get_pg_conn()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO oauth_tokens (provider, access_token, refresh_token, expires_at)
+        VALUES (%s, %s, %s, NOW() + INTERVAL '1 hour')
+        ON CONFLICT DO NOTHING
+    """, (
+        "microsoft",
+        result["access_token"],
+        result.get("refresh_token", ""),
+    ))
+    conn.commit()
+    conn.close()
     return RedirectResponse(state or "/me")
 
 
