@@ -103,7 +103,6 @@ def startup_event():
                             "mailbox_source": "outlook",
                         })
 
-                # Reconstruction résumé chaud toutes les 20 minutes (40 cycles de 30s)
                 cycle += 1
                 if cycle % 40 == 0:
                     try:
@@ -138,7 +137,7 @@ def chat(request: Request, pwd: str = ""):
         return HTMLResponse("""
         <html><body style="background:#0a0a0a;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial">
         <form method="get">
-            <input name="pwd" type="password" placeholder="Mot de passe" 
+            <input name="pwd" type="password" placeholder="Mot de passe"
             style="padding:12px;border-radius:8px;border:none;font-size:16px">
             <button type="submit" style="padding:12px 20px;background:#1565c0;color:white;border:none;border-radius:8px;margin-left:8px;cursor:pointer">
             Accéder</button>
@@ -193,7 +192,6 @@ def aria(payload: AriaQuery):
     conn = get_pg_conn()
     c = conn.cursor()
 
-    # Mails depuis la base (Gmail + Outlook déjà ingérés)
     c.execute("""
         SELECT id as db_id, message_id, from_email, display_title, category, priority,
                short_summary, suggested_reply, raw_body_preview, received_at, mailbox_source
@@ -204,7 +202,6 @@ def aria(payload: AriaQuery):
     columns = [desc[0] for desc in c.description]
     mails_from_db = [dict(zip(columns, row)) for row in c.fetchall()]
 
-    # Historique conversation (8 derniers échanges)
     c.execute("""
         SELECT user_input, aria_response
         FROM aria_memory
@@ -215,7 +212,6 @@ def aria(payload: AriaQuery):
     history = [dict(zip(columns, row)) for row in c.fetchall()]
     history.reverse()
 
-    # Profil Guillaume
     c.execute("""
         SELECT content FROM aria_profile
         WHERE profile_type = 'style'
@@ -225,13 +221,10 @@ def aria(payload: AriaQuery):
     profile = profile_row[0] if profile_row else ""
     conn.close()
 
-    # COUCHE 1 — Résumé chaud
     hot_summary = get_hot_summary()
 
-    # COUCHE 2 — Fiche contact si un nom est mentionné dans la question
     contact_card = ""
     query_lower = payload.query.lower()
-    # Interlocuteurs connus de Guillaume
     known_contacts = ["arlène", "arlene", "sabrina", "benoit", "maxence", "pinto", "enedis",
                       "adiwatt", "triangle", "eleria", "consuel", "socotec", "charlotte"]
     for name in known_contacts:
@@ -240,13 +233,14 @@ def aria(payload: AriaQuery):
             if contact_card:
                 break
 
-    # Style — exemples pertinents
-    style_examples = get_style_examples(context=payload.query[:100] if "répond" in query_lower or "rédige" in query_lower or "écris" in query_lower else "")
+    style_examples = get_style_examples(
+        context=payload.query[:100]
+        if any(w in query_lower for w in ["répond", "rédige", "écris", "mail"])
+        else ""
+    )
 
-    # Token Microsoft — refresh automatique
     outlook_token = get_valid_microsoft_token()
 
-    # MAILS OUTLOOK EN TEMPS RÉEL
     outlook_live_mails = []
     if outlook_token:
         try:
@@ -270,9 +264,8 @@ def aria(payload: AriaQuery):
                     "mailbox_source": "outlook",
                 })
         except Exception as e:
-            print(f"[Aria] Erreur récupération Outlook live: {e}")
+            print(f"[Aria] Erreur Outlook live: {e}")
 
-    # Agenda du jour
     agenda_today = []
     if outlook_token:
         try:
@@ -284,50 +277,49 @@ def aria(payload: AriaQuery):
         except Exception:
             pass
 
-    # Messages alternés pour l'historique
     messages = []
     for h in history:
         messages.append({"role": "user", "content": h["user_input"]})
         messages.append({"role": "assistant", "content": h["aria_response"]})
     messages.append({"role": "user", "content": payload.query})
 
-    # Prompt système — mémoire 3 couches intégrée
     system = f"""Tu es Aria, l'assistante personnelle de Guillaume Perrin, dirigeant de Couffrant Solar.
 
-Guillaume dirige une PME de 8 personnes dans le photovoltaïque. Il est direct, va à l'essentiel, déteste les réponses longues inutiles. Il tutoie Aria.
+Guillaume dirige une PME de 8 personnes dans le photovoltaïque. Direct, efficace, déteste les réponses longues inutiles. Il tutoie Aria.
 
-Ce que tu sais sur Guillaume (profil style) :
+Profil Guillaume :
 {profile[:600] if profile else "Profil en cours de construction."}
 
-=== SITUATION ACTUELLE (résumé chaud — mis à jour toutes les 20 min) ===
-{hot_summary if hot_summary else "Résumé en cours de construction — pas encore généré."}
+=== SITUATION ACTUELLE (résumé — mis à jour toutes les 20 min) ===
+{hot_summary if hot_summary else "Résumé pas encore généré — utilise les mails ci-dessous."}
 
 {f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}
 
-{f"=== EXEMPLES DE STYLE (pour rédiger comme Guillaume) ==={chr(10)}{style_examples}" if style_examples else ""}
+{f"=== EXEMPLES DE STYLE ==={chr(10)}{style_examples}" if style_examples else ""}
 
-Comment tu fonctionnes :
-- Tu réponds naturellement, sans structure imposée.
-- Tu es directe, honnête. Guillaume décide toujours.
-- Si Guillaume dit "oui", "vas-y", "fais-le" → tu exécutes la dernière action proposée.
-- Tu ne dis jamais "c'est fait" sans confirmation réelle de l'API.
-- Pour rédiger un mail, inspire-toi des exemples de style ci-dessus.
+Règles :
+- Réponds naturellement, sans structure imposée.
+- Si Guillaume dit "oui", "vas-y", "fais-le" → exécute la dernière action proposée.
+- Ne dis jamais "c'est fait" sans confirmation API réelle.
+- Pour rédiger un mail, utilise les exemples de style.
 
-{"Tu as accès complet à Microsoft 365 de Guillaume." if outlook_token else "Tu n'as pas de connexion Microsoft active."}
+{"Accès complet Microsoft 365." if outlook_token else "Pas de connexion Microsoft."}
 
-IDENTIFIANTS MAILS — CRITIQUE :
-- `message_id` : longue chaîne Outlook (AAMkAGEw...) → TOUJOURS utiliser pour les actions
-- `db_id` : entier court → JAMAIS utiliser pour les actions
-- `mailbox_source` : "outlook" (actions possibles) | "gmail_perso" (lecture seule)
+IDENTIFIANTS — CRITIQUE :
+- `message_id` : longue chaîne Outlook → TOUJOURS pour les actions
+- `db_id` : entier court → JAMAIS pour les actions
+- `mailbox_source` : "outlook" (actions OK) | "gmail_perso" (lecture seule)
 
-Actions mails Outlook :
-- [ACTION:DELETE:message_id] | [ACTION:ARCHIVE:message_id] | [ACTION:READ:message_id]
-- [ACTION:REPLY:message_id:texte] | [ACTION:READBODY:message_id]
+Actions Outlook :
+- [ACTION:DELETE:message_id] → corbeille (récupérable)
+- [ACTION:ARCHIVE:message_id]
+- [ACTION:READ:message_id]
+- [ACTION:REPLY:message_id:texte de la réponse]
+- [ACTION:READBODY:message_id]
+- [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
+- [ACTION:CREATE_TASK:titre]
 
-Actions agenda : [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
-Actions tâches : [ACTION:CREATE_TASK:titre]
-
-Règle : propose avant d'agir, SAUF si Guillaume dit "fais-le", "vas-y", "oui", "supprime", "archive", "envoie".
+Propose avant d'agir, SAUF si Guillaume dit "fais-le", "vas-y", "oui", "supprime", "archive", "envoie".
 
 Agenda aujourd'hui ({datetime.now().strftime('%A %d %B %Y')}) :
 {json.dumps(agenda_today, ensure_ascii=False, default=str) if agenda_today else "Aucun RDV."}
@@ -335,11 +327,11 @@ Agenda aujourd'hui ({datetime.now().strftime('%A %d %B %Y')}) :
 === MAILS OUTLOOK EN TEMPS RÉEL ({len(outlook_live_mails)} mails inbox) ===
 {json.dumps(outlook_live_mails, ensure_ascii=False, default=str) if outlook_live_mails else "Aucun mail Outlook récupéré."}
 
-=== MAILS EN BASE — Gmail + historique Outlook ===
+=== MAILS EN BASE (Gmail + historique) ===
 {json.dumps(mails_from_db, ensure_ascii=False, default=str)}
 
-Consignes de Guillaume :
-{chr(10).join(instructions) if instructions else "Aucune consigne particulière."}
+Consignes :
+{chr(10).join(instructions) if instructions else "Aucune."}
 """
 
     response = client.messages.create(
@@ -356,6 +348,7 @@ Consignes de Guillaume :
         return len(msg_id.strip()) > 20
 
     if outlook_token:
+        # DELETE → corbeille
         for msg_id in re.findall(r'\[ACTION:DELETE:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
@@ -363,10 +356,11 @@ Consignes de Guillaume :
                 continue
             try:
                 result = perform_outlook_action("delete_message", {"message_id": msg_id}, outlook_token)
-                actions_confirmed.append("✅ Supprimé" if result.get("status") == "ok" else f"❌ {result.get('message')}")
+                actions_confirmed.append("✅ Mis à la corbeille" if result.get("status") == "ok" else f"❌ {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"❌ Erreur suppression : {str(e)[:100]}")
+                actions_confirmed.append(f"❌ Erreur : {str(e)[:100]}")
 
+        # ARCHIVE
         for msg_id in re.findall(r'\[ACTION:ARCHIVE:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
@@ -378,6 +372,7 @@ Consignes de Guillaume :
             except Exception as e:
                 actions_confirmed.append(f"❌ Erreur archivage : {str(e)[:100]}")
 
+        # READ
         for msg_id in re.findall(r'\[ACTION:READ:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
@@ -388,15 +383,16 @@ Consignes de Guillaume :
             except Exception as e:
                 actions_confirmed.append(f"❌ Erreur : {str(e)[:100]}")
 
-        for match in re.finditer(r'\[ACTION:REPLY:([^:]+):([^\]]+)\]', aria_response):
-            msg_id, reply_text = match.group(1).strip(), match.group(2).strip()
+        # REPLY — regex robuste : message_id ({20,} chars sans ':'), texte = tout jusqu'à ']'
+        for match in re.finditer(r'\[ACTION:REPLY:([^:\]]{20,}):(.+?)\]', aria_response, re.DOTALL):
+            msg_id = match.group(1).strip()
+            reply_text = match.group(2).strip()
             if not is_valid_outlook_id(msg_id):
                 actions_confirmed.append("❌ ID invalide pour réponse")
                 continue
             try:
                 result = perform_outlook_action("send_reply", {"message_id": msg_id, "reply_body": reply_text}, outlook_token)
                 if result.get("status") == "ok":
-                    # Apprendre du mail envoyé — enrichit automatiquement le style
                     try:
                         learn_from_correction(original="", corrected=reply_text, context="réponse mail")
                     except Exception:
@@ -405,6 +401,7 @@ Consignes de Guillaume :
             except Exception as e:
                 actions_confirmed.append(f"❌ Erreur envoi : {str(e)[:100]}")
 
+        # READBODY
         for msg_id in re.findall(r'\[ACTION:READBODY:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
@@ -417,6 +414,7 @@ Consignes de Guillaume :
             except Exception as e:
                 actions_confirmed.append(f"❌ Erreur lecture corps : {str(e)[:100]}")
 
+        # CREATEEVENT
         for match in re.finditer(r'\[ACTION:CREATEEVENT:([^\]]+)\]', aria_response):
             parts = match.group(1).split('|')
             if len(parts) >= 3:
@@ -429,6 +427,7 @@ Consignes de Guillaume :
                 except Exception as e:
                     actions_confirmed.append(f"❌ Erreur agenda : {str(e)[:100]}")
 
+        # CREATE_TASK
         for title in re.findall(r'\[ACTION:CREATE_TASK:([^\]]+)\]', aria_response):
             try:
                 result = perform_outlook_action("create_todo_task", {"title": title.strip()}, outlook_token)
@@ -454,110 +453,84 @@ Consignes de Guillaume :
 
 
 # ─────────────────────────────────────────────
-# ENDPOINTS MÉMOIRE INTELLIGENTE
+# ENDPOINTS MÉMOIRE
 # ─────────────────────────────────────────────
 
 @app.get("/build-memory")
 def build_memory():
-    """Reconstruit toute la mémoire intelligente : résumé chaud + fiches contacts + style."""
     results = {}
     try:
         summary = rebuild_hot_summary()
         results["hot_summary"] = "✅ Résumé chaud reconstruit"
-        results["summary_preview"] = summary[:200]
+        results["preview"] = summary[:200]
     except Exception as e:
-        results["hot_summary"] = f"❌ Erreur : {str(e)[:100]}"
-
+        results["hot_summary"] = f"❌ {str(e)[:100]}"
     try:
         count = rebuild_contacts()
-        results["contacts"] = f"✅ {count} fiches contacts créées/mises à jour"
+        results["contacts"] = f"✅ {count} fiches contacts"
     except Exception as e:
-        results["contacts"] = f"❌ Erreur : {str(e)[:100]}"
-
+        results["contacts"] = f"❌ {str(e)[:100]}"
     try:
         added = load_sent_mails_to_style(limit=50)
-        results["style"] = f"✅ {added} exemples de style chargés"
+        results["style"] = f"✅ {added} exemples de style"
     except Exception as e:
-        results["style"] = f"❌ Erreur : {str(e)[:100]}"
-
+        results["style"] = f"❌ {str(e)[:100]}"
     return results
 
 
 @app.get("/memory-status")
 def memory_status():
-    """État actuel de la mémoire intelligente."""
     conn = get_pg_conn()
     c = conn.cursor()
-
     c.execute("SELECT content, updated_at FROM aria_hot_summary WHERE id = 1")
     row = c.fetchone()
-    hot_summary_info = {
-        "exists": bool(row and row[0]),
-        "preview": (row[0] or "")[:150] if row else "",
-        "updated_at": str(row[1]) if row else None
-    }
-
     c.execute("SELECT COUNT(*) FROM aria_contacts")
     contacts_count = c.fetchone()[0]
-
     c.execute("SELECT COUNT(*) FROM aria_style_examples")
     style_count = c.fetchone()[0]
-
     c.execute("SELECT COUNT(*) FROM mail_memory")
     mails_count = c.fetchone()[0]
-
     c.execute("SELECT COUNT(*) FROM sent_mail_memory")
     sent_count = c.fetchone()[0]
-
     conn.close()
-
     return {
-        "couche_1_resume_chaud": hot_summary_info,
-        "couche_2_contacts": {"count": contacts_count},
-        "style_examples": {"count": style_count},
-        "mail_memory": {"count": mails_count},
-        "sent_mail_memory": {"count": sent_count},
+        "resume_chaud": {"exists": bool(row and row[0]), "preview": (row[0] or "")[:150] if row else "", "updated_at": str(row[1]) if row else None},
+        "contacts": contacts_count,
+        "style_examples": style_count,
+        "mail_memory": mails_count,
+        "sent_mail_memory": sent_count,
     }
 
 
 @app.get("/contacts")
-def list_contacts():
-    """Liste toutes les fiches contacts."""
+def list_contacts_endpoint():
     return get_all_contact_cards()
 
 
 @app.get("/purge-memory")
 def purge_memory(days: int = 90):
-    """Purge les mails bruts de plus de N jours de la base locale.
-    Les vrais mails restent dans Outlook et Gmail."""
     deleted = purge_old_mails(days=days)
-    return {
-        "status": "ok",
-        "deleted": deleted,
-        "message": f"{deleted} mails bruts supprimés de la base locale (restent dans Outlook/Gmail)"
-    }
+    return {"status": "ok", "deleted": deleted, "message": f"{deleted} mails bruts supprimés (restent dans Outlook/Gmail)"}
 
 
 @app.post("/learn-style")
 def learn_style(payload: dict = Body(...)):
-    """Enregistre manuellement un exemple de style validé par Guillaume."""
     situation = payload.get("situation", "mail envoyé")
     text = payload.get("text", "")
-    tags = payload.get("tags", "")
     if not text:
         return {"error": "Texte manquant"}
-    save_style_example(situation=situation, example_text=text, tags=tags, quality_score=2.0)
-    return {"status": "ok", "message": "Exemple de style sauvegardé"}
+    save_style_example(situation=situation, example_text=text, tags=payload.get("tags", ""), quality_score=2.0)
+    return {"status": "ok"}
 
+
+# ─────────────────────────────────────────────
+# AUTH MICROSOFT
+# ─────────────────────────────────────────────
 
 @app.get("/login")
 def login(request: Request, next: str = "/chat"):
     msal_app = build_msal_app()
-    auth_url = msal_app.get_authorization_request_url(
-        scopes=GRAPH_SCOPES,
-        redirect_uri=REDIRECT_URI,
-        state=next,
-    )
+    auth_url = msal_app.get_authorization_request_url(scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI, state=next)
     return RedirectResponse(auth_url)
 
 
@@ -566,14 +539,10 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     if not code:
         return HTMLResponse("Code manquant", status_code=400)
     msal_app = build_msal_app()
-    result = msal_app.acquire_token_by_authorization_code(
-        code, scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI,
-    )
+    result = msal_app.acquire_token_by_authorization_code(code, scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI)
     if "access_token" not in result:
         return HTMLResponse(str(result), status_code=400)
-
     request.session["access_token"] = result["access_token"]
-
     conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
@@ -587,9 +556,12 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     """, ("microsoft", result["access_token"], result.get("refresh_token", "")))
     conn.commit()
     conn.close()
-
     return RedirectResponse(state or "/chat")
 
+
+# ─────────────────────────────────────────────
+# TRIAGE
+# ─────────────────────────────────────────────
 
 @app.get("/triage-queue")
 def triage_queue():
@@ -598,14 +570,10 @@ def triage_queue():
     if not token:
         return {"mails": [], "count": 0, "error": "Token Microsoft manquant"}
     try:
-        data = graph_get(
-            token, "/me/mailFolders/inbox/messages",
-            params={
-                "$top": 50,
-                "$select": "id,subject,from,receivedDateTime,bodyPreview,isRead",
-                "$orderby": "receivedDateTime DESC",
-            },
-        )
+        data = graph_get(token, "/me/mailFolders/inbox/messages", params={
+            "$top": 50, "$select": "id,subject,from,receivedDateTime,bodyPreview,isRead",
+            "$orderby": "receivedDateTime DESC",
+        })
         mails = [{
             "message_id": msg["id"],
             "from_email": msg.get("from", {}).get("emailAddress", {}).get("address", ""),
@@ -619,15 +587,15 @@ def triage_queue():
         return {"mails": [], "count": 0, "error": str(e)}
 
 
+# ─────────────────────────────────────────────
+# INGESTION MAILS
+# ─────────────────────────────────────────────
+
 @app.get("/memory")
 def memory():
     conn = get_pg_conn()
     c = conn.cursor()
-    c.execute("""
-        SELECT message_id, received_at, from_email, subject, display_title,
-               category, priority, analysis_status, confidence
-        FROM mail_memory ORDER BY id DESC LIMIT 20
-    """)
+    c.execute("SELECT message_id, received_at, from_email, subject, display_title, category, priority, analysis_status FROM mail_memory ORDER BY id DESC LIMIT 20")
     columns = [desc[0] for desc in c.description]
     rows = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()
@@ -642,43 +610,6 @@ def rebuild_memory_mails():
     conn.commit()
     conn.close()
     return {"status": "mail_memory_cleared"}
-
-
-@app.get("/assistant-dashboard")
-def assistant_dashboard(days: int = 2):
-    return get_dashboard(days)
-
-
-@app.get("/reply-queue")
-def reply_queue():
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("""
-        SELECT id, received_at, from_email, subject, display_title,
-               category, priority, reply_urgency, reply_reason,
-               suggested_reply_subject, suggested_reply, reply_status
-        FROM mail_memory WHERE needs_reply = 1 ORDER BY id DESC
-    """)
-    columns = [desc[0] for desc in c.description]
-    rows = [dict(zip(columns, row)) for row in c.fetchall()]
-    conn.close()
-    return rows
-
-
-@app.get("/digest")
-def digest(days: int = 2):
-    conn = get_pg_conn()
-    c = conn.cursor()
-    start_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
-    c.execute("""
-        SELECT received_at, from_email, display_title, category, priority,
-               reason, suggested_action, short_summary
-        FROM mail_memory WHERE received_at >= %s ORDER BY received_at DESC
-    """, (start_date,))
-    columns = [desc[0] for desc in c.description]
-    rows = [dict(zip(columns, row)) for row in c.fetchall()]
-    conn.close()
-    return {"days": days, "count": len(rows), "items": rows}
 
 
 @app.get("/ingest-mails-fast")
@@ -702,27 +633,18 @@ def ingest_mails_fast(request: Request):
             continue
         item = analyze_single_mail(msg)
         insert_mail({
-            "message_id": message_id,
-            "received_at": msg.get("receivedDateTime"),
+            "message_id": message_id, "received_at": msg.get("receivedDateTime"),
             "from_email": msg.get("from", {}).get("emailAddress", {}).get("address"),
-            "subject": msg.get("subject"),
-            "display_title": item.get("display_title"),
-            "category": item.get("category"),
-            "priority": item.get("priority"),
-            "reason": item.get("reason"),
-            "suggested_action": item.get("suggested_action"),
-            "short_summary": item.get("short_summary"),
-            "group_hints": item.get("group_hints", []),
-            "confidence": item.get("confidence", 0.0),
-            "needs_review": item.get("needs_review", False),
-            "raw_body_preview": msg.get("bodyPreview"),
-            "analysis_status": "fallback",
-            "needs_reply": item.get("needs_reply"),
-            "reply_urgency": item.get("reply_urgency"),
+            "subject": msg.get("subject"), "display_title": item.get("display_title"),
+            "category": item.get("category"), "priority": item.get("priority"),
+            "reason": item.get("reason"), "suggested_action": item.get("suggested_action"),
+            "short_summary": item.get("short_summary"), "group_hints": item.get("group_hints", []),
+            "confidence": item.get("confidence", 0.0), "needs_review": item.get("needs_review", False),
+            "raw_body_preview": msg.get("bodyPreview"), "analysis_status": "fallback",
+            "needs_reply": item.get("needs_reply"), "reply_urgency": item.get("reply_urgency"),
             "reply_reason": item.get("reply_reason"),
             "suggested_reply_subject": item.get("suggested_reply_subject"),
-            "suggested_reply": item.get("suggested_reply"),
-            "mailbox_source": "outlook",
+            "suggested_reply": item.get("suggested_reply"), "mailbox_source": "outlook",
         })
         inserted += 1
         break
@@ -756,27 +678,18 @@ def ingest_mails(request: Request):
             item = analyze_single_mail(msg)
             analysis_status = "fallback"
         insert_mail({
-            "message_id": message_id,
-            "received_at": msg.get("receivedDateTime"),
+            "message_id": message_id, "received_at": msg.get("receivedDateTime"),
             "from_email": msg.get("from", {}).get("emailAddress", {}).get("address"),
-            "subject": msg.get("subject"),
-            "display_title": item.get("display_title"),
-            "category": item.get("category"),
-            "priority": item.get("priority"),
-            "reason": item.get("reason"),
-            "suggested_action": item.get("suggested_action"),
-            "short_summary": item.get("short_summary"),
-            "group_hints": item.get("group_hints", []),
-            "confidence": item.get("confidence", 0.0),
-            "needs_review": item.get("needs_review", False),
-            "raw_body_preview": msg.get("bodyPreview"),
-            "analysis_status": analysis_status,
-            "needs_reply": item.get("needs_reply"),
-            "reply_urgency": item.get("reply_urgency"),
+            "subject": msg.get("subject"), "display_title": item.get("display_title"),
+            "category": item.get("category"), "priority": item.get("priority"),
+            "reason": item.get("reason"), "suggested_action": item.get("suggested_action"),
+            "short_summary": item.get("short_summary"), "group_hints": item.get("group_hints", []),
+            "confidence": item.get("confidence", 0.0), "needs_review": item.get("needs_review", False),
+            "raw_body_preview": msg.get("bodyPreview"), "analysis_status": analysis_status,
+            "needs_reply": item.get("needs_reply"), "reply_urgency": item.get("reply_urgency"),
             "reply_reason": item.get("reply_reason"),
             "suggested_reply_subject": item.get("suggested_reply_subject"),
-            "suggested_reply": item.get("suggested_reply"),
-            "mailbox_source": "outlook",
+            "suggested_reply": item.get("suggested_reply"), "mailbox_source": "outlook",
         })
         inserted += 1
     return {"inserted": inserted}
@@ -816,7 +729,7 @@ def learn_sent_mails(request: Request, top: int = 50):
             continue
     conn.commit()
     conn.close()
-    return {"inserted": inserted, "total_fetched": len(messages), "message": f"{inserted} mails envoyés mémorisés"}
+    return {"inserted": inserted, "total_fetched": len(messages)}
 
 
 @app.get("/learn-inbox-mails")
@@ -834,18 +747,15 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
         request.session.pop("access_token", None)
         return RedirectResponse("/login?next=/learn-inbox-mails")
     messages = data.get("value", [])
-    inserted = 0
-    skipped_noise = 0
+    inserted = skipped_noise = 0
     conn = get_pg_conn()
     c = conn.cursor()
-    skip_keywords = [
-        "noreply", "no-reply", "donotreply", "newsletter", "unsubscribe",
-        "se désabonner", "notification", "mailer-daemon", "marketing",
-        "promo", "offre spéciale", "linkedin", "twitter", "facebook",
-        "instagram", "jobteaser", "indeed", "welcometothejungle",
-        "calendly", "zoom", "teams", "webinar", "webinaire",
-        "satisfaction", "avis client", "enquête", "survey",
-    ]
+    skip_keywords = ["noreply", "no-reply", "donotreply", "newsletter", "unsubscribe",
+                     "se désabonner", "notification", "mailer-daemon", "marketing",
+                     "promo", "offre spéciale", "linkedin", "twitter", "facebook",
+                     "instagram", "jobteaser", "indeed", "welcometothejungle",
+                     "calendly", "zoom", "teams", "webinar", "webinaire",
+                     "satisfaction", "avis client", "enquête", "survey"]
     for msg in messages:
         message_id = msg["id"]
         c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
@@ -854,8 +764,7 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
         from_email = msg.get("from", {}).get("emailAddress", {}).get("address", "").lower()
         subject = (msg.get("subject") or "").lower()
         body = (msg.get("bodyPreview") or "").lower()
-        full_text = f"{from_email} {subject} {body}"
-        if any(kw in full_text for kw in skip_keywords):
+        if any(kw in f"{from_email} {subject} {body}" for kw in skip_keywords):
             skipped_noise += 1
             continue
         try:
@@ -869,8 +778,7 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
             continue
     conn.commit()
     conn.close()
-    return {"inserted": inserted, "skipped_noise": skipped_noise, "total_fetched": len(messages), "skip": skip,
-            "message": f"{inserted} mails utiles stockés, {skipped_noise} bruits ignorés"}
+    return {"inserted": inserted, "skipped_noise": skipped_noise, "total_fetched": len(messages)}
 
 
 @app.get("/build-style-profile")
@@ -886,7 +794,7 @@ def build_style_profile(request: Request):
     mails_text = "\n\n".join([f"Sujet : {r['subject']}\nDestinataire : {r['to_email']}\nContenu : {r['body_preview']}" for r in rows])
     response = client.messages.create(
         model=ANTHROPIC_MODEL_SMART, max_tokens=2048,
-        messages=[{"role": "user", "content": f"Analyse ces {len(rows)} emails envoyés par Guillaume Perrin de Couffrant Solar.\n\n{mails_text}\n\nProduis un profil détaillé de son style de communication, ses interlocuteurs, ses habitudes, et comment Aria doit écrire pour lui ressembler."}]
+        messages=[{"role": "user", "content": f"Analyse ces {len(rows)} emails envoyés par Guillaume Perrin.\n\n{mails_text}\n\nProduis un profil détaillé de son style : formules, longueur, ton, habitudes, interlocuteurs."}]
     )
     profile_text = response.content[0].text
     conn = get_pg_conn()
@@ -904,6 +812,10 @@ def add_instruction(instruction: str = Form(...)):
     return RedirectResponse("/chat", status_code=303)
 
 
+# ─────────────────────────────────────────────
+# AUTH GMAIL
+# ─────────────────────────────────────────────
+
 @app.get("/login/gmail")
 def login_gmail():
     from app.connectors.gmail_connector import get_gmail_auth_url
@@ -916,16 +828,14 @@ def auth_gmail_callback(request: Request, code: str | None = None):
         return HTMLResponse("Code manquant", status_code=400)
     from app.connectors.gmail_connector import exchange_code_for_tokens
     tokens = exchange_code_for_tokens(code)
-    access_token = tokens.get("access_token")
-    refresh_token = tokens.get("refresh_token")
     conn = get_pg_conn()
     c = conn.cursor()
     c.execute("DELETE FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
     c.execute("INSERT INTO gmail_tokens (email, access_token, refresh_token) VALUES (%s, %s, %s)",
-              ("per1.guillaume@gmail.com", access_token, refresh_token))
+              ("per1.guillaume@gmail.com", tokens.get("access_token"), tokens.get("refresh_token")))
     conn.commit()
     conn.close()
-    return {"status": "ok", "message": "Gmail connecté avec succès !"}
+    return {"status": "ok", "message": "Gmail connecté !"}
 
 
 @app.get("/ingest-gmail")
@@ -1033,7 +943,7 @@ def learn_gmail_all(request: Request, max_results: int = 100, page_token: str = 
             try:
                 decision = client.messages.create(
                     model=ANTHROPIC_MODEL_FAST, max_tokens=5,
-                    messages=[{"role": "user", "content": f"Mail de : {from_email}\nSujet : {subject}\nContenu : {snippet[:200]}\n\nCe mail est-il pertinent pour un chef d'entreprise dans le solaire photovoltaïque ? Réponds uniquement OUI ou NON."}]
+                    messages=[{"role": "user", "content": f"Mail de : {from_email}\nSujet : {subject}\nContenu : {snippet[:200]}\n\nPertinent pour un dirigeant dans le solaire ? OUI ou NON."}]
                 )
                 if "NON" in decision.content[0].text.upper():
                     skipped_ai += 1
@@ -1051,8 +961,7 @@ def learn_gmail_all(request: Request, max_results: int = 100, page_token: str = 
     conn.commit()
     conn.close()
     return {"inserted": inserted, "skipped_noise": skipped_noise, "skipped_ai": skipped_ai,
-            "total_fetched": len(messages), "next_page_token": next_page_token,
-            "message": f"{inserted} stockés, {skipped_noise} bruits filtrés, {skipped_ai} rejetés par IA"}
+            "total_fetched": len(messages), "next_page_token": next_page_token}
 
 
 @app.get("/learn-gmail-sent")
@@ -1095,22 +1004,18 @@ def learn_gmail_sent(request: Request, max_results: int = 200, page_token: str =
         try:
             detail = gmail_get_message(access_token, message_id)
             headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
-            subject = headers.get("Subject", "(Sans objet)")
-            to_email = headers.get("To", "")
-            date = headers.get("Date", "")
-            snippet = detail.get("snippet", "")
             c.execute("""
                 INSERT INTO sent_mail_memory (message_id, sent_at, to_email, subject, body_preview)
                 VALUES (%s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING
-            """, (message_id, date, to_email, subject, snippet))
+            """, (message_id, headers.get("Date", ""), headers.get("To", ""),
+                   headers.get("Subject", "(Sans objet)"), detail.get("snippet", "")))
             inserted += 1
         except Exception:
             conn.rollback()
             continue
     conn.commit()
     conn.close()
-    return {"inserted": inserted, "total_fetched": len(messages), "next_page_token": next_page_token,
-            "message": f"{inserted} mails envoyés Gmail mémorisés"}
+    return {"inserted": inserted, "total_fetched": len(messages), "next_page_token": next_page_token}
 
 
 @app.get("/learn-archive-mails")
@@ -1132,12 +1037,8 @@ def learn_archive_mails(request: Request, top: int = 100, skip: int = 0):
     inserted = skipped_noise = 0
     conn = get_pg_conn()
     c = conn.cursor()
-    skip_keywords = ["noreply", "no-reply", "donotreply", "newsletter", "unsubscribe",
-                     "se désabonner", "notification", "mailer-daemon", "marketing",
-                     "promo", "offre spéciale", "linkedin", "twitter", "facebook",
-                     "instagram", "jobteaser", "indeed", "welcometothejungle",
-                     "calendly", "zoom", "teams", "webinar", "webinaire",
-                     "satisfaction", "avis client", "enquête", "survey"]
+    skip_keywords = ["noreply", "no-reply", "newsletter", "unsubscribe", "notification", "marketing",
+                     "promo", "linkedin", "twitter", "facebook", "instagram", "calendly", "webinar"]
     for msg in messages:
         message_id = msg["id"]
         c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
@@ -1160,8 +1061,7 @@ def learn_archive_mails(request: Request, top: int = 100, skip: int = 0):
             continue
     conn.commit()
     conn.close()
-    return {"inserted": inserted, "skipped_noise": skipped_noise, "total_fetched": len(messages), "skip": skip,
-            "message": f"{inserted} mails archivés utiles stockés, {skipped_noise} bruits ignorés"}
+    return {"inserted": inserted, "skipped_noise": skipped_noise, "total_fetched": len(messages)}
 
 
 @app.get("/list-mail-folders")
@@ -1177,6 +1077,11 @@ def list_mail_folders(request: Request):
     return data.get("value", [])
 
 
+@app.get("/assistant-dashboard")
+def assistant_dashboard(days: int = 2):
+    return get_dashboard(days)
+
+
 @app.get("/test-elevenlabs")
 def test_elevenlabs():
     api_key = os.environ.get("ELEVENLABS_API_KEY", "")
@@ -1187,7 +1092,7 @@ def test_elevenlabs():
         json={"text": "Bonjour Guillaume.", "model_id": "eleven_flash_v2_5", "voice_settings": {"stability": 0.5, "similarity_boost": 0.8}},
         timeout=30,
     )
-    return {"status_code": resp.status_code, "response": resp.text[:500], "api_key_length": len(api_key), "voice_id": voice_id}
+    return {"status_code": resp.status_code, "api_key_length": len(api_key), "voice_id": voice_id}
 
 
 @app.get("/test-odoo")
