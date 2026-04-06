@@ -112,6 +112,73 @@ def startup_event():
     init_postgres()
     init_db()
     init_mail_db()
+    
+    # Démarrage scheduler ingestion automatique
+    import threading
+    def auto_ingest():
+        import time
+        while True:
+            try:
+                from app.token_manager import get_valid_microsoft_token
+                from app.graph_client import graph_get
+                from app.ai_client import analyze_single_mail_with_ai
+                from app.mail_memory_store import mail_exists, insert_mail
+                from app.feedback_store import get_global_instructions
+                from app.assistant_analyzer import analyze_single_mail
+
+                token = get_valid_microsoft_token()
+                if token:
+                    data = graph_get(
+                        token,
+                        "/me/mailFolders/inbox/messages",
+                        params={
+                            "$top": 10,
+                            "$select": "id,subject,from,receivedDateTime,bodyPreview",
+                            "$orderby": "receivedDateTime DESC",
+                        },
+                    )
+                    messages = data.get("value", [])
+                    instructions = get_global_instructions()
+                    for msg in messages:
+                        message_id = msg["id"]
+                        if mail_exists(message_id):
+                            continue
+                        try:
+                            item = analyze_single_mail_with_ai(msg, instructions)
+                            analysis_status = "done_ai"
+                        except Exception:
+                            item = analyze_single_mail(msg)
+                            analysis_status = "fallback"
+                        insert_mail({
+                            "message_id": message_id,
+                            "received_at": msg.get("receivedDateTime"),
+                            "from_email": msg.get("from", {}).get("emailAddress", {}).get("address"),
+                            "subject": msg.get("subject"),
+                            "display_title": item.get("display_title"),
+                            "category": item.get("category"),
+                            "priority": item.get("priority"),
+                            "reason": item.get("reason"),
+                            "suggested_action": item.get("suggested_action"),
+                            "short_summary": item.get("short_summary"),
+                            "group_hints": item.get("group_hints", []),
+                            "confidence": item.get("confidence", 0.0),
+                            "needs_review": item.get("needs_review", False),
+                            "raw_body_preview": msg.get("bodyPreview"),
+                            "analysis_status": analysis_status,
+                            "needs_reply": item.get("needs_reply"),
+                            "reply_urgency": item.get("reply_urgency"),
+                            "reply_reason": item.get("reply_reason"),
+                            "suggested_reply_subject": item.get("suggested_reply_subject"),
+                            "suggested_reply": item.get("suggested_reply"),
+                            "mailbox_source": "outlook",
+                        })
+            except Exception as e:
+                print(f"[AutoIngest] Erreur: {e}")
+            
+            time.sleep(300)  # toutes les 5 minutes
+
+    thread = threading.Thread(target=auto_ingest, daemon=True)
+    thread.start()
 
 
 @app.get("/health")
@@ -239,13 +306,20 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     )
     if "access_token" not in result:
         return HTMLResponse(str(result), status_code=400)
+    
     request.session["access_token"] = result["access_token"]
+    
+    # Sauvegarde token + refresh_token en base
     conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
         INSERT INTO oauth_tokens (provider, access_token, refresh_token, expires_at)
         VALUES (%s, %s, %s, NOW() + INTERVAL '1 hour')
-        ON CONFLICT DO NOTHING
+        ON CONFLICT (provider) DO UPDATE SET
+            access_token = EXCLUDED.access_token,
+            refresh_token = EXCLUDED.refresh_token,
+            expires_at = EXCLUDED.expires_at,
+            updated_at = NOW()
     """, (
         "microsoft",
         result["access_token"],
@@ -253,20 +327,8 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     ))
     conn.commit()
     conn.close()
+    
     return RedirectResponse(state or "/me")
-
-
-@app.get("/me")
-def me(request: Request):
-    token = request.session.get("access_token")
-    if not token:
-        return RedirectResponse("/login?next=/me")
-    try:
-        profile = graph_get(token, "/me")
-    except requests.HTTPError:
-        request.session.pop("access_token", None)
-        return RedirectResponse("/login?next=/me")
-    return profile
 
 
 @app.get("/memory")

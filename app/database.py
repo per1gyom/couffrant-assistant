@@ -110,7 +110,7 @@ def init_postgres():
     c.execute("""
         CREATE TABLE IF NOT EXISTS oauth_tokens (
             id SERIAL PRIMARY KEY,
-            provider TEXT,
+            provider TEXT UNIQUE,
             access_token TEXT,
             refresh_token TEXT,
             expires_at TIMESTAMP,
@@ -120,6 +120,11 @@ def init_postgres():
 
     try:
         c.execute("ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS mailbox_source TEXT DEFAULT 'outlook'")
+    except Exception:
+        conn.rollback()
+
+    try:
+        c.execute("ALTER TABLE oauth_tokens ADD CONSTRAINT oauth_tokens_provider_unique UNIQUE (provider)")
     except Exception:
         conn.rollback()
 
