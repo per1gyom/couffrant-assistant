@@ -175,7 +175,7 @@ def startup_event():
             except Exception as e:
                 print(f"[AutoIngest] Erreur: {e}")
             
-            time.sleep(300)  # toutes les 5 minutes
+            time.sleep(30)  # toutes les 5 minutes
 
     thread = threading.Thread(target=auto_ingest, daemon=True)
     thread.start()
