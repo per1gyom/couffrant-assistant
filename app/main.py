@@ -1054,6 +1054,32 @@ def ingest_gmail(request: Request):
 
             full_text = f"{from_email} {subject} {snippet}".lower()
             if any(kw in full_text for kw in skip_keywords):
+                continue
+
+            c.execute("""
+                INSERT INTO mail_memory
+                (message_id, received_at, from_email, subject,
+                 raw_body_preview, analysis_status, mailbox_source, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (message_id) DO NOTHING
+            """, (
+                message_id,
+                date,
+                from_email,
+                subject,
+                snippet,
+                "gmail_raw",
+                "gmail_perso",
+                datetime.utcnow().isoformat(),
+            ))
+            inserted += 1
+        except Exception:
+            continue
+
+    conn.commit()
+    conn.close()
+
+    return {"inserted": inserted, "total_fetched": len(messages)}
 
 @app.get("/test-odoo")
 def test_odoo():
