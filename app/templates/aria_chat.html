@@ -318,6 +318,20 @@ function scrollToBottom() {
     messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
+function cleanText(text) {
+    return text
+        .replace(/#{1,6}\s+/g, '')
+        .replace(/\*\*(.*?)\*\*/g, '$1')
+        .replace(/\*(.*?)\*/g, '$1')
+        .replace(/`(.*?)`/g, '$1')
+        .replace(/---+/g, '')
+        .replace(/\|.*?\|/g, '')
+        .replace(/^\s*[-•]\s/gm, '')
+        .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
 function addMessage(text, type) {
     const div = document.createElement('div');
     div.className = `message ${type}`;
