@@ -1,609 +1,256 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Aria">
-    <title>Aria — Couffrant Solar</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #0a0a0a;
-            color: #f0f0f0;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        .header {
-            background: #111;
-            padding: 16px 20px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            border-bottom: 1px solid #222;
-            position: sticky;
-            top: 0;
-            z-index: 10;
-        }
-        .header-dot {
-            width: 10px;
-            height: 10px;
-            background: #00c853;
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.4; }
-        }
-        .header-title { font-size: 18px; font-weight: 600; color: #fff; }
-        .header-sub { font-size: 12px; color: #666; margin-left: auto; }
-        .messages {
-            flex: 1;
-            overflow-y: auto;
-            padding: 20px 16px;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-        .message {
-            max-width: 85%;
-            padding: 12px 16px;
-            border-radius: 18px;
-            font-size: 15px;
-            line-height: 1.5;
-            white-space: pre-wrap;
-        }
-        .message.aria {
-            background: #1a1a2e;
-            border: 1px solid #2a2a4a;
-            color: #e0e0ff;
-            align-self: flex-start;
-            border-bottom-left-radius: 4px;
-        }
-        .message.user {
-            background: #1e3a5f;
-            color: #e0f0ff;
-            align-self: flex-end;
-            border-bottom-right-radius: 4px;
-        }
-        .message.loading {
-            background: #1a1a2e;
-            border: 1px solid #2a2a4a;
-            color: #666;
-            align-self: flex-start;
-        }
-        .dots span { animation: blink 1.4s infinite; font-size: 20px; }
-        .dots span:nth-child(2) { animation-delay: 0.2s; }
-        .dots span:nth-child(3) { animation-delay: 0.4s; }
-        @keyframes blink {
-            0%, 80%, 100% { opacity: 0; }
-            40% { opacity: 1; }
-        }
-        .input-area {
-            background: #111;
-            border-top: 1px solid #222;
-            padding: 12px 16px;
-            display: flex;
-            gap: 10px;
-            align-items: flex-end;
-        }
-        .input-wrap {
-            flex: 1;
-            background: #1a1a1a;
-            border: 1px solid #333;
-            border-radius: 24px;
-            display: flex;
-            align-items: center;
-            padding: 8px 16px;
-            gap: 8px;
-        }
-        textarea {
-            flex: 1;
-            background: none;
-            border: none;
-            outline: none;
-            color: #f0f0f0;
-            font-size: 15px;
-            resize: none;
-            max-height: 120px;
-            font-family: inherit;
-            line-height: 1.4;
-        }
-        textarea::placeholder { color: #555; }
-        .btn-mic {
-            width: 36px;
-            height: 36px;
-            border-radius: 50%;
-            border: none;
-            background: #333;
-            color: #fff;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            flex-shrink: 0;
-            transition: background 0.2s;
-        }
-        .btn-mic.listening {
-            background: #c62828;
-            animation: pulse-red 1s infinite;
-        }
-        @keyframes pulse-red {
-            0%, 100% { transform: scale(1); }
-            50% { transform: scale(1.1); }
-        }
-        .btn-send {
-            width: 44px;
-            height: 44px;
-            border-radius: 50%;
-            border: none;
-            background: #1565c0;
-            color: #fff;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 18px;
-            flex-shrink: 0;
-            transition: background 0.2s;
-        }
-        .btn-send:hover { background: #1976d2; }
-        .btn-send:disabled { background: #333; cursor: not-allowed; }
-        .quick-actions {
-            display: flex;
-            gap: 8px;
-            padding: 8px 16px;
-            overflow-x: auto;
-            background: #111;
-        }
-        .quick-btn {
-            background: #1a1a2e;
-            border: 1px solid #2a2a4a;
-            color: #a0a0ff;
-            padding: 6px 14px;
-            border-radius: 20px;
-            font-size: 13px;
-            cursor: pointer;
-            white-space: nowrap;
-            transition: background 0.2s;
-        }
-        .quick-btn:hover { background: #2a2a4e; }
-        .speak-btn {
-            background: none;
-            border: 1px solid #333;
-            color: #888;
-            cursor: pointer;
-            font-size: 12px;
-            padding: 4px 10px;
-            border-radius: 12px;
-            margin-top: 8px;
-            display: inline-block;
-            transition: all 0.2s;
-        }
-        .speak-btn:hover { color: #bbb; border-color: #555; }
-        .speak-btn.playing {
-            background: #c62828;
-            border-color: #c62828;
-            color: white;
-            animation: pulse-red 1s infinite;
-        }
-        .triage-bar {
-            display: none;
-            gap: 8px;
-            padding: 10px 16px;
-            background: #0d1117;
-            border-top: 1px solid #333;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-        .triage-bar.visible { display: flex; }
-        .triage-btn {
-            padding: 10px 20px;
-            border-radius: 20px;
-            border: none;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: bold;
-            transition: opacity 0.2s;
-        }
-        .triage-btn:hover { opacity: 0.85; }
-        .triage-btn.skip { background: #333; color: #aaa; }
-        .triage-btn.archive { background: #1565c0; color: white; }
-        .triage-btn.delete { background: #c62828; color: white; }
-        .triage-btn.reply { background: #2e7d32; color: white; }
-        /* Bouton stop global - toujours en bas à droite pendant lecture */
-        .stop-btn {
-            position: fixed;
-            bottom: 90px;
-            right: 16px;
-            background: #c62828;
-            color: white;
-            border: none;
-            border-radius: 50%;
-            width: 56px;
-            height: 56px;
-            font-size: 24px;
-            cursor: pointer;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 1000;
-            box-shadow: 0 4px 16px rgba(198,40,40,0.6);
-            transition: transform 0.1s;
-        }
-        .stop-btn:active { transform: scale(0.92); }
-        .stop-btn.visible { display: flex; }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aria — Couffrant Solar</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0a0a0a; --surface: #141414; --surface2: #1e1e1e;
+    --border: #2a2a2a; --text: #e8e8e8; --text-muted: #888;
+    --accent: #6366f1; --accent-hover: #5558e8;
+    --user-bg: #1e1e2e; --aria-bg: #141414;
+    --danger: #ef4444; --success: #22c55e;
+  }
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 15px; line-height: 1.6; }
+  .app { display: flex; flex-direction: column; height: 100vh; max-width: 800px; margin: 0 auto; }
+  .header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
+  .header-dot { width: 8px; height: 8px; background: var(--success); border-radius: 50%; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  .header-title { font-weight: 600; font-size: 16px; }
+  .header-sub { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+  .quick-actions { display: flex; gap: 8px; padding: 10px 20px; overflow-x: auto; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; scrollbar-width: none; }
+  .quick-actions::-webkit-scrollbar { display: none; }
+  .quick-btn { flex-shrink: 0; background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); border-radius: 20px; padding: 5px 14px; font-size: 13px; cursor: pointer; white-space: nowrap; transition: all 0.15s; }
+  .quick-btn:hover { border-color: var(--accent); color: var(--text); }
+  .messages { flex: 1; overflow-y: auto; padding: 24px 20px; display: flex; flex-direction: column; gap: 20px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  .message-row { display: flex; gap: 12px; align-items: flex-start; }
+  .message-row.user { flex-direction: row-reverse; }
+  .avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; margin-top: 2px; }
+  .avatar.aria-avatar { background: var(--accent); }
+  .avatar.user-avatar { background: var(--surface2); border: 1px solid var(--border); }
+  .bubble { max-width: 75%; border-radius: 16px; padding: 12px 16px; font-size: 14.5px; line-height: 1.65; }
+  .message-row.aria .bubble { background: var(--aria-bg); border: 1px solid var(--border); border-radius: 4px 16px 16px 16px; }
+  .message-row.user .bubble { background: var(--user-bg); border: 1px solid #2d2d4a; border-radius: 16px 4px 16px 16px; color: #c8c8f0; }
+  .bubble-actions { display: flex; gap: 8px; margin-top: 8px; }
+  .speak-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: 20px; padding: 3px 10px; font-size: 12px; cursor: pointer; transition: all 0.15s; }
+  .speak-btn:hover { border-color: var(--accent); color: var(--text); }
+  .speak-btn.playing { border-color: var(--accent); color: var(--accent); }
+  .loading-bubble { display: flex; gap: 5px; padding: 14px 16px; align-items: center; }
+  .dot-anim { width: 7px; height: 7px; background: var(--text-muted); border-radius: 50%; animation: dotbounce 1.2s infinite; }
+  .dot-anim:nth-child(2) { animation-delay: 0.2s; }
+  .dot-anim:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes dotbounce { 0%, 80%, 100% { transform: scale(0.7); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; } }
+  .triage-bar { display: none; gap: 8px; padding: 10px 20px; background: var(--surface); border-top: 1px solid var(--border); justify-content: center; flex-shrink: 0; }
+  .triage-bar.visible { display: flex; }
+  .triage-action { padding: 7px 16px; border-radius: 20px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: opacity 0.15s; }
+  .triage-action:hover { opacity: 0.85; }
+  .triage-skip { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); }
+  .triage-archive { background: #1e3a2e; color: #4ade80; }
+  .triage-delete { background: #3a1e1e; color: #f87171; }
+  .triage-reply { background: #1e2a3a; color: #60a5fa; }
+  .input-zone { padding: 16px 20px 20px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
+  .input-wrapper { display: flex; align-items: flex-end; gap: 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 16px; padding: 8px 8px 8px 16px; transition: border-color 0.15s; }
+  .input-wrapper:focus-within { border-color: var(--accent); }
+  .input-wrapper.mic-active { border-color: var(--danger); }
+  textarea#input { flex: 1; background: none; border: none; outline: none; color: var(--text); font-size: 14.5px; font-family: inherit; resize: none; min-height: 24px; max-height: 120px; line-height: 1.5; padding: 4px 0; }
+  textarea#input::placeholder { color: var(--text-muted); }
+  .input-btns { display: flex; gap: 6px; align-items: flex-end; padding-bottom: 2px; }
+  .icon-btn { width: 36px; height: 36px; border-radius: 10px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; transition: all 0.15s; flex-shrink: 0; }
+  #micBtn { background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); }
+  #micBtn:hover { border-color: var(--accent); color: var(--text); }
+  #micBtn.listening { background: var(--danger); color: white; border-color: var(--danger); animation: micpulse 1s infinite; }
+  @keyframes micpulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); } 50% { box-shadow: 0 0 0 6px rgba(239,68,68,0); } }
+  #sendBtn { background: var(--accent); color: white; border: none; }
+  #sendBtn:hover { background: var(--accent-hover); }
+  #sendBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .mic-status { display: none; font-size: 12px; color: var(--danger); margin-top: 6px; text-align: center; }
+  .mic-status.visible { display: block; }
+  #stopBtn { display: none; position: fixed; bottom: 90px; right: 20px; background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); border-radius: 20px; padding: 6px 14px; font-size: 13px; cursor: pointer; z-index: 100; }
+  #stopBtn.visible { display: block; }
+  .welcome { text-align: center; padding: 40px 20px; color: var(--text-muted); }
+  .welcome-icon { font-size: 40px; margin-bottom: 16px; }
+  .welcome h2 { font-size: 20px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
+  .welcome p { font-size: 14px; max-width: 400px; margin: 0 auto; }
+</style>
 </head>
 <body>
-
-<div class="header">
+<div class="app">
+  <div class="header">
     <div class="header-dot"></div>
     <div class="header-title">Aria</div>
     <div class="header-sub">Couffrant Solar</div>
-</div>
-
-<div class="quick-actions">
+  </div>
+  <div class="quick-actions">
     <button class="quick-btn" onclick="quickAsk('Quels sont mes mails urgents ?')">📬 Mails urgents</button>
     <button class="quick-btn" onclick="quickAsk('Quel est mon planning aujourd\'hui ?')">📅 Planning</button>
-    <button class="quick-btn" onclick="quickAsk('Y a-t-il des chantiers à risque en ce moment ?')">⚡ Chantiers</button>
-    <button class="quick-btn" onclick="quickAsk('Fais-moi un point sur la semaine')">📊 Point semaine</button>
-    <button class="quick-btn" onclick="quickAsk('Quelles sont les relances à faire ?')">🔔 Relances</button>
+    <button class="quick-btn" onclick="quickAsk('Donne-moi un point sur mes chantiers en cours')">⚡ Chantiers</button>
+    <button class="quick-btn" onclick="quickAsk('Fais-moi un point de la semaine')">📊 Point semaine</button>
+    <button class="quick-btn" onclick="quickAsk('Quelles sont mes relances en attente ?')">🔔 Relances</button>
     <button class="quick-btn" onclick="startTriage()">📋 Trier mes mails</button>
-</div>
-
-<div class="messages" id="messages">
-    <div class="message aria">Bonjour Guillaume 👋
-
-Je suis Aria, ton assistante Couffrant Solar.
-
-Je surveille tes mails, tes chantiers et ton activité. Pose-moi n'importe quelle question ou donne-moi un ordre.</div>
-</div>
-
-<div class="triage-bar" id="triageBar">
-    <button class="triage-btn skip" onclick="handleTriage('skip')">⏭ Passer</button>
-    <button class="triage-btn archive" onclick="handleTriage('archive')">📁 Archiver</button>
-    <button class="triage-btn delete" onclick="handleTriage('delete')">🗑 Corbeille</button>
-    <button class="triage-btn reply" onclick="handleTriage('reply')">✉️ Répondre</button>
-</div>
-
-<!-- Bouton stop global - visible pendant toute lecture audio -->
-<button class="stop-btn" id="stopBtn" onclick="stopSpeech()">⏹</button>
-
-<div class="input-area">
-    <div class="input-wrap">
-        <textarea id="input" placeholder="Pose une question à Aria..." rows="1"
-            onkeydown="handleKey(event)"
-            oninput="autoResize(this)"></textarea>
-        <button class="btn-mic" id="micBtn" onclick="toggleMic()" title="Dicter">🎤</button>
+  </div>
+  <div class="messages" id="messages">
+    <div class="welcome">
+      <div class="welcome-icon">✦</div>
+      <h2>Bonjour Guillaume</h2>
+      <p>Je suis Aria, ton assistante Couffrant Solar.<br>Je surveille tes mails, tes chantiers et ton activité.</p>
     </div>
-    <button class="btn-send" id="sendBtn" onclick="sendMessage()">➤</button>
+  </div>
+  <div class="triage-bar" id="triageBar">
+    <button class="triage-action triage-skip" onclick="handleTriage('skip')">⏭ Passer</button>
+    <button class="triage-action triage-archive" onclick="handleTriage('archive')">📁 Archiver</button>
+    <button class="triage-action triage-delete" onclick="handleTriage('delete')">🗑 Corbeille</button>
+    <button class="triage-action triage-reply" onclick="handleTriage('reply')">✉️ Répondre</button>
+  </div>
+  <div class="input-zone">
+    <div class="input-wrapper" id="inputWrapper">
+      <textarea id="input" placeholder="Envoie un message à Aria…" rows="1" oninput="autoResize(this)" onkeydown="handleKey(event)"></textarea>
+      <div class="input-btns">
+        <button class="icon-btn" id="micBtn" onclick="toggleMic()" title="Dicter">🎤</button>
+        <button class="icon-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+      </div>
+    </div>
+    <div class="mic-status" id="micStatus">🎙 En écoute… parle, je t'entends</div>
+  </div>
 </div>
-
+<button id="stopBtn" onclick="stopSpeech()">⏹ Arrêter</button>
 <script>
-const messagesEl = document.getElementById('messages');
-const inputEl = document.getElementById('input');
-const sendBtn = document.getElementById('sendBtn');
-const micBtn = document.getElementById('micBtn');
-const stopBtn = document.getElementById('stopBtn');
-const triageBar = document.getElementById('triageBar');
+const messagesEl=document.getElementById('messages');
+const inputEl=document.getElementById('input');
+const sendBtn=document.getElementById('sendBtn');
+const micBtn=document.getElementById('micBtn');
+const stopBtn=document.getElementById('stopBtn');
+const triageBar=document.getElementById('triageBar');
+const micStatus=document.getElementById('micStatus');
+const inputWrapper=document.getElementById('inputWrapper');
+let recognition=null,isListening=false,currentAudio=null,speakAborted=false,currentSpeakBtn=null,triageQueue=[],triageCurrent=null,silenceTimer=null;
 
-let recognition = null;
-let isListening = false;
-let currentAudio = null;
-let speakAborted = false;
-let currentSpeakBtn = null; // Bouton du message en cours de lecture
-let triageQueue = [];
-let triageCurrent = null;
+function speak(text,btn){
+  stopSpeech();speakAborted=false;stopBtn.classList.add('visible');
+  currentSpeakBtn=btn||null;
+  if(currentSpeakBtn){currentSpeakBtn.textContent='⏹ Stop';currentSpeakBtn.classList.add('playing');}
+  fetch('/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})})
+  .then(r=>r.ok?r.blob():Promise.reject())
+  .then(blob=>{
+    if(speakAborted||blob.size<100){resetSpeakUI();return;}
+    const url=URL.createObjectURL(blob);currentAudio=new Audio(url);
+    currentAudio.onended=resetSpeakUI;currentAudio.onerror=resetSpeakUI;
+    if(!speakAborted)currentAudio.play().catch(resetSpeakUI);
+  }).catch(resetSpeakUI);
+}
+function resetSpeakUI(){
+  stopBtn.classList.remove('visible');
+  if(currentSpeakBtn){currentSpeakBtn.textContent='🔊 Écouter';currentSpeakBtn.classList.remove('playing');currentSpeakBtn=null;}
+}
+function stopSpeech(){
+  speakAborted=true;
+  if(currentAudio){currentAudio.pause();currentAudio=null;}
+  window.speechSynthesis&&window.speechSynthesis.cancel();
+  resetSpeakUI();
+}
+function cleanText(text){
+  return text.replace(/#{1,6}\s+/g,'').replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1')
+    .replace(/`(.*?)`/g,'$1').replace(/---+/g,'').replace(/\|.*?\|/g,'')
+    .replace(/^\s*[-•]\s/gm,'').replace(/\[([^\]]+)\]\([^\)]+\)/g,'$1')
+    .replace(/✔️|\u274c|📧/g,'').replace(/\n{3,}/g,'\n\n').trim();
+}
+function autoResize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,120)+'px';}
+function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}}
+function scrollToBottom(){messagesEl.scrollTop=messagesEl.scrollHeight;}
+function addMessage(text,type){
+  const welcome=messagesEl.querySelector('.welcome');if(welcome)welcome.remove();
+  const row=document.createElement('div');row.className='message-row '+type;
+  const avatar=document.createElement('div');avatar.className='avatar '+type+'-avatar';
+  avatar.textContent=type==='aria'?'✦':'G';
+  const bubble=document.createElement('div');bubble.className='bubble';
+  const content=document.createElement('div');content.style.whiteSpace='pre-wrap';
+  content.textContent=type==='aria'?cleanText(text):text;bubble.appendChild(content);
+  if(type==='aria'){
+    const actions=document.createElement('div');actions.className='bubble-actions';
+    const speakBtn=document.createElement('button');speakBtn.className='speak-btn';speakBtn.textContent='🔊 Écouter';
+    speakBtn.onclick=()=>{if(speakBtn.classList.contains('playing'))stopSpeech();else speak(text,speakBtn);};
+    actions.appendChild(speakBtn);bubble.appendChild(actions);
+  }
+  row.appendChild(avatar);row.appendChild(bubble);messagesEl.appendChild(row);scrollToBottom();return row;
+}
+function addLoading(){
+  const row=document.createElement('div');row.className='message-row aria';
+  const avatar=document.createElement('div');avatar.className='avatar aria-avatar';avatar.textContent='✦';
+  const bubble=document.createElement('div');bubble.className='bubble loading-bubble';
+  bubble.innerHTML='<div class="dot-anim"></div><div class="dot-anim"></div><div class="dot-anim"></div>';
+  row.appendChild(avatar);row.appendChild(bubble);messagesEl.appendChild(row);scrollToBottom();return row;
+}
+async function sendMessage(){
+  const text=inputEl.value.trim();if(!text)return;
+  inputEl.value='';inputEl.style.height='auto';sendBtn.disabled=true;stopSpeech();
+  addMessage(text,'user');const loading=addLoading();
+  try{
+    const response=await fetch('/aria',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:text})});
+    const data=await response.json();loading.remove();
+    const msgRow=addMessage(data.answer,'aria');speak(data.answer,msgRow.querySelector('.speak-btn'));
+  }catch{loading.remove();addMessage('Erreur de connexion à Aria. Réessayez.','aria');}
+  sendBtn.disabled=false;
+}
+function quickAsk(text){inputEl.value=text;sendMessage();}
 
-// ─────────────────────────────
-// VOIX
-// ─────────────────────────────
-
-function speak(text, btn) {
-    // Arrête tout audio en cours avant de lancer le nouveau
-    stopSpeech();
-
-    speakAborted = false;
-    stopBtn.classList.add('visible');
-
-    // Met à jour le bouton du message en cours
-    currentSpeakBtn = btn || null;
-    if (currentSpeakBtn) {
-        currentSpeakBtn.textContent = '⏹ Stop';
-        currentSpeakBtn.classList.add('playing');
-    }
-
-    fetch('/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: text })
-    })
-    .then(r => {
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return r.blob();
-    })
-    .then(blob => {
-        if (speakAborted) { resetSpeakUI(); return; }
-        if (blob.size < 100) { resetSpeakUI(); return; }
-        const url = URL.createObjectURL(blob);
-        currentAudio = new Audio(url);
-        currentAudio.onended = () => resetSpeakUI();
-        currentAudio.onerror = () => resetSpeakUI();
-        if (!speakAborted) {
-            currentAudio.play().catch(() => resetSpeakUI());
-        }
-    })
-    .catch(() => resetSpeakUI());
+function toggleMic(){
+  if(!('webkitSpeechRecognition' in window)&&!('SpeechRecognition' in window)){alert('Reconnaissance vocale non supportée.');return;}
+  if(isListening){stopListening();return;}startListening();
+}
+function startListening(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  recognition=new SR();recognition.lang='fr-FR';recognition.continuous=true;recognition.interimResults=true;
+  recognition.onstart=()=>{isListening=true;micBtn.classList.add('listening');micBtn.textContent='⏹';micStatus.classList.add('visible');inputWrapper.classList.add('mic-active');resetSilenceTimer();};
+  recognition.onresult=(e)=>{
+    clearSilenceTimer();let final='';
+    for(let i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal)final+=e.results[i][0].transcript;}
+    if(final){inputEl.value=(inputEl.value+' '+final).trim();autoResize(inputEl);}
+    resetSilenceTimer();
+  };
+  recognition.onerror=()=>stopListening();
+  recognition.onend=()=>{if(isListening){try{recognition.start();}catch{stopListening();}}};
+  recognition.start();
+}
+function resetSilenceTimer(){clearSilenceTimer();silenceTimer=setTimeout(()=>stopListening(),2500);}
+function clearSilenceTimer(){if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;}}
+function stopListening(){
+  clearSilenceTimer();isListening=false;micBtn.classList.remove('listening');micBtn.textContent='🎤';
+  micStatus.classList.remove('visible');inputWrapper.classList.remove('mic-active');
+  if(recognition){try{recognition.stop();}catch{}recognition=null;}
+  inputEl.value=inputEl.value.trim();autoResize(inputEl);inputEl.focus();
 }
 
-function resetSpeakUI() {
-    stopBtn.classList.remove('visible');
-    if (currentSpeakBtn) {
-        currentSpeakBtn.textContent = '🔊 Écouter';
-        currentSpeakBtn.classList.remove('playing');
-        currentSpeakBtn = null;
-    }
+async function startTriage(){
+  stopSpeech();triageBar.classList.remove('visible');
+  const loading=addLoading();const response=await fetch('/triage-queue');const data=await response.json();loading.remove();
+  triageQueue=data.mails||[];
+  if(triageQueue.length===0){const row=addMessage('Aucun mail.','aria');speak('Aucun mail.',row.querySelector('.speak-btn'));return;}
+  const intro=triageQueue.length+' mails. On commence.';const introRow=addMessage(intro,'aria');speak(intro,introRow.querySelector('.speak-btn'));
+  setTimeout(()=>nextTriage(),1500);
 }
+function nextTriage(){
+  if(triageQueue.length===0){triageBar.classList.remove('visible');const row=addMessage('Triage terminé !','aria');speak('Triage terminé !',row.querySelector('.speak-btn'));triageCurrent=null;return;}
+  triageCurrent=triageQueue.shift();
+  const msg='De : '+( triageCurrent.from_email||'Inconnu')+'
+Sujet : '+(triageCurrent.subject||'(Sans objet)')+'
 
-function stopSpeech() {
-    speakAborted = true;
-    if (currentAudio) {
-        currentAudio.pause();
-        currentAudio = null;
-    }
-    window.speechSynthesis && window.speechSynthesis.cancel();
-    resetSpeakUI();
+'+(triageCurrent.raw_body_preview||'').slice(0,200)+'
+
+— Que je fasse ? ('+ triageQueue.length+' restants)';
+  const row=addMessage(msg,'aria');speak(msg,row.querySelector('.speak-btn'));triageBar.classList.add('visible');
 }
-
-// ─────────────────────────────
-// TEXTE
-// ─────────────────────────────
-
-function cleanText(text) {
-    return text
-        .replace(/#{1,6}\s+/g, '')
-        .replace(/\*\*(.*?)\*\*/g, '$1')
-        .replace(/\*(.*?)\*/g, '$1')
-        .replace(/`(.*?)`/g, '$1')
-        .replace(/---+/g, '')
-        .replace(/\|.*?\|/g, '')
-        .replace(/^\s*[-•]\s/gm, '')
-        .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1')
-        .replace(/✔️|\u274c|📧/g, '') // retire les emoji d’action
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
-}
-
-function autoResize(el) {
-    el.style.height = 'auto';
-    el.style.height = Math.min(el.scrollHeight, 120) + 'px';
-}
-
-function handleKey(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-    }
-}
-
-function scrollToBottom() {
-    messagesEl.scrollTop = messagesEl.scrollHeight;
-}
-
-function addMessage(text, type) {
-    const div = document.createElement('div');
-    div.className = `message ${type}`;
-
-    const content = document.createElement('span');
-    content.style.display = 'block';
-    content.textContent = type === 'aria' ? cleanText(text) : text;
-    div.appendChild(content);
-
-    if (type === 'aria') {
-        const speakBtn = document.createElement('button');
-        speakBtn.className = 'speak-btn';
-        speakBtn.textContent = '🔊 Écouter';
-        // Passe le bouton lui-même pour toggle stop/play
-        speakBtn.onclick = () => {
-            if (speakBtn.classList.contains('playing')) {
-                stopSpeech();
-            } else {
-                speak(text, speakBtn);
-            }
-        };
-        div.appendChild(speakBtn);
-    }
-
-    messagesEl.appendChild(div);
-    scrollToBottom();
-    return div;
-}
-
-function addLoading() {
-    const div = document.createElement('div');
-    div.className = 'message loading';
-    div.innerHTML = '<div class="dots"><span>•</span><span>•</span><span>•</span></div>';
-    messagesEl.appendChild(div);
-    scrollToBottom();
-    return div;
-}
-
-// ─────────────────────────────
-// CHAT
-// ─────────────────────────────
-
-async function sendMessage() {
-    const text = inputEl.value.trim();
-    if (!text) return;
-
-    inputEl.value = '';
-    inputEl.style.height = 'auto';
-    sendBtn.disabled = true;
-
-    addMessage(text, 'user');
-    const loading = addLoading();
-
-    try {
-        const response = await fetch('/aria', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: text })
-        });
-        const data = await response.json();
-        loading.remove();
-        const msgDiv = addMessage(data.answer, 'aria');
-        // Auto-lecture de la réponse
-        const btn = msgDiv.querySelector('.speak-btn');
-        speak(data.answer, btn);
-    } catch (err) {
-        loading.remove();
-        addMessage("Erreur de connexion à Aria. Réessayez.", 'aria');
-    }
-
-    sendBtn.disabled = false;
-}
-
-function quickAsk(text) {
-    inputEl.value = text;
-    sendMessage();
-}
-
-// ─────────────────────────────
-// TRIAGE
-// ─────────────────────────────
-
-async function startTriage() {
-    stopSpeech();
-    triageBar.classList.remove('visible');
-
-    const loading = addLoading();
-    const response = await fetch('/triage-queue');
-    const data = await response.json();
-    loading.remove();
-    triageQueue = data.mails || [];
-
-    if (triageQueue.length === 0) {
-        const msg = "Aucun mail dans ta boîte de réception.";
-        const msgDiv = addMessage(msg, 'aria');
-        speak(msg, msgDiv.querySelector('.speak-btn'));
-        return;
-    }
-
-    const intro = `${triageQueue.length} mails dans ta boîte. On commence par le plus récent.`;
-    const introDiv = addMessage(intro, 'aria');
-    speak(intro, introDiv.querySelector('.speak-btn'));
-    setTimeout(() => nextTriage(), 1500);
-}
-
-function nextTriage() {
-    if (triageQueue.length === 0) {
-        triageBar.classList.remove('visible');
-        const msg = "Triage terminé. Boîte traitée.";
-        const msgDiv = addMessage(msg, 'aria');
-        speak(msg, msgDiv.querySelector('.speak-btn'));
-        triageCurrent = null;
-        return;
-    }
-
-    triageCurrent = triageQueue.shift();
-    const from = triageCurrent.from_email || "Inconnu";
-    const subject = triageCurrent.subject || "(Sans objet)";
-    const preview = triageCurrent.raw_body_preview || "";
-    const restant = triageQueue.length;
-
-    const msg = `De : ${from}\nSujet : ${subject}\n\n${preview.slice(0, 200)}\n\n— Que je fasse ? (${restant} restants)`;
-    const msgDiv = addMessage(msg, 'aria');
-    speak(msg, msgDiv.querySelector('.speak-btn'));
-    triageBar.classList.add('visible');
-}
-
-async function handleTriage(action) {
-    if (!triageCurrent) return;
-    triageBar.classList.remove('visible');
-    stopSpeech();
-
-    const messageId = triageCurrent.message_id;
-    const subject = triageCurrent.subject || "ce mail";
-
-    if (action === 'skip') {
-        const msgDiv = addMessage("Passé.", 'aria');
-        setTimeout(() => nextTriage(), 500);
-        return;
-    }
-
-    const actionMap = {
-        'archive': `Archive le mail ${messageId}`,
-        'delete': `Supprime (corbeille) le mail ${messageId}`,
-        'reply': `Prépare une réponse pour le mail ${messageId} - sujet : ${subject}`,
-    };
-
-    const loading = addLoading();
-    try {
-        const response = await fetch('/aria', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query: actionMap[action] })
-        });
-        const data = await response.json();
-        loading.remove();
-        const msgDiv = addMessage(data.answer, 'aria');
-        speak(data.answer, msgDiv.querySelector('.speak-btn'));
-    } catch (err) {
-        loading.remove();
-    }
-
-    setTimeout(() => nextTriage(), 3000);
-}
-
-// ─────────────────────────────
-// MICRO
-// ─────────────────────────────
-
-function toggleMic() {
-    if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-        alert('Utilisez Safari sur iPhone pour la dictée vocale.');
-        return;
-    }
-
-    if (isListening) {
-        recognition.stop();
-        return;
-    }
-
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    recognition = new SpeechRecognition();
-    recognition.lang = 'fr-FR';
-    recognition.continuous = false;
-    recognition.interimResults = false;
-
-    recognition.onstart = () => {
-        isListening = true;
-        micBtn.classList.add('listening');
-        micBtn.textContent = '⏹';
-    };
-
-    recognition.onresult = (e) => {
-        const transcript = e.results[0][0].transcript;
-        inputEl.value = transcript;
-        autoResize(inputEl);
-        sendMessage();
-    };
-
-    recognition.onend = () => {
-        isListening = false;
-        micBtn.classList.remove('listening');
-        micBtn.textContent = '🎤';
-    };
-
-    recognition.start();
+async function handleTriage(action){
+  if(!triageCurrent)return;triageBar.classList.remove('visible');stopSpeech();
+  if(action==='skip'){addMessage('Passé.','aria');setTimeout(()=>nextTriage(),500);return;}
+  const actionMap={'archive':'Archive le mail '+triageCurrent.message_id,'delete':'Supprime (corbeille) le mail '+triageCurrent.message_id,'reply':'Prépare une réponse pour le mail '+triageCurrent.message_id};
+  const loading=addLoading();
+  try{
+    const response=await fetch('/aria',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:actionMap[action]})});
+    const data=await response.json();loading.remove();const row=addMessage(data.answer,'aria');speak(data.answer,row.querySelector('.speak-btn'));
+  }catch{loading.remove();}
+  setTimeout(()=>nextTriage(),3000);
 }
 </script>
-
 </body>
 </html>
