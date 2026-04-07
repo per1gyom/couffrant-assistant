@@ -11,7 +11,7 @@ from pydantic import BaseModel
 from app.auth import build_msal_app
 from app.config import (
     GRAPH_SCOPES, REDIRECT_URI, SESSION_SECRET,
-    AUTHORITY, ANTHROPIC_MODEL_SMART
+    AUTHORITY, ANTHROPIC_MODEL_SMART, ANTHROPIC_MODEL_FAST
 )
 from app.graph_client import graph_get
 from app.ai_client import summarize_messages, analyze_single_mail_with_ai, client
@@ -22,7 +22,6 @@ from app.dashboard_service import get_dashboard
 from app.connectors.outlook_connector import perform_outlook_action
 from app.database import get_pg_conn, init_postgres
 
-# Import optionnel de memory_manager — le serveur démarre même si ce module a un problème
 try:
     from app.memory_manager import (
         get_hot_summary, rebuild_hot_summary,
@@ -140,35 +139,6 @@ def health():
 def init_db_now():
     init_postgres()
     return {"status": "tables créées"}
-
-
-@app.get("/debug-login")
-def debug_login():
-    try:
-        from app.config import CLIENT_ID, CLIENT_SECRET, AUTHORITY, REDIRECT_URI, GRAPH_SCOPES
-        info = {
-            "client_id_set": bool(CLIENT_ID),
-            "client_id_length": len(CLIENT_ID),
-            "client_secret_set": bool(CLIENT_SECRET),
-            "authority": AUTHORITY,
-            "redirect_uri": REDIRECT_URI,
-            "scopes": GRAPH_SCOPES,
-        }
-        try:
-            msal_app = build_msal_app()
-            auth_url = msal_app.get_authorization_request_url(
-                scopes=GRAPH_SCOPES,
-                redirect_uri=REDIRECT_URI,
-                state="/chat"
-            )
-            info["auth_url_ok"] = True
-            info["auth_url_preview"] = auth_url[:100]
-        except Exception as e:
-            info["auth_url_ok"] = False
-            info["auth_url_error"] = str(e)
-        return info
-    except Exception as e:
-        return {"error": str(e)}
 
 
 @app.get("/chat", response_class=HTMLResponse)
@@ -294,7 +264,7 @@ def aria(payload: AriaQuery):
 
     system = f"""Tu es Aria, l'assistante personnelle de Guillaume Perrin, dirigeant de Couffrant Solar.
 
-Guillaume dirige une PME de 8 personnes dans le photovoltaïque. Direct, efficace, déteste les réponses longues inutiles. Il tutoie Aria.
+Guillaume dirige une PME de 8 personnes dans le photovoltaïque. Direct, efficace, déteste les réponses longues inutiles. Il te tutoie. Tu parles au féminin.
 
 Profil Guillaume :
 {profile[:600] if profile else "Profil en cours de construction."}
@@ -309,6 +279,8 @@ Règles :
 - Réponds naturellement, sans structure imposée.
 - Si Guillaume dit "oui", "vas-y", "fais-le" → exécute la dernière action proposée.
 - Ne dis jamais "c'est fait" sans confirmation API réelle.
+- Tu es rigoureuse : quand on te demande les mails urgents, tu TOUS les signales sans en oublier.
+- Tu proposes toujours, Guillaume décide toujours — aucune action sans validation explicite.
 
 {"Accès complet Microsoft 365." if outlook_token else "Pas de connexion Microsoft."}
 
@@ -318,7 +290,7 @@ IDENTIFIANTS — CRITIQUE :
 - `mailbox_source` : "outlook" (actions OK) | "gmail_perso" (lecture seule)
 
 Actions Outlook :
-- [ACTION:DELETE:message_id] → corbeille récupérable
+- [ACTION:DELETE:message_id] → corbeille récupérable (jamais suppression définitive)
 - [ACTION:ARCHIVE:message_id]
 - [ACTION:READ:message_id]
 - [ACTION:REPLY:message_id:texte]
@@ -354,24 +326,24 @@ Consignes :
         for msg_id in re.findall(r'\[ACTION:DELETE:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
-                actions_confirmed.append("❌ ID invalide pour suppression")
+                actions_confirmed.append("\u274c ID invalide pour suppression")
                 continue
             try:
                 result = perform_outlook_action("delete_message", {"message_id": msg_id}, outlook_token)
-                actions_confirmed.append("✅ Mis à la corbeille" if result.get("status") == "ok" else f"❌ {result.get('message')}")
+                actions_confirmed.append("\u2705 Mis à la corbeille" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"❌ Erreur : {str(e)[:100]}")
+                actions_confirmed.append(f"\u274c Erreur : {str(e)[:100]}")
 
         for msg_id in re.findall(r'\[ACTION:ARCHIVE:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
-                actions_confirmed.append("❌ ID invalide pour archivage")
+                actions_confirmed.append("\u274c ID invalide pour archivage")
                 continue
             try:
                 result = perform_outlook_action("archive_message", {"message_id": msg_id}, outlook_token)
-                actions_confirmed.append("✅ Archivé" if result.get("status") == "ok" else f"❌ {result.get('message')}")
+                actions_confirmed.append("\u2705 Archivé" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"❌ Erreur archivage : {str(e)[:100]}")
+                actions_confirmed.append(f"\u274c Erreur archivage : {str(e)[:100]}")
 
         for msg_id in re.findall(r'\[ACTION:READ:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
@@ -379,15 +351,15 @@ Consignes :
                 continue
             try:
                 result = perform_outlook_action("mark_as_read", {"message_id": msg_id}, outlook_token)
-                actions_confirmed.append("✅ Marqué lu" if result.get("status") == "ok" else "❌ Erreur")
+                actions_confirmed.append("\u2705 Marqué lu" if result.get("status") == "ok" else "\u274c Erreur")
             except Exception as e:
-                actions_confirmed.append(f"❌ Erreur : {str(e)[:100]}")
+                actions_confirmed.append(f"\u274c Erreur : {str(e)[:100]}")
 
         for match in re.finditer(r'\[ACTION:REPLY:([^:\]]{20,}):(.+?)\]', aria_response, re.DOTALL):
             msg_id = match.group(1).strip()
             reply_text = match.group(2).strip()
             if not is_valid_outlook_id(msg_id):
-                actions_confirmed.append("❌ ID invalide pour réponse")
+                actions_confirmed.append("\u274c ID invalide pour réponse")
                 continue
             try:
                 result = perform_outlook_action("send_reply", {"message_id": msg_id, "reply_body": reply_text}, outlook_token)
@@ -396,21 +368,21 @@ Consignes :
                         learn_from_correction(original="", corrected=reply_text, context="réponse mail")
                     except Exception:
                         pass
-                actions_confirmed.append("✅ Réponse envoyée" if result.get("status") == "ok" else f"❌ {result.get('message')}")
+                actions_confirmed.append("\u2705 Réponse envoyée" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"❌ Erreur envoi : {str(e)[:100]}")
+                actions_confirmed.append(f"\u274c Erreur envoi : {str(e)[:100]}")
 
         for msg_id in re.findall(r'\[ACTION:READBODY:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
-                actions_confirmed.append("❌ ID invalide pour lecture corps")
+                actions_confirmed.append("\u274c ID invalide pour lecture corps")
                 continue
             try:
                 result = perform_outlook_action("get_message_body", {"message_id": msg_id}, outlook_token)
                 if result.get("status") == "ok":
-                    actions_confirmed.append(f"📧 Corps du mail :\n{result.get('body_text', '')[:800]}")
+                    actions_confirmed.append(f"\U0001f4e7 Corps du mail :\n{result.get('body_text', '')[:800]}")
             except Exception as e:
-                actions_confirmed.append(f"❌ Erreur lecture corps : {str(e)[:100]}")
+                actions_confirmed.append(f"\u274c Erreur lecture corps : {str(e)[:100]}")
 
         for match in re.finditer(r'\[ACTION:CREATEEVENT:([^\]]+)\]', aria_response):
             parts = match.group(1).split('|')
@@ -420,16 +392,16 @@ Consignes :
                     result = perform_outlook_action("create_calendar_event", {
                         "subject": parts[0], "start": parts[1], "end": parts[2], "attendees": attendees
                     }, outlook_token)
-                    actions_confirmed.append("✅ RDV créé" if result.get("status") == "ok" else "❌ Création RDV échouée")
+                    actions_confirmed.append("\u2705 RDV créé" if result.get("status") == "ok" else "\u274c Création RDV échouée")
                 except Exception as e:
-                    actions_confirmed.append(f"❌ Erreur agenda : {str(e)[:100]}")
+                    actions_confirmed.append(f"\u274c Erreur agenda : {str(e)[:100]}")
 
         for title in re.findall(r'\[ACTION:CREATE_TASK:([^\]]+)\]', aria_response):
             try:
                 result = perform_outlook_action("create_todo_task", {"title": title.strip()}, outlook_token)
-                actions_confirmed.append("✅ Tâche créée" if result.get("status") == "ok" else "❌ Tâche échouée")
+                actions_confirmed.append("\u2705 Tâche créée" if result.get("status") == "ok" else "\u274c Tâche échouée")
             except Exception as e:
-                actions_confirmed.append(f"❌ Erreur tâche : {str(e)[:100]}")
+                actions_confirmed.append(f"\u274c Erreur tâche : {str(e)[:100]}")
 
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]+\]', '', aria_response).strip()
     if actions_confirmed:
@@ -453,20 +425,20 @@ def build_memory():
         return {"error": "Module mémoire non disponible", "memory_module": False}
     try:
         summary = rebuild_hot_summary()
-        results["hot_summary"] = "✅ Résumé chaud reconstruit"
+        results["hot_summary"] = "\u2705 Résumé chaud reconstruit"
         results["preview"] = summary[:200]
     except Exception as e:
-        results["hot_summary"] = f"❌ {str(e)[:100]}"
+        results["hot_summary"] = f"\u274c {str(e)[:100]}"
     try:
         count = rebuild_contacts()
-        results["contacts"] = f"✅ {count} fiches contacts"
+        results["contacts"] = f"\u2705 {count} fiches contacts"
     except Exception as e:
-        results["contacts"] = f"❌ {str(e)[:100]}"
+        results["contacts"] = f"\u274c {str(e)[:100]}"
     try:
         added = load_sent_mails_to_style(limit=50)
-        results["style"] = f"✅ {added} exemples de style"
+        results["style"] = f"\u2705 {added} exemples de style"
     except Exception as e:
-        results["style"] = f"❌ {str(e)[:100]}"
+        results["style"] = f"\u274c {str(e)[:100]}"
     return results
 
 
@@ -504,6 +476,101 @@ def memory_status():
     }
 
 
+@app.get("/analyze-raw-mails")
+def analyze_raw_mails(limit: int = 50):
+    """Analyse les mails bruts avec Claude — à appeler plusieurs fois jusqu'à épuisement."""
+    conn = get_pg_conn()
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, message_id, from_email, subject, raw_body_preview, received_at
+        FROM mail_memory
+        WHERE analysis_status IN ('inbox_raw', 'archive_raw', 'gmail_raw')
+        ORDER BY received_at DESC NULLS LAST
+        LIMIT %s
+    """, (limit,))
+    rows = c.fetchall()
+    conn.close()
+
+    if not rows:
+        return {"status": "termine", "analyzed": 0, "message": "Tous les mails sont déjà analysés."}
+
+    instructions = get_global_instructions()
+    analyzed = 0
+    errors = 0
+
+    for row in rows:
+        db_id, message_id, from_email, subject, body_preview, received_at = row
+        msg = {
+            "id": message_id,
+            "subject": subject,
+            "from": {"emailAddress": {"address": from_email or ""}},
+            "receivedDateTime": str(received_at) if received_at else "",
+            "bodyPreview": body_preview or "",
+        }
+        try:
+            item = analyze_single_mail_with_ai(msg, instructions)
+            conn = get_pg_conn()
+            c = conn.cursor()
+            c.execute("""
+                UPDATE mail_memory SET
+                    display_title = %s,
+                    category = %s,
+                    priority = %s,
+                    reason = %s,
+                    suggested_action = %s,
+                    short_summary = %s,
+                    confidence = %s,
+                    confidence_level = %s,
+                    needs_review = %s,
+                    needs_reply = %s,
+                    reply_urgency = %s,
+                    reply_reason = %s,
+                    response_type = %s,
+                    suggested_reply_subject = %s,
+                    suggested_reply = %s,
+                    analysis_status = 'done_ai'
+                WHERE id = %s
+            """, (
+                item.get("display_title"),
+                item.get("category"),
+                item.get("priority"),
+                item.get("reason"),
+                item.get("suggested_action"),
+                item.get("short_summary"),
+                item.get("confidence", 0.5),
+                item.get("confidence_level", "moyenne"),
+                int(item.get("needs_review", False)),
+                int(item.get("needs_reply", False)),
+                item.get("reply_urgency"),
+                item.get("reply_reason"),
+                item.get("response_type"),
+                item.get("suggested_reply_subject"),
+                item.get("suggested_reply"),
+                db_id,
+            ))
+            conn.commit()
+            conn.close()
+            analyzed += 1
+        except Exception as e:
+            print(f"[AnalyzeRaw] Erreur mail {db_id}: {e}")
+            errors += 1
+            continue
+
+    conn = get_pg_conn()
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM mail_memory WHERE analysis_status IN ('inbox_raw', 'archive_raw', 'gmail_raw')")
+    remaining = c.fetchone()[0]
+    conn.close()
+
+    return {
+        "status": "ok",
+        "analyzed": analyzed,
+        "errors": errors,
+        "remaining": remaining,
+        "message": f"{analyzed} mails analysés. Il reste {remaining} mails bruts."
+    }
+
+
 @app.get("/contacts")
 def list_contacts_endpoint():
     return get_all_contact_cards()
@@ -528,38 +595,32 @@ def learn_style(payload: dict = Body(...)):
 
 @app.get("/login")
 def login(request: Request, next: str = "/chat"):
-    try:
-        msal_app = build_msal_app()
-        auth_url = msal_app.get_authorization_request_url(scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI, state=next)
-        return RedirectResponse(auth_url)
-    except Exception as e:
-        return HTMLResponse(f"<pre>Erreur login: {str(e)}\nREDIRECT_URI={REDIRECT_URI}\nAUTHORITY={AUTHORITY}</pre>", status_code=500)
+    msal_app = build_msal_app()
+    auth_url = msal_app.get_authorization_request_url(scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI, state=next)
+    return RedirectResponse(auth_url)
 
 
 @app.get("/auth/callback")
 def auth_callback(request: Request, code: str | None = None, state: str | None = None):
     if not code:
         return HTMLResponse("Code manquant", status_code=400)
-    try:
-        msal_app = build_msal_app()
-        result = msal_app.acquire_token_by_authorization_code(code, scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI)
-        if "access_token" not in result:
-            return HTMLResponse(str(result), status_code=400)
-        request.session["access_token"] = result["access_token"]
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("""
-            INSERT INTO oauth_tokens (provider, access_token, refresh_token, expires_at)
-            VALUES (%s, %s, %s, NOW() + INTERVAL '1 hour')
-            ON CONFLICT (provider) DO UPDATE SET
-                access_token = EXCLUDED.access_token, refresh_token = EXCLUDED.refresh_token,
-                expires_at = EXCLUDED.expires_at, updated_at = NOW()
-        """, ("microsoft", result["access_token"], result.get("refresh_token", "")))
-        conn.commit()
-        conn.close()
-        return RedirectResponse(state or "/chat")
-    except Exception as e:
-        return HTMLResponse(f"<pre>Erreur auth_callback: {str(e)}</pre>", status_code=500)
+    msal_app = build_msal_app()
+    result = msal_app.acquire_token_by_authorization_code(code, scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI)
+    if "access_token" not in result:
+        return HTMLResponse("Erreur d'authentification", status_code=400)
+    request.session["access_token"] = result["access_token"]
+    conn = get_pg_conn()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO oauth_tokens (provider, access_token, refresh_token, expires_at)
+        VALUES (%s, %s, %s, NOW() + INTERVAL '1 hour')
+        ON CONFLICT (provider) DO UPDATE SET
+            access_token = EXCLUDED.access_token, refresh_token = EXCLUDED.refresh_token,
+            expires_at = EXCLUDED.expires_at, updated_at = NOW()
+    """, ("microsoft", result["access_token"], result.get("refresh_token", "")))
+    conn.commit()
+    conn.close()
+    return RedirectResponse(state or "/chat")
 
 
 # ─── TRIAGE ───
@@ -872,7 +933,6 @@ def ingest_gmail(request: Request):
 @app.get("/learn-gmail-all")
 def learn_gmail_all(request: Request, max_results: int = 100, page_token: str = None):
     from app.connectors.gmail_connector import gmail_get_message, refresh_gmail_token
-    from app.config import ANTHROPIC_MODEL_FAST
     conn = get_pg_conn()
     c = conn.cursor()
     c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
