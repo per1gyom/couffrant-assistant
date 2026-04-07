@@ -4,6 +4,9 @@ GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 
 ARCHIVE_FOLDER_ID = "AQMkAGEwZmJhNTllLWQ3MjUtNDg4ADQtYjdhMi1jMGEyZjRiNmFkNWEALgAAA-6yBmE1L7hGi--BXSl5S2sBAIyf8uOKE0VAkKv1dN8K6xgAAAIBRQAAAA=="
 
+# Dossier OneDrive autorisé — Aria ne peut pas sortir de ce périmètre
+ONEDRIVE_ARIA_ROOT = "1_photovoltaïque"
+
 SIGNATURE_HTML = """
 <div style="font-family:Arial, sans-serif; font-size:13px; color:#222; margin-top:20px; border-top:1px solid #e0e0e0; padding-top:12px;">
     <div style="margin-bottom:2px;">Solairement,</div>
@@ -80,8 +83,197 @@ def _build_email_html(body: str) -> str:
 </div>"""
 
 
+def _safe_drive_path(path: str) -> str:
+    """
+    Sécurise le chemin OneDrive — force le préfixe 1_photovoltaïque.
+    Empêche toute sortie du dossier autorisé (pas de ../ etc.)
+    """
+    # Normalise les séparateurs et supprime les tentatives de remontée
+    path = path.replace("\\", "/").strip("/")
+    # Retire tout préfixe déjà présent pour éviter la duplication
+    if path.startswith(ONEDRIVE_ARIA_ROOT):
+        path = path[len(ONEDRIVE_ARIA_ROOT):].strip("/")
+    # Bloque les remontées de répertoire
+    parts = [p for p in path.split("/") if p and p != ".."]
+    if parts:
+        return f"{ONEDRIVE_ARIA_ROOT}/{'/'.join(parts)}"
+    return ONEDRIVE_ARIA_ROOT
+
+
+# ─────────────────────────────────────────
+# ONEDRIVE — ACTIONS RESTREINTES
+# ─────────────────────────────────────────
+
+def list_aria_drive(token: str, subfolder: str = "") -> dict:
+    """Liste les fichiers dans 1_photovoltaïque (ou un sous-dossier)."""
+    try:
+        full_path = _safe_drive_path(subfolder) if subfolder else ONEDRIVE_ARIA_ROOT
+        endpoint = f"/me/drive/root:/{full_path}:/children"
+        data = _graph_get(token, endpoint, params={
+            "$top": 100,
+            "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl",
+            "$orderby": "name"
+        })
+        items = []
+        for f in data.get("value", []):
+            item_type = "📁 dossier" if "folder" in f else "📄 fichier"
+            ext = f.get("name", "").rsplit(".", 1)[-1].lower() if "." in f.get("name", "") else ""
+            items.append({
+                "nom": f.get("name"),
+                "type": item_type,
+                "extension": ext,
+                "taille_ko": round(f.get("size", 0) / 1024, 1) if f.get("size") else 0,
+                "modifié": f.get("lastModifiedDateTime", "")[:10],
+                "lien": f.get("webUrl", ""),
+                "id": f.get("id"),
+            })
+        return {
+            "status": "ok",
+            "dossier": full_path,
+            "count": len(items),
+            "items": items
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Impossible de lister le dossier : {str(e)[:200]}"}
+
+
+def read_aria_drive_file(token: str, file_path: str) -> dict:
+    """
+    Lit le contenu d'un fichier dans 1_photovoltaïque.
+    Texte brut pour .txt/.md/.csv/.json
+    Aperçu + lien pour les autres types (.docx, .xlsx, .pdf, images…)
+    """
+    try:
+        full_path = _safe_drive_path(file_path)
+        # Récupère les métadonnées du fichier
+        meta = _graph_get(token, f"/me/drive/root:/{full_path}")
+        name = meta.get("name", "")
+        size = meta.get("size", 0)
+        web_url = meta.get("webUrl", "")
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+
+        # Types lisibles directement en texte
+        text_types = {"txt", "md", "csv", "json", "xml", "log", "py", "js", "html", "htm", "css"}
+        if ext in text_types:
+            content_resp = requests.get(
+                f"{GRAPH_BASE_URL}/me/drive/root:/{full_path}:/content",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=30,
+            )
+            content_resp.raise_for_status()
+            text = content_resp.text[:5000]  # limite à 5000 chars
+            return {
+                "status": "ok",
+                "fichier": name,
+                "chemin": full_path,
+                "type": "texte",
+                "contenu": text,
+                "lien": web_url,
+            }
+
+        # Pour Word (.docx) — tente la conversion en texte via Graph
+        if ext in {"docx", "doc"}:
+            try:
+                content_resp = requests.get(
+                    f"{GRAPH_BASE_URL}/me/drive/root:/{full_path}:/content?format=pdf",
+                    headers={"Authorization": f"Bearer {token}"},
+                    timeout=30,
+                    allow_redirects=True,
+                )
+                # Retourne juste le lien — le contenu Word nécessite un viewer
+                return {
+                    "status": "ok",
+                    "fichier": name,
+                    "chemin": full_path,
+                    "type": "word",
+                    "message": f"Document Word ({round(size/1024, 1)} Ko). Ouvrir dans OneDrive pour lire.",
+                    "lien": web_url,
+                    "conseil": "Joins ce fichier via 📎 dans Aria pour que je l'analyse directement."
+                }
+            except Exception:
+                pass
+
+        # Pour Excel (.xlsx)
+        if ext in {"xlsx", "xls"}:
+            try:
+                # Tente de lire via la preview
+                preview = _graph_get(token, f"/me/drive/root:/{full_path}:/workbook/worksheets")
+                sheets = [s.get("name") for s in preview.get("value", [])]
+                return {
+                    "status": "ok",
+                    "fichier": name,
+                    "chemin": full_path,
+                    "type": "excel",
+                    "feuilles": sheets,
+                    "message": f"Classeur Excel avec {len(sheets)} feuille(s) : {', '.join(sheets)}",
+                    "lien": web_url,
+                    "conseil": "Joins ce fichier via 📎 dans Aria pour que je l'analyse directement."
+                }
+            except Exception:
+                pass
+
+        # Pour tous les autres types (PDF, images, etc.)
+        return {
+            "status": "ok",
+            "fichier": name,
+            "chemin": full_path,
+            "type": ext or "inconnu",
+            "taille_ko": round(size / 1024, 1),
+            "lien": web_url,
+            "message": f"Fichier {ext.upper()} ({round(size/1024, 1)} Ko). Pour l'analyser : joins-le via 📎.",
+            "conseil": "Utilise le bouton 📎 dans le chat pour joindre ce fichier directement."
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": f"Impossible de lire le fichier : {str(e)[:200]}"}
+
+
+def search_aria_drive(token: str, query: str) -> dict:
+    """Recherche des fichiers dans 1_photovoltaïque par nom."""
+    try:
+        # Recherche dans tout le drive puis filtre sur le dossier
+        data = _graph_get(
+            token,
+            f"/me/drive/root:/{ONEDRIVE_ARIA_ROOT}:/search(q='{query.replace(chr(39), chr(39)+chr(39))}')",
+            params={"$top": 20, "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl,parentReference"}
+        )
+        items = []
+        for f in data.get("value", []):
+            parent_path = f.get("parentReference", {}).get("path", "")
+            items.append({
+                "nom": f.get("name"),
+                "type": "📁 dossier" if "folder" in f else "📄 fichier",
+                "chemin": parent_path.split("root:")[-1] + "/" + f.get("name", "") if "root:" in parent_path else f.get("name"),
+                "modifié": f.get("lastModifiedDateTime", "")[:10],
+                "lien": f.get("webUrl", ""),
+            })
+        return {
+            "status": "ok",
+            "recherche": query,
+            "count": len(items),
+            "items": items
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Recherche impossible : {str(e)[:200]}"}
+
+
+# ─────────────────────────────────────────
+# DISPATCHER PRINCIPAL
+# ─────────────────────────────────────────
+
 def perform_outlook_action(action: str, params: dict, token: str) -> dict:
 
+    # ── OneDrive Aria (restreint à 1_photovoltaïque) ──
+    if action == "list_aria_drive":
+        return list_aria_drive(token, params.get("subfolder", ""))
+
+    if action == "read_aria_drive_file":
+        return read_aria_drive_file(token, params.get("file_path", ""))
+
+    if action == "search_aria_drive":
+        return search_aria_drive(token, params.get("query", ""))
+
+    # ── Mails ──
     if action == "list_unread_messages":
         top = params.get("top", 10)
         data = _graph_get(
@@ -136,7 +328,6 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         return {"status": "ok", "action": action, "new_message_id": moved.get("id"), "message": "Mail déplacé."}
 
     if action == "delete_message":
-        # Déplace vers la corbeille Outlook (toujours récupérable — jamais définitif)
         message_id = params["message_id"]
         try:
             moved = _graph_post(token, f"/me/messages/{message_id}/move", {"destinationId": "deleteditems"})
@@ -145,10 +336,8 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
             return {"status": "error", "action": action, "message": f"Échec : {str(e)}"}
 
     if action == "delete_message_permanent":
-        # Désactivé par sécurité — Aria ne supprime jamais définitivement
         return {
-            "status": "error",
-            "action": action,
+            "status": "error", "action": action,
             "message": "Suppression définitive désactivée. Utilisez delete_message pour mettre à la corbeille (récupérable)."
         }
 
@@ -191,6 +380,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         except Exception as e:
             return {"status": "error", "action": action, "message": f"Échec envoi : {str(e)}"}
 
+    # ── Calendrier ──
     if action == "list_calendar_events":
         from datetime import datetime, timezone, timedelta
         start = params.get("start", datetime.now(timezone.utc).isoformat())
@@ -233,6 +423,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         success = _graph_delete(token, f"/me/events/{event_id}")
         return {"status": "ok" if success else "error", "message": "RDV supprimé." if success else "Échec."}
 
+    # ── Teams ──
     if action == "list_teams_chats":
         data = _graph_get(token, "/me/chats", params={"$expand": "members", "$top": 20})
         return {"status": "ok", "action": action, "items": data.get("value", [])}
@@ -260,42 +451,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         })
         return {"status": "ok", "action": action, "items": data.get("value", [])}
 
-    if action == "list_onedrive_files":
-        path = params.get("path", "root")
-        endpoint = "/me/drive/root/children" if path == "root" else f"/me/drive/root:/{path}:/children"
-        data = _graph_get(token, endpoint, params={"$top": 50})
-        return {"status": "ok", "action": action, "items": [
-            {"name": f.get("name"), "id": f.get("id"), "size": f.get("size"),
-             "type": "folder" if "folder" in f else "file",
-             "modified": f.get("lastModifiedDateTime"), "webUrl": f.get("webUrl")}
-            for f in data.get("value", [])
-        ]}
-
-    if action == "move_onedrive_file":
-        file_id = params["file_id"]
-        body = {"parentReference": {"id": params["new_parent_id"]}}
-        if params.get("new_name"): body["name"] = params["new_name"]
-        try:
-            _graph_patch(token, f"/me/drive/items/{file_id}", body)
-            return {"status": "ok", "action": action, "message": "Fichier déplacé."}
-        except Exception as e:
-            return {"status": "error", "action": action, "message": f"Échec : {str(e)}"}
-
-    if action == "create_onedrive_folder":
-        parent_path = params.get("parent_path", "root")
-        folder_name = params["folder_name"]
-        endpoint = "/me/drive/root/children" if parent_path == "root" else f"/me/drive/root:/{parent_path}:/children"
-        try:
-            _graph_post(token, endpoint, {"name": folder_name, "folder": {}, "@microsoft.graph.conflictBehavior": "rename"})
-            return {"status": "ok", "action": action, "message": f"Dossier '{folder_name}' créé."}
-        except Exception as e:
-            return {"status": "error", "action": action, "message": f"Échec : {str(e)}"}
-
-    if action == "delete_onedrive_file":
-        file_id = params["file_id"]
-        success = _graph_delete(token, f"/me/drive/items/{file_id}")
-        return {"status": "ok" if success else "error", "message": "Fichier supprimé." if success else "Échec."}
-
+    # ── Contacts ──
     if action == "list_contacts":
         data = _graph_get(token, "/me/contacts", params={"$top": 50, "$select": "displayName,emailAddresses,mobilePhone,businessPhones,companyName,jobTitle"})
         return {"status": "ok", "action": action, "items": data.get("value", [])}
@@ -310,6 +466,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         })
         return {"status": "ok", "action": action, "items": data.get("value", [])}
 
+    # ── Tâches ──
     if action == "list_todo_tasks":
         lists_data = _graph_get(token, "/me/todo/lists")
         all_tasks = []
