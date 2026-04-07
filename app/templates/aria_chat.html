@@ -20,6 +20,8 @@
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
   .header-title { font-weight: 600; font-size: 16px; }
   .header-sub { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+  #autoSpeakBtn { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: 8px; padding: 4px 10px; font-size: 13px; cursor: pointer; transition: all 0.15s; }
+  #autoSpeakBtn.active { border-color: var(--accent); color: var(--accent); }
   .quick-actions { display: flex; gap: 8px; padding: 10px 20px; overflow-x: auto; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; scrollbar-width: none; }
   .quick-actions::-webkit-scrollbar { display: none; }
   .quick-btn { flex-shrink: 0; background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); border-radius: 20px; padding: 5px 14px; font-size: 13px; cursor: pointer; white-space: nowrap; transition: all 0.15s; }
@@ -51,6 +53,10 @@
   .triage-delete { background: #3a1e1e; color: #f87171; }
   .triage-reply { background: #1e2a3a; color: #60a5fa; }
   .input-zone { padding: 16px 20px 20px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
+  .attachment-preview { display: none; align-items: center; gap: 8px; margin-bottom: 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 6px 12px; font-size: 13px; color: var(--text-muted); }
+  .attachment-preview.visible { display: flex; }
+  .attachment-preview span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .attachment-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; padding: 0 2px; }
   .input-wrapper { display: flex; align-items: flex-end; gap: 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 16px; padding: 8px 8px 8px 16px; transition: border-color 0.15s; }
   .input-wrapper:focus-within { border-color: var(--accent); }
   .input-wrapper.mic-active { border-color: var(--danger); }
@@ -59,6 +65,9 @@
   textarea#input.interim { color: #888; font-style: italic; }
   .input-btns { display: flex; gap: 6px; align-items: flex-end; padding-bottom: 2px; }
   .icon-btn { width: 36px; height: 36px; border-radius: 10px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; transition: all 0.15s; flex-shrink: 0; }
+  #attachBtn { background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); }
+  #attachBtn:hover { border-color: var(--accent); color: var(--text); }
+  #attachBtn.has-file { border-color: var(--success); color: var(--success); }
   #micBtn { background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); }
   #micBtn:hover { border-color: var(--accent); color: var(--text); }
   #micBtn.listening { background: var(--danger); color: white; border-color: var(--danger); animation: micpulse 1s infinite; }
@@ -74,6 +83,8 @@
   .welcome-icon { font-size: 40px; margin-bottom: 16px; }
   .welcome h2 { font-size: 20px; font-weight: 600; color: var(--text); margin-bottom: 8px; }
   .welcome p { font-size: 14px; max-width: 400px; margin: 0 auto; }
+  #fileInput { display: none; }
+  .attached-image { max-width: 200px; max-height: 150px; border-radius: 8px; margin-top: 6px; display: block; border: 1px solid var(--border); }
 </style>
 </head>
 <body>
@@ -82,6 +93,7 @@
     <div class="header-dot"></div>
     <div class="header-title">Aria</div>
     <div class="header-sub">Couffrant Solar</div>
+    <button id="autoSpeakBtn" onclick="toggleAutoSpeak()" title="Lecture automatique">🔊 Auto</button>
   </div>
   <div class="quick-actions">
     <button class="quick-btn" onclick="quickAsk('Quels sont mes mails urgents ?')">📬 Mails urgents</button>
@@ -105,14 +117,20 @@
     <button class="triage-action triage-reply" onclick="handleTriage('reply')">✉️ Répondre</button>
   </div>
   <div class="input-zone">
+    <div class="attachment-preview" id="attachmentPreview">
+      <span id="attachmentName">Aucun fichier</span>
+      <button class="attachment-remove" onclick="removeAttachment()" title="Supprimer">✕</button>
+    </div>
     <div class="input-wrapper" id="inputWrapper">
       <textarea id="input" placeholder="Envoie un message à Aria…" rows="1" oninput="autoResize(this)" onkeydown="handleKey(event)"></textarea>
       <div class="input-btns">
+        <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="Joindre un fichier">📎</button>
         <button class="icon-btn" id="micBtn" onclick="toggleMic()" title="Dicter">🎤</button>
         <button class="icon-btn" id="sendBtn" onclick="sendMessage()">➤</button>
       </div>
     </div>
     <div class="mic-status" id="micStatus">🎙 En écoute… parle, je t'entends</div>
+    <input type="file" id="fileInput" accept="image/*,.pdf" onchange="handleFileSelect(event)">
   </div>
 </div>
 <button id="stopBtn" onclick="stopSpeech()">⏹ Arrêter</button>
@@ -125,9 +143,51 @@ const stopBtn=document.getElementById('stopBtn');
 const triageBar=document.getElementById('triageBar');
 const micStatus=document.getElementById('micStatus');
 const inputWrapper=document.getElementById('inputWrapper');
+const attachBtn=document.getElementById('attachBtn');
+const attachmentPreview=document.getElementById('attachmentPreview');
+const attachmentName=document.getElementById('attachmentName');
+
 let isListening=false,currentAudio=null,speakAborted=false,currentSpeakBtn=null;
 let triageQueue=[],triageCurrent=null,silenceTimer=null;
-let interimText='', finalTextBase='';
+let finalTextBase='';
+// Lecture automatique — ON par défaut
+let autoSpeak = true;
+// Pièce jointe courante
+let currentFile = null; // { data: base64string, type: mimeType, name: fileName }
+
+// ─── TOGGLE AUTO-SPEAK ───
+function toggleAutoSpeak(){
+  autoSpeak=!autoSpeak;
+  const btn=document.getElementById('autoSpeakBtn');
+  if(autoSpeak){btn.classList.add('active');btn.textContent='🔊 Auto';}
+  else{btn.classList.remove('active');btn.textContent='🔇 Muet';}
+}
+// Init : bouton actif au démarrage
+document.getElementById('autoSpeakBtn').classList.add('active');
+
+// ─── PIÈCE JOINTE ───
+function handleFileSelect(e){
+  const file=e.target.files[0];
+  if(!file)return;
+  const maxMB=10;
+  if(file.size>maxMB*1024*1024){alert(`Fichier trop volumineux (max ${maxMB} Mo).`);return;}
+  const reader=new FileReader();
+  reader.onload=(ev)=>{
+    const b64=ev.target.result.split(',')[1]; // strip data:...;base64,
+    currentFile={data:b64,type:file.type,name:file.name};
+    attachmentName.textContent='📎 '+file.name;
+    attachmentPreview.classList.add('visible');
+    attachBtn.classList.add('has-file');
+  };
+  reader.readAsDataURL(file);
+  // Reset input pour permettre de resélectionner le même fichier
+  e.target.value='';
+}
+function removeAttachment(){
+  currentFile=null;
+  attachmentPreview.classList.remove('visible');
+  attachBtn.classList.remove('has-file');
+}
 
 // ─── TTS ───
 function speak(text,btn){
@@ -164,12 +224,23 @@ function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMe
 function scrollToBottom(){messagesEl.scrollTop=messagesEl.scrollHeight;}
 
 // ─── MESSAGES ───
-function addMessage(text,type){
+function addMessage(text,type,fileInfo){
   const welcome=messagesEl.querySelector('.welcome');if(welcome)welcome.remove();
   const row=document.createElement('div');row.className='message-row '+type;
   const avatar=document.createElement('div');avatar.className='avatar '+type+'-avatar';
   avatar.textContent=type==='aria'?'✦':'G';
   const bubble=document.createElement('div');bubble.className='bubble';
+  // Aperçu image si pièce jointe utilisateur
+  if(fileInfo&&fileInfo.type.startsWith('image/')){
+    const img=document.createElement('img');img.className='attached-image';
+    img.src='data:'+fileInfo.type+';base64,'+fileInfo.data;
+    bubble.appendChild(img);
+  } else if(fileInfo){
+    const badge=document.createElement('div');
+    badge.style='font-size:12px;color:var(--text-muted);margin-bottom:4px;';
+    badge.textContent='📎 '+fileInfo.name;
+    bubble.appendChild(badge);
+  }
   const content=document.createElement('div');content.style.whiteSpace='pre-wrap';
   content.textContent=type==='aria'?cleanText(text):text;bubble.appendChild(content);
   if(type==='aria'){
@@ -188,14 +259,21 @@ function addLoading(){
   row.appendChild(avatar);row.appendChild(bubble);messagesEl.appendChild(row);scrollToBottom();return row;
 }
 async function sendMessage(){
-  const text=inputEl.value.trim();if(!text)return;
+  const text=inputEl.value.trim();if(!text&&!currentFile)return;
+  const fileSnapshot=currentFile?{...currentFile}:null;
   inputEl.value='';inputEl.style.height='auto';inputEl.classList.remove('interim');
+  removeAttachment();
   sendBtn.disabled=true;stopSpeech();
-  addMessage(text,'user');const loading=addLoading();
+  addMessage(text||'[Fichier joint]','user',fileSnapshot);
+  const loading=addLoading();
   try{
-    const response=await fetch('/aria',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:text})});
+    const body={query:text||(fileSnapshot?'Analyse ce fichier.':'')};
+    if(fileSnapshot){body.file_data=fileSnapshot.data;body.file_type=fileSnapshot.type;body.file_name=fileSnapshot.name;}
+    const response=await fetch('/aria',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const data=await response.json();loading.remove();
-    const msgRow=addMessage(data.answer,'aria');speak(data.answer,msgRow.querySelector('.speak-btn'));
+    const msgRow=addMessage(data.answer,'aria');
+    // Lecture auto seulement si activée
+    if(autoSpeak){speak(data.answer,msgRow.querySelector('.speak-btn'));}
   }catch{loading.remove();addMessage('Erreur de connexion à Aria. Réessayez.','aria');}
   sendBtn.disabled=false;
 }
@@ -204,116 +282,50 @@ function quickAsk(text){inputEl.value=text;sendMessage();}
 // ─── MICRO — version robuste ───
 function toggleMic(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){
-    alert('Reconnaissance vocale non supportée sur ce navigateur.\nUtilisez Chrome ou Edge.');
-    return;
-  }
+  if(!SR){alert('Reconnaissance vocale non supportée sur ce navigateur.\nUtilisez Chrome ou Edge.');return;}
   if(isListening){stopListening();}else{startListening();}
 }
-
 function startListening(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
   if(!SR)return;
-
-  // Réinitialise les textes
   finalTextBase=inputEl.value;
-  interimText='';
-
   const rec=new SR();
-  rec.lang='fr-FR';
-  rec.continuous=false;      // false = plus fiable cross-browser
-  rec.interimResults=true;
-  rec.maxAlternatives=1;
-
+  rec.lang='fr-FR';rec.continuous=false;rec.interimResults=true;rec.maxAlternatives=1;
   rec.onstart=()=>{
-    isListening=true;
-    micBtn.classList.add('listening');
-    micBtn.textContent='⏹';
-    micStatus.classList.add('visible');
-    inputWrapper.classList.add('mic-active');
+    isListening=true;micBtn.classList.add('listening');micBtn.textContent='⏹';
+    micStatus.classList.add('visible');inputWrapper.classList.add('mic-active');
   };
-
   rec.onresult=(e)=>{
-    clearSilenceTimer();
-    let interim='';
-    let final='';
+    clearSilenceTimer();let interim='',final='';
     for(let i=e.resultIndex;i<e.results.length;i++){
-      if(e.results[i].isFinal){
-        final+=e.results[i][0].transcript+' ';
-      }else{
-        interim+=e.results[i][0].transcript;
-      }
+      if(e.results[i].isFinal){final+=e.results[i][0].transcript+' ';}
+      else{interim+=e.results[i][0].transcript;}
     }
-    if(interim){
-      // Affiche en italique grisé dans le champ
-      inputEl.value=(finalTextBase+' '+interim).trim();
-      inputEl.classList.add('interim');
-      autoResize(inputEl);
-    }
-    if(final){
-      finalTextBase=(finalTextBase+' '+final).trim();
-      inputEl.value=finalTextBase;
-      inputEl.classList.remove('interim');
-      autoResize(inputEl);
-    }
+    if(interim){inputEl.value=(finalTextBase+' '+interim).trim();inputEl.classList.add('interim');autoResize(inputEl);}
+    if(final){finalTextBase=(finalTextBase+' '+final).trim();inputEl.value=finalTextBase;inputEl.classList.remove('interim');autoResize(inputEl);}
     resetSilenceTimer();
   };
-
   rec.onerror=(e)=>{
-    console.error('[Mic] Erreur:', e.error);
+    console.error('[Mic] Erreur:',e.error);
     if(e.error==='not-allowed'||e.error==='permission-denied'){
-      alert('Microphone bloqué.\nCliquez sur l\'icône 🔒 dans la barre d\'adresse et autorisez le microphone.');
-    } else if(e.error==='no-speech'){
-      // Silence détecté — on relance si toujours en écoute
-    } else if(e.error==='network'){
-      alert('Erreur réseau pour la reconnaissance vocale.');
-      stopListening();
-    }
+      alert('Microphone bloqué.\nCliquez sur 🔒 dans la barre d\'adresse et autorisez le microphone.');
+    } else if(e.error==='network'){alert('Erreur réseau pour la reconnaissance vocale.');stopListening();}
   };
-
   rec.onend=()=>{
-    if(isListening){
-      // Crée une NOUVELLE instance pour relancer (on ne peut pas réutiliser la même)
-      setTimeout(()=>{
-        if(isListening)startListening();
-      },100);
-    }else{
-      cleanupMicUI();
-    }
+    if(isListening){setTimeout(()=>{if(isListening)startListening();},100);}
+    else{cleanupMicUI();}
   };
-
-  try{
-    rec.start();
-    resetSilenceTimer();
-  }catch(e){
-    console.error('[Mic] Impossible de démarrer:', e);
-    stopListening();
-  }
+  try{rec.start();resetSilenceTimer();}catch(e){console.error('[Mic]',e);stopListening();}
 }
-
-function resetSilenceTimer(){
-  clearSilenceTimer();
-  silenceTimer=setTimeout(()=>{
-    if(isListening)stopListening();
-  },3000);
-}
-function clearSilenceTimer(){
-  if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;}
-}
+function resetSilenceTimer(){clearSilenceTimer();silenceTimer=setTimeout(()=>{if(isListening)stopListening();},3000);}
+function clearSilenceTimer(){if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;}}
 function stopListening(){
-  isListening=false;
-  clearSilenceTimer();
-  cleanupMicUI();
-  // Nettoie le texte interim si présent
-  inputEl.classList.remove('interim');
-  if(inputEl.value)autoResize(inputEl);
-  inputEl.focus();
+  isListening=false;clearSilenceTimer();cleanupMicUI();
+  inputEl.classList.remove('interim');if(inputEl.value)autoResize(inputEl);inputEl.focus();
 }
 function cleanupMicUI(){
-  micBtn.classList.remove('listening');
-  micBtn.textContent='🎤';
-  micStatus.classList.remove('visible');
-  inputWrapper.classList.remove('mic-active');
+  micBtn.classList.remove('listening');micBtn.textContent='🎤';
+  micStatus.classList.remove('visible');inputWrapper.classList.remove('mic-active');
 }
 
 // ─── TRIAGE ───
@@ -322,36 +334,31 @@ async function startTriage(){
   const loading=addLoading();
   const response=await fetch('/triage-queue');const data=await response.json();loading.remove();
   triageQueue=data.mails||[];
-  if(triageQueue.length===0){const row=addMessage('Aucun mail.','aria');speak('Aucun mail.',row.querySelector('.speak-btn'));return;}
+  if(triageQueue.length===0){const row=addMessage('Aucun mail.','aria');if(autoSpeak)speak('Aucun mail.',row.querySelector('.speak-btn'));return;}
   const intro=triageQueue.length+' mails. On commence.';
-  const introRow=addMessage(intro,'aria');speak(intro,introRow.querySelector('.speak-btn'));
+  const introRow=addMessage(intro,'aria');if(autoSpeak)speak(intro,introRow.querySelector('.speak-btn'));
   setTimeout(()=>nextTriage(),1500);
 }
 function nextTriage(){
   if(triageQueue.length===0){
     triageBar.classList.remove('visible');
-    const row=addMessage('Triage terminé !','aria');
-    speak('Triage terminé !',row.querySelector('.speak-btn'));
+    const row=addMessage('Triage terminé !','aria');if(autoSpeak)speak('Triage terminé !',row.querySelector('.speak-btn'));
     triageCurrent=null;return;
   }
   triageCurrent=triageQueue.shift();
   const msg='De : '+(triageCurrent.from_email||'Inconnu')+'\nSujet : '+(triageCurrent.subject||'(Sans objet)')+'\n\n'+(triageCurrent.raw_body_preview||'').slice(0,200)+'\n\n— Que je fasse ? ('+triageQueue.length+' restants)';
-  const row=addMessage(msg,'aria');speak(msg,row.querySelector('.speak-btn'));
+  const row=addMessage(msg,'aria');if(autoSpeak)speak(msg,row.querySelector('.speak-btn'));
   triageBar.classList.add('visible');
 }
 async function handleTriage(action){
   if(!triageCurrent)return;triageBar.classList.remove('visible');stopSpeech();
   if(action==='skip'){addMessage('Passé.','aria');setTimeout(()=>nextTriage(),500);return;}
-  const actionMap={
-    'archive':'Archive le mail '+triageCurrent.message_id,
-    'delete':'Supprime (corbeille) le mail '+triageCurrent.message_id,
-    'reply':'Prépare une réponse pour le mail '+triageCurrent.message_id
-  };
+  const actionMap={'archive':'Archive le mail '+triageCurrent.message_id,'delete':'Supprime (corbeille) le mail '+triageCurrent.message_id,'reply':'Prépare une réponse pour le mail '+triageCurrent.message_id};
   const loading=addLoading();
   try{
     const response=await fetch('/aria',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:actionMap[action]})});
     const data=await response.json();loading.remove();
-    const row=addMessage(data.answer,'aria');speak(data.answer,row.querySelector('.speak-btn'));
+    const row=addMessage(data.answer,'aria');if(autoSpeak)speak(data.answer,row.querySelector('.speak-btn'));
   }catch{loading.remove();}
   setTimeout(()=>nextTriage(),3000);
 }
