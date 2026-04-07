@@ -32,7 +32,8 @@
   .avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; margin-top: 2px; }
   .avatar.aria-avatar { background: var(--accent); }
   .avatar.user-avatar { background: var(--surface2); border: 1px solid var(--border); }
-  .bubble { max-width: 75%; border-radius: 16px; padding: 12px 16px; font-size: 14.5px; line-height: 1.65; }
+  /* word-break pour éviter le débordement des URLs et textes longs */
+  .bubble { max-width: 75%; border-radius: 16px; padding: 12px 16px; font-size: 14.5px; line-height: 1.65; word-break: break-word; overflow-wrap: break-word; }
   .message-row.aria .bubble { background: var(--aria-bg); border: 1px solid var(--border); border-radius: 4px 16px 16px 16px; }
   .message-row.user .bubble { background: var(--user-bg); border: 1px solid #2d2d4a; border-radius: 16px 4px 16px 16px; color: #c8c8f0; }
   .bubble-actions { display: flex; gap: 8px; margin-top: 8px; }
@@ -150,37 +151,30 @@ const attachmentName=document.getElementById('attachmentName');
 let isListening=false,currentAudio=null,speakAborted=false,currentSpeakBtn=null;
 let triageQueue=[],triageCurrent=null,silenceTimer=null;
 let finalTextBase='';
-// Lecture automatique — ON par défaut
-let autoSpeak = true;
-// Pièce jointe courante
-let currentFile = null; // { data: base64string, type: mimeType, name: fileName }
+let autoSpeak=true;
+let currentFile=null;
 
-// ─── TOGGLE AUTO-SPEAK ───
 function toggleAutoSpeak(){
   autoSpeak=!autoSpeak;
   const btn=document.getElementById('autoSpeakBtn');
   if(autoSpeak){btn.classList.add('active');btn.textContent='🔊 Auto';}
   else{btn.classList.remove('active');btn.textContent='🔇 Muet';}
 }
-// Init : bouton actif au démarrage
 document.getElementById('autoSpeakBtn').classList.add('active');
 
-// ─── PIÈCE JOINTE ───
 function handleFileSelect(e){
   const file=e.target.files[0];
   if(!file)return;
-  const maxMB=10;
-  if(file.size>maxMB*1024*1024){alert(`Fichier trop volumineux (max ${maxMB} Mo).`);return;}
+  if(file.size>10*1024*1024){alert('Fichier trop volumineux (max 10 Mo).');return;}
   const reader=new FileReader();
   reader.onload=(ev)=>{
-    const b64=ev.target.result.split(',')[1]; // strip data:...;base64,
+    const b64=ev.target.result.split(',')[1];
     currentFile={data:b64,type:file.type,name:file.name};
     attachmentName.textContent='📎 '+file.name;
     attachmentPreview.classList.add('visible');
     attachBtn.classList.add('has-file');
   };
   reader.readAsDataURL(file);
-  // Reset input pour permettre de resélectionner le même fichier
   e.target.value='';
 }
 function removeAttachment(){
@@ -189,7 +183,6 @@ function removeAttachment(){
   attachBtn.classList.remove('has-file');
 }
 
-// ─── TTS ───
 function speak(text,btn){
   stopSpeech();speakAborted=false;stopBtn.classList.add('visible');
   currentSpeakBtn=btn||null;
@@ -223,14 +216,12 @@ function autoResize(el){el.style.height='auto';el.style.height=Math.min(el.scrol
 function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}}
 function scrollToBottom(){messagesEl.scrollTop=messagesEl.scrollHeight;}
 
-// ─── MESSAGES ───
 function addMessage(text,type,fileInfo){
   const welcome=messagesEl.querySelector('.welcome');if(welcome)welcome.remove();
   const row=document.createElement('div');row.className='message-row '+type;
   const avatar=document.createElement('div');avatar.className='avatar '+type+'-avatar';
   avatar.textContent=type==='aria'?'✦':'G';
   const bubble=document.createElement('div');bubble.className='bubble';
-  // Aperçu image si pièce jointe utilisateur
   if(fileInfo&&fileInfo.type.startsWith('image/')){
     const img=document.createElement('img');img.className='attached-image';
     img.src='data:'+fileInfo.type+';base64,'+fileInfo.data;
@@ -272,17 +263,15 @@ async function sendMessage(){
     const response=await fetch('/aria',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const data=await response.json();loading.remove();
     const msgRow=addMessage(data.answer,'aria');
-    // Lecture auto seulement si activée
     if(autoSpeak){speak(data.answer,msgRow.querySelector('.speak-btn'));}
   }catch{loading.remove();addMessage('Erreur de connexion à Aria. Réessayez.','aria');}
   sendBtn.disabled=false;
 }
 function quickAsk(text){inputEl.value=text;sendMessage();}
 
-// ─── MICRO — version robuste ───
 function toggleMic(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){alert('Reconnaissance vocale non supportée sur ce navigateur.\nUtilisez Chrome ou Edge.');return;}
+  if(!SR){alert('Reconnaissance vocale non supportée.\nUtilisez Chrome ou Edge.');return;}
   if(isListening){stopListening();}else{startListening();}
 }
 function startListening(){
@@ -291,10 +280,7 @@ function startListening(){
   finalTextBase=inputEl.value;
   const rec=new SR();
   rec.lang='fr-FR';rec.continuous=false;rec.interimResults=true;rec.maxAlternatives=1;
-  rec.onstart=()=>{
-    isListening=true;micBtn.classList.add('listening');micBtn.textContent='⏹';
-    micStatus.classList.add('visible');inputWrapper.classList.add('mic-active');
-  };
+  rec.onstart=()=>{isListening=true;micBtn.classList.add('listening');micBtn.textContent='⏹';micStatus.classList.add('visible');inputWrapper.classList.add('mic-active');};
   rec.onresult=(e)=>{
     clearSilenceTimer();let interim='',final='';
     for(let i=e.resultIndex;i<e.results.length;i++){
@@ -306,16 +292,11 @@ function startListening(){
     resetSilenceTimer();
   };
   rec.onerror=(e)=>{
-    console.error('[Mic] Erreur:',e.error);
-    if(e.error==='not-allowed'||e.error==='permission-denied'){
-      alert('Microphone bloqué.\nCliquez sur 🔒 dans la barre d\'adresse et autorisez le microphone.');
-    } else if(e.error==='network'){alert('Erreur réseau pour la reconnaissance vocale.');stopListening();}
+    if(e.error==='not-allowed'||e.error==='permission-denied'){alert('Microphone bloqué.\nCliquez sur 🔒 dans la barre d\'adresse.');}
+    else if(e.error==='network'){alert('Erreur réseau micro.');stopListening();}
   };
-  rec.onend=()=>{
-    if(isListening){setTimeout(()=>{if(isListening)startListening();},100);}
-    else{cleanupMicUI();}
-  };
-  try{rec.start();resetSilenceTimer();}catch(e){console.error('[Mic]',e);stopListening();}
+  rec.onend=()=>{if(isListening){setTimeout(()=>{if(isListening)startListening();},100);}else{cleanupMicUI();}}
+  try{rec.start();resetSilenceTimer();}catch(e){stopListening();}
 }
 function resetSilenceTimer(){clearSilenceTimer();silenceTimer=setTimeout(()=>{if(isListening)stopListening();},3000);}
 function clearSilenceTimer(){if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;}}
@@ -328,7 +309,6 @@ function cleanupMicUI(){
   micStatus.classList.remove('visible');inputWrapper.classList.remove('mic-active');
 }
 
-// ─── TRIAGE ───
 async function startTriage(){
   stopSpeech();triageBar.classList.remove('visible');
   const loading=addLoading();

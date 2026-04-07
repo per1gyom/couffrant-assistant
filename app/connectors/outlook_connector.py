@@ -85,19 +85,32 @@ def _build_email_html(body: str) -> str:
 
 def _safe_drive_path(path: str) -> str:
     """
-    Sécurise le chemin OneDrive — force le préfixe 1_photovoltaïque.
-    Empêche toute sortie du dossier autorisé (pas de ../ etc.)
+    Sécurise le chemin OneDrive — force le préfixe ONEDRIVE_ARIA_ROOT.
+    Empêche toute sortie du dossier autorisé.
     """
-    # Normalise les séparateurs et supprime les tentatives de remontée
     path = path.replace("\\", "/").strip("/")
-    # Retire tout préfixe déjà présent pour éviter la duplication
     if path.startswith(ONEDRIVE_ARIA_ROOT):
         path = path[len(ONEDRIVE_ARIA_ROOT):].strip("/")
-    # Bloque les remontées de répertoire
     parts = [p for p in path.split("/") if p and p != ".."]
     if parts:
         return f"{ONEDRIVE_ARIA_ROOT}/{'/'.join(parts)}"
     return ONEDRIVE_ARIA_ROOT
+
+
+def _list_root_drive(token: str) -> list:
+    """Liste les dossiers à la racine du OneDrive — utile pour diagnostiquer un 404."""
+    try:
+        data = _graph_get(token, "/me/drive/root/children", params={
+            "$top": 50,
+            "$select": "name,folder,lastModifiedDateTime",
+            "$orderby": "name"
+        })
+        return [
+            {"nom": f.get("name"), "type": "📁 dossier" if "folder" in f else "📄 fichier"}
+            for f in data.get("value", [])
+        ]
+    except Exception:
+        return []
 
 
 # ─────────────────────────────────────────
@@ -105,15 +118,31 @@ def _safe_drive_path(path: str) -> str:
 # ─────────────────────────────────────────
 
 def list_aria_drive(token: str, subfolder: str = "") -> dict:
-    """Liste les fichiers dans 1_photovoltaïque (ou un sous-dossier)."""
+    """Liste les fichiers dans le dossier OneDrive autorisé (ou un sous-dossier)."""
     try:
         full_path = _safe_drive_path(subfolder) if subfolder else ONEDRIVE_ARIA_ROOT
         endpoint = f"/me/drive/root:/{full_path}:/children"
-        data = _graph_get(token, endpoint, params={
-            "$top": 100,
-            "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl",
-            "$orderby": "name"
-        })
+        try:
+            data = _graph_get(token, endpoint, params={
+                "$top": 100,
+                "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl",
+                "$orderby": "name"
+            })
+        except Exception as e:
+            # Si le dossier est introuvable (404), liste la racine pour aider Guillaume
+            if "404" in str(e) or "Not Found" in str(e) or "itemNotFound" in str(e):
+                root_items = _list_root_drive(token)
+                dossiers = [it["nom"] for it in root_items if "dossier" in it["type"]]
+                fichiers = [it["nom"] for it in root_items if "fichier" in it["type"]]
+                msg = f"Le dossier '{full_path}' est introuvable sur votre OneDrive."
+                if dossiers:
+                    msg += f"\n\nDossiers disponibles à la racine : {', '.join(dossiers)}"
+                if fichiers:
+                    msg += f"\nFichiers à la racine : {', '.join(fichiers[:10])}"
+                msg += "\n\nDites-moi le nom exact du dossier à utiliser."
+                return {"status": "error", "message": msg}
+            raise
+
         items = []
         for f in data.get("value", []):
             item_type = "📁 dossier" if "folder" in f else "📄 fichier"
@@ -134,25 +163,19 @@ def list_aria_drive(token: str, subfolder: str = "") -> dict:
             "items": items
         }
     except Exception as e:
-        return {"status": "error", "message": f"Impossible de lister le dossier : {str(e)[:200]}"}
+        return {"status": "error", "message": f"Erreur Drive : {str(e)[:300]}"}
 
 
 def read_aria_drive_file(token: str, file_path: str) -> dict:
-    """
-    Lit le contenu d'un fichier dans 1_photovoltaïque.
-    Texte brut pour .txt/.md/.csv/.json
-    Aperçu + lien pour les autres types (.docx, .xlsx, .pdf, images…)
-    """
+    """Lit le contenu d'un fichier dans le dossier autorisé."""
     try:
         full_path = _safe_drive_path(file_path)
-        # Récupère les métadonnées du fichier
         meta = _graph_get(token, f"/me/drive/root:/{full_path}")
         name = meta.get("name", "")
         size = meta.get("size", 0)
         web_url = meta.get("webUrl", "")
         ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
 
-        # Types lisibles directement en texte
         text_types = {"txt", "md", "csv", "json", "xml", "log", "py", "js", "html", "htm", "css"}
         if ext in text_types:
             content_resp = requests.get(
@@ -161,82 +184,59 @@ def read_aria_drive_file(token: str, file_path: str) -> dict:
                 timeout=30,
             )
             content_resp.raise_for_status()
-            text = content_resp.text[:5000]  # limite à 5000 chars
             return {
-                "status": "ok",
-                "fichier": name,
-                "chemin": full_path,
-                "type": "texte",
-                "contenu": text,
-                "lien": web_url,
+                "status": "ok", "fichier": name, "chemin": full_path,
+                "type": "texte", "contenu": content_resp.text[:5000], "lien": web_url,
             }
 
-        # Pour Word (.docx) — tente la conversion en texte via Graph
         if ext in {"docx", "doc"}:
-            try:
-                content_resp = requests.get(
-                    f"{GRAPH_BASE_URL}/me/drive/root:/{full_path}:/content?format=pdf",
-                    headers={"Authorization": f"Bearer {token}"},
-                    timeout=30,
-                    allow_redirects=True,
-                )
-                # Retourne juste le lien — le contenu Word nécessite un viewer
-                return {
-                    "status": "ok",
-                    "fichier": name,
-                    "chemin": full_path,
-                    "type": "word",
-                    "message": f"Document Word ({round(size/1024, 1)} Ko). Ouvrir dans OneDrive pour lire.",
-                    "lien": web_url,
-                    "conseil": "Joins ce fichier via 📎 dans Aria pour que je l'analyse directement."
-                }
-            except Exception:
-                pass
+            return {
+                "status": "ok", "fichier": name, "chemin": full_path, "type": "word",
+                "message": f"Document Word ({round(size/1024, 1)} Ko).",
+                "lien": web_url, "conseil": "Joins ce fichier via 📎 pour que je l'analyse."
+            }
 
-        # Pour Excel (.xlsx)
         if ext in {"xlsx", "xls"}:
             try:
-                # Tente de lire via la preview
                 preview = _graph_get(token, f"/me/drive/root:/{full_path}:/workbook/worksheets")
                 sheets = [s.get("name") for s in preview.get("value", [])]
                 return {
-                    "status": "ok",
-                    "fichier": name,
-                    "chemin": full_path,
-                    "type": "excel",
-                    "feuilles": sheets,
-                    "message": f"Classeur Excel avec {len(sheets)} feuille(s) : {', '.join(sheets)}",
-                    "lien": web_url,
-                    "conseil": "Joins ce fichier via 📎 dans Aria pour que je l'analyse directement."
+                    "status": "ok", "fichier": name, "chemin": full_path, "type": "excel",
+                    "message": f"Excel avec {len(sheets)} feuille(s) : {', '.join(sheets)}",
+                    "lien": web_url, "conseil": "Joins ce fichier via 📎 pour que je l'analyse."
                 }
             except Exception:
                 pass
 
-        # Pour tous les autres types (PDF, images, etc.)
         return {
-            "status": "ok",
-            "fichier": name,
-            "chemin": full_path,
-            "type": ext or "inconnu",
-            "taille_ko": round(size / 1024, 1),
-            "lien": web_url,
-            "message": f"Fichier {ext.upper()} ({round(size/1024, 1)} Ko). Pour l'analyser : joins-le via 📎.",
-            "conseil": "Utilise le bouton 📎 dans le chat pour joindre ce fichier directement."
+            "status": "ok", "fichier": name, "chemin": full_path,
+            "type": ext or "inconnu", "taille_ko": round(size / 1024, 1), "lien": web_url,
+            "message": f"Fichier {ext.upper()} ({round(size/1024, 1)} Ko).",
+            "conseil": "Joins ce fichier via 📎 pour que je l'analyse."
         }
-
     except Exception as e:
-        return {"status": "error", "message": f"Impossible de lire le fichier : {str(e)[:200]}"}
+        return {"status": "error", "message": f"Impossible de lire le fichier : {str(e)[:300]}"}
 
 
 def search_aria_drive(token: str, query: str) -> dict:
-    """Recherche des fichiers dans 1_photovoltaïque par nom."""
+    """Recherche des fichiers dans le dossier autorisé par nom."""
     try:
-        # Recherche dans tout le drive puis filtre sur le dossier
-        data = _graph_get(
-            token,
-            f"/me/drive/root:/{ONEDRIVE_ARIA_ROOT}:/search(q='{query.replace(chr(39), chr(39)+chr(39))}')",
-            params={"$top": 20, "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl,parentReference"}
-        )
+        q_safe = query.replace("'", "''")
+        try:
+            data = _graph_get(
+                token,
+                f"/me/drive/root:/{ONEDRIVE_ARIA_ROOT}:/search(q='{q_safe}')",
+                params={"$top": 20, "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl,parentReference"}
+            )
+        except Exception as e:
+            if "404" in str(e) or "Not Found" in str(e):
+                root_items = _list_root_drive(token)
+                dossiers = [it["nom"] for it in root_items if "dossier" in it["type"]]
+                return {
+                    "status": "error",
+                    "message": f"Dossier '{ONEDRIVE_ARIA_ROOT}' introuvable. Dossiers disponibles : {', '.join(dossiers) if dossiers else 'aucun'}"
+                }
+            raise
         items = []
         for f in data.get("value", []):
             parent_path = f.get("parentReference", {}).get("path", "")
@@ -247,14 +247,9 @@ def search_aria_drive(token: str, query: str) -> dict:
                 "modifié": f.get("lastModifiedDateTime", "")[:10],
                 "lien": f.get("webUrl", ""),
             })
-        return {
-            "status": "ok",
-            "recherche": query,
-            "count": len(items),
-            "items": items
-        }
+        return {"status": "ok", "recherche": query, "count": len(items), "items": items}
     except Exception as e:
-        return {"status": "error", "message": f"Recherche impossible : {str(e)[:200]}"}
+        return {"status": "error", "message": f"Recherche impossible : {str(e)[:300]}"}
 
 
 # ─────────────────────────────────────────
@@ -263,7 +258,6 @@ def search_aria_drive(token: str, query: str) -> dict:
 
 def perform_outlook_action(action: str, params: dict, token: str) -> dict:
 
-    # ── OneDrive Aria (restreint à 1_photovoltaïque) ──
     if action == "list_aria_drive":
         return list_aria_drive(token, params.get("subfolder", ""))
 
@@ -273,14 +267,12 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
     if action == "search_aria_drive":
         return search_aria_drive(token, params.get("query", ""))
 
-    # ── Mails ──
     if action == "list_unread_messages":
         top = params.get("top", 10)
         data = _graph_get(
             token, "/me/mailFolders/inbox/messages",
             params={
-                "$top": top,
-                "$filter": "isRead eq false",
+                "$top": top, "$filter": "isRead eq false",
                 "$orderby": "receivedDateTime DESC",
                 "$select": "id,subject,from,receivedDateTime,isRead,bodyPreview",
             },
@@ -289,10 +281,8 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
 
     if action == "get_message_body":
         message_id = params["message_id"]
-        data = _graph_get(
-            token, f"/me/messages/{message_id}",
-            params={"$select": "id,subject,from,receivedDateTime,body,bodyPreview,toRecipients"},
-        )
+        data = _graph_get(token, f"/me/messages/{message_id}",
+            params={"$select": "id,subject,from,receivedDateTime,body,bodyPreview,toRecipients"})
         body_content = data.get("body", {}).get("content", "")
         import re
         body_text = re.sub(r'<[^>]+>', ' ', body_content)
@@ -301,8 +291,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
             "status": "ok", "action": action, "message_id": message_id,
             "subject": data.get("subject", ""),
             "from": data.get("from", {}).get("emailAddress", {}).get("address", ""),
-            "body_text": body_text[:3000],
-            "body_preview": data.get("bodyPreview", ""),
+            "body_text": body_text[:3000], "body_preview": data.get("bodyPreview", ""),
         }
 
     if action == "create_reply_draft":
@@ -312,9 +301,8 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         draft_id = draft.get("id")
         if not draft_id:
             return {"status": "error", "message": "Impossible de créer le brouillon."}
-        _graph_patch(token, f"/me/messages/{draft_id}", {
-            "body": {"contentType": "HTML", "content": _build_email_html(reply_body)}
-        })
+        _graph_patch(token, f"/me/messages/{draft_id}",
+            {"body": {"contentType": "HTML", "content": _build_email_html(reply_body)}})
         return {"status": "ok", "action": action, "draft_id": draft_id, "message": "Brouillon créé."}
 
     if action == "mark_as_read":
@@ -336,10 +324,8 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
             return {"status": "error", "action": action, "message": f"Échec : {str(e)}"}
 
     if action == "delete_message_permanent":
-        return {
-            "status": "error", "action": action,
-            "message": "Suppression définitive désactivée. Utilisez delete_message pour mettre à la corbeille (récupérable)."
-        }
+        return {"status": "error", "action": action,
+            "message": "Suppression définitive désactivée. Utilisez delete_message."}
 
     if action == "archive_message":
         message_id = params["message_id"]
@@ -353,10 +339,8 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         message_id = params["message_id"]
         reply_body = params.get("reply_body", "")
         try:
-            _graph_post(
-                token, f"/me/messages/{message_id}/reply",
-                {"message": {"body": {"contentType": "HTML", "content": _build_email_html(reply_body)}}}
-            )
+            _graph_post(token, f"/me/messages/{message_id}/reply",
+                {"message": {"body": {"contentType": "HTML", "content": _build_email_html(reply_body)}}})
             return {"status": "ok", "action": action, "message": "Réponse envoyée avec succès."}
         except Exception as e:
             return {"status": "error", "action": action, "message": f"Échec envoi : {str(e)}"}
@@ -366,21 +350,14 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         subject = params["subject"]
         body = params.get("body", "")
         try:
-            _graph_post(
-                token, "/me/sendMail",
-                {
-                    "message": {
-                        "subject": subject,
-                        "body": {"contentType": "HTML", "content": _build_email_html(body)},
-                        "toRecipients": [{"emailAddress": {"address": to_email}}]
-                    }
-                }
-            )
+            _graph_post(token, "/me/sendMail",
+                {"message": {"subject": subject,
+                    "body": {"contentType": "HTML", "content": _build_email_html(body)},
+                    "toRecipients": [{"emailAddress": {"address": to_email}}]}})
             return {"status": "ok", "action": action, "message": f"Mail envoyé à {to_email}."}
         except Exception as e:
             return {"status": "error", "action": action, "message": f"Échec envoi : {str(e)}"}
 
-    # ── Calendrier ──
     if action == "list_calendar_events":
         from datetime import datetime, timezone, timedelta
         start = params.get("start", datetime.now(timezone.utc).isoformat())
@@ -423,7 +400,6 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         success = _graph_delete(token, f"/me/events/{event_id}")
         return {"status": "ok" if success else "error", "message": "RDV supprimé." if success else "Échec."}
 
-    # ── Teams ──
     if action == "list_teams_chats":
         data = _graph_get(token, "/me/chats", params={"$expand": "members", "$top": 20})
         return {"status": "ok", "action": action, "items": data.get("value", [])}
@@ -445,13 +421,9 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
     if action == "find_teams_user":
         name = params["name"]
         name_safe = name.replace("'", "''")
-        data = _graph_get(token, "/users", params={
-            "$filter": f"startswith(displayName,'{name_safe}')",
-            "$select": "id,displayName,mail"
-        })
+        data = _graph_get(token, "/users", params={"$filter": f"startswith(displayName,'{name_safe}')", "$select": "id,displayName,mail"})
         return {"status": "ok", "action": action, "items": data.get("value", [])}
 
-    # ── Contacts ──
     if action == "list_contacts":
         data = _graph_get(token, "/me/contacts", params={"$top": 50, "$select": "displayName,emailAddresses,mobilePhone,businessPhones,companyName,jobTitle"})
         return {"status": "ok", "action": action, "items": data.get("value", [])}
@@ -461,12 +433,9 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         query_safe = query.replace("'", "''")
         data = _graph_get(token, "/me/contacts", params={
             "$filter": f"startswith(displayName,'{query_safe}')",
-            "$select": "displayName,emailAddresses,mobilePhone,businessPhones,companyName",
-            "$top": 10
-        })
+            "$select": "displayName,emailAddresses,mobilePhone,businessPhones,companyName", "$top": 10})
         return {"status": "ok", "action": action, "items": data.get("value", [])}
 
-    # ── Tâches ──
     if action == "list_todo_tasks":
         lists_data = _graph_get(token, "/me/todo/lists")
         all_tasks = []
