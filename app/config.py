@@ -12,14 +12,13 @@ AUTHORITY = os.getenv("AUTHORITY", "").strip()
 if not AUTHORITY and TENANT_ID:
     AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 
-# Scopes minimaux — consentement utilisateur uniquement, pas admin
+# offline_access est géré automatiquement par MSAL — ne pas l'inclure
 GRAPH_SCOPES = [
     "User.Read",
     "Mail.Read",
     "Mail.ReadWrite",
     "Mail.Send",
     "Calendars.ReadWrite",
-    "offline_access",
 ]
 
 SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me")
