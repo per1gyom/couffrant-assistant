@@ -8,17 +8,10 @@ from app.database import get_pg_conn
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 MODEL = ANTHROPIC_MODEL_FAST
 
-DEFAULT_SIGNATURE = """Solairement,
-
-Guillaume Perrin
-06 49 43 09 17
-www.couffrant-solar.fr"""
-
 
 def _parse_json_safe(text: str) -> dict:
     """Parse JSON robustement — gère les blocs markdown ```json ... ```"""
     text = text.strip()
-    # Supprimer les blocs markdown si présents
     text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
     text = re.sub(r'\s*```$', '', text, flags=re.MULTILINE)
     text = text.strip()
@@ -27,6 +20,7 @@ def _parse_json_safe(text: str) -> dict:
 
 def get_learning_examples(category: str, limit: int = 3) -> list[dict]:
     """Récupère les exemples d'apprentissage depuis PostgreSQL."""
+    conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
@@ -38,7 +32,6 @@ def get_learning_examples(category: str, limit: int = 3) -> list[dict]:
             LIMIT %s
         """, (category, limit))
         rows = c.fetchall()
-        conn.close()
         return [
             {
                 "mail_subject": r[0],
@@ -52,6 +45,9 @@ def get_learning_examples(category: str, limit: int = 3) -> list[dict]:
         ]
     except Exception:
         return []
+    finally:
+        if conn:
+            conn.close()
 
 
 def build_learning_text(examples: list[dict]) -> str:
@@ -124,15 +120,18 @@ def get_odoo_context(sender_email: str) -> dict:
 
 def get_style_profile() -> str:
     """Charge le profil de style de Guillaume depuis PostgreSQL."""
+    conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("SELECT content FROM aria_profile WHERE profile_type = 'style' ORDER BY id DESC LIMIT 1")
         row = c.fetchone()
-        conn.close()
         return row[0] if row else ""
     except Exception:
         return ""
+    finally:
+        if conn:
+            conn.close()
 
 
 def analyze_single_mail_with_ai(message: dict, instructions: list[str] | None = None) -> dict:
