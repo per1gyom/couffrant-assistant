@@ -20,7 +20,9 @@ from app.feedback_store import init_db, add_global_instruction, get_global_instr
 from app.mail_memory_store import init_mail_db, insert_mail, mail_exists
 from app.assistant_analyzer import analyze_single_mail
 from app.dashboard_service import get_dashboard
-from app.connectors.outlook_connector import perform_outlook_action
+from app.connectors.outlook_connector import (
+    perform_outlook_action, list_aria_drive, read_aria_drive_file, search_aria_drive
+)
 from app.database import get_pg_conn, init_postgres
 
 try:
@@ -295,7 +297,6 @@ def aria(payload: AriaQuery):
                 "text": f"[PDF joint{file_name_info}]\n{payload.query}" if payload.query else f"[PDF joint{file_name_info}] Analyse ce document."
             })
         else:
-            # Autre type de fichier — texte uniquement
             user_content_parts.append({"type": "text", "text": f"[Fichier joint{file_name_info} — type non supporté pour aperçu]\n{payload.query}"})
     else:
         user_content_parts = payload.query
@@ -335,6 +336,11 @@ Actions Outlook :
 - [ACTION:READBODY:message_id]
 - [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
 - [ACTION:CREATE_TASK:titre]
+
+Actions OneDrive (restreintes au dossier 1_photovoltaïque uniquement) :
+- [ACTION:LISTDRIVE:chemin] → liste les fichiers (laisser vide = racine du dossier)
+- [ACTION:READDRIVE:chemin/fichier.txt] → lit le contenu d'un fichier texte
+- [ACTION:SEARCHDRIVE:mot-clé] → recherche des fichiers par nom dans le dossier
 
 Propose avant d'agir, SAUF si Guillaume dit "fais-le", "vas-y", "oui", "supprime", "archive", "envoie".
 
@@ -447,7 +453,46 @@ Consignes :
             except Exception as e:
                 actions_confirmed.append(f"\u274c Erreur tâche : {str(e)[:100]}")
 
-    clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]+\]', '', aria_response).strip()
+        # ── OneDrive — restreint à 1_photovoltaïque ──
+        for match in re.finditer(r'\[ACTION:LISTDRIVE:([^\]]*)\]', aria_response):
+            subfolder = match.group(1).strip()
+            try:
+                result = list_aria_drive(outlook_token, subfolder)
+                if result.get("status") == "ok":
+                    lines = [f"  {it['type']} {it['nom']} ({it.get('taille_ko', '')} Ko — {it.get('modifié', '')})" for it in result.get("items", [])]
+                    actions_confirmed.append(f"\U0001f4c1 {result['dossier']} ({result['count']} éléments) :\n" + "\n".join(lines))
+                else:
+                    actions_confirmed.append(f"\u274c {result.get('message', 'Erreur Drive')}")
+            except Exception as e:
+                actions_confirmed.append(f"\u274c Erreur Drive : {str(e)[:100]}")
+
+        for match in re.finditer(r'\[ACTION:READDRIVE:([^\]]+)\]', aria_response):
+            file_path = match.group(1).strip()
+            try:
+                result = read_aria_drive_file(outlook_token, file_path)
+                if result.get("status") == "ok":
+                    if result.get("type") == "texte":
+                        actions_confirmed.append(f"\U0001f4c4 {result['fichier']} :\n{result['contenu'][:2000]}")
+                    else:
+                        actions_confirmed.append(f"\U0001f4c4 {result['fichier']} — {result.get('message', '')} {result.get('conseil', '')}")
+                else:
+                    actions_confirmed.append(f"\u274c {result.get('message', 'Erreur lecture')}")
+            except Exception as e:
+                actions_confirmed.append(f"\u274c Erreur lecture fichier : {str(e)[:100]}")
+
+        for match in re.finditer(r'\[ACTION:SEARCHDRIVE:([^\]]+)\]', aria_response):
+            query_drive = match.group(1).strip()
+            try:
+                result = search_aria_drive(outlook_token, query_drive)
+                if result.get("status") == "ok":
+                    lines = [f"  {it['type']} {it['nom']} ({it.get('modifié', '')})" for it in result.get("items", [])]
+                    actions_confirmed.append(f"\U0001f50d '{query_drive}' — {result['count']} résultat(s) :\n" + "\n".join(lines))
+                else:
+                    actions_confirmed.append(f"\u274c {result.get('message', 'Erreur recherche')}")
+            except Exception as e:
+                actions_confirmed.append(f"\u274c Erreur recherche Drive : {str(e)[:100]}")
+
+    clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', aria_response).strip()
     if actions_confirmed:
         clean_response += "\n\n" + "\n".join(actions_confirmed)
 
