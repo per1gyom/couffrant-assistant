@@ -115,7 +115,6 @@ def startup_event():
                             "mailbox_source": "outlook",
                         })
 
-                # Résumé chaud toutes les 20 min (40 cycles de 30s)
                 cycle += 1
                 if cycle % 40 == 0 and MEMORY_OK:
                     try:
@@ -141,6 +140,35 @@ def health():
 def init_db_now():
     init_postgres()
     return {"status": "tables créées"}
+
+
+@app.get("/debug-login")
+def debug_login():
+    try:
+        from app.config import CLIENT_ID, CLIENT_SECRET, AUTHORITY, REDIRECT_URI, GRAPH_SCOPES
+        info = {
+            "client_id_set": bool(CLIENT_ID),
+            "client_id_length": len(CLIENT_ID),
+            "client_secret_set": bool(CLIENT_SECRET),
+            "authority": AUTHORITY,
+            "redirect_uri": REDIRECT_URI,
+            "scopes": GRAPH_SCOPES,
+        }
+        try:
+            msal_app = build_msal_app()
+            auth_url = msal_app.get_authorization_request_url(
+                scopes=GRAPH_SCOPES,
+                redirect_uri=REDIRECT_URI,
+                state="/chat"
+            )
+            info["auth_url_ok"] = True
+            info["auth_url_preview"] = auth_url[:100]
+        except Exception as e:
+            info["auth_url_ok"] = False
+            info["auth_url_error"] = str(e)
+        return info
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @app.get("/chat", response_class=HTMLResponse)
@@ -211,7 +239,6 @@ def aria(payload: AriaQuery):
     profile = profile_row[0] if profile_row else ""
     conn.close()
 
-    # Mémoire intelligente (optionnelle)
     hot_summary = get_hot_summary()
     contact_card = ""
     query_lower = payload.query.lower()
@@ -228,7 +255,6 @@ def aria(payload: AriaQuery):
 
     outlook_token = get_valid_microsoft_token()
 
-    # Mails Outlook en temps réel
     outlook_live_mails = []
     if outlook_token:
         try:
@@ -249,7 +275,6 @@ def aria(payload: AriaQuery):
         except Exception as e:
             print(f"[Aria] Erreur Outlook live: {e}")
 
-    # Agenda du jour
     agenda_today = []
     if outlook_token:
         try:
@@ -358,7 +383,6 @@ Consignes :
             except Exception as e:
                 actions_confirmed.append(f"❌ Erreur : {str(e)[:100]}")
 
-        # REPLY — robuste, tolère les ':' dans le texte
         for match in re.finditer(r'\[ACTION:REPLY:([^:\]]{20,}):(.+?)\]', aria_response, re.DOTALL):
             msg_id = match.group(1).strip()
             reply_text = match.group(2).strip()
@@ -504,32 +528,38 @@ def learn_style(payload: dict = Body(...)):
 
 @app.get("/login")
 def login(request: Request, next: str = "/chat"):
-    msal_app = build_msal_app()
-    auth_url = msal_app.get_authorization_request_url(scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI, state=next)
-    return RedirectResponse(auth_url)
+    try:
+        msal_app = build_msal_app()
+        auth_url = msal_app.get_authorization_request_url(scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI, state=next)
+        return RedirectResponse(auth_url)
+    except Exception as e:
+        return HTMLResponse(f"<pre>Erreur login: {str(e)}\nREDIRECT_URI={REDIRECT_URI}\nAUTHORITY={AUTHORITY}</pre>", status_code=500)
 
 
 @app.get("/auth/callback")
 def auth_callback(request: Request, code: str | None = None, state: str | None = None):
     if not code:
         return HTMLResponse("Code manquant", status_code=400)
-    msal_app = build_msal_app()
-    result = msal_app.acquire_token_by_authorization_code(code, scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI)
-    if "access_token" not in result:
-        return HTMLResponse(str(result), status_code=400)
-    request.session["access_token"] = result["access_token"]
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("""
-        INSERT INTO oauth_tokens (provider, access_token, refresh_token, expires_at)
-        VALUES (%s, %s, %s, NOW() + INTERVAL '1 hour')
-        ON CONFLICT (provider) DO UPDATE SET
-            access_token = EXCLUDED.access_token, refresh_token = EXCLUDED.refresh_token,
-            expires_at = EXCLUDED.expires_at, updated_at = NOW()
-    """, ("microsoft", result["access_token"], result.get("refresh_token", "")))
-    conn.commit()
-    conn.close()
-    return RedirectResponse(state or "/chat")
+    try:
+        msal_app = build_msal_app()
+        result = msal_app.acquire_token_by_authorization_code(code, scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI)
+        if "access_token" not in result:
+            return HTMLResponse(str(result), status_code=400)
+        request.session["access_token"] = result["access_token"]
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO oauth_tokens (provider, access_token, refresh_token, expires_at)
+            VALUES (%s, %s, %s, NOW() + INTERVAL '1 hour')
+            ON CONFLICT (provider) DO UPDATE SET
+                access_token = EXCLUDED.access_token, refresh_token = EXCLUDED.refresh_token,
+                expires_at = EXCLUDED.expires_at, updated_at = NOW()
+        """, ("microsoft", result["access_token"], result.get("refresh_token", "")))
+        conn.commit()
+        conn.close()
+        return RedirectResponse(state or "/chat")
+    except Exception as e:
+        return HTMLResponse(f"<pre>Erreur auth_callback: {str(e)}</pre>", status_code=500)
 
 
 # ─── TRIAGE ───
