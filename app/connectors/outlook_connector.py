@@ -136,7 +136,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         return {"status": "ok", "action": action, "new_message_id": moved.get("id"), "message": "Mail déplacé."}
 
     if action == "delete_message":
-        # Déplace vers la corbeille Outlook (récupérable)
+        # Déplace vers la corbeille Outlook (toujours récupérable — jamais définitif)
         message_id = params["message_id"]
         try:
             moved = _graph_post(token, f"/me/messages/{message_id}/move", {"destinationId": "deleteditems"})
@@ -145,9 +145,12 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
             return {"status": "error", "action": action, "message": f"Échec : {str(e)}"}
 
     if action == "delete_message_permanent":
-        message_id = params["message_id"]
-        success = _graph_delete(token, f"/me/messages/{message_id}")
-        return {"status": "ok" if success else "error", "action": action, "message": "Mail supprimé définitivement." if success else "Échec suppression."}
+        # Désactivé par sécurité — Aria ne supprime jamais définitivement
+        return {
+            "status": "error",
+            "action": action,
+            "message": "Suppression définitive désactivée. Utilisez delete_message pour mettre à la corbeille (récupérable)."
+        }
 
     if action == "archive_message":
         message_id = params["message_id"]
@@ -208,7 +211,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
                 "body": {"contentType": "Text", "content": params.get("body", "")},
                 "attendees": [{"emailAddress": {"address": e}, "type": "required"} for e in params.get("attendees", [])]
             })
-            return {"status": "ok", "action": action, "event_id": event.get("id"), "message": f"RDV créé."}
+            return {"status": "ok", "action": action, "event_id": event.get("id"), "message": "RDV créé."}
         except Exception as e:
             return {"status": "error", "action": action, "message": f"Échec RDV : {str(e)}"}
 
@@ -250,7 +253,11 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
 
     if action == "find_teams_user":
         name = params["name"]
-        data = _graph_get(token, "/users", params={"$filter": f"startswith(displayName,'{name}')", "$select": "id,displayName,mail"})
+        name_safe = name.replace("'", "''")
+        data = _graph_get(token, "/users", params={
+            "$filter": f"startswith(displayName,'{name_safe}')",
+            "$select": "id,displayName,mail"
+        })
         return {"status": "ok", "action": action, "items": data.get("value", [])}
 
     if action == "list_onedrive_files":
@@ -295,8 +302,9 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
 
     if action == "search_contacts":
         query = params["query"]
+        query_safe = query.replace("'", "''")
         data = _graph_get(token, "/me/contacts", params={
-            "$filter": f"startswith(displayName,'{query}')",
+            "$filter": f"startswith(displayName,'{query_safe}')",
             "$select": "displayName,emailAddresses,mobilePhone,businessPhones,companyName",
             "$top": 10
         })
