@@ -9,6 +9,12 @@ def get_pg_conn():
 
 
 def init_postgres():
+    """Crée toutes les tables nécessaires.
+    Les CREATE TABLE et les migrations sont dans des transactions séparées
+    pour éviter qu'un rollback de migration annule les créations de tables.
+    """
+
+    # ── Transaction 1 : création de toutes les tables ──
     conn = get_pg_conn()
     c = conn.cursor()
 
@@ -126,7 +132,6 @@ def init_postgres():
             updated_at TIMESTAMP DEFAULT NOW()
         )
     """)
-    # S'assurer qu'il y a toujours une ligne (upsert cible id=1)
     c.execute("""
         INSERT INTO aria_hot_summary (id, content, updated_at)
         VALUES (1, '', NOW())
@@ -164,16 +169,24 @@ def init_postgres():
         )
     """)
 
-    # Migrations
+    # Commit transaction 1 — toutes les tables sont créées
+    conn.commit()
+    conn.close()
+
+    # ── Transaction 2 : migrations (indépendantes) ──
+    conn = get_pg_conn()
+    c = conn.cursor()
+
     try:
         c.execute("ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS mailbox_source TEXT DEFAULT 'outlook'")
+        conn.commit()
     except Exception:
         conn.rollback()
 
     try:
         c.execute("ALTER TABLE oauth_tokens ADD CONSTRAINT oauth_tokens_provider_unique UNIQUE (provider)")
+        conn.commit()
     except Exception:
         conn.rollback()
 
-    conn.commit()
     conn.close()
