@@ -2,6 +2,7 @@ import os
 import requests
 import json
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from fastapi import FastAPI, Request, Form, Body
 from fastapi.responses import RedirectResponse, HTMLResponse, StreamingResponse
@@ -51,6 +52,9 @@ app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
 
 class AriaQuery(BaseModel):
     query: str
+    file_data: Optional[str] = None    # base64 encodé
+    file_type: Optional[str] = None    # ex: "image/jpeg", "application/pdf"
+    file_name: Optional[str] = None    # nom du fichier pour contexte
 
 
 @app.on_event("startup")
@@ -189,25 +193,29 @@ def aria(payload: AriaQuery):
     from app.token_manager import get_valid_microsoft_token
     instructions = get_global_instructions()
 
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("""
-        SELECT id as db_id, message_id, from_email, display_title, category, priority,
-               short_summary, suggested_reply, raw_body_preview, received_at, mailbox_source
-        FROM mail_memory ORDER BY received_at DESC NULLS LAST LIMIT 10
-    """)
-    columns = [desc[0] for desc in c.description]
-    mails_from_db = [dict(zip(columns, row)) for row in c.fetchall()]
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id as db_id, message_id, from_email, display_title, category, priority,
+                   short_summary, suggested_reply, raw_body_preview, received_at, mailbox_source
+            FROM mail_memory ORDER BY received_at DESC NULLS LAST LIMIT 10
+        """)
+        columns = [desc[0] for desc in c.description]
+        mails_from_db = [dict(zip(columns, row)) for row in c.fetchall()]
 
-    c.execute("SELECT user_input, aria_response FROM aria_memory ORDER BY id DESC LIMIT 8")
-    columns = [desc[0] for desc in c.description]
-    history = [dict(zip(columns, row)) for row in c.fetchall()]
-    history.reverse()
+        c.execute("SELECT user_input, aria_response FROM aria_memory ORDER BY id DESC LIMIT 8")
+        columns = [desc[0] for desc in c.description]
+        history = [dict(zip(columns, row)) for row in c.fetchall()]
+        history.reverse()
 
-    c.execute("SELECT content FROM aria_profile WHERE profile_type = 'style' ORDER BY id DESC LIMIT 1")
-    profile_row = c.fetchone()
-    profile = profile_row[0] if profile_row else ""
-    conn.close()
+        c.execute("SELECT content FROM aria_profile WHERE profile_type = 'style' ORDER BY id DESC LIMIT 1")
+        profile_row = c.fetchone()
+        profile = profile_row[0] if profile_row else ""
+    finally:
+        if conn:
+            conn.close()
 
     hot_summary = get_hot_summary()
     contact_card = ""
@@ -256,11 +264,41 @@ def aria(payload: AriaQuery):
         except Exception:
             pass
 
-    messages = []
-    for h in history:
-        messages.append({"role": "user", "content": h["user_input"]})
-        messages.append({"role": "assistant", "content": h["aria_response"]})
-    messages.append({"role": "user", "content": payload.query})
+    # Construction du contenu utilisateur — texte + fichier optionnel
+    user_content_parts = []
+    if payload.file_data and payload.file_type:
+        file_name_info = f" ({payload.file_name})" if payload.file_name else ""
+        if payload.file_type.startswith("image/"):
+            user_content_parts.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": payload.file_type,
+                    "data": payload.file_data,
+                }
+            })
+            user_content_parts.append({
+                "type": "text",
+                "text": f"[Fichier joint{file_name_info}]\n{payload.query}" if payload.query else f"[Image jointe{file_name_info}] Analyse ce document."
+            })
+        elif payload.file_type == "application/pdf":
+            user_content_parts.append({
+                "type": "document",
+                "source": {
+                    "type": "base64",
+                    "media_type": "application/pdf",
+                    "data": payload.file_data,
+                }
+            })
+            user_content_parts.append({
+                "type": "text",
+                "text": f"[PDF joint{file_name_info}]\n{payload.query}" if payload.query else f"[PDF joint{file_name_info}] Analyse ce document."
+            })
+        else:
+            # Autre type de fichier — texte uniquement
+            user_content_parts.append({"type": "text", "text": f"[Fichier joint{file_name_info} — type non supporté pour aperçu]\n{payload.query}"})
+    else:
+        user_content_parts = payload.query
 
     system = f"""Tu es Aria, l'assistante personnelle de Guillaume Perrin, dirigeant de Couffrant Solar.
 
@@ -312,6 +350,12 @@ Agenda aujourd'hui ({datetime.now().strftime('%A %d %B %Y')}) :
 Consignes :
 {chr(10).join(instructions) if instructions else "Aucune."}
 """
+
+    messages = []
+    for h in history:
+        messages.append({"role": "user", "content": h["user_input"]})
+        messages.append({"role": "assistant", "content": h["aria_response"]})
+    messages.append({"role": "user", "content": user_content_parts})
 
     response = client.messages.create(
         model=ANTHROPIC_MODEL_SMART, max_tokens=2048, system=system, messages=messages,
@@ -407,11 +451,15 @@ Consignes :
     if actions_confirmed:
         clean_response += "\n\n" + "\n".join(actions_confirmed)
 
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("INSERT INTO aria_memory (user_input, aria_response) VALUES (%s, %s)", (payload.query, clean_response))
-    conn.commit()
-    conn.close()
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("INSERT INTO aria_memory (user_input, aria_response) VALUES (%s, %s)", (payload.query, clean_response))
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
 
     return {"answer": clean_response, "actions": actions_confirmed}
 
@@ -444,28 +492,32 @@ def build_memory():
 
 @app.get("/memory-status")
 def memory_status():
-    conn = get_pg_conn()
-    c = conn.cursor()
+    conn = None
     try:
-        c.execute("SELECT content, updated_at FROM aria_hot_summary WHERE id = 1")
-        row = c.fetchone()
-    except Exception:
-        row = None
-    try:
-        c.execute("SELECT COUNT(*) FROM aria_contacts")
-        contacts_count = c.fetchone()[0]
-    except Exception:
-        contacts_count = 0
-    try:
-        c.execute("SELECT COUNT(*) FROM aria_style_examples")
-        style_count = c.fetchone()[0]
-    except Exception:
-        style_count = 0
-    c.execute("SELECT COUNT(*) FROM mail_memory")
-    mails_count = c.fetchone()[0]
-    c.execute("SELECT COUNT(*) FROM sent_mail_memory")
-    sent_count = c.fetchone()[0]
-    conn.close()
+        conn = get_pg_conn()
+        c = conn.cursor()
+        try:
+            c.execute("SELECT content, updated_at FROM aria_hot_summary WHERE id = 1")
+            row = c.fetchone()
+        except Exception:
+            row = None
+        try:
+            c.execute("SELECT COUNT(*) FROM aria_contacts")
+            contacts_count = c.fetchone()[0]
+        except Exception:
+            contacts_count = 0
+        try:
+            c.execute("SELECT COUNT(*) FROM aria_style_examples")
+            style_count = c.fetchone()[0]
+        except Exception:
+            style_count = 0
+        c.execute("SELECT COUNT(*) FROM mail_memory")
+        mails_count = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM sent_mail_memory")
+        sent_count = c.fetchone()[0]
+    finally:
+        if conn:
+            conn.close()
     return {
         "memory_module": MEMORY_OK,
         "resume_chaud": {"exists": bool(row and row[0]), "preview": (row[0] or "")[:150] if row else ""},
@@ -479,17 +531,21 @@ def memory_status():
 @app.get("/analyze-raw-mails")
 def analyze_raw_mails(limit: int = 50):
     """Analyse les mails bruts avec Claude — à appeler plusieurs fois jusqu'à épuisement."""
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("""
-        SELECT id, message_id, from_email, subject, raw_body_preview, received_at
-        FROM mail_memory
-        WHERE analysis_status IN ('inbox_raw', 'archive_raw', 'gmail_raw')
-        ORDER BY received_at DESC NULLS LAST
-        LIMIT %s
-    """, (limit,))
-    rows = c.fetchall()
-    conn.close()
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id, message_id, from_email, subject, raw_body_preview, received_at
+            FROM mail_memory
+            WHERE analysis_status IN ('inbox_raw', 'archive_raw', 'gmail_raw')
+            ORDER BY received_at DESC NULLS LAST
+            LIMIT %s
+        """, (limit,))
+        rows = c.fetchall()
+    finally:
+        if conn:
+            conn.close()
 
     if not rows:
         return {"status": "termine", "analyzed": 0, "message": "Tous les mails sont déjà analysés."}
@@ -509,64 +565,48 @@ def analyze_raw_mails(limit: int = 50):
         }
         try:
             item = analyze_single_mail_with_ai(msg, instructions)
-            conn = get_pg_conn()
-            c = conn.cursor()
-            c.execute("""
-                UPDATE mail_memory SET
-                    display_title = %s,
-                    category = %s,
-                    priority = %s,
-                    reason = %s,
-                    suggested_action = %s,
-                    short_summary = %s,
-                    confidence = %s,
-                    confidence_level = %s,
-                    needs_review = %s,
-                    needs_reply = %s,
-                    reply_urgency = %s,
-                    reply_reason = %s,
-                    response_type = %s,
-                    suggested_reply_subject = %s,
-                    suggested_reply = %s,
-                    analysis_status = 'done_ai'
-                WHERE id = %s
-            """, (
-                item.get("display_title"),
-                item.get("category"),
-                item.get("priority"),
-                item.get("reason"),
-                item.get("suggested_action"),
-                item.get("short_summary"),
-                item.get("confidence", 0.5),
-                item.get("confidence_level", "moyenne"),
-                int(item.get("needs_review", False)),
-                int(item.get("needs_reply", False)),
-                item.get("reply_urgency"),
-                item.get("reply_reason"),
-                item.get("response_type"),
-                item.get("suggested_reply_subject"),
-                item.get("suggested_reply"),
-                db_id,
-            ))
-            conn.commit()
-            conn.close()
+            conn = None
+            try:
+                conn = get_pg_conn()
+                c = conn.cursor()
+                c.execute("""
+                    UPDATE mail_memory SET
+                        display_title = %s, category = %s, priority = %s, reason = %s,
+                        suggested_action = %s, short_summary = %s, confidence = %s,
+                        confidence_level = %s, needs_review = %s, needs_reply = %s,
+                        reply_urgency = %s, reply_reason = %s, response_type = %s,
+                        suggested_reply_subject = %s, suggested_reply = %s, analysis_status = 'done_ai'
+                    WHERE id = %s
+                """, (
+                    item.get("display_title"), item.get("category"), item.get("priority"),
+                    item.get("reason"), item.get("suggested_action"), item.get("short_summary"),
+                    item.get("confidence", 0.5), item.get("confidence_level", "moyenne"),
+                    int(item.get("needs_review", False)), int(item.get("needs_reply", False)),
+                    item.get("reply_urgency"), item.get("reply_reason"), item.get("response_type"),
+                    item.get("suggested_reply_subject"), item.get("suggested_reply"), db_id,
+                ))
+                conn.commit()
+            finally:
+                if conn:
+                    conn.close()
             analyzed += 1
         except Exception as e:
             print(f"[AnalyzeRaw] Erreur mail {db_id}: {e}")
             errors += 1
             continue
 
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM mail_memory WHERE analysis_status IN ('inbox_raw', 'archive_raw', 'gmail_raw')")
-    remaining = c.fetchone()[0]
-    conn.close()
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) FROM mail_memory WHERE analysis_status IN ('inbox_raw', 'archive_raw', 'gmail_raw')")
+        remaining = c.fetchone()[0]
+    finally:
+        if conn:
+            conn.close()
 
     return {
-        "status": "ok",
-        "analyzed": analyzed,
-        "errors": errors,
-        "remaining": remaining,
+        "status": "ok", "analyzed": analyzed, "errors": errors, "remaining": remaining,
         "message": f"{analyzed} mails analysés. Il reste {remaining} mails bruts."
     }
 
@@ -609,17 +649,21 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     if "access_token" not in result:
         return HTMLResponse("Erreur d'authentification", status_code=400)
     request.session["access_token"] = result["access_token"]
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("""
-        INSERT INTO oauth_tokens (provider, access_token, refresh_token, expires_at)
-        VALUES (%s, %s, %s, NOW() + INTERVAL '1 hour')
-        ON CONFLICT (provider) DO UPDATE SET
-            access_token = EXCLUDED.access_token, refresh_token = EXCLUDED.refresh_token,
-            expires_at = EXCLUDED.expires_at, updated_at = NOW()
-    """, ("microsoft", result["access_token"], result.get("refresh_token", "")))
-    conn.commit()
-    conn.close()
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO oauth_tokens (provider, access_token, refresh_token, expires_at)
+            VALUES (%s, %s, %s, NOW() + INTERVAL '1 hour')
+            ON CONFLICT (provider) DO UPDATE SET
+                access_token = EXCLUDED.access_token, refresh_token = EXCLUDED.refresh_token,
+                expires_at = EXCLUDED.expires_at, updated_at = NOW()
+        """, ("microsoft", result["access_token"], result.get("refresh_token", "")))
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
     return RedirectResponse(state or "/chat")
 
 
@@ -653,22 +697,30 @@ def triage_queue():
 
 @app.get("/memory")
 def memory():
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("SELECT message_id, received_at, from_email, subject, display_title, category, priority, analysis_status FROM mail_memory ORDER BY id DESC LIMIT 20")
-    columns = [desc[0] for desc in c.description]
-    rows = [dict(zip(columns, row)) for row in c.fetchall()]
-    conn.close()
-    return rows
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("SELECT message_id, received_at, from_email, subject, display_title, category, priority, analysis_status FROM mail_memory ORDER BY id DESC LIMIT 20")
+        columns = [desc[0] for desc in c.description]
+        rows = [dict(zip(columns, row)) for row in c.fetchall()]
+        return rows
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.get("/rebuild-memory")
 def rebuild_memory_mails():
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("DELETE FROM mail_memory")
-    conn.commit()
-    conn.close()
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("DELETE FROM mail_memory")
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
     return {"status": "mail_memory_cleared"}
 
 
@@ -767,23 +819,27 @@ def learn_sent_mails(request: Request, top: int = 50):
         return RedirectResponse("/login?next=/learn-sent-mails")
     messages = data.get("value", [])
     inserted = 0
-    conn = get_pg_conn()
-    c = conn.cursor()
-    for msg in messages:
-        message_id = msg["id"]
-        c.execute("SELECT 1 FROM sent_mail_memory WHERE message_id = %s", (message_id,))
-        if c.fetchone():
-            continue
-        to_recipients = msg.get("toRecipients", [])
-        to_email = to_recipients[0].get("emailAddress", {}).get("address", "") if to_recipients else ""
-        try:
-            c.execute("INSERT INTO sent_mail_memory (message_id, sent_at, to_email, subject, body_preview) VALUES (%s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING",
-                      (message_id, msg.get("receivedDateTime"), to_email, msg.get("subject"), msg.get("bodyPreview")))
-            inserted += 1
-        except Exception:
-            continue
-    conn.commit()
-    conn.close()
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        for msg in messages:
+            message_id = msg["id"]
+            c.execute("SELECT 1 FROM sent_mail_memory WHERE message_id = %s", (message_id,))
+            if c.fetchone():
+                continue
+            to_recipients = msg.get("toRecipients", [])
+            to_email = to_recipients[0].get("emailAddress", {}).get("address", "") if to_recipients else ""
+            try:
+                c.execute("INSERT INTO sent_mail_memory (message_id, sent_at, to_email, subject, body_preview) VALUES (%s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING",
+                          (message_id, msg.get("receivedDateTime"), to_email, msg.get("subject"), msg.get("bodyPreview")))
+                inserted += 1
+            except Exception:
+                continue
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
     return {"inserted": inserted, "total_fetched": len(messages)}
 
 
@@ -801,43 +857,51 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
         return RedirectResponse("/login?next=/learn-inbox-mails")
     messages = data.get("value", [])
     inserted = skipped_noise = 0
-    conn = get_pg_conn()
-    c = conn.cursor()
+    conn = None
     skip_keywords = ["noreply", "no-reply", "donotreply", "newsletter", "unsubscribe", "se désabonner",
                      "notification", "mailer-daemon", "marketing", "promo", "offre spéciale", "linkedin",
                      "twitter", "facebook", "instagram", "jobteaser", "indeed", "welcometothejungle",
                      "calendly", "zoom", "teams", "webinar", "webinaire", "satisfaction", "avis client", "enquête", "survey"]
-    for msg in messages:
-        message_id = msg["id"]
-        c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
-        if c.fetchone():
-            continue
-        from_email = msg.get("from", {}).get("emailAddress", {}).get("address", "").lower()
-        subject = (msg.get("subject") or "").lower()
-        body = (msg.get("bodyPreview") or "").lower()
-        if any(kw in f"{from_email} {subject} {body}" for kw in skip_keywords):
-            skipped_noise += 1
-            continue
-        try:
-            c.execute("INSERT INTO mail_memory (message_id, received_at, from_email, subject, raw_body_preview, analysis_status, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING",
-                      (message_id, msg.get("receivedDateTime"), msg.get("from", {}).get("emailAddress", {}).get("address", ""),
-                       msg.get("subject"), msg.get("bodyPreview"), "inbox_raw", datetime.utcnow().isoformat()))
-            inserted += 1
-        except Exception:
-            continue
-    conn.commit()
-    conn.close()
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        for msg in messages:
+            message_id = msg["id"]
+            c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
+            if c.fetchone():
+                continue
+            from_email = msg.get("from", {}).get("emailAddress", {}).get("address", "").lower()
+            subject = (msg.get("subject") or "").lower()
+            body = (msg.get("bodyPreview") or "").lower()
+            if any(kw in f"{from_email} {subject} {body}" for kw in skip_keywords):
+                skipped_noise += 1
+                continue
+            try:
+                c.execute("INSERT INTO mail_memory (message_id, received_at, from_email, subject, raw_body_preview, analysis_status, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING",
+                          (message_id, msg.get("receivedDateTime"), msg.get("from", {}).get("emailAddress", {}).get("address", ""),
+                           msg.get("subject"), msg.get("bodyPreview"), "inbox_raw", datetime.utcnow().isoformat()))
+                inserted += 1
+            except Exception:
+                continue
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
     return {"inserted": inserted, "skipped_noise": skipped_noise, "total_fetched": len(messages)}
 
 
 @app.get("/build-style-profile")
 def build_style_profile(request: Request):
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("SELECT subject, to_email, body_preview FROM sent_mail_memory ORDER BY sent_at DESC LIMIT 100")
-    columns = [desc[0] for desc in c.description]
-    rows = [dict(zip(columns, row)) for row in c.fetchall()]
-    conn.close()
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("SELECT subject, to_email, body_preview FROM sent_mail_memory ORDER BY sent_at DESC LIMIT 100")
+        columns = [desc[0] for desc in c.description]
+        rows = [dict(zip(columns, row)) for row in c.fetchall()]
+    finally:
+        if conn:
+            conn.close()
     if not rows:
         return {"error": "Aucun mail envoyé en mémoire"}
     mails_text = "\n\n".join([f"Sujet : {r['subject']}\nDestinataire : {r['to_email']}\nContenu : {r['body_preview']}" for r in rows])
@@ -846,12 +910,16 @@ def build_style_profile(request: Request):
         messages=[{"role": "user", "content": f"Analyse ces {len(rows)} emails envoyés par Guillaume Perrin.\n\n{mails_text}\n\nProduis un profil détaillé de son style."}]
     )
     profile_text = response.content[0].text
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("DELETE FROM aria_profile WHERE profile_type = 'style'")
-    c.execute("INSERT INTO aria_profile (profile_type, content) VALUES (%s, %s)", ('style', profile_text))
-    conn.commit()
-    conn.close()
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("DELETE FROM aria_profile WHERE profile_type = 'style'")
+        c.execute("INSERT INTO aria_profile (profile_type, content) VALUES (%s, %s)", ('style', profile_text))
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
     return {"status": "ok", "profile": profile_text}
 
 
@@ -873,24 +941,32 @@ def auth_gmail_callback(request: Request, code: str | None = None):
         return HTMLResponse("Code manquant", status_code=400)
     from app.connectors.gmail_connector import exchange_code_for_tokens
     tokens = exchange_code_for_tokens(code)
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("DELETE FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
-    c.execute("INSERT INTO gmail_tokens (email, access_token, refresh_token) VALUES (%s, %s, %s)",
-              ("per1.guillaume@gmail.com", tokens.get("access_token"), tokens.get("refresh_token")))
-    conn.commit()
-    conn.close()
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("DELETE FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
+        c.execute("INSERT INTO gmail_tokens (email, access_token, refresh_token) VALUES (%s, %s, %s)",
+                  ("per1.guillaume@gmail.com", tokens.get("access_token"), tokens.get("refresh_token")))
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
     return {"status": "ok", "message": "Gmail connecté !"}
 
 
 @app.get("/ingest-gmail")
 def ingest_gmail(request: Request):
     from app.connectors.gmail_connector import gmail_get_messages, gmail_get_message, refresh_gmail_token
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
-    row = c.fetchone()
-    conn.close()
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
+        row = c.fetchone()
+    finally:
+        if conn:
+            conn.close()
     if not row:
         return {"error": "Gmail non connecté"}
     access_token, refresh_token = row[0], row[1]
@@ -903,200 +979,35 @@ def ingest_gmail(request: Request):
     skip_keywords = ["noreply", "no-reply", "donotreply", "newsletter", "unsubscribe", "se désabonner",
                      "notification", "mailer-daemon", "marketing", "promo", "offre spéciale",
                      "linkedin", "twitter", "facebook", "instagram", "jobteaser", "indeed", "welcometothejungle"]
-    conn = get_pg_conn()
-    c = conn.cursor()
-    for msg in messages:
-        message_id = msg["id"]
-        c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
-        if c.fetchone():
-            continue
-        try:
-            detail = gmail_get_message(access_token, message_id)
-            headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
-            subject = headers.get("Subject", "(Sans objet)")
-            from_email = headers.get("From", "")
-            date = headers.get("Date", "")
-            snippet = detail.get("snippet", "")
-            if any(kw in f"{from_email} {subject} {snippet}".lower() for kw in skip_keywords):
-                continue
-            c.execute("INSERT INTO mail_memory (message_id, received_at, from_email, subject, raw_body_preview, analysis_status, mailbox_source, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING",
-                      (message_id, date, from_email, subject, snippet, "gmail_raw", "gmail_perso", datetime.utcnow().isoformat()))
-            inserted += 1
-        except Exception:
-            conn.rollback()
-            continue
-    conn.commit()
-    conn.close()
-    return {"inserted": inserted, "total_fetched": len(messages)}
-
-
-@app.get("/learn-gmail-all")
-def learn_gmail_all(request: Request, max_results: int = 100, page_token: str = None):
-    from app.connectors.gmail_connector import gmail_get_message, refresh_gmail_token
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
-    row = c.fetchone()
-    conn.close()
-    if not row:
-        return {"error": "Gmail non connecté"}
-    access_token, refresh_token = row[0], row[1]
+    conn = None
     try:
-        response = requests.get("https://gmail.googleapis.com/gmail/v1/users/me/messages",
-            headers={"Authorization": f"Bearer {access_token}"},
-            params={"maxResults": max_results, "pageToken": page_token}, timeout=30)
-        if response.status_code == 401:
-            access_token = refresh_gmail_token(refresh_token)
-            response = requests.get("https://gmail.googleapis.com/gmail/v1/users/me/messages",
-                headers={"Authorization": f"Bearer {access_token}"},
-                params={"maxResults": max_results, "pageToken": page_token}, timeout=30)
-        data = response.json()
-    except Exception as e:
-        return {"error": str(e)}
-    messages = data.get("messages", [])
-    next_page_token = data.get("nextPageToken")
-    inserted = skipped_noise = skipped_ai = 0
-    skip_keywords = ["noreply", "no-reply", "donotreply", "newsletter", "unsubscribe", "se désabonner",
-                     "notification", "mailer-daemon", "marketing", "promo", "offre spéciale",
-                     "linkedin", "twitter", "facebook", "instagram", "jobteaser", "indeed", "welcometothejungle",
-                     "calendly", "zoom", "teams", "webinar", "webinaire", "satisfaction", "avis client", "enquête", "survey"]
-    conn = get_pg_conn()
-    c = conn.cursor()
-    for msg in messages:
-        message_id = msg["id"]
-        c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
-        if c.fetchone():
-            continue
-        try:
-            detail = gmail_get_message(access_token, message_id)
-            headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
-            subject = headers.get("Subject", "(Sans objet)")
-            from_email = headers.get("From", "")
-            date = headers.get("Date", "")
-            snippet = detail.get("snippet", "")
-            full_text = f"{from_email} {subject} {snippet}".lower()
-            if any(kw in full_text for kw in skip_keywords):
-                skipped_noise += 1
+        conn = get_pg_conn()
+        c = conn.cursor()
+        for msg in messages:
+            message_id = msg["id"]
+            c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
+            if c.fetchone():
                 continue
             try:
-                decision = client.messages.create(model=ANTHROPIC_MODEL_FAST, max_tokens=5,
-                    messages=[{"role": "user", "content": f"Mail de : {from_email}\nSujet : {subject}\nContenu : {snippet[:200]}\n\nPertinent pour un dirigeant dans le solaire ? OUI ou NON."}])
-                if "NON" in decision.content[0].text.upper():
-                    skipped_ai += 1
+                detail = gmail_get_message(access_token, message_id)
+                headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
+                subject = headers.get("Subject", "(Sans objet)")
+                from_email = headers.get("From", "")
+                date = headers.get("Date", "")
+                snippet = detail.get("snippet", "")
+                if any(kw in f"{from_email} {subject} {snippet}".lower() for kw in skip_keywords):
                     continue
+                c.execute("INSERT INTO mail_memory (message_id, received_at, from_email, subject, raw_body_preview, analysis_status, mailbox_source, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING",
+                          (message_id, date, from_email, subject, snippet, "gmail_raw", "gmail_perso", datetime.utcnow().isoformat()))
+                inserted += 1
             except Exception:
-                pass
-            c.execute("INSERT INTO mail_memory (message_id, received_at, from_email, subject, raw_body_preview, analysis_status, mailbox_source, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING",
-                      (message_id, date, from_email, subject, snippet, "gmail_raw", "gmail_perso", datetime.utcnow().isoformat()))
-            inserted += 1
-        except Exception:
-            conn.rollback()
-            continue
-    conn.commit()
-    conn.close()
-    return {"inserted": inserted, "skipped_noise": skipped_noise, "skipped_ai": skipped_ai, "total_fetched": len(messages), "next_page_token": next_page_token}
-
-
-@app.get("/learn-gmail-sent")
-def learn_gmail_sent(request: Request, max_results: int = 200, page_token: str = None):
-    from app.connectors.gmail_connector import gmail_get_message, refresh_gmail_token
-    conn = get_pg_conn()
-    c = conn.cursor()
-    c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
-    row = c.fetchone()
-    conn.close()
-    if not row:
-        return {"error": "Gmail non connecté"}
-    access_token, refresh_token = row[0], row[1]
-    try:
-        response = requests.get("https://gmail.googleapis.com/gmail/v1/users/me/messages",
-            headers={"Authorization": f"Bearer {access_token}"},
-            params={"maxResults": max_results, "labelIds": "SENT", "pageToken": page_token}, timeout=30)
-        if response.status_code == 401:
-            access_token = refresh_gmail_token(refresh_token)
-            response = requests.get("https://gmail.googleapis.com/gmail/v1/users/me/messages",
-                headers={"Authorization": f"Bearer {access_token}"},
-                params={"maxResults": max_results, "labelIds": "SENT", "pageToken": page_token}, timeout=30)
-        data = response.json()
-    except Exception as e:
-        return {"error": str(e)}
-    messages = data.get("messages", [])
-    next_page_token = data.get("nextPageToken")
-    inserted = 0
-    conn = get_pg_conn()
-    c = conn.cursor()
-    for msg in messages:
-        message_id = msg["id"]
-        c.execute("SELECT 1 FROM sent_mail_memory WHERE message_id = %s", (message_id,))
-        if c.fetchone():
-            continue
-        try:
-            detail = gmail_get_message(access_token, message_id)
-            headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
-            c.execute("INSERT INTO sent_mail_memory (message_id, sent_at, to_email, subject, body_preview) VALUES (%s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING",
-                      (message_id, headers.get("Date", ""), headers.get("To", ""), headers.get("Subject", "(Sans objet)"), detail.get("snippet", "")))
-            inserted += 1
-        except Exception:
-            conn.rollback()
-            continue
-    conn.commit()
-    conn.close()
-    return {"inserted": inserted, "total_fetched": len(messages), "next_page_token": next_page_token}
-
-
-@app.get("/learn-archive-mails")
-def learn_archive_mails(request: Request, top: int = 100, skip: int = 0):
-    token = request.session.get("access_token")
-    if not token:
-        return RedirectResponse("/login?next=/learn-archive-mails")
-    folder_id = "AQMkAGEwZmJhNTllLWQ3MjUtNDg4ADQtYjdhMi1jMGEyZjRiNmFkNWEALgAAA-6yBmE1L7hGi--BXSl5S2sBAIyf8uOKE0VAkKv1dN8K6xgAAAIBRQAAAA=="
-    try:
-        data = graph_get(token, f"/me/mailFolders/{folder_id}/messages", params={
-            "$top": top, "$skip": skip, "$select": "id,subject,from,receivedDateTime,bodyPreview", "$orderby": "receivedDateTime DESC",
-        })
-    except requests.HTTPError:
-        request.session.pop("access_token", None)
-        return RedirectResponse("/login?next=/learn-archive-mails")
-    messages = data.get("value", [])
-    inserted = skipped_noise = 0
-    conn = get_pg_conn()
-    c = conn.cursor()
-    skip_keywords = ["noreply", "no-reply", "newsletter", "unsubscribe", "notification", "marketing",
-                     "promo", "linkedin", "twitter", "facebook", "instagram", "calendly", "webinar"]
-    for msg in messages:
-        message_id = msg["id"]
-        c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
-        if c.fetchone():
-            continue
-        from_email = msg.get("from", {}).get("emailAddress", {}).get("address", "").lower()
-        subject = (msg.get("subject") or "").lower()
-        body = (msg.get("bodyPreview") or "").lower()
-        if any(kw in f"{from_email} {subject} {body}" for kw in skip_keywords):
-            skipped_noise += 1
-            continue
-        try:
-            c.execute("INSERT INTO mail_memory (message_id, received_at, from_email, subject, raw_body_preview, analysis_status, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING",
-                      (message_id, msg.get("receivedDateTime"), msg.get("from", {}).get("emailAddress", {}).get("address", ""),
-                       msg.get("subject"), msg.get("bodyPreview"), "archive_raw", datetime.utcnow().isoformat()))
-            inserted += 1
-        except Exception:
-            continue
-    conn.commit()
-    conn.close()
-    return {"inserted": inserted, "skipped_noise": skipped_noise, "total_fetched": len(messages)}
-
-
-@app.get("/list-mail-folders")
-def list_mail_folders(request: Request):
-    token = request.session.get("access_token")
-    if not token:
-        return RedirectResponse("/login?next=/list-mail-folders")
-    try:
-        data = graph_get(token, "/me/mailFolders")
-    except requests.HTTPError:
-        request.session.pop("access_token", None)
-        return RedirectResponse("/login?next=/list-mail-folders")
-    return data.get("value", [])
+                conn.rollback()
+                continue
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+    return {"inserted": inserted, "total_fetched": len(messages)}
 
 
 @app.get("/assistant-dashboard")
