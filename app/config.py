@@ -12,10 +12,15 @@ AUTHORITY = os.getenv("AUTHORITY", "").strip()
 if not AUTHORITY and TENANT_ID:
     AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
 
-GRAPH_SCOPES = os.getenv(
-    "GRAPH_SCOPES",
-    "User.Read Mail.Read Mail.ReadWrite Mail.Send Calendars.ReadWrite Files.ReadWrite.All Sites.ReadWrite.All offline_access"
-).split()
+# Scopes minimaux — consentement utilisateur uniquement, pas admin
+GRAPH_SCOPES = [
+    "User.Read",
+    "Mail.Read",
+    "Mail.ReadWrite",
+    "Mail.Send",
+    "Calendars.ReadWrite",
+    "offline_access",
+]
 
 SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me")
 ASSISTANT_DB_PATH = os.getenv("ASSISTANT_DB_PATH", "assistant.db")
