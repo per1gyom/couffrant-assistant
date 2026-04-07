@@ -19,6 +19,11 @@ GRAPH_SCOPES = [
     "Mail.ReadWrite",
     "Mail.Send",
     "Calendars.ReadWrite",
+    "Tasks.ReadWrite",
+    "Files.ReadWrite.All",
+    "Contacts.Read",
+    "Chat.ReadWrite",
+    "TeamMember.Read.All",
 ]
 
 SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me")
@@ -26,7 +31,7 @@ ASSISTANT_DB_PATH = os.getenv("ASSISTANT_DB_PATH", "assistant.db")
 
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").strip()
 ANTHROPIC_MODEL_FAST = os.getenv("ANTHROPIC_MODEL_FAST", "claude-haiku-4-5-20251001")
-ANTHROPIC_MODEL_SMART = os.getenv("ANTHROPIC_MODEL_SMART", "claude-sonnet-4-6")
+ANTHROPIC_MODEL_SMART = os.getenv("ANTHROPIC_MODEL_SMART", "claude-sonnet-4-6-20250514")
 
 ODOO_URL = os.getenv("ODOO_URL", "").strip()
 ODOO_API_KEY = os.getenv("ODOO_API_KEY", "").strip()
