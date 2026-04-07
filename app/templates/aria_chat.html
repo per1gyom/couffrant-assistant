@@ -56,6 +56,7 @@
   .input-wrapper.mic-active { border-color: var(--danger); }
   textarea#input { flex: 1; background: none; border: none; outline: none; color: var(--text); font-size: 14.5px; font-family: inherit; resize: none; min-height: 24px; max-height: 120px; line-height: 1.5; padding: 4px 0; }
   textarea#input::placeholder { color: var(--text-muted); }
+  textarea#input.interim { color: #888; font-style: italic; }
   .input-btns { display: flex; gap: 6px; align-items: flex-end; padding-bottom: 2px; }
   .icon-btn { width: 36px; height: 36px; border-radius: 10px; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 16px; transition: all 0.15s; flex-shrink: 0; }
   #micBtn { background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); }
@@ -124,8 +125,11 @@ const stopBtn=document.getElementById('stopBtn');
 const triageBar=document.getElementById('triageBar');
 const micStatus=document.getElementById('micStatus');
 const inputWrapper=document.getElementById('inputWrapper');
-let recognition=null,isListening=false,currentAudio=null,speakAborted=false,currentSpeakBtn=null,triageQueue=[],triageCurrent=null,silenceTimer=null;
+let isListening=false,currentAudio=null,speakAborted=false,currentSpeakBtn=null;
+let triageQueue=[],triageCurrent=null,silenceTimer=null;
+let interimText='', finalTextBase='';
 
+// ─── TTS ───
 function speak(text,btn){
   stopSpeech();speakAborted=false;stopBtn.classList.add('visible');
   currentSpeakBtn=btn||null;
@@ -158,6 +162,8 @@ function cleanText(text){
 function autoResize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,120)+'px';}
 function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}}
 function scrollToBottom(){messagesEl.scrollTop=messagesEl.scrollHeight;}
+
+// ─── MESSAGES ───
 function addMessage(text,type){
   const welcome=messagesEl.querySelector('.welcome');if(welcome)welcome.remove();
   const row=document.createElement('div');row.className='message-row '+type;
@@ -183,7 +189,8 @@ function addLoading(){
 }
 async function sendMessage(){
   const text=inputEl.value.trim();if(!text)return;
-  inputEl.value='';inputEl.style.height='auto';sendBtn.disabled=true;stopSpeech();
+  inputEl.value='';inputEl.style.height='auto';inputEl.classList.remove('interim');
+  sendBtn.disabled=true;stopSpeech();
   addMessage(text,'user');const loading=addLoading();
   try{
     const response=await fetch('/aria',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:text})});
@@ -194,60 +201,157 @@ async function sendMessage(){
 }
 function quickAsk(text){inputEl.value=text;sendMessage();}
 
+// ─── MICRO — version robuste ───
 function toggleMic(){
-  if(!('webkitSpeechRecognition' in window)&&!('SpeechRecognition' in window)){alert('Reconnaissance vocale non supportée.');return;}
-  if(isListening){stopListening();return;}startListening();
-}
-function startListening(){
   const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  recognition=new SR();recognition.lang='fr-FR';recognition.continuous=true;recognition.interimResults=true;
-  recognition.onstart=()=>{isListening=true;micBtn.classList.add('listening');micBtn.textContent='⏹';micStatus.classList.add('visible');inputWrapper.classList.add('mic-active');resetSilenceTimer();};
-  recognition.onresult=(e)=>{
-    clearSilenceTimer();let final='';
-    for(let i=e.resultIndex;i<e.results.length;i++){if(e.results[i].isFinal)final+=e.results[i][0].transcript;}
-    if(final){inputEl.value=(inputEl.value+' '+final).trim();autoResize(inputEl);}
-    resetSilenceTimer();
-  };
-  recognition.onerror=()=>stopListening();
-  recognition.onend=()=>{if(isListening){try{recognition.start();}catch{stopListening();}}};
-  recognition.start();
-}
-function resetSilenceTimer(){clearSilenceTimer();silenceTimer=setTimeout(()=>stopListening(),2500);}
-function clearSilenceTimer(){if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;}}
-function stopListening(){
-  clearSilenceTimer();isListening=false;micBtn.classList.remove('listening');micBtn.textContent='🎤';
-  micStatus.classList.remove('visible');inputWrapper.classList.remove('mic-active');
-  if(recognition){try{recognition.stop();}catch{}recognition=null;}
-  inputEl.value=inputEl.value.trim();autoResize(inputEl);inputEl.focus();
+  if(!SR){
+    alert('Reconnaissance vocale non supportée sur ce navigateur.\nUtilisez Chrome ou Edge.');
+    return;
+  }
+  if(isListening){stopListening();}else{startListening();}
 }
 
+function startListening(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR)return;
+
+  // Réinitialise les textes
+  finalTextBase=inputEl.value;
+  interimText='';
+
+  const rec=new SR();
+  rec.lang='fr-FR';
+  rec.continuous=false;      // false = plus fiable cross-browser
+  rec.interimResults=true;
+  rec.maxAlternatives=1;
+
+  rec.onstart=()=>{
+    isListening=true;
+    micBtn.classList.add('listening');
+    micBtn.textContent='⏹';
+    micStatus.classList.add('visible');
+    inputWrapper.classList.add('mic-active');
+  };
+
+  rec.onresult=(e)=>{
+    clearSilenceTimer();
+    let interim='';
+    let final='';
+    for(let i=e.resultIndex;i<e.results.length;i++){
+      if(e.results[i].isFinal){
+        final+=e.results[i][0].transcript+' ';
+      }else{
+        interim+=e.results[i][0].transcript;
+      }
+    }
+    if(interim){
+      // Affiche en italique grisé dans le champ
+      inputEl.value=(finalTextBase+' '+interim).trim();
+      inputEl.classList.add('interim');
+      autoResize(inputEl);
+    }
+    if(final){
+      finalTextBase=(finalTextBase+' '+final).trim();
+      inputEl.value=finalTextBase;
+      inputEl.classList.remove('interim');
+      autoResize(inputEl);
+    }
+    resetSilenceTimer();
+  };
+
+  rec.onerror=(e)=>{
+    console.error('[Mic] Erreur:', e.error);
+    if(e.error==='not-allowed'||e.error==='permission-denied'){
+      alert('Microphone bloqué.\nCliquez sur l\'icône 🔒 dans la barre d\'adresse et autorisez le microphone.');
+    } else if(e.error==='no-speech'){
+      // Silence détecté — on relance si toujours en écoute
+    } else if(e.error==='network'){
+      alert('Erreur réseau pour la reconnaissance vocale.');
+      stopListening();
+    }
+  };
+
+  rec.onend=()=>{
+    if(isListening){
+      // Crée une NOUVELLE instance pour relancer (on ne peut pas réutiliser la même)
+      setTimeout(()=>{
+        if(isListening)startListening();
+      },100);
+    }else{
+      cleanupMicUI();
+    }
+  };
+
+  try{
+    rec.start();
+    resetSilenceTimer();
+  }catch(e){
+    console.error('[Mic] Impossible de démarrer:', e);
+    stopListening();
+  }
+}
+
+function resetSilenceTimer(){
+  clearSilenceTimer();
+  silenceTimer=setTimeout(()=>{
+    if(isListening)stopListening();
+  },3000);
+}
+function clearSilenceTimer(){
+  if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;}
+}
+function stopListening(){
+  isListening=false;
+  clearSilenceTimer();
+  cleanupMicUI();
+  // Nettoie le texte interim si présent
+  inputEl.classList.remove('interim');
+  if(inputEl.value)autoResize(inputEl);
+  inputEl.focus();
+}
+function cleanupMicUI(){
+  micBtn.classList.remove('listening');
+  micBtn.textContent='🎤';
+  micStatus.classList.remove('visible');
+  inputWrapper.classList.remove('mic-active');
+}
+
+// ─── TRIAGE ───
 async function startTriage(){
   stopSpeech();triageBar.classList.remove('visible');
-  const loading=addLoading();const response=await fetch('/triage-queue');const data=await response.json();loading.remove();
+  const loading=addLoading();
+  const response=await fetch('/triage-queue');const data=await response.json();loading.remove();
   triageQueue=data.mails||[];
   if(triageQueue.length===0){const row=addMessage('Aucun mail.','aria');speak('Aucun mail.',row.querySelector('.speak-btn'));return;}
-  const intro=triageQueue.length+' mails. On commence.';const introRow=addMessage(intro,'aria');speak(intro,introRow.querySelector('.speak-btn'));
+  const intro=triageQueue.length+' mails. On commence.';
+  const introRow=addMessage(intro,'aria');speak(intro,introRow.querySelector('.speak-btn'));
   setTimeout(()=>nextTriage(),1500);
 }
 function nextTriage(){
-  if(triageQueue.length===0){triageBar.classList.remove('visible');const row=addMessage('Triage terminé !','aria');speak('Triage terminé !',row.querySelector('.speak-btn'));triageCurrent=null;return;}
+  if(triageQueue.length===0){
+    triageBar.classList.remove('visible');
+    const row=addMessage('Triage terminé !','aria');
+    speak('Triage terminé !',row.querySelector('.speak-btn'));
+    triageCurrent=null;return;
+  }
   triageCurrent=triageQueue.shift();
-  const msg='De : '+( triageCurrent.from_email||'Inconnu')+'
-Sujet : '+(triageCurrent.subject||'(Sans objet)')+'
-
-'+(triageCurrent.raw_body_preview||'').slice(0,200)+'
-
-— Que je fasse ? ('+ triageQueue.length+' restants)';
-  const row=addMessage(msg,'aria');speak(msg,row.querySelector('.speak-btn'));triageBar.classList.add('visible');
+  const msg='De : '+(triageCurrent.from_email||'Inconnu')+'\nSujet : '+(triageCurrent.subject||'(Sans objet)')+'\n\n'+(triageCurrent.raw_body_preview||'').slice(0,200)+'\n\n— Que je fasse ? ('+triageQueue.length+' restants)';
+  const row=addMessage(msg,'aria');speak(msg,row.querySelector('.speak-btn'));
+  triageBar.classList.add('visible');
 }
 async function handleTriage(action){
   if(!triageCurrent)return;triageBar.classList.remove('visible');stopSpeech();
   if(action==='skip'){addMessage('Passé.','aria');setTimeout(()=>nextTriage(),500);return;}
-  const actionMap={'archive':'Archive le mail '+triageCurrent.message_id,'delete':'Supprime (corbeille) le mail '+triageCurrent.message_id,'reply':'Prépare une réponse pour le mail '+triageCurrent.message_id};
+  const actionMap={
+    'archive':'Archive le mail '+triageCurrent.message_id,
+    'delete':'Supprime (corbeille) le mail '+triageCurrent.message_id,
+    'reply':'Prépare une réponse pour le mail '+triageCurrent.message_id
+  };
   const loading=addLoading();
   try{
     const response=await fetch('/aria',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:actionMap[action]})});
-    const data=await response.json();loading.remove();const row=addMessage(data.answer,'aria');speak(data.answer,row.querySelector('.speak-btn'));
+    const data=await response.json();loading.remove();
+    const row=addMessage(data.answer,'aria');speak(data.answer,row.querySelector('.speak-btn'));
   }catch{loading.remove();}
   setTimeout(()=>nextTriage(),3000);
 }
