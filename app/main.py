@@ -267,7 +267,6 @@ def aria(payload: AriaQuery):
         except Exception:
             pass
 
-    # Construction du contenu utilisateur — texte + fichier optionnel
     user_content_parts = []
     if payload.file_data and payload.file_type:
         file_name_info = f" ({payload.file_name})" if payload.file_name else ""
@@ -333,13 +332,13 @@ Actions Outlook :
 Actions Drive SharePoint (dossier 1_Photovoltaïque uniquement) :
 - [ACTION:LISTDRIVE:] → liste la racine (chaque item retourne son 'id')
 - [ACTION:LISTDRIVE:nom_dossier] → liste un sous-dossier par son nom
-- [ACTION:LISTDRIVE:item_id] → liste par ID — TOUJOURS préférer l'id pour les sous-dossiers (évite les erreurs d'accent)
+- [ACTION:LISTDRIVE:item_id] → liste par ID — TOUJOURS préférer l'id pour les sous-dossiers
 - [ACTION:READDRIVE:item_id] → lit un fichier par son ID
 - [ACTION:SEARCHDRIVE:mot-clé] → recherche par nom dans tout le dossier
-- [ACTION:CREATEFOLDER:parent_item_id|nom_dossier] → crée un dossier (pour la copie uniquement, jamais dans l'original)
-- [ACTION:COPYFILE:source_item_id|dest_folder_id|nouveau_nom] → copie un fichier vers un dossier
+- [ACTION:CREATEFOLDER:parent_item_id|nom_dossier] → crée un dossier
+- [ACTION:COPYFILE:source_item_id|dest_folder_id|nouveau_nom] → copie un fichier
 
-RÈGLE DRIVE CRITIQUE : Après un LISTDRIVE, chaque item a un champ "id". Pour explorer un sous-dossier, TOUJOURS utiliser son id dans [ACTION:LISTDRIVE:item_id]. Ne jamais construire des chemins texte avec des accents.
+RÈGLE DRIVE : Après LISTDRIVE, chaque item a un 'id'. Toujours utiliser cet id pour naviguer/copier.
 
 Propose avant d'agir, SAUF si Guillaume dit "fais-le", "vas-y", "oui".
 
@@ -1095,3 +1094,145 @@ def test_elevenlabs():
 def test_odoo():
     from app.connectors.odoo_connector import perform_odoo_action
     return perform_odoo_action(action="get_partner_by_email", params={"email": "guillaume@couffrant-solar.fr"})
+
+
+# ─── RÉORGANISATION SHAREPOINT ───
+
+@app.get("/reorganize-drive")
+def reorganize_drive():
+    """
+    Crée 1_Photovoltaïque_V2 dans SharePoint Commun avec une structure réorganisée.
+    Copie tous les éléments de 1_Photovoltaïque vers les bons dossiers.
+    Les originaux ne sont JAMAIS touchés.
+    """
+    import time
+    from app.token_manager import get_valid_microsoft_token
+    from app.connectors.outlook_connector import (
+        _find_sharepoint_site_and_drive, _find_folder_item_id, _graph_get
+    )
+
+    token = get_valid_microsoft_token()
+    if not token:
+        return {"error": "Token Microsoft manquant — reconnectez-vous via /login"}
+
+    _, drive_id, _ = _find_sharepoint_site_and_drive(token)
+    if not drive_id:
+        return {"error": "Drive SharePoint 'Commun' introuvable"}
+
+    _, source_id = _find_folder_item_id(token, drive_id)
+    if not source_id:
+        return {"error": "Dossier 1_Photovoltaïque introuvable"}
+
+    # Liste tous les éléments sources avec leurs IDs
+    data = _graph_get(token, f"/drives/{drive_id}/items/{source_id}/children",
+                     params={"$top": 100, "$select": "name,id,folder,file"})
+    items_by_name = {f.get("name"): f.get("id") for f in data.get("value", [])}
+
+    # Trouve le dossier parent (racine de la bibliothèque Documents)
+    source_meta = _graph_get(token, f"/drives/{drive_id}/items/{source_id}",
+                            params={"$select": "id,parentReference"})
+    parent_id = source_meta.get("parentReference", {}).get("id")
+    if not parent_id:
+        return {"error": "Impossible de trouver le dossier parent de 1_Photovoltaïque"}
+
+    log = []
+    errors = []
+
+    def make_folder(parent, name):
+        r = create_drive_folder(token, parent, name, drive_id)
+        if r.get("status") == "ok":
+            log.append(f"✅ Dossier créé : {name}")
+            return r.get("id")
+        errors.append(f"❌ Dossier '{name}' : {r.get('message', '')[:80]}")
+        return None
+
+    def copy_item(source_name, dest_id, new_name=None):
+        item_id = items_by_name.get(source_name)
+        if not item_id:
+            errors.append(f"⚠️ '{source_name}' introuvable dans la source")
+            return
+        r = copy_drive_item(token, item_id, dest_id, new_name, drive_id)
+        label = new_name if new_name else source_name
+        if r.get("status") == "ok":
+            log.append(f"✅ Copie : {source_name} → {label}")
+        else:
+            errors.append(f"❌ Copie '{source_name}' : {r.get('message', '')[:80]}")
+
+    # ── Étape 1 : Crée la racine V2 ──
+    v2_id = make_folder(parent_id, "1_Photovoltaïque_V2")
+    if not v2_id:
+        return {"error": "Impossible de créer 1_Photovoltaïque_V2", "details": errors}
+    time.sleep(1)
+
+    # ── Étape 2 : Crée les 7 catégories ──
+    cat01 = make_folder(v2_id, "01_Commercial")
+    cat02 = make_folder(v2_id, "02_Chantiers")
+    cat03 = make_folder(v2_id, "03_Administratif_Reglementaire")
+    cat04 = make_folder(v2_id, "04_Documentation_Technique")
+    cat05 = make_folder(v2_id, "05_Fournisseurs_Partenaires")
+    cat06 = make_folder(v2_id, "06_Outils_et_Logiciels")
+    cat07 = make_folder(v2_id, "07_RH_et_Stock")
+    time.sleep(1)
+
+    # ── Étape 3 : Copies — 01_Commercial ──
+    if cat01:
+        copy_item("1_1 Chiffrage Particulier", cat01, "Chiffrage_Particuliers")
+        copy_item("1_Chiffrage Pro", cat01, "Chiffrage_Pro")
+
+    # ── Étape 4 : Copies — 02_Chantiers ──
+    if cat02:
+        copy_item("Pilotage", cat02)
+        copy_item("1_SUIVI CHANTIER PV modifié.xlsm", cat02)
+        copy_item("Photo vidéo chantier en cours", cat02, "Photos_et_Videos")
+        copy_item("Photos drone", cat02, "Photos_Drone")
+
+    # ── Étape 5 : Copies — 03_Administratif ──
+    if cat03:
+        copy_item("2_CONSUEL", cat03, "CONSUEL")
+        copy_item("3_ENEDIS", cat03, "ENEDIS")
+        copy_item("4_Demandes DP Cerfa et Raccordement", cat03, "Demandes_DP")
+        copy_item("Procédure d'aide EDF OA.docx", cat03)
+
+    # ── Étape 6 : Copies — 04_Documentation ──
+    if cat04:
+        copy_item("5_Document technique", cat04, "Docs_Techniques")
+        copy_item("Normes", cat04)
+        copy_item("Import ELEC", cat04)
+        copy_item("6_Audits et rapports", cat04, "Audits")
+        copy_item("DOE_Couffrant_Solar_Complet_Modele.docx", cat04)
+        copy_item("DOE_Couffrant_Solar_Modele_Reutilisable.docx", cat04)
+        copy_item("DOE_Photovoltaique_Couffrant_Solar_Complet.docx", cat04)
+        copy_item("PV fin de chantier.docx", cat04)
+        copy_item("RAPPORT AUDIT PV.docx", cat04)
+
+    # ── Étape 7 : Copies — 05_Fournisseurs ──
+    if cat05:
+        copy_item("Adiwatt", cat05)
+        copy_item("MADENR", cat05)
+        copy_item("Urban Solar", cat05)
+        copy_item("Powr Connect", cat05)
+        copy_item("formulaire compensation solaredge.pdf", cat05)
+        copy_item("Demande garantie Onduleur 1 \u2013 Copie.xlsx", cat05)
+        copy_item("Demande garantie Onduleur.xlsx", cat05)
+
+    # ── Étape 8 : Copies — 06_Outils ──
+    if cat06:
+        copy_item("Formation archelios calc", cat06)
+        copy_item("sauvegarde Archelios", cat06)
+        copy_item("Logiciels", cat06)
+        copy_item("unnamed.png", cat06)
+
+    # ── Étape 9 : Copies — 07_RH_Stock ──
+    if cat07:
+        copy_item("Certificats et Formations Professionnels", cat07)
+        copy_item("8_Stock 2026.ods", cat07)
+        copy_item("Suivi panneau publicitaire.xlsx", cat07)
+
+    return {
+        "status": "ok",
+        "message": f"Réorganisation lancée : {len(log)} succès, {len(errors)} erreurs.",
+        "dossier_cree": "1_Photovoltaïque_V2",
+        "note": "Les copies sont asynchrones — attendre 2-5 min que SharePoint termine. Les originaux sont intacts.",
+        "log": log,
+        "errors": errors if errors else "Aucune erreur.",
+    }
