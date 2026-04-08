@@ -21,9 +21,9 @@ except Exception as _mem_err:
 
     def get_hot_summary(username="guillaume"): return ""
     def rebuild_hot_summary(username="guillaume"): return ""
-    def get_contact_card(x): return ""
-    def get_all_contact_cards(): return []
-    def rebuild_contacts(): return 0
+    def get_contact_card(x, tenant_id="couffrant_solar"): return ""
+    def get_all_contact_cards(tenant_id="couffrant_solar"): return []
+    def rebuild_contacts(tenant_id="couffrant_solar"): return 0
     def get_style_examples(**kwargs): return ""
     def save_style_example(**kwargs): pass
     def learn_from_correction(**kwargs): pass

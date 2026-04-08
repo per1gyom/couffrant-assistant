@@ -9,11 +9,23 @@ def get_pg_conn():
 def init_postgres():
     """
     Crée toutes les tables nécessaires.
-    Architecture multi-utilisateurs : chaque utilisateur a sa propre mémoire.
-    Seuls aria_contacts et global_instructions sont partagés.
+    Architecture multi-tenants : tenant = société cliente.
+    Chaque utilisateur appartient à un tenant.
+    Données partagées (contacts, consignes) scopées par tenant.
+    Données personnelles (mémoire, règles) isolées par username.
     """
     conn = get_pg_conn()
     c = conn.cursor()
+
+    # ── tenants — sociétés clientes ──
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS tenants (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            settings JSONB DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS mail_memory (
@@ -83,10 +95,12 @@ def init_postgres():
         )
     """)
 
+    # ── aria_contacts — partagés par tenant ──
     c.execute("""
         CREATE TABLE IF NOT EXISTS aria_contacts (
             id SERIAL PRIMARY KEY,
-            email TEXT UNIQUE,
+            tenant_id TEXT DEFAULT 'couffrant_solar',
+            email TEXT,
             name TEXT,
             company TEXT,
             role TEXT,
@@ -95,7 +109,8 @@ def init_postgres():
             last_subject TEXT,
             mail_count INTEGER DEFAULT 0,
             tags TEXT,
-            updated_at TIMESTAMP DEFAULT NOW()
+            updated_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(email, tenant_id)
         )
     """)
 
@@ -172,6 +187,7 @@ def init_postgres():
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
             scope TEXT DEFAULT 'couffrant_solar',
+            tenant_id TEXT DEFAULT 'couffrant_solar',
             last_login TIMESTAMP,
             created_at TIMESTAMP DEFAULT NOW()
         )
@@ -204,7 +220,6 @@ def init_postgres():
         )
     """)
 
-    # Fix 1 — reply_learning_memory avec username (isolation par utilisateur)
     c.execute("""
         CREATE TABLE IF NOT EXISTS reply_learning_memory (
             id SERIAL PRIMARY KEY,
@@ -215,19 +230,26 @@ def init_postgres():
         )
     """)
 
+    # ── global_instructions — partagées par tenant ──
     c.execute("""
         CREATE TABLE IF NOT EXISTS global_instructions (
             id SERIAL PRIMARY KEY,
+            tenant_id TEXT DEFAULT 'couffrant_solar',
             instruction TEXT,
             created_at TIMESTAMP DEFAULT NOW()
         )
     """)
 
+    # ── gmail_tokens — par username (priorité 2) ──
     c.execute("""
         CREATE TABLE IF NOT EXISTS gmail_tokens (
             id SERIAL PRIMARY KEY,
-            email TEXT, access_token TEXT, refresh_token TEXT,
-            created_at TIMESTAMP DEFAULT NOW()
+            username TEXT DEFAULT 'guillaume',
+            email TEXT,
+            access_token TEXT,
+            refresh_token TEXT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(username)
         )
     """)
 
@@ -239,6 +261,7 @@ def init_postgres():
     c = conn.cursor()
 
     migrations = [
+        # Colonnes username existantes
         "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
         "ALTER TABLE aria_memory ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
         "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
@@ -256,6 +279,7 @@ def init_postgres():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS scope TEXT DEFAULT 'couffrant_solar'",
         "ALTER TABLE aria_hot_summary ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
         "CREATE UNIQUE INDEX IF NOT EXISTS aria_hot_summary_username_idx ON aria_hot_summary (username)",
+        # Contraintes
         "ALTER TABLE oauth_tokens DROP CONSTRAINT IF EXISTS oauth_tokens_provider_unique",
         "ALTER TABLE oauth_tokens DROP CONSTRAINT IF EXISTS oauth_tokens_provider_username_unique",
         "ALTER TABLE oauth_tokens ADD CONSTRAINT oauth_tokens_provider_username_unique UNIQUE (provider, username)",
@@ -265,13 +289,28 @@ def init_postgres():
         "ALTER TABLE sent_mail_memory DROP CONSTRAINT IF EXISTS sent_mail_memory_message_id_key",
         "ALTER TABLE sent_mail_memory DROP CONSTRAINT IF EXISTS sent_mail_msg_user_unique",
         "ALTER TABLE sent_mail_memory ADD CONSTRAINT sent_mail_msg_user_unique UNIQUE (message_id, username)",
-        # Fix 1 — migration reply_learning_memory.username sur base existante
+        # Fix 1 — reply_learning_memory.username
         "ALTER TABLE reply_learning_memory ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
+        # Priorité 3 — multi-tenant
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'couffrant_solar'",
+        "ALTER TABLE aria_contacts ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'couffrant_solar'",
+        "ALTER TABLE global_instructions ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'couffrant_solar'",
+        # Priorité 2 — gmail_tokens par username
+        "ALTER TABLE gmail_tokens ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
+        # Contrainte email unique -> unique par tenant (aria_contacts)
+        "ALTER TABLE aria_contacts DROP CONSTRAINT IF EXISTS aria_contacts_email_key",
+        # user_tools
         """CREATE TABLE IF NOT EXISTS user_tools (
             id SERIAL PRIMARY KEY, username TEXT NOT NULL, tool TEXT NOT NULL,
             access_level TEXT DEFAULT 'read_only', enabled BOOLEAN DEFAULT true,
             config JSONB DEFAULT '{}', created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW(), UNIQUE(username, tool))""",
+        # tenants
+        """CREATE TABLE IF NOT EXISTS tenants (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL,
+            settings JSONB DEFAULT '{}', created_at TIMESTAMP DEFAULT NOW())""",
+        # Seed tenant par défaut
+        "INSERT INTO tenants (id, name, settings) VALUES ('couffrant_solar', 'Couffrant Solar', '{\"sharepoint_folder\": \"1_Photovolta\u00efque\"}') ON CONFLICT (id) DO NOTHING",
     ]
 
     for migration in migrations:

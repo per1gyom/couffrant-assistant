@@ -6,7 +6,7 @@ from app.token_manager import save_microsoft_token
 from app.app_security import (
     authenticate, update_last_login, check_rate_limit,
     record_failed_attempt, clear_attempts, get_user_scope,
-    LOGIN_PAGE_HTML,
+    get_tenant_id, LOGIN_PAGE_HTML,
 )
 from app.database import get_pg_conn
 
@@ -32,8 +32,10 @@ async def login_app_post(
         clear_attempts(ip)
         update_last_login(username.strip())
         scope = get_user_scope(username.strip())
+        tenant_id = get_tenant_id(username.strip())
         request.session["user"] = username.strip()
         request.session["scope"] = scope
+        request.session["tenant_id"] = tenant_id
         return RedirectResponse("/chat", status_code=303)
     record_failed_attempt(ip)
     return HTMLResponse(
@@ -80,10 +82,8 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     request.session["access_token"] = result["access_token"]
     username = request.session.get("user", "guillaume")
     save_microsoft_token(
-        username,
-        result["access_token"],
-        result.get("refresh_token", ""),
-        result.get("expires_in", 3600),
+        username, result["access_token"],
+        result.get("refresh_token", ""), result.get("expires_in", 3600),
     )
     return RedirectResponse(state or "/chat")
 
@@ -96,20 +96,26 @@ def login_gmail():
 
 @router.get("/auth/gmail/callback")
 def auth_gmail_callback(request: Request, code: str | None = None):
+    """
+    Callback OAuth Gmail — priorité 2 : token lié à l'username connecté.
+    Chaque utilisateur a son propre token Gmail.
+    """
     if not code:
         return HTMLResponse("Code manquant", status_code=400)
     from app.connectors.gmail_connector import exchange_code_for_tokens
     tokens = exchange_code_for_tokens(code)
+    username = request.session.get("user", "guillaume")
+    email = tokens.get("email", f"{username}@gmail.com")
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("DELETE FROM gmail_tokens WHERE email=%s", ("per1.guillaume@gmail.com",))
+        c.execute("DELETE FROM gmail_tokens WHERE username=%s", (username,))
         c.execute(
-            "INSERT INTO gmail_tokens (email,access_token,refresh_token) VALUES (%s,%s,%s)",
-            ("per1.guillaume@gmail.com", tokens.get("access_token"), tokens.get("refresh_token")),
+            "INSERT INTO gmail_tokens (username, email, access_token, refresh_token) VALUES (%s,%s,%s,%s)",
+            (username, email, tokens.get("access_token"), tokens.get("refresh_token")),
         )
         conn.commit()
     finally:
         if conn: conn.close()
-    return {"status": "ok", "message": "Gmail connecté !"}
+    return {"status": "ok", "message": f"Gmail connecté pour {username} ({email}) !"}

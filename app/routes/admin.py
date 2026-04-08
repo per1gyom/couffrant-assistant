@@ -6,12 +6,39 @@ from fastapi.responses import RedirectResponse, HTMLResponse
 from app.database import get_pg_conn, init_postgres
 from app.app_security import (
     create_user, delete_user, list_users, init_default_user,
-    get_user_tools, set_user_tool, remove_user_tool, SCOPE_CS,
+    get_user_tools, set_user_tool, remove_user_tool, SCOPE_CS, DEFAULT_TENANT,
 )
 from app.token_manager import get_valid_microsoft_token
 from app.routes.deps import require_admin
 
 router = APIRouter(tags=["admin"])
+
+
+# ─── Tenants ───
+
+@router.get("/admin/tenants")
+def list_tenants_endpoint(request: Request):
+    if not require_admin(request): return {"error": "Accès refusé."}
+    from app.tenant_manager import list_tenants
+    return list_tenants()
+
+
+@router.post("/admin/tenants")
+def create_tenant_endpoint(request: Request, payload: dict = Body(...)):
+    if not require_admin(request): return {"error": "Accès refusé."}
+    from app.tenant_manager import create_tenant
+    return create_tenant(
+        payload.get("tenant_id", "").strip(),
+        payload.get("name", "").strip(),
+        payload.get("settings", {})
+    )
+
+
+@router.delete("/admin/tenants/{tenant_id}")
+def delete_tenant_endpoint(request: Request, tenant_id: str):
+    if not require_admin(request): return {"error": "Accès refusé."}
+    from app.tenant_manager import delete_tenant
+    return delete_tenant(tenant_id)
 
 
 # ─── Panel & users ───
@@ -33,8 +60,11 @@ def admin_list_users(request: Request):
 def admin_create_user(request: Request, payload: dict = Body(...)):
     if not require_admin(request): return {"error": "Accès refusé."}
     return create_user(
-        payload.get("username", "").strip(), payload.get("password", ""),
-        payload.get("scope", SCOPE_CS), payload.get("tools"),
+        payload.get("username", "").strip(),
+        payload.get("password", ""),
+        payload.get("scope", SCOPE_CS),
+        payload.get("tools"),
+        tenant_id=payload.get("tenant_id", DEFAULT_TENANT),
     )
 
 
@@ -117,11 +147,10 @@ def admin_set_user_tool(request: Request, target_username: str, tool: str, paylo
 @router.delete("/admin/user-tools/{target_username}/{tool}")
 def admin_remove_user_tool(request: Request, target_username: str, tool: str):
     if not require_admin(request): return {"error": "Accès refusé."}
-    from app.app_security import remove_user_tool as _remove
-    return _remove(target_username, tool)
+    return remove_user_tool(target_username, tool)
 
 
-# ─── Misc admin (non-préfixés mais réservés admin) ───
+# ─── Misc admin ───
 
 @router.get("/init-db")
 def init_db_now(request: Request):
@@ -222,4 +251,4 @@ def reorganize_drive(request: Request):
         except Exception as e: print(f"[Reorganize] Erreur : {e}")
 
     threading.Thread(target=run_reorganize, daemon=True).start()
-    return {"status": "started", "message": "Réorganisation lancée. Vérifiez SharePoint dans 5-10 minutes.", "note": "Les originaux restent intacts."}
+    return {"status": "started", "message": "Réorganisation lancée.", "note": "Les originaux restent intacts."}

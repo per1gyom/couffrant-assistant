@@ -17,14 +17,16 @@ router = APIRouter(tags=["memory"])
 def build_memory(request: Request):
     username = require_user(request)
     if not username: return RedirectResponse("/login-app")
+    tenant_id = request.session.get("tenant_id", "couffrant_solar")
     if not MEMORY_OK: return {"error": "Module mémoire non disponible"}
-    results = {"memory_module": MEMORY_OK, "username": username}
+    results = {"memory_module": MEMORY_OK, "username": username, "tenant_id": tenant_id}
     try:
         summary = rebuild_hot_summary(username)
         results["hot_summary"] = "✅ Résumé chaud reconstruit"; results["preview"] = summary[:200]
     except Exception as e: results["hot_summary"] = f"❌ {str(e)[:100]}"
     try:
-        count = rebuild_contacts(); results["contacts"] = f"✅ {count} fiches contacts (partagées)"
+        count = rebuild_contacts(tenant_id=tenant_id)
+        results["contacts"] = f"✅ {count} fiches contacts (tenant: {tenant_id})"
     except Exception as e: results["contacts"] = f"❌ {str(e)[:100]}"
     try:
         added = load_sent_mails_to_style(limit=50, username=username)
@@ -46,7 +48,7 @@ def memory_status(request: Request):
         except Exception: row = None
         counts = {}
         for table, key in [
-            ("aria_contacts", "contacts"),
+            (f"aria_contacts WHERE tenant_id='{request.session.get('tenant_id','couffrant_solar')}'", "contacts"),
             (f"aria_style_examples WHERE username='{username}'", "style_examples"),
             (f"aria_rules WHERE active=true AND username='{username}'", "regles_actives"),
             (f"aria_insights WHERE username='{username}'", "insights"),
@@ -63,6 +65,7 @@ def memory_status(request: Request):
         if conn: conn.close()
     return {
         "username": username, "memory_module": MEMORY_OK,
+        "tenant_id": request.session.get("tenant_id", "couffrant_solar"),
         "niveau_1": {"resume_chaud": {"exists": bool(row and row[0])},
                      "contacts": counts.get("contacts", 0),
                      "regles_actives": counts.get("regles_actives", 0),
@@ -114,7 +117,8 @@ def list_insights(request: Request):
 @router.get("/contacts")
 def list_contacts_endpoint(request: Request):
     if not require_user(request): return RedirectResponse("/login-app")
-    return get_all_contact_cards()
+    tenant_id = request.session.get("tenant_id", "couffrant_solar")
+    return get_all_contact_cards(tenant_id=tenant_id)
 
 
 @router.get("/purge-memory")

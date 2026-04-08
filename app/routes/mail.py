@@ -111,6 +111,7 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
 def analyze_raw_mails(request: Request, limit: int = 50):
     username = require_user(request)
     if not username: return RedirectResponse("/login-app")
+    tenant_id = request.session.get("tenant_id", "couffrant_solar")
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -123,7 +124,7 @@ def analyze_raw_mails(request: Request, limit: int = 50):
     finally:
         if conn: conn.close()
     if not rows: return {"status": "termine", "analyzed": 0}
-    instructions = get_global_instructions()
+    instructions = get_global_instructions(tenant_id=tenant_id)
     analyzed = errors = 0
     for row in rows:
         db_id, message_id, from_email, subject, body_preview, received_at = row
@@ -164,17 +165,20 @@ def analyze_raw_mails(request: Request, limit: int = 50):
 
 @router.get("/ingest-gmail")
 def ingest_gmail(request: Request):
+    """
+    Priorité 2 — token Gmail lié à l'username connecté.
+    """
     username = require_user(request)
     if not username: return RedirectResponse("/login-app")
     from app.connectors.gmail_connector import gmail_get_messages, gmail_get_message, refresh_gmail_token
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("SELECT access_token,refresh_token FROM gmail_tokens WHERE email=%s", ("per1.guillaume@gmail.com",))
+        c.execute("SELECT access_token,refresh_token FROM gmail_tokens WHERE username=%s", (username,))
         row = c.fetchone()
     finally:
         if conn: conn.close()
-    if not row: return {"error": "Gmail non connecté"}
+    if not row: return {"error": "Gmail non connecté pour cet utilisateur"}
     access_token, refresh_token = row[0], row[1]
     try:
         messages = gmail_get_messages(access_token, max_results=10)
@@ -217,8 +221,10 @@ def assistant_dashboard(request: Request, days: int = 2):
 
 
 @router.post("/instruction")
-def add_instruction(instruction: str = Form(...)):
-    add_global_instruction(instruction)
+def add_instruction(request: Request, instruction: str = Form(...)):
+    """Ajoute une consigne globale — scopée au tenant de l'utilisateur connecté."""
+    tenant_id = request.session.get("tenant_id", "couffrant_solar")
+    add_global_instruction(instruction, tenant_id=tenant_id)
     return RedirectResponse("/chat", status_code=303)
 
 

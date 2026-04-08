@@ -6,7 +6,6 @@ import time
 import json
 from app.database import get_pg_conn
 
-# ── Rate limiting en mémoire ──
 _login_attempts: dict = {}
 MAX_ATTEMPTS = 5
 LOCKOUT_SECONDS = 15 * 60
@@ -35,8 +34,6 @@ def clear_attempts(ip: str):
     _login_attempts.pop(ip, None)
 
 
-# ── Hachage de mot de passe (PBKDF2-SHA256) ──
-
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
     dk = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, 100_000)
@@ -53,12 +50,10 @@ def verify_password(password: str, stored_hash: str) -> bool:
         return False
 
 
-# ── Scopes ──
 SCOPE_ADMIN = "admin"
 SCOPE_CS    = "couffrant_solar"
+DEFAULT_TENANT = "couffrant_solar"
 
-
-# ── Outils par défaut selon le scope ──
 
 DEFAULT_TOOLS_ADMIN = [
     {"tool": "outlook", "access_level": "full",      "config": {"mailboxes": [], "can_delete_mail": True}},
@@ -173,9 +168,30 @@ def remove_user_tool(username: str, tool: str) -> dict:
         if conn: conn.close()
 
 
-# ── Gestion des utilisateurs ──
+def get_tenant_id(username: str) -> str:
+    """Retourne le tenant_id de l'utilisateur. Défaut : 'couffrant_solar'."""
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("SELECT tenant_id FROM users WHERE username = %s", (username.strip(),))
+        row = c.fetchone()
+        return row[0] if row and row[0] else DEFAULT_TENANT
+    except Exception:
+        return DEFAULT_TENANT
+    finally:
+        if conn: conn.close()
+
 
 def init_default_user():
+    """Crée l'admin et s'assure que le tenant par défaut existe."""
+    # S'assurer que le tenant couffrant_solar existe
+    try:
+        from app.tenant_manager import ensure_default_tenant
+        ensure_default_tenant()
+    except Exception as e:
+        print(f"[Tenant] Erreur ensure_default_tenant: {e}")
+
     username = os.getenv("APP_USERNAME", "guillaume").strip()
     password = os.getenv("APP_PASSWORD", "couffrant2026").strip()
 
@@ -187,15 +203,16 @@ def init_default_user():
         if c.fetchone()[0] == 0:
             password_hash = hash_password(password)
             c.execute("""
-                INSERT INTO users (username, password_hash, scope)
-                VALUES (%s, %s, %s) ON CONFLICT (username) DO NOTHING
-            """, (username, password_hash, SCOPE_ADMIN))
+                INSERT INTO users (username, password_hash, scope, tenant_id)
+                VALUES (%s, %s, %s, %s) ON CONFLICT (username) DO NOTHING
+            """, (username, password_hash, SCOPE_ADMIN, DEFAULT_TENANT))
             conn.commit()
             print(f"[Auth] Utilisateur admin créé : {username}")
         else:
             c.execute("""
-                UPDATE users SET scope = %s WHERE username = %s AND scope = 'couffrant_solar'
-            """, (SCOPE_ADMIN, username))
+                UPDATE users SET scope = %s, tenant_id = COALESCE(NULLIF(tenant_id,''), %s)
+                WHERE username = %s AND scope = 'couffrant_solar'
+            """, (SCOPE_ADMIN, DEFAULT_TENANT, username))
             conn.commit()
     except Exception as e:
         print(f"[Auth] Erreur init_default_user: {e}")
@@ -241,7 +258,8 @@ def get_user_scope(username: str) -> str:
 
 
 def create_user(username: str, password: str, scope: str = SCOPE_CS,
-                tools: list = None) -> dict:
+                tools: list = None, tenant_id: str = DEFAULT_TENANT) -> dict:
+    """Crée un utilisateur dans un tenant."""
     if not username or not password:
         return {"status": "error", "message": "Identifiant et mot de passe requis."}
     if len(password) < 8:
@@ -255,11 +273,11 @@ def create_user(username: str, password: str, scope: str = SCOPE_CS,
         c = conn.cursor()
         password_hash = hash_password(password)
         c.execute("""
-            INSERT INTO users (username, password_hash, scope)
-            VALUES (%s, %s, %s)
-        """, (username.strip(), password_hash, scope))
+            INSERT INTO users (username, password_hash, scope, tenant_id)
+            VALUES (%s, %s, %s, %s)
+        """, (username.strip(), password_hash, scope, tenant_id or DEFAULT_TENANT))
         conn.commit()
-        print(f"[Auth] Utilisateur créé : {username} (scope: {scope})")
+        print(f"[Auth] Utilisateur créé : {username} (scope: {scope}, tenant: {tenant_id})")
     except Exception as e:
         if "unique" in str(e).lower():
             return {"status": "error", "message": f"L'identifiant '{username}' existe déjà."}
@@ -285,11 +303,11 @@ def create_user(username: str, password: str, scope: str = SCOPE_CS,
                     t.get("config", {}),
                 )
 
-    return {"status": "ok", "message": f"Utilisateur '{username}' créé avec le rôle {scope}."}
+    return {"status": "ok", "message": f"Utilisateur '{username}' créé (tenant: {tenant_id})."}
 
 
 def delete_user(username: str, requesting_user: str) -> dict:
-    """Supprime un utilisateur et TOUTES ses données (cascade propre)."""
+    """Supprime un utilisateur et TOUTES ses données."""
     if username.strip() == requesting_user.strip():
         return {"status": "error", "message": "Impossible de supprimer ton propre compte."}
     conn = None
@@ -301,12 +319,11 @@ def delete_user(username: str, requesting_user: str) -> dict:
         if c.rowcount == 0:
             conn.rollback()
             return {"status": "error", "message": "Utilisateur introuvable."}
-        # Fix 2 — cascade sur toutes les tables utilisateur
         for table in [
             "user_tools", "mail_memory", "aria_memory", "aria_rules",
             "aria_insights", "aria_hot_summary", "aria_style_examples",
             "aria_session_digests", "sent_mail_memory", "aria_profile",
-            "oauth_tokens", "reply_learning_memory"
+            "oauth_tokens", "reply_learning_memory", "gmail_tokens"
         ]:
             c.execute(f"DELETE FROM {table} WHERE username = %s", (username.strip(),))
         conn.commit()
@@ -322,10 +339,10 @@ def list_users() -> list:
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT username, scope, last_login, created_at FROM users ORDER BY created_at")
+        c.execute("SELECT username, scope, tenant_id, last_login, created_at FROM users ORDER BY created_at")
         return [
-            {"username": r[0], "scope": r[1],
-             "last_login": str(r[2]) if r[2] else None, "created_at": str(r[3])}
+            {"username": r[0], "scope": r[1], "tenant_id": r[2],
+             "last_login": str(r[3]) if r[3] else None, "created_at": str(r[4])}
             for r in c.fetchall()
         ]
     except Exception:
@@ -396,7 +413,7 @@ button:hover {{ background: #1976d2; }}
 <div class="card">
     <div class="logo">⚡</div>
     <h1>Aria</h1>
-    <div class="subtitle">Couffrant Solar — Accès privé</div>
+    <div class="subtitle">Accès privé</div>
     {error_block}
     <form method="post" action="/login-app">
         <label>Identifiant</label>
