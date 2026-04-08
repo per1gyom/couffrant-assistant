@@ -59,7 +59,6 @@ SCOPE_CS    = "couffrant_solar"
 
 
 # ── Outils par défaut selon le scope ──
-# Extensible : ajouter un outil = ajouter une entrée ici + dans user_tools
 
 DEFAULT_TOOLS_ADMIN = [
     {"tool": "outlook", "access_level": "full",      "config": {"mailboxes": [], "can_delete_mail": True}},
@@ -76,10 +75,6 @@ DEFAULT_TOOLS_CS = [
 
 
 def init_default_tools(username: str, scope: str):
-    """
-    Initialise les outils par défaut pour un utilisateur.
-    Appelé à la création du compte. N'écrase pas les configs existantes.
-    """
     tools = DEFAULT_TOOLS_ADMIN if scope == SCOPE_ADMIN else DEFAULT_TOOLS_CS
     conn = None
     try:
@@ -99,11 +94,6 @@ def init_default_tools(username: str, scope: str):
 
 
 def get_user_tools(username: str, raw: bool = False):
-    """
-    Retourne les outils d'un utilisateur.
-    raw=False : dict {tool: {access_level, enabled, config}}  — pour l'app
-    raw=True  : liste de dicts complets                        — pour l'admin
-    """
     conn = None
     try:
         conn = get_pg_conn()
@@ -123,7 +113,6 @@ def get_user_tools(username: str, raw: bool = False):
 
 
 def get_tool_config(username: str, tool: str) -> dict:
-    """Retourne la config complète d'un outil pour un utilisateur."""
     conn = None
     try:
         conn = get_pg_conn()
@@ -144,10 +133,6 @@ def get_tool_config(username: str, tool: str) -> dict:
 
 def set_user_tool(username: str, tool: str, access_level: str = "read_only",
                   enabled: bool = True, config: dict = None) -> dict:
-    """
-    Crée ou met à jour un outil dans le profil utilisateur.
-    Extensible : tool peut être n'importe quelle chaîne.
-    """
     if config is None:
         config = {}
     conn = None
@@ -172,7 +157,6 @@ def set_user_tool(username: str, tool: str, access_level: str = "read_only",
 
 
 def remove_user_tool(username: str, tool: str) -> dict:
-    """Supprime un outil du profil utilisateur."""
     conn = None
     try:
         conn = get_pg_conn()
@@ -194,7 +178,7 @@ def remove_user_tool(username: str, tool: str) -> dict:
 def init_default_user():
     """
     Crée l'utilisateur admin (Guillaume) depuis APP_USERNAME / APP_PASSWORD.
-    Initialise aussi ses outils par défaut.
+    Initialise ses outils et ses règles Aria par défaut.
     """
     username = os.getenv("APP_USERNAME", "guillaume").strip()
     password = os.getenv("APP_PASSWORD", "couffrant2026").strip()
@@ -222,8 +206,15 @@ def init_default_user():
     finally:
         if conn: conn.close()
 
-    # Initialise les outils de l'admin s'ils n'existent pas encore
+    # Outils par défaut
     init_default_tools(username, SCOPE_ADMIN)
+
+    # Règles Aria par défaut — seed idempotent
+    try:
+        from app.memory_manager import seed_default_rules
+        seed_default_rules(username)
+    except Exception as e:
+        print(f"[Seed] Erreur seed_default_rules pour {username}: {e}")
 
 
 def authenticate(username: str, password: str) -> bool:
@@ -258,9 +249,8 @@ def get_user_scope(username: str) -> str:
 def create_user(username: str, password: str, scope: str = SCOPE_CS,
                 tools: list = None) -> dict:
     """
-    Crée un utilisateur + initialise ses outils.
-    tools : liste optionnelle de configs outils pour personnaliser au-delà des défauts.
-    Ex: [{"tool": "odoo", "access_level": "full", "config": {}}]
+    Crée un utilisateur + initialise ses outils et ses règles Aria.
+    tools : liste optionnelle de surcharges outils.
     """
     if not username or not password:
         return {"status": "error", "message": "Identifiant et mot de passe requis."}
@@ -287,16 +277,22 @@ def create_user(username: str, password: str, scope: str = SCOPE_CS,
     finally:
         if conn: conn.close()
 
+    # Seed des règles Aria par défaut — idempotent, n'écrase rien
+    try:
+        from app.memory_manager import seed_default_rules
+        seed_default_rules(username.strip())
+    except Exception as e:
+        print(f"[Seed] Erreur seed_default_rules pour {username}: {e}")
+
     # Outils par défaut selon le scope
     init_default_tools(username.strip(), scope)
 
-    # Surcharge éventuelle passée par l'admin
+    # Surcharges outils passées par l'admin
     if tools:
         for t in tools:
             if "tool" in t:
                 set_user_tool(
-                    username.strip(),
-                    t["tool"],
+                    username.strip(), t["tool"],
                     t.get("access_level", "read_only"),
                     t.get("enabled", True),
                     t.get("config", {}),
@@ -317,7 +313,6 @@ def delete_user(username: str, requesting_user: str) -> dict:
         if c.rowcount == 0:
             conn.rollback()
             return {"status": "error", "message": "Utilisateur introuvable."}
-        # Supprime aussi les outils de l'utilisateur
         c.execute("DELETE FROM user_tools WHERE username = %s", (username.strip(),))
         conn.commit()
         return {"status": "ok", "message": f"Utilisateur '{username}' supprimé."}
