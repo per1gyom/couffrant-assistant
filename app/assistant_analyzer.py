@@ -1,115 +1,68 @@
-from app.mail_config import (
-    LOW_PRIORITY_DOMAINS,
-    INTERNAL_DOMAINS,
-    GRID_KEYWORDS,
-    MEETING_KEYWORDS,
-)
+import re
 
 
-def contains_any(text: str, keywords: list[str]) -> bool:
-    text = (text or "").lower()
-    return any(keyword.lower() in text for keyword in keywords)
-
-
-def domain_matches(sender: str, domains: list[str]) -> bool:
-    sender = (sender or "").lower()
-    return any(domain in sender for domain in domains)
-
-
-def analyze_single_mail(message: dict) -> dict:
+def analyze_single_mail(message: dict, username: str = 'guillaume') -> dict:
+    """
+    Analyseur de secours utilisé uniquement quand l'appel IA échoue.
+    Utilise les règles Aria chargées depuis aria_rules pour classifier.
+    Pas d'appel Claude — classification par correspondance de mots-clés.
+    Confidence faible (0.3) : indique que l'analyse doit être revue.
+    """
     subject = message.get("subject") or "(Sans objet)"
-    sender = (
-        message.get("from", {})
-        .get("emailAddress", {})
-        .get("address", "Expéditeur inconnu")
-    )
+    sender = message.get("from", {}).get("emailAddress", {}).get("address", "")
     body_preview = (message.get("bodyPreview") or "").strip()
-    full_text = f"{subject} {body_preview}".lower()
+    full_text = f"{subject} {body_preview} {sender}".lower()
 
     category = "autre"
     priority = "moyenne"
-    reason = "Mail à qualifier."
-    suggested_action = "Lire et qualifier"
+    reason = "Mail à qualifier (analyse fallback)."
 
-    if domain_matches(sender, LOW_PRIORITY_DOMAINS):
-        category = "notification"
-        priority = "basse"
-        reason = "Notification ou communication peu prioritaire."
-        suggested_action = "Classer ou ignorer"
+    # Chargement des règles depuis la base
+    try:
+        from app.memory_manager import get_rules_by_category, extract_keywords_from_rule
+        urgence_rules = get_rules_by_category('urgence', username)
+        tri_rules = get_rules_by_category('tri_mails', username)
+    except Exception:
+        urgence_rules = []
+        tri_rules = []
 
-    elif contains_any(full_text, GRID_KEYWORDS):
-        category = "raccordement"
-        priority = "haute"
-        reason = "Sujet raccordement ENEDIS / Consuel détecté."
-        suggested_action = "Analyser et suivre"
+    # Classification par règles de tri
+    for rule in tri_rules:
+        keywords = extract_keywords_from_rule(rule)
+        if any(kw.lower() in full_text for kw in keywords):
+            cat_match = re.search(r"catégorie\s+(\w+)", rule.lower())
+            if cat_match:
+                category = cat_match.group(1)
+            prio_match = re.search(r"priorité\s+(haute|moyenne|basse)", rule.lower())
+            if prio_match:
+                priority = prio_match.group(1)
+            reason = f"Règle appliquée : {rule[:80]}"
+            break
 
-    elif contains_any(full_text, MEETING_KEYWORDS):
-        category = "reunion"
-        priority = "moyenne"
-        reason = "Invitation ou sujet de réunion détecté."
-        suggested_action = "Ajouter au calendrier"
-
-    elif domain_matches(sender, INTERNAL_DOMAINS):
-        category = "interne"
-        priority = "moyenne"
-        reason = "Mail interne détecté."
-        suggested_action = "Relire si suivi nécessaire"
-
-    needs_reply = False
-    reply_urgency = "basse"
-    reply_reason = ""
-    suggested_reply_subject = f"Re: {subject}"
-    suggested_reply = ""
-
-    if (
-        "?" in full_text
-        or "merci de" in full_text
-        or "pouvez-vous" in full_text
-        or "peux-tu" in full_text
-    ) and category not in ["notification"]:
-
-        needs_reply = True
-        reply_urgency = "haute" if priority == "haute" else "moyenne"
-        reply_reason = "Le mail contient une demande ou une question."
-
-        if "rt connecting" in full_text or "newsletter" in full_text:
-            needs_reply = False
-
-        if needs_reply:
-            suggested_reply = (
-                "Bonjour,\n\n"
-                "Nous avons bien pris en compte votre message et revenons vers vous "
-                "rapidement avec les éléments nécessaires.\n\n"
-                "Solairement,"
-            )
-
-    if category == "raccordement":
-        needs_reply = True
-        reply_urgency = "haute"
-        reply_reason = "Sujet raccordement nécessitant un suivi."
-        suggested_reply = (
-            "Bonjour,\n\n"
-            "Nous avons bien pris en compte votre demande concernant le raccordement. "
-            "Nous revenons vers vous dès que nous avons les éléments ou le retour nécessaire.\n\n"
-            "Solairement,"
-        )
+    # Surcharge de priorité par les règles d'urgence
+    for rule in urgence_rules:
+        keywords = extract_keywords_from_rule(rule)
+        if any(kw.lower() in full_text for kw in keywords):
+            priority = "haute"
+            reason = f"Urgence détectée : {rule[:80]}"
+            break
 
     return {
         "display_title": subject,
         "category": category,
         "priority": priority,
         "reason": reason,
-        "suggested_action": suggested_action,
+        "suggested_action": "Lire et qualifier",
         "short_summary": body_preview[:180] + ("..." if len(body_preview) > 180 else ""),
         "group_hints": [],
-        "confidence": 0.5,
-        "confidence_level": "moyenne",
-        "needs_review": False,
+        "confidence": 0.3,
+        "confidence_level": "basse",
+        "needs_review": True,
         "response_type": "autre",
         "missing_fields": [],
-        "needs_reply": needs_reply,
-        "reply_urgency": reply_urgency,
-        "reply_reason": reply_reason,
-        "suggested_reply_subject": suggested_reply_subject,
-        "suggested_reply": suggested_reply,
+        "needs_reply": False,
+        "reply_urgency": "basse",
+        "reply_reason": "",
+        "suggested_reply_subject": f"Re: {subject}",
+        "suggested_reply": "",
     }
