@@ -106,15 +106,20 @@ Factuel, direct, sans blabla."""
 def get_aria_rules(username: str = 'guillaume') -> str:
     """
     Retourne les règles actives d'Aria pour injection dans le system prompt.
-    N'affiche PAS les règles de catégories techniques (anti_spam, memoire, contacts_cles, etc.)
-    qui sont utilisées par le code directement.
+
+    Section 1 — Règles de comportement/style : Aria les applique activement.
+    Section 2 — Règles techniques (tri, spam, urgence, contacts) : Aria les voit
+                pour éviter les doublons et pouvoir les modifier via FORGET+LEARN.
+    Les paramètres memoire (synth_threshold...) ne sont pas affichés —
+    ils sont utilisés directement par le code.
     """
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        # Catégories visibles dans le prompt Aria (comportement, style, métier)
-        visible_categories = ('comportement', 'style', 'style_reponse', 'métier', 'préférence', 'auto', 'général')
+
+        # Section 1 : comportement, style, métier — Aria les applique
+        behavior_categories = ('comportement', 'style', 'style_reponse', 'métier', 'préférence', 'auto', 'général')
         c.execute("""
             SELECT id, category, rule, confidence, reinforcements
             FROM aria_rules
@@ -122,12 +127,37 @@ def get_aria_rules(username: str = 'guillaume') -> str:
             AND category = ANY(%s)
             ORDER BY confidence DESC, reinforcements DESC, created_at DESC
             LIMIT 25
-        """, (username, list(visible_categories)))
-        rows = c.fetchall()
-        if not rows: return ""
-        return "\n".join([f"[id:{r[0]}][{r[1]}] {r[2]}" for r in rows])
+        """, (username, list(behavior_categories)))
+        behavior_rows = c.fetchall()
+
+        # Section 2 : règles techniques — Aria les connaît pour ne pas créer de doublons
+        technical_categories = ('tri_mails', 'urgence', 'anti_spam', 'regroupement', 'contacts_cles')
+        c.execute("""
+            SELECT id, category, rule, confidence, reinforcements
+            FROM aria_rules
+            WHERE active = true AND username = %s
+            AND category = ANY(%s)
+            ORDER BY category, confidence DESC, created_at DESC
+        """, (username, list(technical_categories)))
+        technical_rows = c.fetchall()
+
     finally:
         if conn: conn.close()
+
+    parts = []
+
+    if behavior_rows:
+        parts.append("\n".join([f"[id:{r[0]}][{r[1]}] {r[2]}" for r in behavior_rows]))
+
+    if technical_rows:
+        tech_lines = "\n".join([f"[id:{r[0]}][{r[1]}] {r[2]}" for r in technical_rows])
+        parts.append(
+            "— Règles techniques (tri, spam, urgence, contacts) —\n"
+            "Tu les vois pour éviter les doublons et les modifier via FORGET+LEARN :\n"
+            + tech_lines
+        )
+
+    return "\n\n".join(parts) if parts else ""
 
 
 def save_rule(category: str, rule: str, source: str = "auto", confidence: float = 0.7, username: str = 'guillaume') -> int:
@@ -509,14 +539,9 @@ def purge_old_mails(days: int = None, username: str = 'guillaume') -> int:
 
 # ─────────────────────────────────────────
 # RÈGLES PAR CATÉGORIE — API interne utilisée par les modules
-# Remplace toutes les constantes hardcodées (mail_config.py, etc.)
 # ─────────────────────────────────────────
 
 def get_rules_by_category(category: str, username: str = 'guillaume') -> list[str]:
-    """
-    Retourne les règles actives d'une catégorie pour un utilisateur.
-    Fonction centrale utilisée par tous les modules pour remplacer les constantes hardcodées.
-    """
     conn = None
     try:
         conn = get_pg_conn()
@@ -534,9 +559,6 @@ def get_rules_by_category(category: str, username: str = 'guillaume') -> list[st
 
 
 def get_rules_as_text(categories: list, username: str = 'guillaume') -> str:
-    """
-    Retourne les règles de plusieurs catégories formatées pour injection dans un prompt.
-    """
     all_rules = []
     for cat in categories:
         rules = get_rules_by_category(cat, username)
@@ -546,17 +568,11 @@ def get_rules_as_text(categories: list, username: str = 'guillaume') -> str:
 
 
 def get_antispam_keywords(username: str = 'guillaume') -> list[str]:
-    """
-    Extrait les mots-clés/domaines anti-spam depuis les règles Aria.
-    Chaque règle anti_spam est une liste de mots-clés séparés par des virgules.
-    Aria peut évoluer ces règles via LEARN/FORGET.
-    """
     rules = get_rules_by_category('anti_spam', username)
     keywords = []
     for rule in rules:
         parts = [p.strip().lower() for p in rule.replace("'", "").split(',')]
         keywords.extend([p for p in parts if len(p) > 2])
-    # Garde-fou absolu : noreply et mailer-daemon toujours filtrés (sécurité)
     for kw in ['mailer-daemon', 'noreply@', 'no-reply@']:
         if kw not in keywords:
             keywords.append(kw)
@@ -564,10 +580,6 @@ def get_antispam_keywords(username: str = 'guillaume') -> list[str]:
 
 
 def get_contacts_keywords(username: str = 'guillaume') -> list[str]:
-    """
-    Retourne la liste dynamique des noms/entités à surveiller dans les conversations.
-    Combine les contacts en base (aria_contacts) + les règles contacts_cles d'Aria.
-    """
     keywords = []
     conn = None
     try:
@@ -595,12 +607,6 @@ def get_contacts_keywords(username: str = 'guillaume') -> list[str]:
 
 
 def get_memoire_param(param: str, default, username: str = 'guillaume'):
-    """
-    Lit un paramètre de configuration mémoire depuis les règles Aria.
-    Format des règles memoire : "param_name:valeur"
-    Ex: "synth_threshold:15", "purge_days:90", "rebuild_cycles:40"
-    Aria peut modifier ces valeurs via LEARN.
-    """
     rules = get_rules_by_category('memoire', username)
     for rule in rules:
         if rule.strip().lower().startswith(f"{param.lower()}:"):
@@ -613,15 +619,9 @@ def get_memoire_param(param: str, default, username: str = 'guillaume'):
 
 
 def extract_keywords_from_rule(rule: str) -> list[str]:
-    """
-    Extrait les mots-clés d'une règle de classification.
-    Cherche les termes entre guillemets simples, ou après 'contenant' / 'de'.
-    """
-    # Termes entre guillemets simples
     keywords = re.findall(r"'([^']+)'", rule.lower())
     if keywords:
         return [k.strip() for k in keywords if len(k.strip()) > 2]
-    # Fallback : après 'contenant ' ou 'de '
     match = re.search(r"(?:contenant|de)\s+(.+?)(?:\s*=|\s*→|\s*$)", rule.lower())
     if match:
         parts = [p.strip() for p in match.group(1).split(',')]
@@ -632,7 +632,6 @@ def extract_keywords_from_rule(rule: str) -> list[str]:
 def seed_default_rules(username: str = 'guillaume'):
     """
     Insère les règles par défaut pour un utilisateur si aucune règle n'existe encore.
-    Ces règles sont le point de départ — Aria les fera évoluer librement via LEARN/FORGET.
     Idempotent : n'écrase jamais des règles existantes.
     """
     conn = None
@@ -645,10 +644,9 @@ def seed_default_rules(username: str = 'guillaume'):
         if conn: conn.close()
 
     if count > 0:
-        return  # L'utilisateur a déjà des règles — on ne touche à rien
+        return
 
     defaults = [
-        # ── Tri et classification des mails ──
         ("tri_mails", "Mails contenant 'enedis', 'engie', 'raccordement', 'consuel', 'injection', 'tgbt', 'point de livraison' = catégorie raccordement, priorité haute"),
         ("tri_mails", "Mails contenant 'devis', 'offre', 'proposition', 'tarif', 'prix', 'commande', 'contrat', 'signature' = catégorie commercial, priorité moyenne"),
         ("tri_mails", "Mails contenant 'chantier', 'planning', 'intervention', 'installation', 'pose', 'mise en service', 'travaux' = catégorie chantier, priorité moyenne"),
@@ -656,14 +654,10 @@ def seed_default_rules(username: str = 'guillaume'):
         ("tri_mails", "Mails contenant 'réunion', 'meeting', 'invitation calendrier', 'visioconférence', 'teams.microsoft.com' = catégorie reunion, priorité moyenne"),
         ("tri_mails", "Mails de couffrant-solar.fr = catégorie interne, priorité moyenne"),
         ("tri_mails", "Mails contenant 'photovoltaïque', 'pv', 'onduleur', 'batterie', 'autoconsommation', 'kstar', 'solaire' = catégorie chantier, priorité moyenne"),
-
-        # ── Urgence ──
         ("urgence", "Mails contenant 'urgent', 'immédiat', 'asap', 'bloqué', 'blocage', 'alerte' = priorité haute"),
         ("urgence", "Mails d'Enedis sur raccordement en attente = priorité haute, réponse requise rapidement"),
         ("urgence", "Mails contenant 'mise en demeure', 'litige', 'avocat', 'tribunal', 'contentieux' = priorité haute, signaler immédiatement"),
         ("urgence", "Mails contenant 'retard chantier', 'annulation', 'panne' = priorité haute"),
-
-        # ── Anti-spam (mots-clés/domaines à filtrer — évolutif via LEARN) ──
         ("anti_spam", "noreply, no-reply, donotreply"),
         ("anti_spam", "newsletter, marketing, promotional, unsubscribe, se désabonner"),
         ("anti_spam", "linkedin.com, twitter.com, facebook.com, instagram.com"),
@@ -671,24 +665,16 @@ def seed_default_rules(username: str = 'guillaume'):
         ("anti_spam", "mailer-daemon, notification automatique"),
         ("anti_spam", "enquête satisfaction, avis client, survey"),
         ("anti_spam", "webinar, webinaire, calendly, zoom invitation"),
-
-        # ── Style de réponse ──
         ("style_reponse", "Commencer les réponses par 'Bonjour,' suivi d'une accroche contextualisée"),
         ("style_reponse", "Terminer les mails professionnels par 'Solairement,' comme signature"),
         ("style_reponse", "Réponses directes et courtes, maximum 5 lignes sauf explication technique"),
         ("style_reponse", "Pour les mails Enedis/raccordement, confirmer toujours la réception et donner un délai"),
         ("style_reponse", "Ne jamais inventer de dates, chiffres ou informations techniques absents du mail"),
-
-        # ── Regroupement dashboard ──
         ("regroupement", "Regrouper les mails d'un même fil 'raccordement', 'enedis', 'consuel'"),
         ("regroupement", "Regrouper les notifications automatiques d'un même expéditeur"),
         ("regroupement", "Regrouper les échanges sur un même chantier client"),
-
-        # ── Contacts clés (noms/entités à détecter dans les conversations) ──
         ("contacts_cles", "arlène, arlene, sabrina, benoit, pierre, maxence, charlotte, pinto"),
         ("contacts_cles", "enedis, consuel, adiwatt, socotec, triangle, eleria, edf"),
-
-        # ── Mémoire et cycles (format param:valeur — modifiable via LEARN) ──
         ("memoire", "synth_threshold:15"),
         ("memoire", "rebuild_cycles:40"),
         ("memoire", "purge_days:90"),
