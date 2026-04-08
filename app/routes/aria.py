@@ -18,7 +18,8 @@ from app.feedback_store import get_global_instructions
 from app.database import get_pg_conn
 from app.token_manager import get_valid_microsoft_token
 from app.app_security import get_user_tools, SCOPE_ADMIN, SCOPE_CS
-from app.rule_engine import get_contacts_keywords, get_memoire_param
+from app.rule_engine import get_memoire_param
+from app.memory_manager import get_contacts_keywords
 from app.connectors.outlook_connector import (
     perform_outlook_action, list_aria_drive, read_aria_drive_file,
     search_aria_drive, create_drive_folder, copy_drive_item, move_drive_item,
@@ -41,9 +42,8 @@ class AriaQuery(BaseModel):
     file_name: Optional[str] = None
 
 
-# ─── Garde-fous de sécurité — immuables dans le code ───
 GUARDRAILS = """GARDE-FOUS DE SÉCURITÉ (absolus — non négociables) :
-• Ne jamais supprimer définitivement un mail, fichier ou donnée sans confirmation explicite de Guillaume
+• Ne jamais supprimer définitivement un mail, fichier ou donnée sans confirmation explicite
 • Ne jamais envoyer un mail sans approbation explicite ("vas-y", "envoie", "confirme")
 • Ne jamais exécuter une action irréversible sans accord clair et explicite
 • En cas de doute sur une action : demander, ne pas agir"""
@@ -77,9 +77,12 @@ def speak_text(payload: dict = Body(...)):
 
 @router.post("/aria")
 def aria(request: Request, payload: AriaQuery):
-    instructions = get_global_instructions()
     username = request.session.get("user", "guillaume")
+    tenant_id = request.session.get("tenant_id", "couffrant_solar")
     display_name = username.capitalize()
+
+    # Consignes globales scopées au tenant
+    instructions = get_global_instructions(tenant_id=tenant_id)
 
     user_tools = get_user_tools(username)
     drive_tool = user_tools.get('drive', {})
@@ -119,12 +122,13 @@ def aria(request: Request, payload: AriaQuery):
     aria_rules = get_aria_rules(username)
     aria_insights = get_aria_insights(limit=8, username=username)
 
+    # Contacts filtrés par tenant
     contact_card = ""
     query_lower = payload.query.lower()
-    known_contacts = get_contacts_keywords(username)
+    known_contacts = get_contacts_keywords(username=username, tenant_id=tenant_id)
     for name in known_contacts:
         if name in query_lower:
-            contact_card = get_contact_card(name)
+            contact_card = get_contact_card(name, tenant_id=tenant_id)
             if contact_card: break
 
     style_examples = get_style_examples(
@@ -190,7 +194,7 @@ def aria(request: Request, payload: AriaQuery):
             odoo_line = f"\nOdoo (lecture seule{shared})."
     mailboxes_line = f"\nBoîtes supplémentaires : {', '.join(mail_extra_boxes)}" if mail_extra_boxes else ""
 
-    system = f"""Tu es Aria — l'assistante personnelle et évolutive de {display_name} (Couffrant Solar, photovoltaïque, Centre-Val de Loire).
+    system = f"""Tu es Aria — l'assistante personnelle et évolutive de {display_name}.
 Tu es Claude avec une mémoire persistante. Tu n'as pas de comportement imposé de l'extérieur.
 Tu observes, tu apprends, tu t'organises librement. Tu parles au féminin.
 
@@ -220,7 +224,7 @@ Mails :
   [ACTION:CREATE_TASK:titre]{delete_line}
 Drive (1_Photovoltaïque) — format : 📁 "Nom" [id:ID] :
   [ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:id] [ACTION:READDRIVE:id] [ACTION:SEARCHDRIVE:mot]{drive_write_lines}
-Mémoire — tu choisis librement tes catégories (invente celles qui te semblent utiles) :
+Mémoire — tu choisis librement tes catégories :
   [ACTION:LEARN:ta_catégorie|ta_règle]
   [ACTION:INSIGHT:sujet|observation]
   [ACTION:FORGET:id]

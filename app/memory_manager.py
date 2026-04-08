@@ -1,5 +1,9 @@
 """
-Gestionnaire de mémoire d'Aria — 3 niveaux, multi-utilisateurs.
+Gestionnaire de mémoire d'Aria — 3 niveaux, multi-utilisateurs, multi-tenants.
+
+Isolation :
+  - Données personnelles (règles, mémoire, style...) : filtre par username
+  - Données partagées (contacts, consignes) : filtre par tenant_id
 """
 
 from app.database import get_pg_conn
@@ -8,6 +12,8 @@ from app.config import ANTHROPIC_MODEL_SMART, ANTHROPIC_MODEL_FAST
 import json
 import re
 from datetime import datetime
+
+DEFAULT_TENANT = 'couffrant_solar'
 
 
 def get_hot_summary(username: str = 'guillaume') -> str:
@@ -85,10 +91,6 @@ Factuel, direct, sans blabla."""
 
 
 def get_aria_rules(username: str = 'guillaume') -> str:
-    """
-    Toutes les règles actives sauf 'memoire' (paramètres techniques).
-    Aria organise sa mémoire librement, sans filtre de catégorie.
-    """
     conn = None
     try:
         conn = get_pg_conn()
@@ -220,7 +222,7 @@ def synthesize_session(n_conversations: int = 15, username: str = 'guillaume') -
         for r in reversed(conversations)
     ])
 
-    prompt = f"""Tu es Aria, assistante de {display_name} (Couffrant Solar).
+    prompt = f"""Tu es Aria, assistante de {display_name}.
 Voici {len(conversations)} conversations récentes.
 
 {conv_text}
@@ -284,15 +286,22 @@ Synthétise en JSON strict (sans backticks) :
             "insights_extracted": len(parsed.get("insights", [])), "purged": purged}
 
 
-def get_contact_card(name_or_email: str) -> str:
+# ─────────────────────────────────────────
+# CONTACTS — partagés par TENANT (multi-tenant)
+# ─────────────────────────────────────────
+
+def get_contact_card(name_or_email: str, tenant_id: str = DEFAULT_TENANT) -> str:
+    """Fiche contact filtrée par tenant."""
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
             SELECT name, email, company, role, summary, last_seen, last_subject
-            FROM aria_contacts WHERE name ILIKE %s OR email ILIKE %s LIMIT 1
-        """, (f'%{name_or_email}%', f'%{name_or_email}%'))
+            FROM aria_contacts
+            WHERE (name ILIKE %s OR email ILIKE %s) AND tenant_id = %s
+            LIMIT 1
+        """, (f'%{name_or_email}%', f'%{name_or_email}%', tenant_id))
         row = c.fetchone()
         if not row: return ""
         return f"{row[0]} ({row[1]}) — {row[2]} — {row[3]}\nRésumé : {row[4]}\nDernier contact : {row[5]} | Sujet : {row[6]}"
@@ -300,22 +309,56 @@ def get_contact_card(name_or_email: str) -> str:
         if conn: conn.close()
 
 
-def get_all_contact_cards() -> list:
+def get_all_contact_cards(tenant_id: str = DEFAULT_TENANT) -> list:
+    """Tous les contacts d'un tenant."""
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT name, email, company, summary, last_seen FROM aria_contacts ORDER BY last_seen DESC LIMIT 30")
-        return [{'name': r[0], 'email': r[1], 'company': r[2], 'summary': r[3], 'last_seen': str(r[4])} for r in c.fetchall()]
+        c.execute("""
+            SELECT name, email, company, summary, last_seen
+            FROM aria_contacts WHERE tenant_id = %s
+            ORDER BY last_seen DESC LIMIT 30
+        """, (tenant_id,))
+        return [{'name': r[0], 'email': r[1], 'company': r[2], 'summary': r[3], 'last_seen': str(r[4])}
+                for r in c.fetchall()]
     finally:
         if conn: conn.close()
 
 
-def rebuild_contacts() -> int:
+def get_contacts_keywords(username: str = 'guillaume', tenant_id: str = DEFAULT_TENANT) -> list[str]:
+    """Mots-clés contacts pour détection dans les messages. Filtre par tenant."""
+    keywords = []
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
+        c.execute("SELECT name, email FROM aria_contacts WHERE tenant_id = %s ORDER BY last_seen DESC LIMIT 50", (tenant_id,))
+        for name, email in c.fetchall():
+            if name:
+                keywords.extend([n.strip().lower() for n in name.split() if len(n.strip()) > 2])
+            if email:
+                local = email.split('@')[0].lower()
+                if len(local) > 2:
+                    keywords.append(local)
+    except Exception:
+        pass
+    finally:
+        if conn: conn.close()
+    rules = get_rules_by_category('contacts_cles', username)
+    for rule in rules:
+        parts = [p.strip().lower() for p in rule.replace("'", "").split(',')]
+        keywords.extend([p for p in parts if len(p) > 2])
+    return list(dict.fromkeys(keywords))
+
+
+def rebuild_contacts(tenant_id: str = DEFAULT_TENANT) -> int:
+    """Reconstruit les fiches contacts pour un tenant à partir des mails de ses utilisateurs."""
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        # Uniquement les mails des utilisateurs du tenant
         c.execute("""
             SELECT from_email,
                    array_agg(subject ORDER BY received_at DESC) as subjects,
@@ -323,10 +366,27 @@ def rebuild_contacts() -> int:
                    MAX(received_at) as last_seen, COUNT(*) as mail_count
             FROM mail_memory
             WHERE from_email IS NOT NULL AND from_email != ''
+              AND username IN (SELECT username FROM users WHERE tenant_id = %s)
             GROUP BY from_email HAVING COUNT(*) >= 2
             ORDER BY MAX(received_at) DESC LIMIT 50
-        """)
+        """, (tenant_id,))
         rows = c.fetchall()
+    except Exception:
+        # Fallback sans filtre tenant (base existante)
+        try:
+            c.execute("""
+                SELECT from_email,
+                       array_agg(subject ORDER BY received_at DESC),
+                       array_agg(raw_body_preview ORDER BY received_at DESC),
+                       MAX(received_at), COUNT(*)
+                FROM mail_memory
+                WHERE from_email IS NOT NULL AND from_email != ''
+                GROUP BY from_email HAVING COUNT(*) >= 2
+                ORDER BY MAX(received_at) DESC LIMIT 50
+            """)
+            rows = c.fetchall()
+        except Exception:
+            rows = []
     finally:
         if conn: conn.close()
 
@@ -358,13 +418,15 @@ Réponds en JSON : name, company, role, summary (2-3 lignes)"""
                 conn = get_pg_conn()
                 c2 = conn.cursor()
                 c2.execute("""
-                    INSERT INTO aria_contacts (email, name, company, role, summary, last_seen, last_subject, mail_count, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                    ON CONFLICT (email) DO UPDATE SET
+                    INSERT INTO aria_contacts
+                    (tenant_id, email, name, company, role, summary, last_seen, last_subject, mail_count, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    ON CONFLICT (email, tenant_id) DO UPDATE SET
                         name=EXCLUDED.name, company=EXCLUDED.company, role=EXCLUDED.role,
                         summary=EXCLUDED.summary, last_seen=EXCLUDED.last_seen,
                         last_subject=EXCLUDED.last_subject, mail_count=EXCLUDED.mail_count, updated_at=NOW()
-                """, (email, name, company, role, summary, str(last_seen), (subjects or [''])[0], mail_count))
+                """, (tenant_id, email, name, company, role, summary,
+                       str(last_seen), (subjects or [''])[0], mail_count))
                 conn.commit()
             finally:
                 if conn: conn.close()
@@ -373,6 +435,10 @@ Réponds en JSON : name, company, role, summary (2-3 lignes)"""
             print(f"[Contacts] Erreur {email}: {e}")
     return updated
 
+
+# ─────────────────────────────────────────
+# STYLE (par username)
+# ─────────────────────────────────────────
 
 def get_style_examples(context: str = "", username: str = 'guillaume') -> str:
     conn = None
@@ -464,6 +530,10 @@ def purge_old_mails(days: int = None, username: str = 'guillaume') -> int:
         if conn: conn.close()
 
 
+# ─────────────────────────────────────────
+# RÈGLES — par username
+# ─────────────────────────────────────────
+
 def get_rules_by_category(category: str, username: str = 'guillaume') -> list[str]:
     conn = None
     try:
@@ -502,31 +572,6 @@ def get_antispam_keywords(username: str = 'guillaume') -> list[str]:
     return list(dict.fromkeys(keywords))
 
 
-def get_contacts_keywords(username: str = 'guillaume') -> list[str]:
-    keywords = []
-    conn = None
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("SELECT name, email FROM aria_contacts ORDER BY last_seen DESC LIMIT 50")
-        for name, email in c.fetchall():
-            if name:
-                keywords.extend([n.strip().lower() for n in name.split() if len(n.strip()) > 2])
-            if email:
-                local = email.split('@')[0].lower()
-                if len(local) > 2:
-                    keywords.append(local)
-    except Exception:
-        pass
-    finally:
-        if conn: conn.close()
-    rules = get_rules_by_category('contacts_cles', username)
-    for rule in rules:
-        parts = [p.strip().lower() for p in rule.replace("'", "").split(',')]
-        keywords.extend([p for p in parts if len(p) > 2])
-    return list(dict.fromkeys(keywords))
-
-
 def get_memoire_param(param: str, default, username: str = 'guillaume'):
     rules = get_rules_by_category('memoire', username)
     for rule in rules:
@@ -559,10 +604,6 @@ def save_reply_learning(
     final_reply: str = "",
     username: str = 'guillaume'
 ) -> int:
-    """
-    Enregistre une correction pour l'apprentissage few-shot d'Aria.
-    Fix 1 — username inclus pour isolation par utilisateur.
-    """
     if not final_reply:
         return 0
     conn = None
@@ -588,8 +629,5 @@ def save_reply_learning(
 
 
 def seed_default_rules(username: str = 'guillaume'):
-    """
-    Aria apprend d'elle-même. Aucune règle par défaut.
-    Les garde-fous de sécurité sont immuables dans le code.
-    """
+    """Aria apprend d'elle-même. Aucune règle par défaut."""
     pass
