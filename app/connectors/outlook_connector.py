@@ -4,16 +4,14 @@ GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 
 ARCHIVE_FOLDER_ID = "AQMkAGEwZmJhNTllLWQ3MjUtNDg4ADQtYjdhMi1jMGEyZjRiNmFkNWEALgAAA-6yBmE1L7hGi--BXSl5S2sBAIyf8uOKE0VAkKv1dN8K6xgAAAIBRQAAAA=="
 
-# Site SharePoint et nom du dossier cible
 ONEDRIVE_SITE_NAME = "Commun"
 ONEDRIVE_FOLDER_NAME = "1_Photovoltaïque"
 
-# Chemins à tester dans l'ordre (SharePoint : "Documents" = racine du drive)
 ONEDRIVE_PATH_CANDIDATES = [
-    "1_Photovoltaïque",                   # Documents est la racine du drive
-    "Documents/1_Photovoltaïque",         # Documents comme sous-dossier
-    "Shared Documents/1_Photovoltaïque",  # Nom anglais
-    "1_Photovoltaique",                   # Sans accent (parfois normalisé)
+    "1_Photovoltaïque",
+    "Documents/1_Photovoltaïque",
+    "Shared Documents/1_Photovoltaïque",
+    "1_Photovoltaique",
 ]
 
 SIGNATURE_HTML = """
@@ -74,15 +72,10 @@ def _build_email_html(body: str) -> str:
 # ─────────────────────────────────────────
 
 def _find_sharepoint_site_and_drive(token: str) -> tuple[str | None, str | None, list]:
-    """
-    Trouve le site SharePoint 'Commun' et son drive Documents.
-    Retourne (site_id, drive_id, all_drives).
-    """
     site_id = None
     drive_id = None
     all_drives = []
 
-    # Stratégie 1 — recherche par nom
     try:
         data = _graph_get(token, "/sites", params={"search": ONEDRIVE_SITE_NAME})
         for site in data.get("value", []):
@@ -93,7 +86,6 @@ def _find_sharepoint_site_and_drive(token: str) -> tuple[str | None, str | None,
     except Exception:
         pass
 
-    # Stratégie 2 — sites suivis
     if not site_id:
         try:
             data = _graph_get(token, "/me/followedSites")
@@ -108,19 +100,16 @@ def _find_sharepoint_site_and_drive(token: str) -> tuple[str | None, str | None,
     if not site_id:
         return None, None, []
 
-    # Récupère tous les drives du site
     try:
         drives_data = _graph_get(token, f"/sites/{site_id}/drives")
         all_drives = drives_data.get("value", [])
-        # Préfère le drive "Documents" ou premier documentLibrary
         for drive in all_drives:
             dtype = drive.get("driveType", "")
             dname = drive.get("name", "").lower()
             if dtype == "documentLibrary" and ("document" in dname or dname == "documents"):
                 drive_id = drive.get("id")
                 break
-        if not drive_id and all_drives:
-            # Prend le premier documentLibrary disponible
+        if not drive_id:
             for drive in all_drives:
                 if drive.get("driveType") == "documentLibrary":
                     drive_id = drive.get("id")
@@ -133,29 +122,19 @@ def _find_sharepoint_site_and_drive(token: str) -> tuple[str | None, str | None,
     return site_id, drive_id, all_drives
 
 
-def _list_drive_root(token: str, drive_id: str) -> list:
-    """Liste la racine d'un drive SharePoint pour diagnostic."""
-    try:
-        data = _graph_get(token, f"/drives/{drive_id}/root/children", params={
-            "$top": 50, "$select": "name,folder,file,lastModifiedDateTime", "$orderby": "name"
-        })
-        return [{"nom": f.get("name"), "type": "📁" if "folder" in f else "📄"} for f in data.get("value", [])]
-    except Exception:
-        return []
-
-
-def _find_folder_in_drive(token: str, drive_id: str) -> str | None:
+def _find_folder_item_id(token: str, drive_id: str) -> tuple[str | None, str | None]:
     """
-    Cherche automatiquement 1_Photovoltaïque dans le drive.
-    Essaie plusieurs chemins candidats et retourne le premier qui fonctionne.
+    Cherche 1_Photovoltaïque dans le drive.
+    Retourne (chemin_trouvé, item_id) — navigue ensuite par ID pour éviter les problèmes d'encodage.
     """
     for candidate in ONEDRIVE_PATH_CANDIDATES:
         try:
-            _graph_get(token, f"/drives/{drive_id}/root:/{candidate}")
-            return candidate  # Ce chemin existe !
+            meta = _graph_get(token, f"/drives/{drive_id}/root:/{candidate}",
+                              params={"$select": "id,name,webUrl"})
+            return candidate, meta.get("id")
         except Exception:
             continue
-    return None
+    return None, None
 
 
 def _format_drive_items(value: list) -> list:
@@ -169,167 +148,255 @@ def _format_drive_items(value: list) -> list:
             "taille_ko": round(f.get("size", 0) / 1024, 1) if f.get("size") else 0,
             "modifié": f.get("lastModifiedDateTime", "")[:10],
             "lien": f.get("webUrl", ""),
-            "id": f.get("id"),
+            "id": f.get("id"),  # ← ID pour navigation sans encodage
         })
     return items
 
 
-def _safe_subpath(path: str) -> str:
-    path = path.replace("\\", "/").strip("/")
-    parts = [p for p in path.split("/") if p and p != ".."]
-    return "/".join(parts)
-
-
 # ─────────────────────────────────────────
-# ONEDRIVE — ACTIONS RESTREINTES
+# ONEDRIVE — ACTIONS DRIVE
 # ─────────────────────────────────────────
 
 def list_aria_drive(token: str, subfolder: str = "") -> dict:
-    """Liste les fichiers dans 1_Photovoltaïque (SharePoint Commun)."""
+    """
+    Liste les fichiers dans 1_Photovoltaïque.
+    subfolder peut être : vide (racine), un nom de sous-dossier, ou un item_id direct.
+    Navigation par item_id pour éviter les problèmes d'encodage des accents.
+    """
     try:
-        site_id, drive_id, all_drives = _find_sharepoint_site_and_drive(token)
+        _, drive_id, all_drives = _find_sharepoint_site_and_drive(token)
 
         if not drive_id:
-            # Fallback OneDrive personnel
             try:
                 data = _graph_get(token, f"/me/drive/root:/{ONEDRIVE_FOLDER_NAME}:/children", params={
                     "$top": 100, "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl", "$orderby": "name"
                 })
                 items = _format_drive_items(data.get("value", []))
-                return {"status": "ok", "source": "OneDrive personnel", "dossier": ONEDRIVE_FOLDER_NAME, "count": len(items), "items": items}
+                return {"status": "ok", "source": "OneDrive", "dossier": ONEDRIVE_FOLDER_NAME, "count": len(items), "items": items}
             except Exception:
-                return {"status": "error", "message": f"Site SharePoint '{ONEDRIVE_SITE_NAME}' introuvable et dossier absent du OneDrive personnel."}
+                return {"status": "error", "message": f"Site SharePoint '{ONEDRIVE_SITE_NAME}' introuvable."}
 
-        # Trouve le bon chemin dans ce drive
-        base_path = _find_folder_in_drive(token, drive_id)
+        base_path, base_item_id = _find_folder_item_id(token, drive_id)
 
-        if base_path is None:
-            # Diagnostic : liste la racine du drive pour aider
-            root_items = _list_drive_root(token, drive_id)
-            root_names = [f"{it['type']} {it['nom']}" for it in root_items]
-            drive_names = [d.get("name") for d in all_drives]
+        if not base_item_id:
+            root_data = _graph_get(token, f"/drives/{drive_id}/root/children",
+                                   params={"$top": 50, "$select": "name,folder,id"})
+            root_names = [f.get("name") for f in root_data.get("value", [])]
             return {
                 "status": "error",
                 "message": (
-                    f"Dossier '{ONEDRIVE_FOLDER_NAME}' introuvable dans le site SharePoint '{ONEDRIVE_SITE_NAME}'.\n"
-                    f"Drives disponibles : {', '.join(drive_names)}\n"
-                    f"Racine du drive : {', '.join(root_names) if root_names else 'vide'}\n"
-                    f"Paths testés : {', '.join(ONEDRIVE_PATH_CANDIDATES)}"
+                    f"Dossier '{ONEDRIVE_FOLDER_NAME}' introuvable dans SharePoint '{ONEDRIVE_SITE_NAME}'.\n"
+                    f"Racine du drive : {', '.join(root_names)}"
                 )
             }
 
-        # Construit le chemin complet
-        if subfolder:
-            sub = _safe_subpath(subfolder)
-            for prefix in [base_path, ONEDRIVE_FOLDER_NAME]:
-                if sub.lower().startswith(prefix.lower()):
-                    sub = sub[len(prefix):].strip("/")
-                    break
-            full_path = f"{base_path}/{sub}" if sub else base_path
-        else:
-            full_path = base_path
+        if not subfolder:
+            # Liste la racine de 1_Photovoltaïque par son ID
+            data = _graph_get(token, f"/drives/{drive_id}/items/{base_item_id}/children", params={
+                "$top": 100, "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl", "$orderby": "name"
+            })
+            items = _format_drive_items(data.get("value", []))
+            return {
+                "status": "ok", "source": f"SharePoint {ONEDRIVE_SITE_NAME}",
+                "dossier": ONEDRIVE_FOLDER_NAME, "root_id": base_item_id,
+                "count": len(items), "items": items
+            }
 
-        data = _graph_get(token, f"/drives/{drive_id}/root:/{full_path}:/children", params={
+        # Sous-dossier : si l'argument ressemble à un item_id, navigue directement
+        subfolder = subfolder.strip()
+        if len(subfolder) > 20 and not "/" in subfolder and not " " in subfolder:
+            # C'est un item_id — navigation directe sans encodage de chemin
+            data = _graph_get(token, f"/drives/{drive_id}/items/{subfolder}/children", params={
+                "$top": 100, "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl", "$orderby": "name"
+            })
+            items = _format_drive_items(data.get("value", []))
+            return {
+                "status": "ok", "source": f"SharePoint {ONEDRIVE_SITE_NAME}",
+                "dossier": f"sous-dossier (id:{subfolder[:8]}...)",
+                "count": len(items), "items": items
+            }
+
+        # Sous-dossier par nom : cherche l'item_id dans la liste de la racine
+        root_data = _graph_get(token, f"/drives/{drive_id}/items/{base_item_id}/children", params={
+            "$top": 100, "$select": "name,id,folder", "$orderby": "name"
+        })
+        target_id = None
+        for item in root_data.get("value", []):
+            if "folder" in item and item.get("name", "").lower() == subfolder.lower():
+                target_id = item.get("id")
+                break
+
+        if not target_id:
+            # Essai via le chemin en dernier recours
+            try:
+                meta = _graph_get(token, f"/drives/{drive_id}/root:/{base_path}/{subfolder}",
+                                  params={"$select": "id,name"})
+                target_id = meta.get("id")
+            except Exception:
+                pass
+
+        if not target_id:
+            return {"status": "error", "message": f"Sous-dossier '{subfolder}' introuvable dans {ONEDRIVE_FOLDER_NAME}."}
+
+        data = _graph_get(token, f"/drives/{drive_id}/items/{target_id}/children", params={
             "$top": 100, "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl", "$orderby": "name"
         })
         items = _format_drive_items(data.get("value", []))
         return {
-            "status": "ok",
-            "source": f"SharePoint {ONEDRIVE_SITE_NAME}",
-            "dossier": full_path,
-            "count": len(items),
-            "items": items
+            "status": "ok", "source": f"SharePoint {ONEDRIVE_SITE_NAME}",
+            "dossier": subfolder, "dossier_id": target_id,
+            "count": len(items), "items": items
         }
 
     except Exception as e:
         return {"status": "error", "message": f"Erreur Drive : {str(e)[:300]}"}
 
 
-def read_aria_drive_file(token: str, file_path: str) -> dict:
-    """Lit le contenu d'un fichier dans 1_Photovoltaïque."""
+def create_drive_folder(token: str, parent_item_id: str, folder_name: str, drive_id: str | None = None) -> dict:
+    """Crée un dossier dans le SharePoint par ID du parent."""
     try:
-        _, drive_id, _ = _find_sharepoint_site_and_drive(token)
-        base_path = _find_folder_in_drive(token, drive_id) if drive_id else None
-
-        sub = _safe_subpath(file_path)
-        if base_path and sub.lower().startswith(base_path.lower()):
-            sub = sub[len(base_path):].strip("/")
-        elif sub.lower().startswith(ONEDRIVE_FOLDER_NAME.lower()):
-            sub = sub[len(ONEDRIVE_FOLDER_NAME):].strip("/")
-
-        target = f"{base_path}/{sub}" if base_path else sub
-        use_drive = drive_id and base_path
-
-        if use_drive:
-            meta = _graph_get(token, f"/drives/{drive_id}/root:/{target}")
-            content_url = f"{GRAPH_BASE_URL}/drives/{drive_id}/root:/{target}:/content"
-        else:
-            meta = _graph_get(token, f"/me/drive/root:/{target}")
-            content_url = f"{GRAPH_BASE_URL}/me/drive/root:/{target}:/content"
-
-        name = meta.get("name", "")
-        size = meta.get("size", 0)
-        web_url = meta.get("webUrl", "")
-        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
-
-        if ext in {"txt", "md", "csv", "json", "xml", "log", "py", "js", "html", "htm", "css"}:
-            resp = requests.get(content_url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
-            resp.raise_for_status()
-            return {"status": "ok", "fichier": name, "type": "texte", "contenu": resp.text[:5000], "lien": web_url}
-
-        if ext in {"docx", "doc"}:
-            return {"status": "ok", "fichier": name, "type": "word",
-                    "message": f"Document Word ({round(size/1024,1)} Ko).",
-                    "lien": web_url, "conseil": "Joins via 📎 pour que je l'analyse."}
-
-        if ext in {"xlsx", "xls"}:
-            return {"status": "ok", "fichier": name, "type": "excel",
-                    "message": f"Classeur Excel ({round(size/1024,1)} Ko).",
-                    "lien": web_url, "conseil": "Joins via 📎 pour que je l'analyse."}
-
-        return {"status": "ok", "fichier": name, "type": ext or "inconnu",
-                "taille_ko": round(size/1024, 1), "lien": web_url,
-                "conseil": "Joins via 📎 pour que je l'analyse."}
-
+        if not drive_id:
+            _, drive_id, _ = _find_sharepoint_site_and_drive(token)
+        if not drive_id:
+            return {"status": "error", "message": "Drive SharePoint introuvable."}
+        result = _graph_post(token, f"/drives/{drive_id}/items/{parent_item_id}/children", {
+            "name": folder_name,
+            "folder": {},
+            "@microsoft.graph.conflictBehavior": "rename"
+        })
+        return {
+            "status": "ok",
+            "message": f"Dossier '{folder_name}' créé.",
+            "id": result.get("id"),
+            "lien": result.get("webUrl", ""),
+        }
     except Exception as e:
-        return {"status": "error", "message": f"Lecture impossible : {str(e)[:300]}"}
+        return {"status": "error", "message": f"Création dossier impossible : {str(e)[:200]}"}
+
+
+def copy_drive_item(token: str, item_id: str, dest_folder_id: str, new_name: str | None = None, drive_id: str | None = None) -> dict:
+    """Copie un fichier/dossier vers un dossier destination (par ID)."""
+    try:
+        if not drive_id:
+            _, drive_id, _ = _find_sharepoint_site_and_drive(token)
+        if not drive_id:
+            return {"status": "error", "message": "Drive SharePoint introuvable."}
+
+        body = {"parentReference": {"driveId": drive_id, "id": dest_folder_id}}
+        if new_name:
+            body["name"] = new_name
+
+        # Copy est asynchrone — retourne 202 avec Location header
+        resp = requests.post(
+            f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{item_id}/copy",
+            headers=_headers(token),
+            json=body,
+            timeout=30
+        )
+        if resp.status_code in (202, 200):
+            return {
+                "status": "ok",
+                "message": f"Copie lancée{'vers ' + new_name if new_name else ''}. La copie peut prendre quelques secondes.",
+                "async": resp.status_code == 202,
+                "monitor_url": resp.headers.get("Location", ""),
+            }
+        resp.raise_for_status()
+        return {"status": "ok", "message": "Copie effectuée."}
+    except Exception as e:
+        return {"status": "error", "message": f"Copie impossible : {str(e)[:200]}"}
 
 
 def search_aria_drive(token: str, query: str) -> dict:
     """Recherche dans 1_Photovoltaïque par nom de fichier."""
     try:
         _, drive_id, _ = _find_sharepoint_site_and_drive(token)
-        base_path = _find_folder_in_drive(token, drive_id) if drive_id else None
+        base_path, base_item_id = _find_folder_item_id(token, drive_id) if drive_id else (None, None)
         q_safe = query.replace("'", "''")
 
-        if drive_id and base_path:
+        if drive_id and base_item_id:
+            # Recherche via l'item ID pour éviter les problèmes d'encodage
             data = _graph_get(token,
-                f"/drives/{drive_id}/root:/{base_path}:/search(q='{q_safe}')",
+                f"/drives/{drive_id}/items/{base_item_id}/search(q='{q_safe}')",
                 params={"$top": 20, "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl,parentReference"}
             )
             items = []
             for f in data.get("value", []):
-                parent = f.get("parentReference", {}).get("path", "")
+                parent = f.get("parentReference", {}).get("name", "")
                 items.append({
                     "nom": f.get("name"),
                     "type": "📁 dossier" if "folder" in f else "📄 fichier",
-                    "chemin": parent.split("root:")[-1] + "/" + f.get("name", "") if "root:" in parent else f.get("name"),
+                    "dossier_parent": parent,
+                    "id": f.get("id"),
                     "modifié": f.get("lastModifiedDateTime", "")[:10],
                     "lien": f.get("webUrl", ""),
                 })
             return {"status": "ok", "source": f"SharePoint {ONEDRIVE_SITE_NAME}", "recherche": query, "count": len(items), "items": items}
 
-        # Fallback OneDrive
-        data = _graph_get(token,
-            f"/me/drive/root:/{ONEDRIVE_FOLDER_NAME}:/search(q='{q_safe}')",
-            params={"$top": 20, "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl,parentReference"}
-        )
-        items = [{"nom": f.get("name"), "type": "📁" if "folder" in f else "📄",
-                  "lien": f.get("webUrl", "")} for f in data.get("value", [])]
-        return {"status": "ok", "source": "OneDrive", "recherche": query, "count": len(items), "items": items}
-
+        return {"status": "error", "message": "Drive SharePoint introuvable pour la recherche."}
     except Exception as e:
         return {"status": "error", "message": f"Recherche impossible : {str(e)[:300]}"}
+
+
+def read_aria_drive_file(token: str, file_path_or_id: str) -> dict:
+    """Lit le contenu d'un fichier (par chemin ou item_id)."""
+    try:
+        _, drive_id, _ = _find_sharepoint_site_and_drive(token)
+        base_path, base_item_id = _find_folder_item_id(token, drive_id) if drive_id else (None, None)
+
+        file_ref = file_path_or_id.strip()
+        meta = None
+        content_url = None
+
+        # Si c'est un item_id direct (long string sans slash)
+        if drive_id and len(file_ref) > 20 and "/" not in file_ref and " " not in file_ref:
+            meta = _graph_get(token, f"/drives/{drive_id}/items/{file_ref}",
+                              params={"$select": "id,name,size,webUrl,file"})
+            content_url = f"{GRAPH_BASE_URL}/drives/{drive_id}/items/{file_ref}/content"
+        elif drive_id and base_path:
+            # Chemin relatif — nettoie les préfixes connus
+            sub = file_ref.replace("\\", "/").strip("/")
+            for prefix in [base_path, ONEDRIVE_FOLDER_NAME, "Documents"]:
+                if sub.lower().startswith(prefix.lower() + "/"):
+                    sub = sub[len(prefix)+1:]
+                    break
+            try:
+                target = f"{base_path}/{sub}"
+                meta = _graph_get(token, f"/drives/{drive_id}/root:/{target}",
+                                  params={"$select": "id,name,size,webUrl,file"})
+                content_url = f"{GRAPH_BASE_URL}/drives/{drive_id}/root:/{target}:/content"
+            except Exception:
+                pass
+
+        if meta is None:
+            return {"status": "error", "message": f"Fichier '{file_ref[:50]}' introuvable."}
+
+        name = meta.get("name", "")
+        size = meta.get("size", 0)
+        web_url = meta.get("webUrl", "")
+        ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+
+        if ext in {"txt", "md", "csv", "json", "xml", "log"}:
+            resp = requests.get(content_url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+            resp.raise_for_status()
+            return {"status": "ok", "fichier": name, "id": meta.get("id"), "type": "texte", "contenu": resp.text[:5000], "lien": web_url}
+
+        if ext in {"docx", "doc"}:
+            return {"status": "ok", "fichier": name, "id": meta.get("id"), "type": "word",
+                    "taille_ko": round(size/1024, 1), "lien": web_url, "conseil": "Joins via 📎 pour que je l'analyse."}
+
+        if ext in {"xlsx", "xls", "xlsm", "ods"}:
+            return {"status": "ok", "fichier": name, "id": meta.get("id"), "type": "tableur",
+                    "taille_ko": round(size/1024, 1), "lien": web_url, "conseil": "Joins via 📎 pour que je l'analyse."}
+
+        if ext == "pdf":
+            return {"status": "ok", "fichier": name, "id": meta.get("id"), "type": "pdf",
+                    "taille_ko": round(size/1024, 1), "lien": web_url, "conseil": "Joins via 📎 pour que je l'analyse."}
+
+        return {"status": "ok", "fichier": name, "id": meta.get("id"), "type": ext or "inconnu",
+                "taille_ko": round(size/1024, 1), "lien": web_url}
+
+    except Exception as e:
+        return {"status": "error", "message": f"Lecture impossible : {str(e)[:300]}"}
 
 
 # ─────────────────────────────────────────
@@ -338,15 +405,51 @@ def search_aria_drive(token: str, query: str) -> dict:
 
 def perform_outlook_action(action: str, params: dict, token: str) -> dict:
 
+    # ── Drive SharePoint ──
     if action == "list_aria_drive":
         return list_aria_drive(token, params.get("subfolder", ""))
 
+    if action == "list_drive_by_id":
+        # Navigation par item_id — évite les problèmes d'encodage
+        item_id = params.get("item_id", "")
+        _, drive_id, _ = _find_sharepoint_site_and_drive(token)
+        if not drive_id:
+            return {"status": "error", "message": "Drive introuvable."}
+        try:
+            data = _graph_get(token, f"/drives/{drive_id}/items/{item_id}/children", params={
+                "$top": 100, "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl", "$orderby": "name"
+            })
+            items = _format_drive_items(data.get("value", []))
+            return {"status": "ok", "count": len(items), "items": items}
+        except Exception as e:
+            return {"status": "error", "message": str(e)[:200]}
+
     if action == "read_aria_drive_file":
-        return read_aria_drive_file(token, params.get("file_path", ""))
+        return read_aria_drive_file(token, params.get("file_path", "") or params.get("item_id", ""))
 
     if action == "search_aria_drive":
         return search_aria_drive(token, params.get("query", ""))
 
+    if action == "create_drive_folder":
+        _, drive_id, _ = _find_sharepoint_site_and_drive(token)
+        return create_drive_folder(
+            token,
+            params.get("parent_item_id", ""),
+            params.get("folder_name", "Nouveau dossier"),
+            drive_id
+        )
+
+    if action == "copy_drive_item":
+        _, drive_id, _ = _find_sharepoint_site_and_drive(token)
+        return copy_drive_item(
+            token,
+            params.get("item_id", ""),
+            params.get("dest_folder_id", ""),
+            params.get("new_name"),
+            drive_id
+        )
+
+    # ── Mails ──
     if action == "list_unread_messages":
         top = params.get("top", 10)
         data = _graph_get(token, "/me/mailFolders/inbox/messages",
@@ -434,6 +537,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         except Exception as e:
             return {"status": "error", "action": action, "message": f"Échec envoi : {str(e)}"}
 
+    # ── Calendrier ──
     if action == "list_calendar_events":
         from datetime import datetime, timezone, timedelta
         start = params.get("start", datetime.now(timezone.utc).isoformat())
@@ -475,6 +579,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         success = _graph_delete(token, f"/me/events/{event_id}")
         return {"status": "ok" if success else "error", "message": "RDV supprimé." if success else "Échec."}
 
+    # ── Teams ──
     if action == "list_teams_chats":
         data = _graph_get(token, "/me/chats", params={"$expand": "members", "$top": 20})
         return {"status": "ok", "action": action, "items": data.get("value", [])}
@@ -500,6 +605,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
             "$filter": f"startswith(displayName,'{name_safe}')", "$select": "id,displayName,mail"})
         return {"status": "ok", "action": action, "items": data.get("value", [])}
 
+    # ── Contacts ──
     if action == "list_contacts":
         data = _graph_get(token, "/me/contacts", params={
             "$top": 50, "$select": "displayName,emailAddresses,mobilePhone,businessPhones,companyName,jobTitle"})
@@ -513,6 +619,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
             "$select": "displayName,emailAddresses,mobilePhone,businessPhones,companyName", "$top": 10})
         return {"status": "ok", "action": action, "items": data.get("value", [])}
 
+    # ── Tâches ──
     if action == "list_todo_tasks":
         lists_data = _graph_get(token, "/me/todo/lists")
         all_tasks = []
