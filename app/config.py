@@ -24,6 +24,7 @@ GRAPH_SCOPES = [
     "Contacts.Read",
     "Chat.ReadWrite",
     "TeamMember.Read.All",
+    "Sites.Read.All",
 ]
 
 SESSION_SECRET = os.getenv("SESSION_SECRET", "change-me")
@@ -47,3 +48,8 @@ GMAIL_REDIRECT_URI = os.getenv("GMAIL_REDIRECT_URI", "").strip()
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
+
+# Auth application (chat Aria)
+# Définir APP_USERNAME et APP_PASSWORD dans Railway pour sécuriser l'accès
+APP_USERNAME = os.getenv("APP_USERNAME", "guillaume").strip()
+APP_PASSWORD = os.getenv("APP_PASSWORD", "couffrant2026").strip()

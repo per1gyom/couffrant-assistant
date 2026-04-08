@@ -109,14 +109,13 @@ def init_postgres():
         )
     """)
 
-    # Règles apprises par Aria (gérées par elle-même, pas codées en dur)
     c.execute("""
         CREATE TABLE IF NOT EXISTS aria_rules (
             id SERIAL PRIMARY KEY,
             category TEXT DEFAULT 'général',
             rule TEXT NOT NULL,
-            source TEXT DEFAULT 'auto',  -- 'auto', 'manuel', 'correction', 'synthesis'
-            confidence REAL DEFAULT 0.7,  -- 0.0 à 1.0, monte avec les confirmations
+            source TEXT DEFAULT 'auto',
+            confidence REAL DEFAULT 0.7,
             reinforcements INTEGER DEFAULT 1,
             active BOOLEAN DEFAULT true,
             created_at TIMESTAMP DEFAULT NOW(),
@@ -124,7 +123,6 @@ def init_postgres():
         )
     """)
 
-    # Insights sur Guillaume et son contexte métier
     c.execute("""
         CREATE TABLE IF NOT EXISTS aria_insights (
             id SERIAL PRIMARY KEY,
@@ -168,6 +166,18 @@ def init_postgres():
             id SERIAL PRIMARY KEY,
             profile_type TEXT,
             content TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
+    # ── Auth utilisateurs ──
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            last_login TIMESTAMP,
             created_at TIMESTAMP DEFAULT NOW()
         )
     """)
