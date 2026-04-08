@@ -1,6 +1,5 @@
 """
 Chargeur mémoire avec fallbacks gracieux.
-Importer depuis ici pour éviter de dupliquer le try/except partout.
 """
 
 try:
@@ -20,7 +19,7 @@ except Exception as _mem_err:
     MEMORY_OK = False
 
     def get_hot_summary(username="guillaume"): return ""
-    def rebuild_hot_summary(username="guillaume"): return ""
+    def rebuild_hot_summary(username="guillaume", tenant_id="couffrant_solar"): return ""
     def get_contact_card(x, tenant_id="couffrant_solar"): return ""
     def get_all_contact_cards(tenant_id="couffrant_solar"): return []
     def rebuild_contacts(tenant_id="couffrant_solar"): return 0

@@ -6,15 +6,19 @@ from fastapi.responses import RedirectResponse, HTMLResponse
 from app.database import get_pg_conn, init_postgres
 from app.app_security import (
     create_user, delete_user, list_users, init_default_user,
-    get_user_tools, set_user_tool, remove_user_tool, SCOPE_CS, DEFAULT_TENANT,
+    get_user_tools, set_user_tool, remove_user_tool,
+    get_users_in_tenant, get_tenant_id,
+    SCOPE_CS, SCOPE_USER, SCOPE_TENANT_ADMIN, DEFAULT_TENANT,
 )
 from app.token_manager import get_valid_microsoft_token
-from app.routes.deps import require_admin
+from app.routes.deps import require_admin, require_tenant_admin, get_session_tenant_id, assert_same_tenant
 
 router = APIRouter(tags=["admin"])
 
 
-# ─── Tenants ───
+# ─────────────────────────────────────────
+# TENANTS — super-admin uniquement
+# ─────────────────────────────────────────
 
 @router.get("/admin/tenants")
 def list_tenants_endpoint(request: Request):
@@ -41,7 +45,9 @@ def delete_tenant_endpoint(request: Request, tenant_id: str):
     return delete_tenant(tenant_id)
 
 
-# ─── Panel & users ───
+# ─────────────────────────────────────────
+# PANEL & USERS — super-admin uniquement
+# ─────────────────────────────────────────
 
 @router.get("/admin/panel", response_class=HTMLResponse)
 def admin_panel(request: Request):
@@ -52,6 +58,7 @@ def admin_panel(request: Request):
 
 @router.get("/admin/users")
 def admin_list_users(request: Request):
+    """Tous les utilisateurs tous tenants confondus — super-admin uniquement."""
     if not require_admin(request): return {"error": "Accès refusé."}
     return list_users()
 
@@ -62,7 +69,7 @@ def admin_create_user(request: Request, payload: dict = Body(...)):
     return create_user(
         payload.get("username", "").strip(),
         payload.get("password", ""),
-        payload.get("scope", SCOPE_CS),
+        payload.get("scope", SCOPE_USER),
         payload.get("tools"),
         tenant_id=payload.get("tenant_id", DEFAULT_TENANT),
     )
@@ -74,7 +81,121 @@ def admin_delete_user(request: Request, target_username: str):
     return delete_user(target_username, request.session.get("user", ""))
 
 
-# ─── Rules & insights ───
+# ─────────────────────────────────────────
+# TENANT ADMIN — admin société (tenant_admin + super-admin)
+# Toutes ces routes sont scopées au tenant de l'appelant.
+# Un tenant_admin ne peut voir/modifier que son propre tenant.
+# ─────────────────────────────────────────
+
+@router.get("/tenant/users")
+def tenant_list_users(request: Request):
+    """Utilisateurs du tenant de l'appelant."""
+    if not require_tenant_admin(request): return {"error": "Accès refusé."}
+    tenant_id = get_session_tenant_id(request)
+    return get_users_in_tenant(tenant_id)
+
+
+@router.post("/tenant/create-user")
+def tenant_create_user(request: Request, payload: dict = Body(...)):
+    """
+    Crée un utilisateur dans le tenant de l'appelant.
+    Un tenant_admin ne peut créer que des 'user' (pas de tenant_admin ni d'admin).
+    """
+    if not require_tenant_admin(request): return {"error": "Accès refusé."}
+    tenant_id = get_session_tenant_id(request)
+    requested_scope = payload.get("scope", SCOPE_USER)
+    # Un tenant_admin ne peut pas promouvoir au-delà de tenant_admin
+    if request.session.get("scope") == SCOPE_TENANT_ADMIN:
+        if requested_scope not in (SCOPE_USER, SCOPE_CS):
+            requested_scope = SCOPE_USER
+    return create_user(
+        payload.get("username", "").strip(),
+        payload.get("password", ""),
+        requested_scope,
+        payload.get("tools"),
+        tenant_id=tenant_id,  # forcé au tenant de l'appelant
+    )
+
+
+@router.delete("/tenant/delete-user/{target_username}")
+def tenant_delete_user(request: Request, target_username: str):
+    """Supprime un utilisateur du tenant de l'appelant."""
+    if not require_tenant_admin(request): return {"error": "Accès refusé."}
+    ok, err = assert_same_tenant(request, target_username)
+    if not ok: return {"error": err}
+    requesting_tenant = get_session_tenant_id(request)
+    return delete_user(target_username, request.session.get("user", ""),
+                       requesting_tenant=requesting_tenant)
+
+
+@router.get("/tenant/user-tools/{target_username}")
+def tenant_get_user_tools(request: Request, target_username: str):
+    if not require_tenant_admin(request): return {"error": "Accès refusé."}
+    ok, err = assert_same_tenant(request, target_username)
+    if not ok: return {"error": err}
+    return get_user_tools(target_username, raw=True)
+
+
+@router.post("/tenant/user-tools/{target_username}/{tool}")
+def tenant_set_user_tool(request: Request, target_username: str, tool: str, payload: dict = Body(...)):
+    if not require_tenant_admin(request): return {"error": "Accès refusé."}
+    ok, err = assert_same_tenant(request, target_username)
+    if not ok: return {"error": err}
+    return set_user_tool(target_username, tool,
+        payload.get("access_level", "read_only"), payload.get("enabled", True), payload.get("config", {}))
+
+
+@router.get("/tenant/rules")
+def tenant_rules(request: Request):
+    """Règles Aria de tous les utilisateurs du tenant."""
+    if not require_tenant_admin(request): return {"error": "Accès refusé."}
+    tenant_id = get_session_tenant_id(request)
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("""
+            SELECT ar.id, ar.username, ar.category, ar.rule, ar.confidence, ar.reinforcements, ar.active
+            FROM aria_rules ar
+            JOIN users u ON u.username = ar.username
+            WHERE u.tenant_id = %s
+            ORDER BY ar.username, ar.active DESC, ar.confidence DESC
+        """, (tenant_id,))
+        cols = [d[0] for d in c.description]
+        return [dict(zip(cols, row)) for row in c.fetchall()]
+    finally:
+        if conn: conn.close()
+
+
+@router.get("/tenant/memory-status")
+def tenant_memory_status(request: Request):
+    """Statut mémoire des utilisateurs du tenant."""
+    if not require_tenant_admin(request): return {"error": "Accès refusé."}
+    tenant_id = get_session_tenant_id(request)
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("SELECT username FROM users WHERE tenant_id = %s", (tenant_id,))
+        usernames = [r[0] for r in c.fetchall()]
+        results = []
+        for uname in usernames:
+            counts = {}
+            for table, key in [
+                ("aria_memory", "conversations"), ("aria_rules", "regles"),
+                ("aria_insights", "insights"), ("mail_memory", "mails")
+            ]:
+                c.execute(f"SELECT COUNT(*) FROM {table} WHERE username = %s", (uname,))
+                counts[key] = c.fetchone()[0]
+            c.execute("SELECT scope FROM users WHERE username = %s", (uname,))
+            scope_row = c.fetchone()
+            results.append({"username": uname, "scope": scope_row[0] if scope_row else "?", **counts})
+        return results
+    finally:
+        if conn: conn.close()
+
+
+# ─────────────────────────────────────────
+# OUTILS — super-admin uniquement
+# ─────────────────────────────────────────
 
 @router.get("/admin/rules")
 def admin_rules(request: Request, user: str = ""):
@@ -86,8 +207,8 @@ def admin_rules(request: Request, user: str = ""):
             c.execute("SELECT id,username,category,rule,confidence,reinforcements,active,created_at FROM aria_rules WHERE username=%s ORDER BY active DESC,confidence DESC", (user,))
         else:
             c.execute("SELECT id,username,category,rule,confidence,reinforcements,active,created_at FROM aria_rules ORDER BY username,active DESC,confidence DESC")
-        columns = [d[0] for d in c.description]
-        return [dict(zip(columns, row)) for row in c.fetchall()]
+        cols = [d[0] for d in c.description]
+        return [dict(zip(cols, row)) for row in c.fetchall()]
     finally:
         if conn: conn.close()
 
@@ -102,8 +223,8 @@ def admin_insights(request: Request, user: str = ""):
             c.execute("SELECT id,username,topic,insight,reinforcements,created_at FROM aria_insights WHERE username=%s ORDER BY reinforcements DESC", (user,))
         else:
             c.execute("SELECT id,username,topic,insight,reinforcements,created_at FROM aria_insights ORDER BY username,reinforcements DESC")
-        columns = [d[0] for d in c.description]
-        return [dict(zip(columns, row)) for row in c.fetchall()]
+        cols = [d[0] for d in c.description]
+        return [dict(zip(cols, row)) for row in c.fetchall()]
     finally:
         if conn: conn.close()
 
@@ -122,14 +243,21 @@ def admin_memory_status(request: Request):
         insights = dict(c.fetchall())
         c.execute("SELECT username, COUNT(*) FROM mail_memory GROUP BY username")
         mails = dict(c.fetchall())
-        users_all = set(list(conversations) + list(rules) + list(insights) + list(mails))
-        return [{"username": u, "conversations": conversations.get(u, 0), "rules": rules.get(u, 0),
-                 "insights": insights.get(u, 0), "mails": mails.get(u, 0)} for u in sorted(users_all)]
+        c.execute("SELECT username, scope, tenant_id FROM users")
+        users_meta = {r[0]: {"scope": r[1], "tenant_id": r[2]} for r in c.fetchall()}
+        all_users = set(list(conversations) + list(rules) + list(insights) + list(mails))
+        return [{
+            "username": u,
+            "tenant_id": users_meta.get(u, {}).get("tenant_id", "?"),
+            "scope": users_meta.get(u, {}).get("scope", "?"),
+            "conversations": conversations.get(u, 0),
+            "rules": rules.get(u, 0),
+            "insights": insights.get(u, 0),
+            "mails": mails.get(u, 0)
+        } for u in sorted(all_users)]
     finally:
         if conn: conn.close()
 
-
-# ─── Outils ───
 
 @router.get("/admin/user-tools/{target_username}")
 def admin_get_user_tools(request: Request, target_username: str):
@@ -150,7 +278,9 @@ def admin_remove_user_tool(request: Request, target_username: str, tool: str):
     return remove_user_tool(target_username, tool)
 
 
-# ─── Misc admin ───
+# ─────────────────────────────────────────
+# MISC — super-admin uniquement
+# ─────────────────────────────────────────
 
 @router.get("/init-db")
 def init_db_now(request: Request):
@@ -211,14 +341,13 @@ def reorganize_drive(request: Request):
 
             def mk(parent, name):
                 r = create_drive_folder(token, parent, name, drive_id)
-                if r.get("status") == "ok": print(f"[Reorganize] ✅ {name}"); return r.get("id")
+                if r.get("status") == "ok": return r.get("id")
                 return None
 
             def cp(source_name, dest_id, new_name=None):
                 item_id = items_by_name.get(source_name)
                 if not item_id: return
-                r = copy_drive_item(token, item_id, dest_id, new_name, drive_id)
-                print(f"[Reorganize] {'✅' if r.get('status')=='ok' else '❌'} {source_name}")
+                copy_drive_item(token, item_id, dest_id, new_name, drive_id)
 
             v2_id = mk(parent_id, "1_Photovoltaïque_V2")
             if not v2_id: return
@@ -237,18 +366,13 @@ def reorganize_drive(request: Request):
             if cat04:
                 cp("5_Document technique",cat04,"Docs_Techniques"); cp("Normes",cat04); cp("Import ELEC",cat04)
                 cp("6_Audits et rapports",cat04,"Audits")
-                for f in ["DOE_Couffrant_Solar_Complet_Modele.docx","DOE_Couffrant_Solar_Modele_Reutilisable.docx",
-                           "DOE_Photovoltaique_Couffrant_Solar_Complet.docx","PV fin de chantier.docx","RAPPORT AUDIT PV.docx"]:
-                    cp(f, cat04)
             if cat05:
-                for f in ["Adiwatt","MADENR","Urban Solar","Powr Connect","formulaire compensation solaredge.pdf",
-                           "Demande garantie Onduleur 1 – Copie.xlsx","Demande garantie Onduleur.xlsx"]: cp(f,cat05)
+                for f in ["Adiwatt","MADENR","Urban Solar","Powr Connect"]: cp(f,cat05)
             if cat06:
-                for f in ["Formation archelios calc","sauvegarde Archelios","Logiciels","unnamed.png"]: cp(f,cat06)
+                for f in ["Formation archelios calc","sauvegarde Archelios","Logiciels"]: cp(f,cat06)
             if cat07:
-                for f in ["Certificats et Formations Professionnels","8_Stock 2026.ods","Suivi panneau publicitaire.xlsx"]: cp(f,cat07)
-            print("[Reorganize] Terminé.")
+                for f in ["Certificats et Formations Professionnels","8_Stock 2026.ods"]: cp(f,cat07)
         except Exception as e: print(f"[Reorganize] Erreur : {e}")
 
     threading.Thread(target=run_reorganize, daemon=True).start()
-    return {"status": "started", "message": "Réorganisation lancée.", "note": "Les originaux restent intacts."}
+    return {"status": "started", "note": "Les originaux restent intacts."}

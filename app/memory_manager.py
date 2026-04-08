@@ -3,7 +3,10 @@ Gestionnaire de mémoire d'Aria — 3 niveaux, multi-utilisateurs, multi-tenants
 
 Isolation :
   - Données personnelles (règles, mémoire, style...) : filtre par username
+    Un username = un utilisateur = un tenant. Aucune donnée personnelle
+    ne peut traverser la cloison tenant par construction.
   - Données partagées (contacts, consignes) : filtre par tenant_id
+    Contacts et consignes ne sont visibles que par les utilisateurs du même tenant.
 """
 
 from app.database import get_pg_conn
@@ -28,7 +31,12 @@ def get_hot_summary(username: str = 'guillaume') -> str:
         if conn: conn.close()
 
 
-def rebuild_hot_summary(username: str = 'guillaume') -> str:
+def rebuild_hot_summary(username: str = 'guillaume', tenant_id: str = DEFAULT_TENANT) -> str:
+    """
+    Reconstruit le résumé chaud.
+    tenant_id utilisé pour filtrer les contacts (donnée partagée par société).
+    Garantit qu'aucun contact d'une autre société n'apparaît dans le résumé.
+    """
     conn = None
     try:
         conn = get_pg_conn()
@@ -40,7 +48,12 @@ def rebuild_hot_summary(username: str = 'guillaume') -> str:
         """, (username,))
         cols = [d[0] for d in c.description]
         mails = [dict(zip(cols, row)) for row in c.fetchall()]
-        c.execute("SELECT name, summary FROM aria_contacts ORDER BY last_seen DESC LIMIT 15")
+        # Contacts filtrés par tenant — cloison étanche
+        c.execute("""
+            SELECT name, summary FROM aria_contacts
+            WHERE tenant_id = %s
+            ORDER BY last_seen DESC LIMIT 15
+        """, (tenant_id,))
         contacts = [{'name': r[0], 'summary': r[1]} for r in c.fetchall()]
         c.execute("""
             SELECT user_input, aria_response FROM aria_memory
@@ -51,7 +64,7 @@ def rebuild_hot_summary(username: str = 'guillaume') -> str:
         if conn: conn.close()
 
     display_name = username.capitalize()
-    prompt = f"""Tu es l'assistant de {display_name} — Couffrant Solar.
+    prompt = f"""Tu es l'assistant de {display_name}.
 
 Mails récents :
 {json.dumps(mails, ensure_ascii=False, default=str)}
@@ -287,11 +300,10 @@ Synthétise en JSON strict (sans backticks) :
 
 
 # ─────────────────────────────────────────
-# CONTACTS — partagés par TENANT (multi-tenant)
+# CONTACTS — partagés par TENANT (cloison étanche)
 # ─────────────────────────────────────────
 
 def get_contact_card(name_or_email: str, tenant_id: str = DEFAULT_TENANT) -> str:
-    """Fiche contact filtrée par tenant."""
     conn = None
     try:
         conn = get_pg_conn()
@@ -310,7 +322,6 @@ def get_contact_card(name_or_email: str, tenant_id: str = DEFAULT_TENANT) -> str
 
 
 def get_all_contact_cards(tenant_id: str = DEFAULT_TENANT) -> list:
-    """Tous les contacts d'un tenant."""
     conn = None
     try:
         conn = get_pg_conn()
@@ -327,7 +338,6 @@ def get_all_contact_cards(tenant_id: str = DEFAULT_TENANT) -> list:
 
 
 def get_contacts_keywords(username: str = 'guillaume', tenant_id: str = DEFAULT_TENANT) -> list[str]:
-    """Mots-clés contacts pour détection dans les messages. Filtre par tenant."""
     keywords = []
     conn = None
     try:
@@ -353,12 +363,10 @@ def get_contacts_keywords(username: str = 'guillaume', tenant_id: str = DEFAULT_
 
 
 def rebuild_contacts(tenant_id: str = DEFAULT_TENANT) -> int:
-    """Reconstruit les fiches contacts pour un tenant à partir des mails de ses utilisateurs."""
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        # Uniquement les mails des utilisateurs du tenant
         c.execute("""
             SELECT from_email,
                    array_agg(subject ORDER BY received_at DESC) as subjects,
@@ -372,7 +380,6 @@ def rebuild_contacts(tenant_id: str = DEFAULT_TENANT) -> int:
         """, (tenant_id,))
         rows = c.fetchall()
     except Exception:
-        # Fallback sans filtre tenant (base existante)
         try:
             c.execute("""
                 SELECT from_email,
@@ -413,10 +420,9 @@ Réponds en JSON : name, company, role, summary (2-3 lignes)"""
                 summary = parsed.get("summary", raw)
             except Exception:
                 name = email.split('@')[0]; company = ""; role = ""; summary = raw
-            conn = None
+            conn2 = get_pg_conn()
             try:
-                conn = get_pg_conn()
-                c2 = conn.cursor()
+                c2 = conn2.cursor()
                 c2.execute("""
                     INSERT INTO aria_contacts
                     (tenant_id, email, name, company, role, summary, last_seen, last_subject, mail_count, updated_at)
@@ -427,9 +433,9 @@ Réponds en JSON : name, company, role, summary (2-3 lignes)"""
                         last_subject=EXCLUDED.last_subject, mail_count=EXCLUDED.mail_count, updated_at=NOW()
                 """, (tenant_id, email, name, company, role, summary,
                        str(last_seen), (subjects or [''])[0], mail_count))
-                conn.commit()
+                conn2.commit()
             finally:
-                if conn: conn.close()
+                conn2.close()
             updated += 1
         except Exception as e:
             print(f"[Contacts] Erreur {email}: {e}")
