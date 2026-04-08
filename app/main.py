@@ -22,6 +22,7 @@ from app.routes.admin import router as admin_router
 from app.routes.aria import router as aria_router
 from app.routes.memory import router as memory_router
 from app.routes.mail import router as mail_router
+from app.routes.reset_password import router as reset_router
 
 app = FastAPI(title="Couffrant Solar Assistant — Aria")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=30 * 24 * 3600)
@@ -31,6 +32,7 @@ app.include_router(admin_router)
 app.include_router(aria_router)
 app.include_router(memory_router)
 app.include_router(mail_router)
+app.include_router(reset_router)
 
 
 @app.get("/health")
@@ -63,14 +65,16 @@ def startup_event():
                 from app.assistant_analyzer import analyze_single_mail as _analyze
                 from app.mail_memory_store import insert_mail, mail_exists
                 from app.rule_engine import get_antispam_keywords as _get_spam, get_memoire_param as _get_param
+                from app.app_security import get_tenant_id as _get_tenant
 
                 users = get_all_users_with_tokens()
-                instructions = _get_instructions()
 
                 for username in users:
                     try:
                         token = get_valid_microsoft_token(username)
                         if not token: continue
+                        tenant_id = _get_tenant(username)
+                        instructions = _get_instructions(tenant_id=tenant_id)
                         data = _graph_get(token, "/me/mailFolders/inbox/messages",
                             params={"$top": 10, "$select": "id,subject,from,receivedDateTime,bodyPreview",
                                     "$orderby": "receivedDateTime DESC"})
@@ -110,7 +114,9 @@ def startup_event():
                     _rebuild_cycle = 40
                 if cycle % _rebuild_cycle == 0 and MEMORY_OK:
                     for username in users:
-                        try: rebuild_hot_summary(username)
+                        try:
+                            tenant_id = _get_tenant(username)
+                            rebuild_hot_summary(username, tenant_id=tenant_id)
                         except Exception as e: print(f"[Memory] Erreur rebuild {username}: {e}")
 
             except Exception as e:
