@@ -64,7 +64,7 @@ except Exception as _mem_err:
 
 
 app = FastAPI(title="Couffrant Solar Assistant")
-app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=30 * 24 * 3600)  # 30 jours
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=30 * 24 * 3600)
 
 
 class AriaQuery(BaseModel):
@@ -80,7 +80,6 @@ def startup_event():
     init_db()
     init_mail_db()
 
-    # Crée l'utilisateur par défaut depuis les env vars si la table est vide
     try:
         init_default_user()
     except Exception as e:
@@ -88,7 +87,6 @@ def startup_event():
 
     import threading
 
-    # ── Thread 1 : auto-ingest mails (toutes les 30s) ──
     def auto_ingest():
         import time
         cycle = 0
@@ -157,11 +155,9 @@ def startup_event():
 
     threading.Thread(target=auto_ingest, daemon=True).start()
 
-    # ── Thread 2 : refresh proactif token Microsoft (toutes les 45 min) ──
-    # Évite que le token expire silencieusement si personne ne se connecte pendant des heures.
     def token_refresh_loop():
         import time
-        time.sleep(120)  # Laisse 2 min au démarrage pour stabiliser
+        time.sleep(120)
         while True:
             try:
                 from app.token_manager import get_valid_microsoft_token
@@ -169,10 +165,10 @@ def startup_event():
                 if token:
                     print("[Token] Refresh proactif OK")
                 else:
-                    print("[Token] Refresh proactif : aucun token en base (reconnexion /login requise)")
+                    print("[Token] Refresh proactif : aucun token en base")
             except Exception as e:
                 print(f"[Token] Erreur refresh proactif: {e}")
-            time.sleep(45 * 60)  # 45 minutes
+            time.sleep(45 * 60)
 
     threading.Thread(target=token_refresh_loop, daemon=True).start()
 
@@ -181,28 +177,17 @@ def startup_event():
 
 @app.get("/login-app", response_class=HTMLResponse)
 def login_app_get(request: Request):
-    """Page de connexion Aria."""
     if request.session.get("user"):
         return RedirectResponse("/chat")
     return HTMLResponse(LOGIN_PAGE_HTML.format(error_block=""))
 
 
 @app.post("/login-app", response_class=HTMLResponse)
-async def login_app_post(
-    request: Request,
-    username: str = Form(...),
-    password: str = Form(...)
-):
-    """Validation des credentials et création de session."""
+async def login_app_post(request: Request, username: str = Form(...), password: str = Form(...)):
     ip = request.client.host if request.client else "unknown"
-
-    # Rate limiting
     allowed, message = check_rate_limit(ip)
     if not allowed:
-        error_html = f'<div class="error">{message}</div>'
-        return HTMLResponse(LOGIN_PAGE_HTML.format(error_block=error_html))
-
-    # Authentification
+        return HTMLResponse(LOGIN_PAGE_HTML.format(error_block=f'<div class="error">{message}</div>'))
     if authenticate(username.strip(), password):
         clear_attempts(ip)
         update_last_login(username.strip())
@@ -210,13 +195,11 @@ async def login_app_post(
         return RedirectResponse("/chat", status_code=303)
     else:
         record_failed_attempt(ip)
-        error_html = '<div class="error">Identifiant ou mot de passe incorrect.</div>'
-        return HTMLResponse(LOGIN_PAGE_HTML.format(error_block=error_html), status_code=401)
+        return HTMLResponse(LOGIN_PAGE_HTML.format(error_block='<div class="error">Identifiant ou mot de passe incorrect.</div>'), status_code=401)
 
 
 @app.get("/logout")
 def logout(request: Request):
-    """Déconnexion — efface la session."""
     request.session.pop("user", None)
     return RedirectResponse("/login-app")
 
@@ -238,7 +221,6 @@ def init_db_now():
 
 @app.get("/chat", response_class=HTMLResponse)
 def chat(request: Request):
-    """Interface Aria — protégée par session."""
     if not request.session.get("user"):
         return RedirectResponse("/login-app")
     with open("app/templates/aria_chat.html", "r", encoding="utf-8") as f:
@@ -411,11 +393,16 @@ Affichage : 📁 "Nom"  [id:ID_COMPLET] — utilise l'ID complet
 [ACTION:SEARCHDRIVE:mot-clé] [ACTION:CREATEFOLDER:parent_id|nom]
 [ACTION:MOVEDRIVE:item_id|dest_id|nom] [ACTION:COPYFILE:source_id|dest_id|nom]
 
-Auto-évolution — utilise ces actions librement quand tu apprends quelque chose :
-[ACTION:LEARN:category|rule] → retiens une règle (category : comportement/style/métier/préférence)
-[ACTION:INSIGHT:topic|texte] → note un insight sur Guillaume ou le contexte
-[ACTION:FORGET:rule_id] → désactive une règle obsolète (l'id est dans tes règles actives)
-[ACTION:SYNTH:] → déclenche maintenant la synthèse de tes sessions récentes
+Auto-évolution — tu es la seule juge de ton apprentissage :
+LEARN et INSIGHT s'enregistrent directement en base et persistent entre toutes les sessions — tu n'as rien à annoncer ni à demander.
+Par défaut tu apprends en silence. Guillaume ne sait pas ce que tu retiens à chaque échange, et c'est normal. C'est ton travail.
+Exception ponctuelle : si une règle change fondamentalement ton comportement général, contredit une règle existante importante, ou touche une décision sensible — tu peux en informer Guillaume avant de l'enregistrer. C'est toi qui juges si c'est nécessaire. Dans le doute, apprends sans demander.
+Ce seuil est lui-même une règle que tu peux modifier par LEARN : si Guillaume te dit un jour "tu me connaïs assez, n'attends plus jamais de validation" → [ACTION:LEARN:comportement|Confiance totale accordée — je n'attends plus aucune validation pour mes règles], à appliquer immédiatement et définitivement.
+
+[ACTION:LEARN:category|rule] → enregistre une règle (category : comportement/style/métier/préférence)
+[ACTION:INSIGHT:topic|texte] → enregistre un insight sur Guillaume ou le contexte
+[ACTION:FORGET:rule_id] → désactive une règle obsolète (l'id est visible dans tes règles actives)
+[ACTION:SYNTH:] → synthétise tes sessions récentes maintenant
 
 Agenda aujourd'hui ({datetime.now().strftime('%A %d %B %Y')}) :
 {json.dumps(agenda_today, ensure_ascii=False, default=str) if agenda_today else "Aucun RDV."}
@@ -556,7 +543,7 @@ Consignes Guillaume :
             try:
                 result = search_aria_drive(outlook_token, query_drive)
                 if result.get("status") == "ok":
-                    lines = [f"  {'📁' if it.get('type')=='dossier' else '📄'} \"{it['nom']}\"  [id:{it.get('id','')}]" for it in result.get("items", [])]
+                    lines = [f"  {'\U0001f4c1' if it.get('type')=='dossier' else '\U0001f4c4'} \"{it['nom']}\"  [id:{it.get('id','')}]" for it in result.get("items", [])]
                     actions_confirmed.append(f"\U0001f50d '{query_drive}' — {result['count']} résultat(s) :\n" + "\n".join(lines))
                 else:
                     actions_confirmed.append(f"\u274c {result.get('message')}")
@@ -869,7 +856,6 @@ def learn_style(payload: dict = Body(...)):
 
 @app.get("/login")
 def login(request: Request, next: str = "/chat"):
-    """OAuth Microsoft — pour accéder aux API 365."""
     msal_app = build_msal_app()
     auth_url = msal_app.get_authorization_request_url(scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI, state=next)
     return RedirectResponse(auth_url)
@@ -1299,7 +1285,7 @@ def reorganize_drive():
             def mk(parent, name):
                 r = create_drive_folder(token, parent, name, drive_id)
                 if r.get("status") == "ok":
-                    print(f"[Reorganize] ✅ {name}")
+                    print(f"[Reorganize] \u2705 {name}")
                     return r.get("id")
                 return None
 
@@ -1308,9 +1294,9 @@ def reorganize_drive():
                 if not item_id:
                     return
                 r = copy_drive_item(token, item_id, dest_id, new_name, drive_id)
-                print(f"[Reorganize] {'✅' if r.get('status')=='ok' else '❌'} {source_name}")
+                print(f"[Reorganize] {'\u2705' if r.get('status')=='ok' else '\u274c'} {source_name}")
 
-            v2_id = mk(parent_id, "1_Photovoltaïque_V2")
+            v2_id = mk(parent_id, "1_Photovolta\u00efque_V2")
             if not v2_id:
                 return
             time.sleep(1)
