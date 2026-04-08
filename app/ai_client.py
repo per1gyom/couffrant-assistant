@@ -1,39 +1,46 @@
+"""
+Analyse des mails entrants par Claude.
+
+Les règles de tri, d'urgence et de style sont chargées dynamiquement
+depuis aria_rules via rule_engine. Aucune règle métier n'est codée en dur.
+
+Seuls garde-fous immuables dans ce module :
+- Retourner uniquement du JSON valide
+- Ne jamais inventer d'informations absentes du mail
+- Ne jamais inclure de signature dans suggested_reply
+"""
+
 import json
 import re
 import anthropic
 
-from app.config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL_FAST
+from app.config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL_FAST, ANTHROPIC_MODEL_SMART
 from app.database import get_pg_conn
+from app.rule_engine import get_rules_as_text, get_rules_by_category
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 MODEL = ANTHROPIC_MODEL_FAST
 
 
 def _parse_json_safe(text: str) -> dict:
-    """Parse JSON robustement."""
     text = text.strip()
     text = re.sub(r'^```(?:json)?\s*', '', text, flags=re.MULTILINE)
     text = re.sub(r'\s*```$', '', text, flags=re.MULTILINE)
     return json.loads(text.strip())
 
 
-def get_learning_examples(limit: int = 5) -> list[dict]:
-    """Récupère les derniers exemples de correction (toutes catégories)."""
+def get_learning_examples(category: str, username: str = 'guillaume', limit: int = 3) -> list[dict]:
+    """Exemples de corrections passées pour le few-shot learning."""
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
             SELECT mail_subject, mail_from, mail_body_preview, category, ai_reply, final_reply
-            FROM reply_learning_memory
-            ORDER BY id DESC LIMIT %s
-        """, (limit,))
-        rows = c.fetchall()
-        return [
-            {"mail_subject": r[0], "mail_from": r[1], "mail_body_preview": r[2],
-             "category": r[3], "ai_reply": r[4], "final_reply": r[5]}
-            for r in rows
-        ]
+            FROM reply_learning_memory WHERE category = %s ORDER BY id DESC LIMIT %s
+        """, (category, limit))
+        return [{"mail_subject": r[0], "mail_from": r[1], "mail_body_preview": r[2],
+                 "category": r[3], "ai_reply": r[4], "final_reply": r[5]} for r in c.fetchall()]
     except Exception:
         return []
     finally:
@@ -42,15 +49,15 @@ def get_learning_examples(limit: int = 5) -> list[dict]:
 
 def build_learning_text(examples: list[dict]) -> str:
     if not examples:
-        return "Aucun exemple disponible."
+        return ""
     blocks = []
     for i, ex in enumerate(examples, 1):
         blocks.append(
-            f"Exemple {i}\nSujet : {ex.get('mail_subject', '')}\n"
-            f"Expéditeur : {ex.get('mail_from', '')}\n"
-            f"Contenu : {ex.get('mail_body_preview', '')}\n"
-            f"Réponse IA : {ex.get('ai_reply', '')}\n"
-            f"Réponse corrigée : {ex.get('final_reply', '')}"
+            f"Exemple {i}\nSujet : {ex.get('mail_subject','')}\n"
+            f"Expéditeur : {ex.get('mail_from','')}\n"
+            f"Contenu : {ex.get('mail_body_preview','')}\n"
+            f"Réponse IA : {ex.get('ai_reply','')}\n"
+            f"Réponse corrigée : {ex.get('final_reply','')}"
         )
     return "\n\n".join(blocks)
 
@@ -63,20 +70,15 @@ def get_odoo_context(sender_email: str) -> dict:
             return {"client_trouve": False}
         p = partner["result"]
         projects = perform_odoo_action("get_projects_by_partner", {"partner_id": p["id"]})
-        return {
-            "client_trouve": True,
-            "client_nom": p.get("name"),
-            "client_email": p.get("email"),
-            "client_telephone": p.get("phone"),
-            "client_ville": p.get("city"),
-            "chantiers": projects.get("result", []),
-        }
+        return {"client_trouve": True, "client_nom": p.get("name"), "client_email": p.get("email"),
+                "client_telephone": p.get("phone"), "client_ville": p.get("city"),
+                "chantiers": projects.get("result", [])}
     except Exception:
         return {"client_trouve": False}
 
 
 def get_style_profile(username: str = 'guillaume') -> str:
-    """Charge le profil de style rédactionnel d'un utilisateur."""
+    """Charge le profil de style de l'utilisateur depuis aria_profile."""
     conn = None
     try:
         conn = get_pg_conn()
@@ -93,6 +95,32 @@ def get_style_profile(username: str = 'guillaume') -> str:
         if conn: conn.close()
 
 
+def _get_hint_category(full_text: str, username: str) -> str:
+    """
+    Détection légère de catégorie pour charger les bons exemples d'apprentissage.
+    Basé sur les règles tri_mails d'Aria, sans logique hardcodée.
+    Fallback : quelques termes clés de bootstrap si aucune règle.
+    """
+    from app.rule_engine import extract_category_keywords
+
+    categories = ["raccordement", "commercial", "reunion", "chantier", "financier"]
+    for cat in categories:
+        kws = extract_category_keywords(username, cat)
+        # Fallback si la règle n'a pas encore été seedée
+        if not kws:
+            fallbacks = {
+                "raccordement": ["enedis", "consuel", "raccordement"],
+                "commercial":   ["devis", "offre", "contrat"],
+                "reunion":      ["réunion", "meeting", "teams.microsoft"],
+                "chantier":     ["chantier", "planning", "installation"],
+                "financier":    ["facture", "paiement", "échéance"],
+            }
+            kws = fallbacks.get(cat, [])
+        if any(kw in full_text for kw in kws):
+            return cat
+    return "autre"
+
+
 def analyze_single_mail_with_ai(
     message: dict,
     instructions: list[str] | None = None,
@@ -100,9 +128,9 @@ def analyze_single_mail_with_ai(
 ) -> dict:
     """
     Analyse un mail avec Claude.
-    Les règles d'urgence, de tri et de style sont chargées dynamiquement
-    depuis aria_rules — elles évoluent avec les apprentissages d'Aria.
-    Aucune règle métier n'est codée en dur ici.
+
+    Les règles de tri, d'urgence et de style viennent de aria_rules.
+    Aria les fait évoluer via LEARN/FORGET. Le code n'en contient aucune.
     """
     instructions = instructions or []
 
@@ -110,15 +138,17 @@ def analyze_single_mail_with_ai(
     odoo_context = get_odoo_context(sender_email)
     style_profile = get_style_profile(username)
 
-    # Chargement dynamique des règles Aria pour ce mail
-    aria_rules_text = ""
-    try:
-        from app.memory_manager import get_rules_as_text
-        aria_rules_text = get_rules_as_text(['tri_mails', 'urgence', 'style_reponse'], username)
-    except Exception as e:
-        print(f"[ai_client] Impossible de charger les règles: {e}")
+    # ── Règles Aria chargées dynamiquement ──
+    rules_text = get_rules_as_text(username, ["tri_mails", "urgence", "style_reponse"])
 
-    learning_examples = get_learning_examples(limit=4)
+    # Exemples de corrections passées (few-shot)
+    full_lower = (
+        f"{message.get('subject', '')} "
+        f"{message.get('bodyPreview', '')} "
+        f"{sender_email}"
+    ).lower()
+    hint_cat = _get_hint_category(full_lower, username)
+    learning_examples = get_learning_examples(hint_cat, username)
     learning_text = build_learning_text(learning_examples)
 
     payload = {
@@ -134,60 +164,59 @@ def analyze_single_mail_with_ai(
         "odoo_context": odoo_context,
     }
 
-    system_instructions = f"""Tu es Aria, l'assistante de Couffrant Solar.
+    rules_section = (
+        f"=== RÈGLES D'ARIA (apprise et évolutives) ===\n{rules_text}\n"
+        if rules_text else
+        "Pas encore de règles enregistrées. Utilise le bon sens métier photovoltaïque.\n"
+    )
 
+    system_prompt = f"""Tu es Aria, l'assistante de Couffrant Solar.
 Analyse ce mail et retourne UNIQUEMENT un objet JSON valide, sans texte avant ou après, sans bloc markdown.
 
-Champs requis (tous obligatoires) :
-- display_title : string
-- category : "raccordement"|"consuel"|"chantier"|"commercial"|"financier"|"fournisseur"|"reunion"|"securite"|"interne"|"notification"|"autre"
-- priority : "haute"|"moyenne"|"basse"
-- reason : string
-- suggested_action : string
-- short_summary : string
-- group_hints : array of strings
-- confidence : number between 0 and 1
-- confidence_level : "haute"|"moyenne"|"basse"
-- needs_review : boolean
-- needs_reply : boolean
-- reply_urgency : "haute"|"moyenne"|"basse"
-- reply_reason : string
-- response_type : "oui_non"|"planification"|"demande_info"|"demande_document"|"accuse_reception"|"relance"|"pas_de_reponse"|"autre"
-- missing_fields : array of strings
-- suggested_reply_subject : string
-- suggested_reply : string (sans signature)
+{rules_section}
 
-Garde-fous de sécurité (immuables) :
-- Retourner UNIQUEMENT du JSON valide
+Garde-fous immuables :
+- Retourner UNIQUEMENT du JSON valide, rien d'autre
 - Ne jamais inventer d'information absente du mail
 - Ne jamais mettre de signature dans suggested_reply
 
-Règles d'Aria pour la classification de ce mail (apprises, évolutives — à appliquer en priorité) :
-{aria_rules_text if aria_rules_text else "Pas de règles spécifiques encore — utilise ton jugement."}
+Tu appliques les règles avec ton jugement. Si une situation n'est pas couverte, utilise le bon sens métier.
 
-Profil rédactionnel de l'utilisateur :
-{style_profile[:600] if style_profile else "Style direct et concis."}
+Champs JSON requis :
+display_title, category, priority (haute/moyenne/basse), reason,
+suggested_action, short_summary, group_hints (array), confidence (0-1),
+confidence_level (haute/moyenne/basse), needs_review (bool), needs_reply (bool),
+reply_urgency (haute/moyenne/basse), reply_reason,
+response_type (oui_non/planification/demande_info/demande_document/
+accuse_reception/relance/pas_de_reponse/autre),
+missing_fields (array), suggested_reply_subject, suggested_reply (sans signature)
+
+Catégories valides : raccordement, consuel, chantier, commercial, financier,
+fournisseur, reunion, securite, interne, notification, autre
+
+Profil de style :
+{style_profile[:600] if style_profile else "Écrire de façon directe et concise."}
 
 Contexte Odoo :
 {json.dumps(odoo_context, ensure_ascii=False)}
 
-Consignes utilisateur :
+Consignes additionnelles :
 {json.dumps(instructions, ensure_ascii=False)}
-
-Exemples de corrections passées :
-{learning_text}
-""".strip()
+{f"Exemples de corrections passées :{chr(10)}{learning_text}" if learning_text else ""}"""
 
     response = client.messages.create(
-        model=MODEL,
-        max_tokens=1024,
-        system=system_instructions,
+        model=MODEL, max_tokens=1024,
+        system=system_prompt,
         messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
     )
     return _parse_json_safe(response.content[0].text)
 
 
-def summarize_messages(messages: list[dict], instructions: list[str] | None = None, username: str = 'guillaume') -> dict:
+def summarize_messages(
+    messages: list[dict],
+    instructions: list[str] | None = None,
+    username: str = 'guillaume'
+) -> dict:
     items = []
     for msg in messages:
         try:
@@ -197,15 +226,15 @@ def summarize_messages(messages: list[dict], instructions: list[str] | None = No
                 "display_title": msg.get("subject", "(Sans objet)"),
                 "category": "autre", "priority": "moyenne",
                 "reason": "Analyse indisponible", "suggested_action": "Lire",
-                "short_summary": msg.get("bodyPreview", ""),
-                "group_hints": [], "confidence": 0.0, "confidence_level": "basse",
-                "needs_review": True, "needs_reply": False, "reply_urgency": "basse",
-                "reply_reason": "", "response_type": "pas_de_reponse",
-                "missing_fields": [], "suggested_reply_subject": "", "suggested_reply": "",
+                "short_summary": msg.get("bodyPreview", ""), "group_hints": [],
+                "confidence": 0.0, "confidence_level": "basse", "needs_review": True,
+                "needs_reply": False, "reply_urgency": "basse", "reply_reason": "",
+                "response_type": "pas_de_reponse", "missing_fields": [],
+                "suggested_reply_subject": "", "suggested_reply": "",
             }
         items.append({
             "display_title": item.get("display_title"),
-            "from": msg.get("from", {}).get("emailAddress", {}).get("address", "Expéditeur inconnu"),
+            "from": msg.get("from", {}).get("emailAddress", {}).get("address", ""),
             "receivedDateTime": msg.get("receivedDateTime", ""),
             "category": item.get("category"), "priority": item.get("priority"),
             "reason": item.get("reason"), "suggested_action": item.get("suggested_action"),

@@ -1,112 +1,84 @@
+"""
+Dashboard service — regroupement et priorisation des mails.
+
+Toute la logique de groupement et de priorité business est pilotée
+par les règles Aria (catégorie regroupement) via rule_engine.
+Aria fait évoluer ces règles via LEARN/FORGET.
+"""
+
 import json
-import re
 from collections import defaultdict
 from datetime import datetime, timedelta
+
 from app.database import get_pg_conn
+from app.rule_engine import get_rules_by_category, parse_business_priority
 
 
 def normalize_text(text: str) -> str:
-    if not text:
-        return ""
+    if not text: return ""
     t = text.lower().strip()
     for p in ["re: ", "tr: ", "fw: ", "fwd: "]:
-        while t.startswith(p):
-            t = t[len(p):].strip()
+        changed = True
+        while changed:
+            changed = False
+            if t.startswith(p):
+                t = t[len(p):].strip()
+                changed = True
     return t
 
 
-def load_dashboard_rules(username: str = 'guillaume') -> dict:
+def build_group_key(item: dict, regroupement_rules: list[str]) -> str:
     """
-    Charge les règles de regroupement et d'urgence depuis aria_rules.
-    Remplacement dynamique des constantes hardcodées de l'ancien dashboard_service.
-    """
-    try:
-        from app.memory_manager import get_rules_by_category
-        return {
-            'urgence': get_rules_by_category('urgence', username),
-            'regroupement': get_rules_by_category('regroupement', username),
-            'tri_mails': get_rules_by_category('tri_mails', username),
-        }
-    except Exception:
-        return {'urgence': [], 'regroupement': [], 'tri_mails': []}
-
-
-def extract_kw(rule: str) -> list[str]:
-    """Extrait les mots-clés d'une règle pour matching rapide."""
-    try:
-        from app.memory_manager import extract_keywords_from_rule
-        return extract_keywords_from_rule(rule)
-    except Exception:
-        return []
-
-
-def build_group_key(item: dict, rules: dict) -> str:
-    """
-    Construit la clé de regroupement.
-    Piloté par les règles 'regroupement' d'Aria — plus de logique hardcodée.
+    Construit la clé de regroupement depuis les règles Aria.
+    Chaque règle de regroupement peut définir un groupe spécifique.
     """
     title = normalize_text(item.get("display_title", ""))
     category = item.get("category", "autre")
     sender = (item.get("from_email") or "").lower()
-    full_text = f"{title} {sender} {category}"
+    combined = f"{title} {sender} {category}"
 
-    # Appliquer les règles de regroupement Aria
-    for rule in rules.get('regroupement', []):
-        keywords = extract_kw(rule)
-        for kw in keywords:
-            if kw in full_text:
-                return f"groupe|{kw}"
+    # Cherche une règle de regroupement spécifique
+    for rule in regroupement_rules:
+        rule_l = rule.lower()
+        if "regrouper" not in rule_l:
+            continue
+        # Extrait les termes clés de la règle
+        import re
+        kw_part = re.sub(r"regrouper (les mails |les |)d[e']?", "", rule_l)
+        kw_part = kw_part.split("=>")[0].split("→")[0].strip()
+        keywords = [k.strip().strip("',") for k in kw_part.split(",")]
+        if any(kw and len(kw) > 2 and kw in combined for kw in keywords):
+            # Utilise la règle comme clé de groupe
+            return f"rule|{kw_part[:40].strip()}"
 
-    # Regroupement par catégorie + extrémité du titre
+    # Regroupement générique
     if category == "notification":
         return f"notification|{sender}"
-
-    return f"{category}|{title[:50]}"
-
-
-def compute_business_priority(item: dict, rules: dict) -> str:
-    """
-    Détermine la priorité métier.
-    Piloté par les règles 'urgence' d'Aria — plus de logique hardcodée.
-    """
-    title = (item.get("topic") or "").lower()
-    category = item.get("category") or ""
-    priority = item.get("priority") or "moyenne"
-    full_text = f"{title} {category}"
-
-    # Priorité directe haute
-    if priority == "haute":
-        return "urgent"
-
-    # Vérification via règles d'urgence Aria
-    for rule in rules.get('urgence', []):
-        keywords = extract_kw(rule)
-        if any(kw in full_text for kw in keywords):
-            return "urgent"
-
-    # Priorité basse / notifications
-    if category == "notification" or priority == "basse":
-        return "faible"
-
-    return "a_traiter"
+    return f"{category}|{normalize_text(item.get('display_title', ''))}"
 
 
-def choose_group_title(items: list[dict]) -> str:
-    return items[0].get("display_title", "Sujet")
+def choose_group_title(items: list[dict], regroupement_rules: list[str]) -> str:
+    """Titre du groupe, enrichi par les règles si disponible."""
+    first = items[0]
+    title = normalize_text(first.get("display_title", ""))
+    sender = (first.get("from_email") or "").lower()
+    combined = f"{title} {sender}"
 
+    for rule in regroupement_rules:
+        rule_l = rule.lower()
+        if "regrouper" not in rule_l:
+            continue
+        import re
+        kw_part = re.sub(r"regrouper (les mails |les |)d[e']?", "", rule_l)
+        kw_part = kw_part.split("=>")[0].split("→")[0].strip()
+        keywords = [k.strip().strip("',") for k in kw_part.split(",")]
+        if any(kw and len(kw) > 2 and kw in combined for kw in keywords):
+            # Titre propre : capitalize chaque mot significatif
+            return " ".join(w.capitalize() for w in kw_part.split() if len(w) > 2)[:50]
 
-def choose_group_action(items: list[dict]) -> str:
-    priorities = [item.get("priority") for item in items]
-    categories = [item.get("category") for item in items]
-    if "haute" in priorities:
-        return "Traiter rapidement"
-    if "raccordement" in categories:
-        return "Analyser et suivre"
-    if "reunion" in categories:
-        return "Vérifier et planifier"
-    if all(cat == "notification" for cat in categories):
-        return "Classer ou ignorer"
-    return "Lire et qualifier"
+    if first.get("category") == "notification":
+        return "Notifications"
+    return first.get("display_title", "Sujet")
 
 
 def choose_group_priority(items: list[dict]) -> str:
@@ -117,26 +89,38 @@ def choose_group_priority(items: list[dict]) -> str:
 
 
 def choose_group_reason(items: list[dict]) -> str:
-    if len(items) == 1:
-        return items[0].get("reason", "")
+    if len(items) == 1: return items[0].get("reason", "")
     cats = {item.get("category") for item in items}
     if "raccordement" in cats:
         return f"{len(items)} mails liés à un même sujet de raccordement."
     if cats == {"notification"}:
-        return f"{len(items)} notifications similaires regroupées."
+        return f"{len(items)} notifications regroupées."
     return f"{len(items)} mails liés au même sujet."
+
+
+def choose_group_action(items: list[dict]) -> str:
+    priorities = [item.get("priority") for item in items]
+    categories = [item.get("category") for item in items]
+    if "haute" in priorities: return "Traiter rapidement"
+    if "raccordement" in categories: return "Analyser et suivre"
+    if "reunion" in categories: return "Vérifier et planifier"
+    if all(cat == "notification" for cat in categories): return "Classer ou ignorer"
+    return "Lire et qualifier"
 
 
 def build_summary(items: list[dict]) -> str:
     texts = []
     for item in items[:2]:
         s = (item.get("short_summary") or "").strip()
-        if s and s not in texts:
-            texts.append(s)
+        if s and s not in texts: texts.append(s)
     return " | ".join(texts)
 
 
 def get_dashboard(days: int = 2, username: str = 'guillaume') -> dict:
+    """
+    Tableau de bord — piloté par les règles de regroupement d'Aria.
+    Chaque utilisateur voit uniquement ses propres mails.
+    """
     conn = get_pg_conn()
     c = conn.cursor()
     start_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
@@ -153,12 +137,13 @@ def get_dashboard(days: int = 2, username: str = 'guillaume') -> dict:
     rows = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()
 
-    # Charger les règles Aria une seule fois pour tout le dashboard
-    rules = load_dashboard_rules(username)
+    # Règles de regroupement d'Aria
+    regroupement_rules = get_rules_by_category(username, "regroupement")
 
     groups = defaultdict(list)
     for row in rows:
-        groups[build_group_key(row, rules)].append(row)
+        key = build_group_key(row, regroupement_rules)
+        groups[key].append(row)
 
     grouped_items = []
     for _, items in groups.items():
@@ -167,14 +152,12 @@ def get_dashboard(days: int = 2, username: str = 'guillaume') -> dict:
         if not missing_fields:
             missing_fields = []
         elif isinstance(missing_fields, str):
-            try:
-                missing_fields = json.loads(missing_fields)
-            except Exception:
-                missing_fields = []
+            try: missing_fields = json.loads(missing_fields)
+            except Exception: missing_fields = []
 
         grouped_items.append({
             "id": items_sorted[0].get("id"),
-            "topic": choose_group_title(items_sorted),
+            "topic": choose_group_title(items_sorted, regroupement_rules),
             "priority": choose_group_priority(items_sorted),
             "reason": choose_group_reason(items_sorted),
             "action": choose_group_action(items_sorted),
@@ -191,14 +174,23 @@ def get_dashboard(days: int = 2, username: str = 'guillaume') -> dict:
         })
 
     priority_order = {"haute": 0, "moyenne": 1, "basse": 2}
-    grouped_items.sort(key=lambda x: (priority_order.get(x["priority"], 99), x.get("latest_date") or ""))
+    grouped_items.sort(key=lambda x: (
+        priority_order.get(x["priority"], 99), x.get("latest_date") or ""
+    ))
 
     urgent, normal, low = [], [], []
     for item in grouped_items:
-        bp = compute_business_priority(item, rules)
+        bp = parse_business_priority(item.get("category", ""), item.get("topic", ""), username)
         if bp == "urgent": urgent.append(item)
-        elif bp == "a_traiter": normal.append(item)
-        else: low.append(item)
+        elif bp == "faible": low.append(item)
+        else: normal.append(item)
 
-    return {"days": days, "count": len(grouped_items),
-            "urgent": urgent, "normal": normal, "low": low, "all": grouped_items}
+    return {
+        "days": days,
+        "username": username,
+        "count": len(grouped_items),
+        "urgent": urgent,
+        "normal": normal,
+        "low": low,
+        "all": grouped_items,
+    }
