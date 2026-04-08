@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Request, Form, Body
 from fastapi.responses import RedirectResponse
 from app.database import get_pg_conn
-from app.token_manager import get_valid_microsoft_token
+from app.token_manager import get_valid_microsoft_token, get_valid_google_token
 from app.graph_client import graph_get
 from app.rule_engine import get_antispam_keywords
 from app.ai_client import analyze_single_mail_with_ai
@@ -166,27 +166,21 @@ def analyze_raw_mails(request: Request, limit: int = 50):
 @router.get("/ingest-gmail")
 def ingest_gmail(request: Request):
     """
-    Priorité 2 — token Gmail lié à l'username connecté.
+    Ingestion Gmail — utilise oauth_tokens (provider='google'), avec fallback gmail_tokens.
+    Compatible tenants Microsoft et Google.
     """
     username = require_user(request)
     if not username: return RedirectResponse("/login-app")
-    from app.connectors.gmail_connector import gmail_get_messages, gmail_get_message, refresh_gmail_token
-    conn = None
-    try:
-        conn = get_pg_conn(); c = conn.cursor()
-        c.execute("SELECT access_token,refresh_token FROM gmail_tokens WHERE username=%s", (username,))
-        row = c.fetchone()
-    finally:
-        if conn: conn.close()
-    if not row: return {"error": "Gmail non connecté pour cet utilisateur"}
-    access_token, refresh_token = row[0], row[1]
-    try:
-        messages = gmail_get_messages(access_token, max_results=10)
-    except Exception:
-        access_token = refresh_gmail_token(refresh_token)
-        messages = gmail_get_messages(access_token, max_results=10)
+    from app.connectors.gmail_connector import gmail_get_messages, gmail_get_message
+    access_token = get_valid_google_token(username)
+    if not access_token:
+        return {"error": "Google non connecté pour cet utilisateur. Connectez-vous via /login/gmail"}
     inserted = 0
     skip_keywords = get_antispam_keywords(username)
+    try:
+        messages = gmail_get_messages(access_token, max_results=10)
+    except Exception as e:
+        return {"error": f"Erreur Gmail : {str(e)[:100]}"}
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -222,7 +216,7 @@ def assistant_dashboard(request: Request, days: int = 2):
 
 @router.post("/instruction")
 def add_instruction(request: Request, instruction: str = Form(...)):
-    """Ajoute une consigne globale — scopée au tenant de l'utilisateur connecté."""
+    """Consigne globale scopée au tenant de l'utilisateur."""
     tenant_id = request.session.get("tenant_id", "couffrant_solar")
     add_global_instruction(instruction, tenant_id=tenant_id)
     return RedirectResponse("/chat", status_code=303)
@@ -230,10 +224,6 @@ def add_instruction(request: Request, instruction: str = Form(...)):
 
 @router.post("/correction")
 def save_correction(request: Request, payload: dict = Body(...)):
-    """
-    Enregistre une correction manuelle de Guillaume sur une réponse d'Aria.
-    Corps : mail_subject, mail_from, mail_body_preview, category, ai_reply, final_reply
-    """
     username = require_user(request)
     if not username: return {"error": "Non authentifié"}
     from app.memory_manager import save_reply_learning

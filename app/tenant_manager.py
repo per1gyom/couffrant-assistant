@@ -6,7 +6,15 @@ Architecture :
   Chaque utilisateur appartient à un tenant.
   Données partagées (contacts, consignes) sont scopées par tenant.
   Données personnelles (mémoire, règles) restent par username.
-  Config ténant : SharePoint, Odoo, Azure dans settings JSONB.
+
+Settings tenant (JSONB) :
+  email_provider       : "microsoft" | "google" | "both"
+                         Détermine quelle messagerie la société utilise.
+                         Contrôle les boutons de connexion et le flux d'emails dans Aria.
+  sharepoint_folder    : nom du dossier racine SharePoint (Microsoft uniquement)
+  odoo_url             : URL de l'instance Odoo
+  azure_tenant_id      : tenant Microsoft 365 (pour future isolation OAuth par client)
+  google_domain        : domaine Google Workspace (ex: acmecorp.com)
 """
 import json
 from app.database import get_pg_conn
@@ -15,13 +23,6 @@ DEFAULT_TENANT = 'couffrant_solar'
 
 
 def create_tenant(tenant_id: str, name: str, settings: dict = None) -> dict:
-    """
-    Crée ou met à jour un tenant.
-    settings possibles :
-      sharepoint_folder  : dossier racine SharePoint (défaut: '1_Photovoltaïque')
-      odoo_url           : URL de l'instance Odoo
-      azure_tenant_id    : tenant Microsoft 365
-    """
     if not tenant_id or not name:
         return {"status": "error", "message": "tenant_id et name requis."}
     conn = None
@@ -71,16 +72,36 @@ def list_tenants() -> list:
 
 
 def get_tenant_settings(tenant_id: str) -> dict:
-    """Retourne les settings avec valeurs par défaut."""
-    tenant = get_tenant(tenant_id)
+    """
+    Retourne les settings d'un tenant avec valeurs par défaut.
+    email_provider : quelle(s) messagerie(s) la société utilise.
+      'microsoft' → Outlook / Exchange / Microsoft 365
+      'google'    → Gmail / Google Workspace
+      'both'      → les deux (rare, ex: hybride en migration)
+    """
     defaults = {
+        "email_provider": "microsoft",
         "sharepoint_folder": "1_Photovoltaïque",
         "odoo_url": None,
         "azure_tenant_id": None,
+        "google_domain": None,
     }
+    tenant = get_tenant(tenant_id)
     if not tenant:
         return defaults
     return {**defaults, **(tenant.get("settings") or {})}
+
+
+def uses_microsoft(tenant_id: str) -> bool:
+    """Vrai si le tenant utilise Microsoft 365."""
+    provider = get_tenant_settings(tenant_id).get("email_provider", "microsoft")
+    return provider in ("microsoft", "both")
+
+
+def uses_google(tenant_id: str) -> bool:
+    """Vrai si le tenant utilise Google Workspace / Gmail."""
+    provider = get_tenant_settings(tenant_id).get("email_provider", "microsoft")
+    return provider in ("google", "both")
 
 
 def delete_tenant(tenant_id: str) -> dict:
@@ -105,5 +126,6 @@ def delete_tenant(tenant_id: str) -> dict:
 def ensure_default_tenant():
     """Crée le tenant Couffrant Solar s'il n'existe pas encore."""
     create_tenant(DEFAULT_TENANT, "Couffrant Solar", {
-        "sharepoint_folder": "1_Photovoltaïque"
+        "email_provider": "microsoft",
+        "sharepoint_folder": "1_Photovoltaïque",
     })

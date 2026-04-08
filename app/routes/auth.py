@@ -2,7 +2,7 @@ from fastapi import APIRouter, Request, Form
 from fastapi.responses import RedirectResponse, HTMLResponse
 from app.auth import build_msal_app
 from app.config import GRAPH_SCOPES, REDIRECT_URI
-from app.token_manager import save_microsoft_token
+from app.token_manager import save_microsoft_token, save_google_token
 from app.app_security import (
     authenticate, update_last_login, check_rate_limit,
     record_failed_attempt, clear_attempts, get_user_scope,
@@ -97,8 +97,8 @@ def login_gmail():
 @router.get("/auth/gmail/callback")
 def auth_gmail_callback(request: Request, code: str | None = None):
     """
-    Callback OAuth Gmail — priorité 2 : token lié à l'username connecté.
-    Chaque utilisateur a son propre token Gmail.
+    Callback OAuth Google — stocke dans oauth_tokens (provider='google').
+    Compatible Microsoft + Google : les deux coexistent par username.
     """
     if not code:
         return HTMLResponse("Code manquant", status_code=400)
@@ -106,16 +106,11 @@ def auth_gmail_callback(request: Request, code: str | None = None):
     tokens = exchange_code_for_tokens(code)
     username = request.session.get("user", "guillaume")
     email = tokens.get("email", f"{username}@gmail.com")
-    conn = None
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("DELETE FROM gmail_tokens WHERE username=%s", (username,))
-        c.execute(
-            "INSERT INTO gmail_tokens (username, email, access_token, refresh_token) VALUES (%s,%s,%s,%s)",
-            (username, email, tokens.get("access_token"), tokens.get("refresh_token")),
-        )
-        conn.commit()
-    finally:
-        if conn: conn.close()
-    return {"status": "ok", "message": f"Gmail connecté pour {username} ({email}) !"}
+    # Stockage unifié dans oauth_tokens + sync gmail_tokens pour compat
+    save_google_token(
+        username=username,
+        access_token=tokens.get("access_token", ""),
+        refresh_token=tokens.get("refresh_token", ""),
+        email=email,
+    )
+    return {"status": "ok", "message": f"Google connecté pour {username} ({email}) !"}
