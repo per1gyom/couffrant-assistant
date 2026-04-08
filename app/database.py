@@ -52,7 +52,6 @@ def init_postgres():
         )
     """)
 
-    # ── aria_memory — par utilisateur ──
     c.execute("""
         CREATE TABLE IF NOT EXISTS aria_memory (
             id SERIAL PRIMARY KEY,
@@ -63,7 +62,6 @@ def init_postgres():
         )
     """)
 
-    # ── aria_style_examples — par utilisateur ──
     c.execute("""
         CREATE TABLE IF NOT EXISTS aria_style_examples (
             id SERIAL PRIMARY KEY,
@@ -78,7 +76,6 @@ def init_postgres():
         )
     """)
 
-    # ── aria_hot_summary — par utilisateur (username = clé) ──
     c.execute("""
         CREATE TABLE IF NOT EXISTS aria_hot_summary (
             username TEXT PRIMARY KEY,
@@ -87,7 +84,6 @@ def init_postgres():
         )
     """)
 
-    # ── aria_contacts — PARTAGÉ (contacts entreprise) ──
     c.execute("""
         CREATE TABLE IF NOT EXISTS aria_contacts (
             id SERIAL PRIMARY KEY,
@@ -104,7 +100,6 @@ def init_postgres():
         )
     """)
 
-    # ── aria_rules — par utilisateur ──
     c.execute("""
         CREATE TABLE IF NOT EXISTS aria_rules (
             id SERIAL PRIMARY KEY,
@@ -121,7 +116,6 @@ def init_postgres():
         )
     """)
 
-    # ── aria_insights — par utilisateur ──
     c.execute("""
         CREATE TABLE IF NOT EXISTS aria_insights (
             id SERIAL PRIMARY KEY,
@@ -136,7 +130,6 @@ def init_postgres():
         )
     """)
 
-    # ── aria_session_digests — par utilisateur ──
     c.execute("""
         CREATE TABLE IF NOT EXISTS aria_session_digests (
             id SERIAL PRIMARY KEY,
@@ -150,7 +143,6 @@ def init_postgres():
         )
     """)
 
-    # ── sent_mail_memory — par utilisateur ──
     c.execute("""
         CREATE TABLE IF NOT EXISTS sent_mail_memory (
             id SERIAL PRIMARY KEY,
@@ -165,7 +157,6 @@ def init_postgres():
         )
     """)
 
-    # ── aria_profile — par utilisateur ──
     c.execute("""
         CREATE TABLE IF NOT EXISTS aria_profile (
             id SERIAL PRIMARY KEY,
@@ -176,7 +167,6 @@ def init_postgres():
         )
     """)
 
-    # ── users — auth + scope ──
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -188,7 +178,6 @@ def init_postgres():
         )
     """)
 
-    # ── oauth_tokens — par utilisateur ──
     c.execute("""
         CREATE TABLE IF NOT EXISTS oauth_tokens (
             id SERIAL PRIMARY KEY,
@@ -202,7 +191,25 @@ def init_postgres():
         )
     """)
 
-    # ── Tables partagées ──
+    # ── user_tools — profil outils par utilisateur ──
+    # tool         : 'outlook', 'odoo', 'drive', 'gmail', ... (extensible)
+    # access_level : 'full', 'write', 'read_only', 'none'
+    # enabled      : active ou non
+    # config       : JSON libre (paramètres spécifiques à chaque outil)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS user_tools (
+            id SERIAL PRIMARY KEY,
+            username TEXT NOT NULL,
+            tool TEXT NOT NULL,
+            access_level TEXT DEFAULT 'read_only',
+            enabled BOOLEAN DEFAULT true,
+            config JSONB DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(username, tool)
+        )
+    """)
+
     c.execute("""
         CREATE TABLE IF NOT EXISTS reply_learning_memory (
             id SERIAL PRIMARY KEY,
@@ -234,7 +241,6 @@ def init_postgres():
     c = conn.cursor()
 
     migrations = [
-        # Ajout colonne username sur toutes les tables mémoire
         "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
         "ALTER TABLE aria_memory ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
         "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
@@ -244,28 +250,29 @@ def init_postgres():
         "ALTER TABLE aria_profile ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
         "ALTER TABLE sent_mail_memory ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
         "ALTER TABLE oauth_tokens ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
-        # Autres colonnes
         "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS mailbox_source TEXT DEFAULT 'outlook'",
         "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS reinforcements INTEGER DEFAULT 1",
         "ALTER TABLE aria_insights ADD COLUMN IF NOT EXISTS reinforcements INTEGER DEFAULT 1",
         "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS context TEXT DEFAULT 'couffrant_solar'",
         "ALTER TABLE aria_insights ADD COLUMN IF NOT EXISTS context TEXT DEFAULT 'couffrant_solar'",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS scope TEXT DEFAULT 'couffrant_solar'",
-        # aria_hot_summary : ajout username + index unique
         "ALTER TABLE aria_hot_summary ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
         "CREATE UNIQUE INDEX IF NOT EXISTS aria_hot_summary_username_idx ON aria_hot_summary (username)",
-        # oauth_tokens : nouvelle contrainte unique (provider, username)
         "ALTER TABLE oauth_tokens DROP CONSTRAINT IF EXISTS oauth_tokens_provider_unique",
         "ALTER TABLE oauth_tokens DROP CONSTRAINT IF EXISTS oauth_tokens_provider_username_unique",
         "ALTER TABLE oauth_tokens ADD CONSTRAINT oauth_tokens_provider_username_unique UNIQUE (provider, username)",
-        # mail_memory : nouvelle contrainte unique (message_id, username)
         "ALTER TABLE mail_memory DROP CONSTRAINT IF EXISTS mail_memory_message_id_key",
         "ALTER TABLE mail_memory DROP CONSTRAINT IF EXISTS mail_memory_msg_user_unique",
         "ALTER TABLE mail_memory ADD CONSTRAINT mail_memory_msg_user_unique UNIQUE (message_id, username)",
-        # sent_mail_memory : nouvelle contrainte unique (message_id, username)
         "ALTER TABLE sent_mail_memory DROP CONSTRAINT IF EXISTS sent_mail_memory_message_id_key",
         "ALTER TABLE sent_mail_memory DROP CONSTRAINT IF EXISTS sent_mail_msg_user_unique",
         "ALTER TABLE sent_mail_memory ADD CONSTRAINT sent_mail_msg_user_unique UNIQUE (message_id, username)",
+        # user_tools : crée la table si elle n'existe pas encore (idempotent)
+        """CREATE TABLE IF NOT EXISTS user_tools (
+            id SERIAL PRIMARY KEY, username TEXT NOT NULL, tool TEXT NOT NULL,
+            access_level TEXT DEFAULT 'read_only', enabled BOOLEAN DEFAULT true,
+            config JSONB DEFAULT '{}', created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW(), UNIQUE(username, tool))""",
     ]
 
     for migration in migrations:

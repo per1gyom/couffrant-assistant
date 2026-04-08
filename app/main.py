@@ -30,6 +30,7 @@ from app.app_security import (
     authenticate, init_default_user, update_last_login,
     check_rate_limit, record_failed_attempt, clear_attempts,
     get_user_scope, create_user, delete_user, list_users,
+    get_user_tools, set_user_tool, remove_user_tool,
     LOGIN_PAGE_HTML, SCOPE_ADMIN, SCOPE_CS
 )
 
@@ -88,7 +89,6 @@ def startup_event():
 
     import threading
 
-    # ── Thread 1 : auto-ingest mails pour tous les utilisateurs connectés (toutes les 30s) ──
     def auto_ingest():
         import time
         cycle = 0
@@ -105,46 +105,31 @@ def startup_event():
                 for username in users:
                     try:
                         token = get_valid_microsoft_token(username)
-                        if not token:
-                            continue
-                        data = _graph_get(
-                            token, "/me/mailFolders/inbox/messages",
+                        if not token: continue
+                        data = _graph_get(token, "/me/mailFolders/inbox/messages",
                             params={"$top": 10, "$select": "id,subject,from,receivedDateTime,bodyPreview",
-                                    "$orderby": "receivedDateTime DESC"},
-                        )
+                                    "$orderby": "receivedDateTime DESC"})
                         for msg in data.get("value", []):
                             message_id = msg["id"]
-                            if mail_exists(message_id, username):
-                                continue
+                            if mail_exists(message_id, username): continue
                             try:
-                                item = _analyze_ai(msg, instructions)
-                                analysis_status = "done_ai"
+                                item = _analyze_ai(msg, instructions); analysis_status = "done_ai"
                             except Exception:
-                                item = _analyze(msg)
-                                analysis_status = "fallback"
+                                item = _analyze(msg); analysis_status = "fallback"
                             insert_mail({
-                                "username": username,
-                                "message_id": message_id,
+                                "username": username, "message_id": message_id,
                                 "received_at": msg.get("receivedDateTime"),
                                 "from_email": msg.get("from", {}).get("emailAddress", {}).get("address"),
-                                "subject": msg.get("subject"),
-                                "display_title": item.get("display_title"),
-                                "category": item.get("category"),
-                                "priority": item.get("priority"),
-                                "reason": item.get("reason"),
-                                "suggested_action": item.get("suggested_action"),
-                                "short_summary": item.get("short_summary"),
-                                "group_hints": item.get("group_hints", []),
-                                "confidence": item.get("confidence", 0.0),
-                                "needs_review": item.get("needs_review", False),
-                                "raw_body_preview": msg.get("bodyPreview"),
-                                "analysis_status": analysis_status,
-                                "needs_reply": item.get("needs_reply"),
-                                "reply_urgency": item.get("reply_urgency"),
+                                "subject": msg.get("subject"), "display_title": item.get("display_title"),
+                                "category": item.get("category"), "priority": item.get("priority"),
+                                "reason": item.get("reason"), "suggested_action": item.get("suggested_action"),
+                                "short_summary": item.get("short_summary"), "group_hints": item.get("group_hints", []),
+                                "confidence": item.get("confidence", 0.0), "needs_review": item.get("needs_review", False),
+                                "raw_body_preview": msg.get("bodyPreview"), "analysis_status": analysis_status,
+                                "needs_reply": item.get("needs_reply"), "reply_urgency": item.get("reply_urgency"),
                                 "reply_reason": item.get("reply_reason"),
                                 "suggested_reply_subject": item.get("suggested_reply_subject"),
-                                "suggested_reply": item.get("suggested_reply"),
-                                "mailbox_source": "outlook",
+                                "suggested_reply": item.get("suggested_reply"), "mailbox_source": "outlook",
                             })
                     except Exception as e:
                         print(f"[AutoIngest] Erreur pour {username}: {e}")
@@ -152,10 +137,8 @@ def startup_event():
                 cycle += 1
                 if cycle % 40 == 0 and MEMORY_OK:
                     for username in users:
-                        try:
-                            rebuild_hot_summary(username)
-                        except Exception as e:
-                            print(f"[Memory] Erreur rebuild {username}: {e}")
+                        try: rebuild_hot_summary(username)
+                        except Exception as e: print(f"[Memory] Erreur rebuild {username}: {e}")
 
             except Exception as e:
                 print(f"[AutoIngest] Erreur générale: {e}")
@@ -163,19 +146,17 @@ def startup_event():
 
     threading.Thread(target=auto_ingest, daemon=True).start()
 
-    # ── Thread 2 : refresh proactif tokens (toutes les 45 min) ──
     def token_refresh_loop():
         import time
         time.sleep(120)
         while True:
             try:
-                users = get_all_users_with_tokens()
-                for username in users:
+                for username in get_all_users_with_tokens():
                     try:
                         token = get_valid_microsoft_token(username)
                         print(f"[Token] Refresh {username}: {'OK' if token else 'ECHEC'}")
                     except Exception as e:
-                        print(f"[Token] Erreur refresh {username}: {e}")
+                        print(f"[Token] Erreur {username}: {e}")
             except Exception as e:
                 print(f"[Token] Erreur générale: {e}")
             time.sleep(45 * 60)
@@ -183,12 +164,11 @@ def startup_event():
     threading.Thread(target=token_refresh_loop, daemon=True).start()
 
 
-# ─── AUTH CHAT ───
+# ─── AUTH ───
 
 @app.get("/login-app", response_class=HTMLResponse)
 def login_app_get(request: Request):
-    if request.session.get("user"):
-        return RedirectResponse("/chat")
+    if request.session.get("user"): return RedirectResponse("/chat")
     return HTMLResponse(LOGIN_PAGE_HTML.format(error_block=""))
 
 
@@ -231,8 +211,7 @@ def init_db_now():
 
 @app.get("/chat", response_class=HTMLResponse)
 def chat(request: Request):
-    if not request.session.get("user"):
-        return RedirectResponse("/login-app")
+    if not request.session.get("user"): return RedirectResponse("/login-app")
     with open("app/templates/aria_chat.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
@@ -252,7 +231,12 @@ def admin_list_users(request: Request):
 @app.post("/admin/create-user")
 def admin_create_user(request: Request, payload: dict = Body(...)):
     if not _require_admin(request): return {"error": "Accès refusé."}
-    return create_user(payload.get("username", "").strip(), payload.get("password", ""), payload.get("scope", SCOPE_CS))
+    return create_user(
+        payload.get("username", "").strip(),
+        payload.get("password", ""),
+        payload.get("scope", SCOPE_CS),
+        payload.get("tools"),  # liste optionnelle de surcharges outils
+    )
 
 
 @app.delete("/admin/delete-user/{target_username}")
@@ -263,7 +247,6 @@ def admin_delete_user(request: Request, target_username: str):
 
 @app.get("/admin/rules")
 def admin_rules(request: Request, user: str = ""):
-    """Admin : voir les règles d'un utilisateur spécifique ou de tous."""
     if not _require_admin(request): return {"error": "Accès refusé."}
     conn = None
     try:
@@ -280,7 +263,6 @@ def admin_rules(request: Request, user: str = ""):
 
 @app.get("/admin/insights")
 def admin_insights(request: Request, user: str = ""):
-    """Admin : voir les insights d'un utilisateur spécifique ou de tous."""
     if not _require_admin(request): return {"error": "Accès refusé."}
     conn = None
     try:
@@ -297,7 +279,6 @@ def admin_insights(request: Request, user: str = ""):
 
 @app.get("/admin/memory-status")
 def admin_memory_status(request: Request):
-    """Admin : état de la mémoire pour tous les utilisateurs."""
     if not _require_admin(request): return {"error": "Accès refusé."}
     conn = None
     try:
@@ -310,17 +291,53 @@ def admin_memory_status(request: Request):
         insights = dict(c.fetchall())
         c.execute("SELECT username, COUNT(*) FROM mail_memory GROUP BY username")
         mails = dict(c.fetchall())
-        users_all = set(list(conversations.keys()) + list(rules.keys()) + list(insights.keys()) + list(mails.keys()))
-        return [
-            {"username": u, "conversations": conversations.get(u, 0), "rules": rules.get(u, 0),
-             "insights": insights.get(u, 0), "mails": mails.get(u, 0)}
-            for u in sorted(users_all)
-        ]
+        users_all = set(list(conversations) + list(rules) + list(insights) + list(mails))
+        return [{"username": u, "conversations": conversations.get(u, 0), "rules": rules.get(u, 0),
+                 "insights": insights.get(u, 0), "mails": mails.get(u, 0)} for u in sorted(users_all)]
     finally:
         if conn: conn.close()
 
 
-# ─── ARIA (endpoint principal) ───
+# ─── ADMIN OUTILS ───
+
+@app.get("/admin/user-tools/{target_username}")
+def admin_get_user_tools(request: Request, target_username: str):
+    """
+    Voir les outils configurés pour un utilisateur.
+    GET /admin/user-tools/sabrina
+    """
+    if not _require_admin(request): return {"error": "Accès refusé."}
+    return get_user_tools(target_username, raw=True)
+
+
+@app.post("/admin/user-tools/{target_username}/{tool}")
+def admin_set_user_tool(request: Request, target_username: str, tool: str,
+                         payload: dict = Body(...)):
+    """
+    Créer ou mettre à jour un outil pour un utilisateur.
+    POST /admin/user-tools/sabrina/odoo
+    Body: {"access_level": "full", "enabled": true, "config": {}}
+    """
+    if not _require_admin(request): return {"error": "Accès refusé."}
+    return set_user_tool(
+        target_username, tool,
+        payload.get("access_level", "read_only"),
+        payload.get("enabled", True),
+        payload.get("config", {}),
+    )
+
+
+@app.delete("/admin/user-tools/{target_username}/{tool}")
+def admin_remove_user_tool(request: Request, target_username: str, tool: str):
+    """
+    Supprimer un outil du profil d'un utilisateur.
+    DELETE /admin/user-tools/sabrina/gmail
+    """
+    if not _require_admin(request): return {"error": "Accès refusé."}
+    return remove_user_tool(target_username, tool)
+
+
+# ─── ARIA ───
 
 @app.post("/speak")
 def speak_text(payload: dict = Body(...)):
@@ -353,13 +370,33 @@ def aria(request: Request, payload: AriaQuery):
     import re
     instructions = get_global_instructions()
 
-    # Identité de l'utilisateur connecté
+    # ── Identité et scope ──
     username = request.session.get("user", "guillaume")
     user_scope = request.session.get("scope", SCOPE_CS)
     is_admin = user_scope == SCOPE_ADMIN
     display_name = username.capitalize()
 
-    # Chargement des données propres à cet utilisateur
+    # ── Chargement du profil outils de l'utilisateur ──
+    user_tools = get_user_tools(username)
+
+    # Drive
+    drive_tool = user_tools.get('drive', {})
+    drive_access = drive_tool.get('access_level', 'read_only') if drive_tool.get('enabled', True) else 'none'
+    drive_write = drive_access in ('write', 'full')
+    drive_can_delete = drive_tool.get('config', {}).get('can_delete', False)
+
+    # Mail
+    mail_tool = user_tools.get('outlook', {})
+    mail_can_delete = mail_tool.get('config', {}).get('can_delete_mail', False)
+    mail_extra_boxes = mail_tool.get('config', {}).get('mailboxes', [])
+
+    # Odoo
+    odoo_tool = user_tools.get('odoo', {})
+    odoo_enabled = odoo_tool.get('enabled', False) and odoo_tool.get('access_level', 'none') != 'none'
+    odoo_access = odoo_tool.get('access_level', 'none')
+    odoo_shared_user = odoo_tool.get('config', {}).get('shared_user')
+
+    # ── Données mémoire ──
     conn = None
     try:
         conn = get_pg_conn()
@@ -380,7 +417,6 @@ def aria(request: Request, payload: AriaQuery):
 
         c.execute("SELECT content FROM aria_profile WHERE username = %s AND profile_type = 'style' ORDER BY id DESC LIMIT 1", (username,))
         profile_row = c.fetchone()
-        profile = profile_row[0] if profile_row else ""
 
         c.execute("SELECT COUNT(*) FROM aria_memory WHERE username = %s", (username,))
         conv_count = c.fetchone()[0]
@@ -412,8 +448,7 @@ def aria(request: Request, payload: AriaQuery):
         try:
             data = graph_get(outlook_token, "/me/mailFolders/inbox/messages", params={
                 "$top": 20, "$select": "id,subject,from,receivedDateTime,bodyPreview,isRead",
-                "$orderby": "receivedDateTime DESC",
-            })
+                "$orderby": "receivedDateTime DESC"})
             for msg in data.get("value", []):
                 outlook_live_mails.append({
                     "message_id": msg["id"],
@@ -421,8 +456,7 @@ def aria(request: Request, payload: AriaQuery):
                     "subject": msg.get("subject", "(Sans objet)"),
                     "raw_body_preview": msg.get("bodyPreview", ""),
                     "received_at": msg.get("receivedDateTime", ""),
-                    "is_read": msg.get("isRead", False),
-                    "mailbox_source": "outlook",
+                    "is_read": msg.get("isRead", False), "mailbox_source": "outlook",
                 })
         except Exception as e:
             print(f"[Aria] Erreur Outlook live {username}: {e}")
@@ -433,7 +467,8 @@ def aria(request: Request, payload: AriaQuery):
             now = datetime.now(timezone.utc)
             start = now.replace(hour=0, minute=0, second=0).isoformat()
             end = now.replace(hour=23, minute=59, second=59).isoformat()
-            agenda_result = perform_outlook_action("list_calendar_events", {"start": start, "end": end, "top": 10}, outlook_token)
+            agenda_result = perform_outlook_action("list_calendar_events",
+                {"start": start, "end": end, "top": 10}, outlook_token)
             agenda_today = agenda_result.get("items", [])
         except Exception: pass
 
@@ -451,71 +486,82 @@ def aria(request: Request, payload: AriaQuery):
     else:
         user_content_parts = payload.query
 
-    # ── System prompt selon le scope ──
+    # ── Sections du system prompt selon le profil outils ──
+
     if is_admin:
         identity = f"""Tu es Aria, l'assistante personnelle de {display_name} — Couffrant Solar (photovoltaïque, 8 personnes, Centre-Val de Loire).
-
-Tu es autonome et apprenante. Tu n'as pas de règles imposées de l'extérieur — tes règles viennent de ce que tu as appris au fil des échanges et tu les gères toi-même. Tu parles au féminin. Tu proposes avant d'agir sauf si {display_name} dit explicitement de procéder."""
+Tu es autonome et apprenante. Tu n'as pas de règles imposées de l'extérieur — tes règles viennent de ce que tu as appris au fil des échanges.
+Tu parles au féminin. Tu proposes avant d'agir sauf si {display_name} dit explicitement de procéder."""
     else:
         identity = f"""Tu es Aria, l'assistante de {display_name} — Couffrant Solar (photovoltaïque, Centre-Val de Loire).
+Tu aides {display_name} dans son travail quotidien et apprends ses habitudes au fil des échanges.
+Tu parles au féminin. Tu proposes avant d'agir."""
 
-Tu aides {display_name} dans son travail quotidien. Tu apprends ses habitudes et préférences au fil des échanges. Tu parles au féminin. Tu proposes avant d'agir."""
+    # Section mail
+    mail_delete_line = "[ACTION:DELETE:message_id] → corbeille récupérable" if mail_can_delete else ""
+    mailboxes_line = f"Boîtes mail configurées : {', '.join(mail_extra_boxes)}" if mail_extra_boxes else ""
 
-    drive_section = """
-Actions Drive SharePoint (1_Photovoltaïque) :
-Affichage : \U0001f4c1 "Nom"  [id:ID_COMPLET] — utilise l'ID complet
+    # Section Drive
+    drive_section = """\nActions Drive SharePoint (1_Photovoltaïque) :
+Affichage : 📁 "Nom"  [id:ID_COMPLET] — utilise l'ID complet
 [ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:ID] [ACTION:READDRIVE:ID] [ACTION:SEARCHDRIVE:mot-clé]"""
-    if is_admin:
+    if drive_write:
         drive_section += "\n[ACTION:CREATEFOLDER:parent_id|nom] [ACTION:MOVEDRIVE:item_id|dest_id|nom] [ACTION:COPYFILE:source_id|dest_id|nom]"
-    else:
-        drive_section += "\n(Lecture seule pour les collègues — modifications Drive réservées à l'administrateur.)"
+    if drive_can_delete:
+        drive_section += "\n(Suppression de fichiers disponible — sera implémentée dans une prochaine version.)"
+    if not drive_write:
+        drive_section += "\n(Drive en lecture seule pour ton compte.)"
 
+    # Section Odoo
+    odoo_section = ""
+    if odoo_enabled:
+        if odoo_access == 'full':
+            odoo_section = f"\nOdoo (accès complet) — tu peux lire et agir sur les données."
+        else:
+            shared_info = f" via les credentials de {odoo_shared_user.capitalize()}" if odoo_shared_user else ""
+            odoo_section = f"\nOdoo (lecture seule{shared_info}) — tu peux consulter les données mais pas les modifier."
+
+    # Section auto-évolution
     auto_evolution_section = f"""
 Auto-évolution — tu es juge de l'apprentissage de {display_name} :
-LEARN et INSIGHT s'enregistrent pour {display_name} personnellement et persistent entre les sessions.
-Par défaut tu apprends en silence. Dans le doute, apprends sans demander.
-Exception : si une règle change fondamentalement ton comportement ou contredit une règle importante, signale-le avant d'enregistrer.
-
-[ACTION:LEARN:category|rule] → enregistre une règle pour {display_name}
-[ACTION:INSIGHT:topic|texte] → note un insight sur {display_name}
-[ACTION:FORGET:rule_id] → désactive une règle obsolète
-[ACTION:SYNTH:] → synthétise les sessions récentes"""
+LEARN et INSIGHT sont personnels à {display_name} et persistent entre les sessions. Tu apprends en silence.
+[ACTION:LEARN:category|rule] [ACTION:INSIGHT:topic|texte] [ACTION:FORGET:rule_id] [ACTION:SYNTH:]"""
 
     system = f"""{identity}
 
 {f"=== CONTEXTE OPÉRATIONNEL ==={chr(10)}{hot_summary}" if hot_summary else ""}
 
-{f"=== TES RÈGLES ACTIVES ==={chr(10)}{aria_rules}" if aria_rules else f"Pas encore de règles pour {display_name} — tu vas en apprendre au fil des échanges."}
+{f"=== TES RÈGLES ==={chr(10)}{aria_rules}" if aria_rules else f"Pas encore de règles pour {display_name}."}
 
 {f"=== TES INSIGHTS ==={chr(10)}{aria_insights}" if aria_insights else ""}
 
 {f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}
 
-{f"=== STYLE DE {display_name.upper()} ==={chr(10)}{style_examples}" if style_examples else ""}
+{f"=== STYLE ==={chr(10)}{style_examples}" if style_examples else ""}
 
-{"Microsoft 365 connecté." if outlook_token else "Pas de connexion Microsoft — {display_name} doit se connecter via /login."}
+{mailboxes_line}
+{"Microsoft 365 connecté." if outlook_token else f"Pas de connexion Microsoft — {display_name} doit se connecter via /login."}
+{odoo_section}
 
-IDENTIFIANTS :
-- message_id Outlook (long) → actions mail | mailbox_source 'gmail_perso' = lecture seule
+IDENTIFIANTS : message_id Outlook (long) → actions mail | gmail_perso = lecture seule
 
 Actions mail :
 [ACTION:ARCHIVE:message_id] [ACTION:READ:message_id] [ACTION:READBODY:message_id]
 [ACTION:REPLY:message_id:texte] [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
-[ACTION:CREATE_TASK:titre]{chr(10) + '[ACTION:DELETE:message_id] → corbeille récupérable (admin uniquement)' if is_admin else ''}
+[ACTION:CREATE_TASK:titre]{chr(10) + mail_delete_line if mail_delete_line else ''}
 {drive_section}
 {auto_evolution_section}
 
-Agenda aujourd'hui ({datetime.now().strftime('%A %d %B %Y')}) :
+Agenda ({datetime.now().strftime('%A %d %B %Y')}) :
 {json.dumps(agenda_today, ensure_ascii=False, default=str) if agenda_today else "Aucun RDV."}
 
-=== MAILS OUTLOOK DE {display_name.upper()} ({len(outlook_live_mails)} inbox) ===
+=== MAILS {display_name.upper()} ({len(outlook_live_mails)} inbox) ===
 {json.dumps(outlook_live_mails, ensure_ascii=False, default=str) if outlook_live_mails else "Aucun."}
 
-=== MAILS BASE ({display_name}) ===
+=== MAILS BASE ===
 {json.dumps(mails_from_db, ensure_ascii=False, default=str)}
 
-Consignes :
-{chr(10).join(instructions) if instructions else "Aucune."}
+Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
 """
 
     messages = []
@@ -534,25 +580,25 @@ Consignes :
         return len(msg_id.strip()) > 20
 
     if outlook_token:
-        # DELETE — admin uniquement
-        if is_admin:
+        # DELETE mail — selon config outil
+        if mail_can_delete:
             for msg_id in re.findall(r'\[ACTION:DELETE:([^\]]+)\]', aria_response):
                 msg_id = msg_id.strip()
                 if not is_valid_outlook_id(msg_id): continue
                 try:
                     result = perform_outlook_action("delete_message", {"message_id": msg_id}, outlook_token)
-                    actions_confirmed.append("\u2705 Mis à la corbeille" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
+                    actions_confirmed.append("✅ Mis à la corbeille" if result.get("status") == "ok" else f"❌ {result.get('message')}")
                 except Exception as e:
-                    actions_confirmed.append(f"\u274c {str(e)[:80]}")
+                    actions_confirmed.append(f"❌ {str(e)[:80]}")
 
         for msg_id in re.findall(r'\[ACTION:ARCHIVE:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id): continue
             try:
                 result = perform_outlook_action("archive_message", {"message_id": msg_id}, outlook_token)
-                actions_confirmed.append("\u2705 Archivé" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
+                actions_confirmed.append("✅ Archivé" if result.get("status") == "ok" else f"❌ {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"\u274c {str(e)[:80]}")
+                actions_confirmed.append(f"❌ {str(e)[:80]}")
 
         for msg_id in re.findall(r'\[ACTION:READ:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
@@ -561,17 +607,16 @@ Consignes :
             except Exception: pass
 
         for match in re.finditer(r'\[ACTION:REPLY:([^:\]]{20,}):(.+?)\]', aria_response, re.DOTALL):
-            msg_id = match.group(1).strip()
-            reply_text = match.group(2).strip()
+            msg_id = match.group(1).strip(); reply_text = match.group(2).strip()
             if not is_valid_outlook_id(msg_id): continue
             try:
                 result = perform_outlook_action("send_reply", {"message_id": msg_id, "reply_body": reply_text}, outlook_token)
                 if result.get("status") == "ok":
                     try: learn_from_correction(original="", corrected=reply_text, context="réponse mail", username=username)
                     except Exception: pass
-                actions_confirmed.append("\u2705 Réponse envoyée" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
+                actions_confirmed.append("✅ Réponse envoyée" if result.get("status") == "ok" else f"❌ {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"\u274c {str(e)[:80]}")
+                actions_confirmed.append(f"❌ {str(e)[:80]}")
 
         for msg_id in re.findall(r'\[ACTION:READBODY:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
@@ -579,7 +624,7 @@ Consignes :
             try:
                 result = perform_outlook_action("get_message_body", {"message_id": msg_id}, outlook_token)
                 if result.get("status") == "ok":
-                    actions_confirmed.append(f"\U0001f4e7 Corps du mail :\n{result.get('body_text', '')[:800]}")
+                    actions_confirmed.append(f"📧 Corps du mail :\n{result.get('body_text', '')[:800]}")
             except Exception: pass
 
         for match in re.finditer(r'\[ACTION:CREATEEVENT:([^\]]+)\]', aria_response):
@@ -587,17 +632,16 @@ Consignes :
             if len(parts) >= 3:
                 try:
                     attendees = parts[3].split(',') if len(parts) > 3 else []
-                    result = perform_outlook_action("create_calendar_event", {
-                        "subject": parts[0], "start": parts[1], "end": parts[2], "attendees": attendees
-                    }, outlook_token)
-                    actions_confirmed.append("\u2705 RDV créé" if result.get("status") == "ok" else "\u274c RDV échoué")
+                    result = perform_outlook_action("create_calendar_event",
+                        {"subject": parts[0], "start": parts[1], "end": parts[2], "attendees": attendees}, outlook_token)
+                    actions_confirmed.append("✅ RDV créé" if result.get("status") == "ok" else "❌ RDV échoué")
                 except Exception: pass
 
         for title in re.findall(r'\[ACTION:CREATE_TASK:([^\]]+)\]', aria_response):
             try: perform_outlook_action("create_todo_task", {"title": title.strip()}, outlook_token)
             except Exception: pass
 
-        # Drive — lecture pour tous
+        # Drive lecture — tous
         for match in re.finditer(r'\[ACTION:LISTDRIVE:([^\]]*)\]', aria_response):
             subfolder = match.group(1).strip()
             try:
@@ -605,14 +649,14 @@ Consignes :
                 if result.get("status") == "ok":
                     lines = []
                     for it in result.get("items", []):
-                        icon = "\U0001f4c1" if it.get("type") == "dossier" else "\U0001f4c4"
+                        icon = "📁" if it.get("type") == "dossier" else "📄"
                         size_str = f"  ({it.get('taille_ko','')} Ko)" if it.get("taille_ko") else ""
                         lines.append(f"  {icon} \"{it['nom']}\"  [id:{it.get('id','')}]{size_str}")
-                    actions_confirmed.append(f"\U0001f4c2 {result.get('dossier', '1_Photovoltaïque')} ({result['count']}) :\n" + "\n".join(lines))
+                    actions_confirmed.append(f"📂 {result.get('dossier', '1_Photovoltaïque')} ({result['count']}) :\n" + "\n".join(lines))
                 else:
-                    actions_confirmed.append(f"\u274c {result.get('message', 'Erreur Drive')}")
+                    actions_confirmed.append(f"❌ {result.get('message', 'Erreur Drive')}")
             except Exception as e:
-                actions_confirmed.append(f"\u274c Drive : {str(e)[:80]}")
+                actions_confirmed.append(f"❌ Drive : {str(e)[:80]}")
 
         for match in re.finditer(r'\[ACTION:READDRIVE:([^\]]+)\]', aria_response):
             file_ref = match.group(1).strip()
@@ -620,37 +664,37 @@ Consignes :
                 result = read_aria_drive_file(outlook_token, file_ref)
                 if result.get("status") == "ok":
                     if result.get("type") == "texte":
-                        actions_confirmed.append(f"\U0001f4c4 {result['fichier']} :\n{result['contenu'][:2000]}")
+                        actions_confirmed.append(f"📄 {result['fichier']} :\n{result['contenu'][:2000]}")
                     else:
-                        actions_confirmed.append(f"\U0001f4c4 {result.get('fichier', file_ref)} — {result.get('message', '')} {result.get('conseil', '')}")
+                        actions_confirmed.append(f"📄 {result.get('fichier', file_ref)} — {result.get('message', '')} {result.get('conseil', '')}")
                 else:
-                    actions_confirmed.append(f"\u274c {result.get('message')}")
+                    actions_confirmed.append(f"❌ {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"\u274c {str(e)[:80]}")
+                actions_confirmed.append(f"❌ {str(e)[:80]}")
 
         for match in re.finditer(r'\[ACTION:SEARCHDRIVE:([^\]]+)\]', aria_response):
             query_drive = match.group(1).strip()
             try:
                 result = search_aria_drive(outlook_token, query_drive)
                 if result.get("status") == "ok":
-                    lines = [f"  {'\U0001f4c1' if it.get('type')=='dossier' else '\U0001f4c4'} \"{it['nom']}\"  [id:{it.get('id','')}]" for it in result.get("items", [])]
-                    actions_confirmed.append(f"\U0001f50d '{query_drive}' — {result['count']} résultat(s) :\n" + "\n".join(lines))
+                    lines = [f"  {'📁' if it.get('type')=='dossier' else '📄'} \"{it['nom']}\"  [id:{it.get('id','')}]" for it in result.get("items", [])]
+                    actions_confirmed.append(f"🔍 '{query_drive}' — {result['count']} résultat(s) :\n" + "\n".join(lines))
                 else:
-                    actions_confirmed.append(f"\u274c {result.get('message')}")
+                    actions_confirmed.append(f"❌ {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"\u274c {str(e)[:80]}")
+                actions_confirmed.append(f"❌ {str(e)[:80]}")
 
-        # Drive écriture — admin uniquement
-        if is_admin:
+        # Drive écriture — selon config outil (drive_write)
+        if drive_write:
             for match in re.finditer(r'\[ACTION:CREATEFOLDER:([^|^\]]+)\|([^\]]+)\]', aria_response):
                 parent_id = match.group(1).strip(); folder_name = match.group(2).strip()
                 try:
                     from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
                     _, drive_id, _ = _find_sharepoint_site_and_drive(outlook_token)
                     result = create_drive_folder(outlook_token, parent_id, folder_name, drive_id)
-                    actions_confirmed.append(f"\u2705 Dossier '{folder_name}' créé  [id:{result.get('id','')}]" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
+                    actions_confirmed.append(f"✅ Dossier '{folder_name}' créé  [id:{result.get('id','')}]" if result.get("status") == "ok" else f"❌ {result.get('message')}")
                 except Exception as e:
-                    actions_confirmed.append(f"\u274c {str(e)[:80]}")
+                    actions_confirmed.append(f"❌ {str(e)[:80]}")
 
             for match in re.finditer(r'\[ACTION:MOVEDRIVE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', aria_response):
                 item_id=match.group(1).strip(); dest_id=match.group(2).strip(); new_name=match.group(3).strip() or None
@@ -658,9 +702,9 @@ Consignes :
                     from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
                     _, drive_id, _ = _find_sharepoint_site_and_drive(outlook_token)
                     result = move_drive_item(outlook_token, item_id, dest_id, new_name, drive_id)
-                    actions_confirmed.append(f"\u2705 {result.get('message', 'Déplacé.')}" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
+                    actions_confirmed.append(f"✅ {result.get('message', 'Déplacé.')}" if result.get("status") == "ok" else f"❌ {result.get('message')}")
                 except Exception as e:
-                    actions_confirmed.append(f"\u274c {str(e)[:80]}")
+                    actions_confirmed.append(f"❌ {str(e)[:80]}")
 
             for match in re.finditer(r'\[ACTION:COPYFILE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', aria_response):
                 source_id=match.group(1).strip(); dest_id=match.group(2).strip(); new_name=match.group(3).strip() or None
@@ -668,38 +712,38 @@ Consignes :
                     from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
                     _, drive_id, _ = _find_sharepoint_site_and_drive(outlook_token)
                     result = copy_drive_item(outlook_token, source_id, dest_id, new_name, drive_id)
-                    actions_confirmed.append(f"\u2705 {result.get('message', 'Copie lancée.')}" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
+                    actions_confirmed.append(f"✅ {result.get('message', 'Copie lancée.')}" if result.get("status") == "ok" else f"❌ {result.get('message')}")
                 except Exception as e:
-                    actions_confirmed.append(f"\u274c {str(e)[:80]}")
+                    actions_confirmed.append(f"❌ {str(e)[:80]}")
 
-    # Auto-évolution — disponible pour tous les utilisateurs (mémoire personnelle)
+    # Auto-évolution — tous les utilisateurs (mémoire personnelle)
     if MEMORY_OK:
         for match in re.finditer(r'\[ACTION:LEARN:([^|^\]]+)\|([^\]]+)\]', aria_response):
             category=match.group(1).strip(); rule=match.group(2).strip()
             try:
                 save_rule(category, rule, "auto", 0.7, username)
-                actions_confirmed.append(f"\U0001f9e0 Règle mémorisée [{category}] : {rule[:60]}")
+                actions_confirmed.append(f"🧠 Règle mémorisée [{category}] : {rule[:60]}")
             except Exception as e: print(f"[LEARN] Erreur: {e}")
 
         for match in re.finditer(r'\[ACTION:INSIGHT:([^|^\]]+)\|([^\]]+)\]', aria_response):
             topic=match.group(1).strip(); insight=match.group(2).strip()
             try:
                 save_insight(topic, insight, "auto", username)
-                actions_confirmed.append(f"\U0001f4a1 Insight noté [{topic}] : {insight[:60]}")
+                actions_confirmed.append(f"💡 Insight noté [{topic}] : {insight[:60]}")
             except Exception as e: print(f"[INSIGHT] Erreur: {e}")
 
         for match in re.finditer(r'\[ACTION:FORGET:(\d+)\]', aria_response):
             rule_id = int(match.group(1))
             try:
                 deleted = delete_rule(rule_id, username)
-                actions_confirmed.append(f"\U0001f5d1\ufe0f Règle {rule_id} désactivée." if deleted else f"\u274c Règle {rule_id} introuvable.")
+                actions_confirmed.append(f"🗑️ Règle {rule_id} désactivée." if deleted else f"❌ Règle {rule_id} introuvable.")
             except Exception as e: print(f"[FORGET] Erreur: {e}")
 
         for _ in re.finditer(r'\[ACTION:SYNTH:\]', aria_response):
             try:
                 import threading
                 threading.Thread(target=lambda u=username: synthesize_session(15, u), daemon=True).start()
-                actions_confirmed.append("\U0001f504 Synthèse lancée en arrière-plan.")
+                actions_confirmed.append("🔄 Synthèse lancée en arrière-plan.")
             except Exception as e: print(f"[SYNTH] Erreur: {e}")
 
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', aria_response).strip()
@@ -734,20 +778,15 @@ def build_memory(request: Request):
     if not MEMORY_OK: return {"error": "Module mémoire non disponible"}
     try:
         summary = rebuild_hot_summary(username)
-        results["hot_summary"] = "\u2705 Résumé chaud reconstruit"
-        results["preview"] = summary[:200]
-    except Exception as e:
-        results["hot_summary"] = f"\u274c {str(e)[:100]}"
+        results["hot_summary"] = "✅ Résumé chaud reconstruit"; results["preview"] = summary[:200]
+    except Exception as e: results["hot_summary"] = f"❌ {str(e)[:100]}"
     try:
-        count = rebuild_contacts()
-        results["contacts"] = f"\u2705 {count} fiches contacts (partagées)"
-    except Exception as e:
-        results["contacts"] = f"\u274c {str(e)[:100]}"
+        count = rebuild_contacts(); results["contacts"] = f"✅ {count} fiches contacts (partagées)"
+    except Exception as e: results["contacts"] = f"❌ {str(e)[:100]}"
     try:
         added = load_sent_mails_to_style(limit=50, username=username)
-        results["style"] = f"\u2705 {added} exemples de style"
-    except Exception as e:
-        results["style"] = f"\u274c {str(e)[:100]}"
+        results["style"] = f"✅ {added} exemples de style"
+    except Exception as e: results["style"] = f"❌ {str(e)[:100]}"
     return results
 
 
@@ -756,8 +795,7 @@ def memory_status(request: Request):
     username = request.session.get("user", "guillaume")
     conn = None
     try:
-        conn = get_pg_conn()
-        c = conn.cursor()
+        conn = get_pg_conn(); c = conn.cursor()
         try:
             c.execute("SELECT content FROM aria_hot_summary WHERE username = %s", (username,))
             row = c.fetchone()
@@ -781,11 +819,15 @@ def memory_status(request: Request):
         if conn: conn.close()
     return {
         "username": username, "memory_module": MEMORY_OK,
-        "niveau_1": {"resume_chaud": {"exists": bool(row and row[0])}, "contacts": counts.get("contacts", 0),
-                     "regles_actives": counts.get("regles_actives", 0), "insights": counts.get("insights", 0)},
+        "niveau_1": {"resume_chaud": {"exists": bool(row and row[0])},
+                     "contacts": counts.get("contacts", 0),
+                     "regles_actives": counts.get("regles_actives", 0),
+                     "insights": counts.get("insights", 0)},
         "niveau_2": {"conversations_brutes": counts.get("conversations_brutes", 0),
-                     "mail_memory": counts.get("mail_memory", 0), "style_examples": counts.get("style_examples", 0)},
-        "niveau_3": {"session_digests": counts.get("session_digests", 0), "sent_mail_memory": counts.get("sent_mail_memory", 0)},
+                     "mail_memory": counts.get("mail_memory", 0),
+                     "style_examples": counts.get("style_examples", 0)},
+        "niveau_3": {"session_digests": counts.get("session_digests", 0),
+                     "sent_mail_memory": counts.get("sent_mail_memory", 0)},
     }
 
 
@@ -801,8 +843,7 @@ def list_rules(request: Request):
     username = request.session.get("user", "guillaume")
     conn = None
     try:
-        conn = get_pg_conn()
-        c = conn.cursor()
+        conn = get_pg_conn(); c = conn.cursor()
         c.execute("SELECT id,category,rule,source,confidence,reinforcements,active,created_at FROM aria_rules WHERE username=%s ORDER BY active DESC,confidence DESC,created_at DESC", (username,))
         columns = [d[0] for d in c.description]
         return [dict(zip(columns, row)) for row in c.fetchall()]
@@ -815,8 +856,7 @@ def list_insights(request: Request):
     username = request.session.get("user", "guillaume")
     conn = None
     try:
-        conn = get_pg_conn()
-        c = conn.cursor()
+        conn = get_pg_conn(); c = conn.cursor()
         c.execute("SELECT id,topic,insight,reinforcements,created_at FROM aria_insights WHERE username=%s ORDER BY reinforcements DESC,updated_at DESC", (username,))
         columns = [d[0] for d in c.description]
         return [dict(zip(columns, row)) for row in c.fetchall()]
@@ -829,8 +869,7 @@ def analyze_raw_mails(request: Request, limit: int = 50):
     username = request.session.get("user", "guillaume")
     conn = None
     try:
-        conn = get_pg_conn()
-        c = conn.cursor()
+        conn = get_pg_conn(); c = conn.cursor()
         c.execute("""
             SELECT id, message_id, from_email, subject, raw_body_preview, received_at
             FROM mail_memory WHERE username=%s AND analysis_status IN ('inbox_raw','archive_raw','gmail_raw')
@@ -868,8 +907,7 @@ def analyze_raw_mails(request: Request, limit: int = 50):
                 if conn: conn.close()
             analyzed += 1
         except Exception as e:
-            print(f"[AnalyzeRaw] Erreur {db_id}: {e}")
-            errors += 1
+            print(f"[AnalyzeRaw] Erreur {db_id}: {e}"); errors += 1
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -901,8 +939,6 @@ def learn_style(request: Request, payload: dict = Body(...)):
     return {"status": "ok"}
 
 
-# ─── AUTH MICROSOFT ───
-
 @app.get("/login")
 def login(request: Request, next: str = "/chat"):
     msal_app = build_msal_app()
@@ -917,7 +953,6 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     result = msal_app.acquire_token_by_authorization_code(code, scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI)
     if "access_token" not in result: return HTMLResponse("Erreur d'authentification", status_code=400)
     request.session["access_token"] = result["access_token"]
-    # Sauvegarde le token pour l'utilisateur connecté
     username = request.session.get("user", "guillaume")
     save_microsoft_token(username, result["access_token"], result.get("refresh_token", ""),
                          result.get("expires_in", 3600))
@@ -961,8 +996,7 @@ def rebuild_memory_mails(request: Request):
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("DELETE FROM mail_memory WHERE username=%s", (username,))
-        conn.commit()
+        c.execute("DELETE FROM mail_memory WHERE username=%s", (username,)); conn.commit()
     finally:
         if conn: conn.close()
     return {"status": "mail_memory_cleared", "username": username}
@@ -1158,7 +1192,7 @@ def test_elevenlabs():
     voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "")
     resp = requests.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
         headers={"xi-api-key": api_key, "Content-Type": "application/json"},
-        json={"text": "Bonjour Guillaume.", "model_id": "eleven_flash_v2_5",
+        json={"text": "Bonjour.", "model_id": "eleven_flash_v2_5",
               "voice_settings": {"stability": 0.5, "similarity_boost": 0.8}}, timeout=30)
     return {"status_code": resp.status_code, "api_key_length": len(api_key), "voice_id": voice_id}
 
@@ -1169,14 +1203,11 @@ def test_odoo():
     return perform_odoo_action(action="get_partner_by_email", params={"email": "guillaume@couffrant-solar.fr"})
 
 
-# ─── RÉORGANISATION SHAREPOINT (admin uniquement) ───
-
 @app.get("/reorganize-drive")
 def reorganize_drive(request: Request):
     if not _require_admin(request): return {"error": "Réservé à l'admin."}
     import threading
     from app.connectors.outlook_connector import (_find_sharepoint_site_and_drive, _find_folder_item_id, _graph_get)
-
     username = request.session.get("user", "guillaume")
     token = get_valid_microsoft_token(username)
     if not token: return {"error": "Token Microsoft manquant"}
@@ -1197,14 +1228,14 @@ def reorganize_drive(request: Request):
 
             def mk(parent, name):
                 r = create_drive_folder(token, parent, name, drive_id)
-                if r.get("status") == "ok": print(f"[Reorganize] \u2705 {name}"); return r.get("id")
+                if r.get("status") == "ok": print(f"[Reorganize] ✅ {name}"); return r.get("id")
                 return None
 
             def cp(source_name, dest_id, new_name=None):
                 item_id = items_by_name.get(source_name)
                 if not item_id: return
                 r = copy_drive_item(token, item_id, dest_id, new_name, drive_id)
-                print(f"[Reorganize] {'\u2705' if r.get('status')=='ok' else '\u274c'} {source_name}")
+                print(f"[Reorganize] {'✅' if r.get('status')=='ok' else '❌'} {source_name}")
 
             v2_id = mk(parent_id, "1_Photovoltaïque_V2")
             if not v2_id: return
@@ -1228,7 +1259,7 @@ def reorganize_drive(request: Request):
                     cp(f, cat04)
             if cat05:
                 for f in ["Adiwatt","MADENR","Urban Solar","Powr Connect","formulaire compensation solaredge.pdf",
-                           "Demande garantie Onduleur 1 \u2013 Copie.xlsx","Demande garantie Onduleur.xlsx"]: cp(f,cat05)
+                           "Demande garantie Onduleur 1 – Copie.xlsx","Demande garantie Onduleur.xlsx"]: cp(f,cat05)
             if cat06:
                 for f in ["Formation archelios calc","sauvegarde Archelios","Logiciels","unnamed.png"]: cp(f,cat06)
             if cat07:

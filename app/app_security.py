@@ -3,6 +3,7 @@ import hmac
 import os
 import base64
 import time
+import json
 from app.database import get_pg_conn
 
 # ── Rate limiting en mémoire ──
@@ -28,14 +29,13 @@ def record_failed_attempt(ip: str):
     if data["count"] >= MAX_ATTEMPTS:
         data["locked_until"] = now + LOCKOUT_SECONDS
         data["count"] = 0
-        print(f"[Auth] IP {ip} bloquée pour {LOCKOUT_SECONDS//60} minutes.")
 
 
 def clear_attempts(ip: str):
     _login_attempts.pop(ip, None)
 
 
-# ── Hachage de mot de passe (PBKDF2-SHA256, stdlib uniquement) ──
+# ── Hachage de mot de passe (PBKDF2-SHA256) ──
 
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
@@ -53,16 +53,148 @@ def verify_password(password: str, stored_hash: str) -> bool:
         return False
 
 
+# ── Scopes ──
+SCOPE_ADMIN = "admin"
+SCOPE_CS    = "couffrant_solar"
+
+
+# ── Outils par défaut selon le scope ──
+# Extensible : ajouter un outil = ajouter une entrée ici + dans user_tools
+
+DEFAULT_TOOLS_ADMIN = [
+    {"tool": "outlook", "access_level": "full",      "config": {"mailboxes": [], "can_delete_mail": True}},
+    {"tool": "odoo",    "access_level": "full",      "config": {}},
+    {"tool": "drive",   "access_level": "full",      "config": {"can_delete": True}},
+    {"tool": "gmail",   "access_level": "full",      "config": {}},
+]
+
+DEFAULT_TOOLS_CS = [
+    {"tool": "outlook", "access_level": "write",     "config": {"mailboxes": [], "can_delete_mail": False}},
+    {"tool": "odoo",    "access_level": "read_only", "config": {"shared_user": "sabrina"}},
+    {"tool": "drive",   "access_level": "write",     "config": {"can_delete": False}},
+]
+
+
+def init_default_tools(username: str, scope: str):
+    """
+    Initialise les outils par défaut pour un utilisateur.
+    Appelé à la création du compte. N'écrase pas les configs existantes.
+    """
+    tools = DEFAULT_TOOLS_ADMIN if scope == SCOPE_ADMIN else DEFAULT_TOOLS_CS
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        for t in tools:
+            c.execute("""
+                INSERT INTO user_tools (username, tool, access_level, enabled, config)
+                VALUES (%s, %s, %s, true, %s)
+                ON CONFLICT (username, tool) DO NOTHING
+            """, (username, t["tool"], t["access_level"], json.dumps(t["config"])))
+        conn.commit()
+    except Exception as e:
+        print(f"[Tools] Erreur init_default_tools pour {username}: {e}")
+    finally:
+        if conn: conn.close()
+
+
+def get_user_tools(username: str, raw: bool = False):
+    """
+    Retourne les outils d'un utilisateur.
+    raw=False : dict {tool: {access_level, enabled, config}}  — pour l'app
+    raw=True  : liste de dicts complets                        — pour l'admin
+    """
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT tool, access_level, enabled, config
+            FROM user_tools WHERE username = %s ORDER BY tool
+        """, (username,))
+        rows = c.fetchall()
+        if raw:
+            return [{"tool": r[0], "access_level": r[1], "enabled": r[2], "config": r[3] or {}} for r in rows]
+        return {r[0]: {"access_level": r[1], "enabled": r[2], "config": r[3] or {}} for r in rows}
+    except Exception:
+        return [] if raw else {}
+    finally:
+        if conn: conn.close()
+
+
+def get_tool_config(username: str, tool: str) -> dict:
+    """Retourne la config complète d'un outil pour un utilisateur."""
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            "SELECT access_level, enabled, config FROM user_tools WHERE username=%s AND tool=%s",
+            (username, tool)
+        )
+        row = c.fetchone()
+        if not row:
+            return {"access_level": "none", "enabled": False, "config": {}}
+        return {"access_level": row[0], "enabled": row[1], "config": row[2] or {}}
+    except Exception:
+        return {"access_level": "none", "enabled": False, "config": {}}
+    finally:
+        if conn: conn.close()
+
+
+def set_user_tool(username: str, tool: str, access_level: str = "read_only",
+                  enabled: bool = True, config: dict = None) -> dict:
+    """
+    Crée ou met à jour un outil dans le profil utilisateur.
+    Extensible : tool peut être n'importe quelle chaîne.
+    """
+    if config is None:
+        config = {}
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO user_tools (username, tool, access_level, enabled, config, updated_at)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (username, tool) DO UPDATE SET
+                access_level = EXCLUDED.access_level,
+                enabled = EXCLUDED.enabled,
+                config = EXCLUDED.config,
+                updated_at = NOW()
+        """, (username, tool, access_level, enabled, json.dumps(config)))
+        conn.commit()
+        return {"status": "ok", "message": f"Outil '{tool}' configuré pour {username} ({access_level})."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:100]}
+    finally:
+        if conn: conn.close()
+
+
+def remove_user_tool(username: str, tool: str) -> dict:
+    """Supprime un outil du profil utilisateur."""
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("DELETE FROM user_tools WHERE username=%s AND tool=%s", (username, tool))
+        if c.rowcount == 0:
+            conn.rollback()
+            return {"status": "error", "message": "Outil introuvable."}
+        conn.commit()
+        return {"status": "ok", "message": f"Outil '{tool}' supprimé pour {username}."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:100]}
+    finally:
+        if conn: conn.close()
+
+
 # ── Gestion des utilisateurs ──
-
-SCOPE_ADMIN = "admin"           # Guillaume — accès complet à tous les contextes
-SCOPE_CS    = "couffrant_solar" # Collègues — accès Couffrant Solar uniquement
-
 
 def init_default_user():
     """
-    Crée l'utilisateur admin par défaut (Guillaume) depuis les variables d'env.
-    APP_USERNAME / APP_PASSWORD — scope 'admin'.
+    Crée l'utilisateur admin (Guillaume) depuis APP_USERNAME / APP_PASSWORD.
+    Initialise aussi ses outils par défaut.
     """
     username = os.getenv("APP_USERNAME", "guillaume").strip()
     password = os.getenv("APP_PASSWORD", "couffrant2026").strip()
@@ -76,46 +208,40 @@ def init_default_user():
             password_hash = hash_password(password)
             c.execute("""
                 INSERT INTO users (username, password_hash, scope)
-                VALUES (%s, %s, %s)
-                ON CONFLICT (username) DO NOTHING
+                VALUES (%s, %s, %s) ON CONFLICT (username) DO NOTHING
             """, (username, password_hash, SCOPE_ADMIN))
             conn.commit()
             print(f"[Auth] Utilisateur admin créé : {username}")
         else:
-            # Assure que l'utilisateur admin a bien le scope 'admin'
             c.execute("""
-                UPDATE users SET scope = %s
-                WHERE username = %s AND scope = 'couffrant_solar'
+                UPDATE users SET scope = %s WHERE username = %s AND scope = 'couffrant_solar'
             """, (SCOPE_ADMIN, username))
             conn.commit()
     except Exception as e:
         print(f"[Auth] Erreur init_default_user: {e}")
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
+
+    # Initialise les outils de l'admin s'ils n'existent pas encore
+    init_default_tools(username, SCOPE_ADMIN)
 
 
 def authenticate(username: str, password: str) -> bool:
-    """Vérifie les credentials contre la base."""
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("SELECT password_hash FROM users WHERE username = %s", (username.strip(),))
         row = c.fetchone()
-        if not row:
-            return False
+        if not row: return False
         return verify_password(password, row[0])
-    except Exception as e:
-        print(f"[Auth] Erreur authenticate: {e}")
+    except Exception:
         return False
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
 def get_user_scope(username: str) -> str:
-    """Retourne le scope de l'utilisateur. Défaut : couffrant_solar."""
     conn = None
     try:
         conn = get_pg_conn()
@@ -126,12 +252,16 @@ def get_user_scope(username: str) -> str:
     except Exception:
         return SCOPE_CS
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
-def create_user(username: str, password: str, scope: str = SCOPE_CS) -> dict:
-    """Crée un nouvel utilisateur. Retourne {status, message}."""
+def create_user(username: str, password: str, scope: str = SCOPE_CS,
+                tools: list = None) -> dict:
+    """
+    Crée un utilisateur + initialise ses outils.
+    tools : liste optionnelle de configs outils pour personnaliser au-delà des défauts.
+    Ex: [{"tool": "odoo", "access_level": "full", "config": {}}]
+    """
     if not username or not password:
         return {"status": "error", "message": "Identifiant et mot de passe requis."}
     if len(password) < 8:
@@ -150,18 +280,32 @@ def create_user(username: str, password: str, scope: str = SCOPE_CS) -> dict:
         """, (username.strip(), password_hash, scope))
         conn.commit()
         print(f"[Auth] Utilisateur créé : {username} (scope: {scope})")
-        return {"status": "ok", "message": f"Utilisateur '{username}' créé avec le rôle {scope}."}
     except Exception as e:
         if "unique" in str(e).lower():
             return {"status": "error", "message": f"L'identifiant '{username}' existe déjà."}
         return {"status": "error", "message": str(e)[:100]}
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
+
+    # Outils par défaut selon le scope
+    init_default_tools(username.strip(), scope)
+
+    # Surcharge éventuelle passée par l'admin
+    if tools:
+        for t in tools:
+            if "tool" in t:
+                set_user_tool(
+                    username.strip(),
+                    t["tool"],
+                    t.get("access_level", "read_only"),
+                    t.get("enabled", True),
+                    t.get("config", {}),
+                )
+
+    return {"status": "ok", "message": f"Utilisateur '{username}' créé avec le rôle {scope}."}
 
 
 def delete_user(username: str, requesting_user: str) -> dict:
-    """Supprime un utilisateur. Un admin ne peut pas se supprimer lui-même."""
     if username.strip() == requesting_user.strip():
         return {"status": "error", "message": "Impossible de supprimer ton propre compte."}
     conn = None
@@ -173,31 +317,31 @@ def delete_user(username: str, requesting_user: str) -> dict:
         if c.rowcount == 0:
             conn.rollback()
             return {"status": "error", "message": "Utilisateur introuvable."}
+        # Supprime aussi les outils de l'utilisateur
+        c.execute("DELETE FROM user_tools WHERE username = %s", (username.strip(),))
         conn.commit()
         return {"status": "ok", "message": f"Utilisateur '{username}' supprimé."}
     except Exception as e:
         return {"status": "error", "message": str(e)[:100]}
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
 def list_users() -> list:
-    """Liste tous les utilisateurs (sans les mots de passe)."""
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("SELECT username, scope, last_login, created_at FROM users ORDER BY created_at")
         return [
-            {"username": r[0], "scope": r[1], "last_login": str(r[2]) if r[2] else None, "created_at": str(r[3])}
+            {"username": r[0], "scope": r[1],
+             "last_login": str(r[2]) if r[2] else None, "created_at": str(r[3])}
             for r in c.fetchall()
         ]
     except Exception:
         return []
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
 def update_last_login(username: str):
@@ -210,8 +354,7 @@ def update_last_login(username: str):
     except Exception:
         pass
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
 def get_current_user(request) -> str | None:
@@ -228,63 +371,34 @@ LOGIN_PAGE_HTML = """
 <style>
 * {{ box-sizing: border-box; margin: 0; padding: 0; }}
 body {{
-    background: #0a0a0a;
-    color: #fff;
+    background: #0a0a0a; color: #fff;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center; min-height: 100vh;
 }}
 .card {{
-    background: #111;
-    border: 1px solid #1e1e1e;
-    border-radius: 16px;
-    padding: 40px;
-    width: 100%;
-    max-width: 380px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    background: #111; border: 1px solid #1e1e1e; border-radius: 16px;
+    padding: 40px; width: 100%; max-width: 380px; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
 }}
 .logo {{ font-size: 32px; margin-bottom: 12px; }}
 h1 {{ font-size: 24px; color: #e8e8e8; margin-bottom: 4px; font-weight: 700; }}
 .subtitle {{ font-size: 13px; color: #555; margin-bottom: 36px; }}
 label {{ font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.8px; display: block; }}
 input[type=text], input[type=password] {{
-    width: 100%;
-    padding: 13px 16px;
-    background: #161616;
-    border: 1px solid #2a2a2a;
-    border-radius: 10px;
-    color: #e8e8e8;
-    font-size: 15px;
-    margin: 8px 0 22px;
-    outline: none;
-    transition: border-color 0.2s;
+    width: 100%; padding: 13px 16px; background: #161616; border: 1px solid #2a2a2a;
+    border-radius: 10px; color: #e8e8e8; font-size: 15px; margin: 8px 0 22px;
+    outline: none; transition: border-color 0.2s;
 }}
 input:focus {{ border-color: #1565c0; background: #1a1a1a; }}
 button {{
-    width: 100%;
-    padding: 14px;
-    background: #1565c0;
-    color: white;
-    border: none;
-    border-radius: 10px;
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s;
-    letter-spacing: 0.3px;
+    width: 100%; padding: 14px; background: #1565c0; color: white; border: none;
+    border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer;
+    transition: background 0.15s; letter-spacing: 0.3px;
 }}
 button:hover {{ background: #1976d2; }}
 .error {{
-    background: rgba(220,50,50,0.1);
-    border: 1px solid rgba(220,50,50,0.3);
-    color: #ff7070;
-    padding: 12px 16px;
-    border-radius: 8px;
-    font-size: 13px;
-    margin-bottom: 24px;
-    text-align: center;
+    background: rgba(220,50,50,0.1); border: 1px solid rgba(220,50,50,0.3);
+    color: #ff7070; padding: 12px 16px; border-radius: 8px; font-size: 13px;
+    margin-bottom: 24px; text-align: center;
 }}
 </style>
 </head>
