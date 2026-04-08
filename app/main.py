@@ -240,6 +240,14 @@ def _require_admin(request: Request) -> bool:
     return request.session.get("scope", SCOPE_CS) == SCOPE_ADMIN
 
 
+@app.get("/admin/panel", response_class=HTMLResponse)
+def admin_panel(request: Request):
+    """Panel d'administration Aria — réservé admin."""
+    if not _require_admin(request): return RedirectResponse("/login-app")
+    with open("app/templates/admin_panel.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
 @app.get("/admin/users")
 def admin_list_users(request: Request):
     if not _require_admin(request): return {"error": "Accès refusé."}
@@ -417,7 +425,7 @@ def aria(request: Request, payload: AriaQuery):
 
     contact_card = ""
     query_lower = payload.query.lower()
-    known_contacts = get_contacts_keywords(username)  # dynamique depuis aria_contacts + règles
+    known_contacts = get_contacts_keywords(username)
     for name in known_contacts:
         if name in query_lower:
             contact_card = get_contact_card(name)
@@ -1021,7 +1029,7 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
     except requests.HTTPError:
         return RedirectResponse("/login?next=/learn-inbox-mails")
     inserted = skipped_noise = 0
-    skip_keywords = get_antispam_keywords(username)  # dynamique depuis aria_rules
+    skip_keywords = get_antispam_keywords(username)
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -1123,9 +1131,7 @@ def ingest_gmail(request: Request):
         access_token = refresh_gmail_token(refresh_token)
         messages = gmail_get_messages(access_token, max_results=10)
     inserted = 0
-    skip_keywords = ["noreply","no-reply","donotreply","newsletter","unsubscribe","se désabonner",
-                     "notification","mailer-daemon","marketing","promo","offre spéciale",
-                     "linkedin","twitter","facebook","instagram","jobteaser","indeed","welcometothejungle"]
+    skip_keywords = get_antispam_keywords(username)
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
