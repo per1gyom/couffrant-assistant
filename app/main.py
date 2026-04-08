@@ -1,7 +1,7 @@
 import os
 import requests
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import FastAPI, Request, Form, Body
@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from app.auth import build_msal_app
 from app.config import (
     GRAPH_SCOPES, REDIRECT_URI, SESSION_SECRET,
-    AUTHORITY, ANTHROPIC_MODEL_SMART, ANTHROPIC_MODEL_FAST
+    ANTHROPIC_MODEL_SMART, ANTHROPIC_MODEL_FAST
 )
 from app.graph_client import graph_get
 from app.ai_client import summarize_messages, analyze_single_mail_with_ai, client
@@ -25,6 +25,7 @@ from app.connectors.outlook_connector import (
     search_aria_drive, create_drive_folder, copy_drive_item, move_drive_item
 )
 from app.database import get_pg_conn, init_postgres
+from app.token_manager import get_valid_microsoft_token, save_microsoft_token, get_all_users_with_tokens
 from app.app_security import (
     authenticate, init_default_user, update_last_login,
     check_rate_limit, record_failed_attempt, clear_attempts,
@@ -46,8 +47,8 @@ try:
 except Exception as _mem_err:
     print(f"[Memory] Module non disponible: {_mem_err}")
     MEMORY_OK = False
-    def get_hot_summary(): return ""
-    def rebuild_hot_summary(): return ""
+    def get_hot_summary(username='guillaume'): return ""
+    def rebuild_hot_summary(username='guillaume'): return ""
     def get_contact_card(x): return ""
     def get_all_contact_cards(): return []
     def rebuild_contacts(): return 0
@@ -56,9 +57,9 @@ except Exception as _mem_err:
     def learn_from_correction(**kwargs): pass
     def load_sent_mails_to_style(**kwargs): return 0
     def purge_old_mails(**kwargs): return 0
-    def get_aria_rules(): return ""
+    def get_aria_rules(username='guillaume'): return ""
     def save_rule(*a, **kw): return 0
-    def delete_rule(*a): return False
+    def delete_rule(*a, **kw): return False
     def get_aria_insights(**kwargs): return ""
     def save_insight(*a, **kw): return 0
     def synthesize_session(**kwargs): return {}
@@ -80,7 +81,6 @@ def startup_event():
     init_postgres()
     init_db()
     init_mail_db()
-
     try:
         init_default_user()
     except Exception as e:
@@ -88,93 +88,102 @@ def startup_event():
 
     import threading
 
+    # ── Thread 1 : auto-ingest mails pour tous les utilisateurs connectés (toutes les 30s) ──
     def auto_ingest():
         import time
         cycle = 0
         while True:
             try:
-                from app.token_manager import get_valid_microsoft_token
                 from app.graph_client import graph_get as _graph_get
                 from app.ai_client import analyze_single_mail_with_ai as _analyze_ai
-                from app.mail_memory_store import mail_exists as _mail_exists, insert_mail as _insert_mail
                 from app.feedback_store import get_global_instructions as _get_instructions
                 from app.assistant_analyzer import analyze_single_mail as _analyze
 
-                token = get_valid_microsoft_token()
-                if token:
-                    data = _graph_get(
-                        token, "/me/mailFolders/inbox/messages",
-                        params={"$top": 10, "$select": "id,subject,from,receivedDateTime,bodyPreview", "$orderby": "receivedDateTime DESC"},
-                    )
-                    messages = data.get("value", [])
-                    instructions = _get_instructions()
-                    for msg in messages:
-                        message_id = msg["id"]
-                        if _mail_exists(message_id):
+                users = get_all_users_with_tokens()
+                instructions = _get_instructions()
+
+                for username in users:
+                    try:
+                        token = get_valid_microsoft_token(username)
+                        if not token:
                             continue
-                        try:
-                            item = _analyze_ai(msg, instructions)
-                            analysis_status = "done_ai"
-                        except Exception:
-                            item = _analyze(msg)
-                            analysis_status = "fallback"
-                        _insert_mail({
-                            "message_id": message_id,
-                            "received_at": msg.get("receivedDateTime"),
-                            "from_email": msg.get("from", {}).get("emailAddress", {}).get("address"),
-                            "subject": msg.get("subject"),
-                            "display_title": item.get("display_title"),
-                            "category": item.get("category"),
-                            "priority": item.get("priority"),
-                            "reason": item.get("reason"),
-                            "suggested_action": item.get("suggested_action"),
-                            "short_summary": item.get("short_summary"),
-                            "group_hints": item.get("group_hints", []),
-                            "confidence": item.get("confidence", 0.0),
-                            "needs_review": item.get("needs_review", False),
-                            "raw_body_preview": msg.get("bodyPreview"),
-                            "analysis_status": analysis_status,
-                            "needs_reply": item.get("needs_reply"),
-                            "reply_urgency": item.get("reply_urgency"),
-                            "reply_reason": item.get("reply_reason"),
-                            "suggested_reply_subject": item.get("suggested_reply_subject"),
-                            "suggested_reply": item.get("suggested_reply"),
-                            "mailbox_source": "outlook",
-                        })
+                        data = _graph_get(
+                            token, "/me/mailFolders/inbox/messages",
+                            params={"$top": 10, "$select": "id,subject,from,receivedDateTime,bodyPreview",
+                                    "$orderby": "receivedDateTime DESC"},
+                        )
+                        for msg in data.get("value", []):
+                            message_id = msg["id"]
+                            if mail_exists(message_id, username):
+                                continue
+                            try:
+                                item = _analyze_ai(msg, instructions)
+                                analysis_status = "done_ai"
+                            except Exception:
+                                item = _analyze(msg)
+                                analysis_status = "fallback"
+                            insert_mail({
+                                "username": username,
+                                "message_id": message_id,
+                                "received_at": msg.get("receivedDateTime"),
+                                "from_email": msg.get("from", {}).get("emailAddress", {}).get("address"),
+                                "subject": msg.get("subject"),
+                                "display_title": item.get("display_title"),
+                                "category": item.get("category"),
+                                "priority": item.get("priority"),
+                                "reason": item.get("reason"),
+                                "suggested_action": item.get("suggested_action"),
+                                "short_summary": item.get("short_summary"),
+                                "group_hints": item.get("group_hints", []),
+                                "confidence": item.get("confidence", 0.0),
+                                "needs_review": item.get("needs_review", False),
+                                "raw_body_preview": msg.get("bodyPreview"),
+                                "analysis_status": analysis_status,
+                                "needs_reply": item.get("needs_reply"),
+                                "reply_urgency": item.get("reply_urgency"),
+                                "reply_reason": item.get("reply_reason"),
+                                "suggested_reply_subject": item.get("suggested_reply_subject"),
+                                "suggested_reply": item.get("suggested_reply"),
+                                "mailbox_source": "outlook",
+                            })
+                    except Exception as e:
+                        print(f"[AutoIngest] Erreur pour {username}: {e}")
 
                 cycle += 1
                 if cycle % 40 == 0 and MEMORY_OK:
-                    try:
-                        rebuild_hot_summary()
-                        print("[Memory] R\u00e9sum\u00e9 chaud reconstruit")
-                    except Exception as e:
-                        print(f"[Memory] Erreur: {e}")
+                    for username in users:
+                        try:
+                            rebuild_hot_summary(username)
+                        except Exception as e:
+                            print(f"[Memory] Erreur rebuild {username}: {e}")
 
             except Exception as e:
-                print(f"[AutoIngest] Erreur: {e}")
+                print(f"[AutoIngest] Erreur générale: {e}")
             time.sleep(30)
 
     threading.Thread(target=auto_ingest, daemon=True).start()
 
+    # ── Thread 2 : refresh proactif tokens (toutes les 45 min) ──
     def token_refresh_loop():
         import time
         time.sleep(120)
         while True:
             try:
-                from app.token_manager import get_valid_microsoft_token
-                token = get_valid_microsoft_token()
-                if token:
-                    print("[Token] Refresh proactif OK")
-                else:
-                    print("[Token] Refresh proactif : aucun token en base")
+                users = get_all_users_with_tokens()
+                for username in users:
+                    try:
+                        token = get_valid_microsoft_token(username)
+                        print(f"[Token] Refresh {username}: {'OK' if token else 'ECHEC'}")
+                    except Exception as e:
+                        print(f"[Token] Erreur refresh {username}: {e}")
             except Exception as e:
-                print(f"[Token] Erreur refresh proactif: {e}")
+                print(f"[Token] Erreur générale: {e}")
             time.sleep(45 * 60)
 
     threading.Thread(target=token_refresh_loop, daemon=True).start()
 
 
-# \u2500\u2500\u2500 AUTH CHAT \u2500\u2500\u2500
+# ─── AUTH CHAT ───
 
 @app.get("/login-app", response_class=HTMLResponse)
 def login_app_get(request: Request):
@@ -194,7 +203,7 @@ async def login_app_post(request: Request, username: str = Form(...), password: 
         update_last_login(username.strip())
         scope = get_user_scope(username.strip())
         request.session["user"] = username.strip()
-        request.session["scope"] = scope  # persisté dans le cookie de session
+        request.session["scope"] = scope
         return RedirectResponse("/chat", status_code=303)
     else:
         record_failed_attempt(ip)
@@ -215,11 +224,9 @@ def health():
 @app.get("/init-db")
 def init_db_now():
     init_postgres()
-    try:
-        init_default_user()
-    except Exception:
-        pass
-    return {"status": "tables cr\u00e9\u00e9es"}
+    try: init_default_user()
+    except Exception: pass
+    return {"status": "tables créées"}
 
 
 @app.get("/chat", response_class=HTMLResponse)
@@ -230,49 +237,97 @@ def chat(request: Request):
         return HTMLResponse(content=f.read())
 
 
-# \u2500\u2500\u2500 ADMIN \u2500\u2500\u2500
+# ─── ADMIN ───
 
-def _require_admin(request: Request):
-    """Helper : retourne True si l'utilisateur est admin, sinon lance une exception."""
-    scope = request.session.get("scope", SCOPE_CS)
-    return scope == SCOPE_ADMIN
+def _require_admin(request: Request) -> bool:
+    return request.session.get("scope", SCOPE_CS) == SCOPE_ADMIN
 
 
 @app.get("/admin/users")
 def admin_list_users(request: Request):
-    """Liste tous les utilisateurs. R\u00e9serv\u00e9 aux admins."""
-    if not _require_admin(request):
-        return {"error": "Acc\u00e8s refus\u00e9."}
+    if not _require_admin(request): return {"error": "Accès refusé."}
     return list_users()
 
 
 @app.post("/admin/create-user")
 def admin_create_user(request: Request, payload: dict = Body(...)):
-    """Cr\u00e9e un compte utilisateur. R\u00e9serv\u00e9 aux admins."""
-    if not _require_admin(request):
-        return {"error": "Acc\u00e8s refus\u00e9."}
-    username = payload.get("username", "").strip()
-    password = payload.get("password", "")
-    scope = payload.get("scope", SCOPE_CS)
-    return create_user(username, password, scope)
+    if not _require_admin(request): return {"error": "Accès refusé."}
+    return create_user(payload.get("username", "").strip(), payload.get("password", ""), payload.get("scope", SCOPE_CS))
 
 
-@app.delete("/admin/delete-user/{username}")
-def admin_delete_user(request: Request, username: str):
-    """Supprime un compte utilisateur. R\u00e9serv\u00e9 aux admins."""
-    if not _require_admin(request):
-        return {"error": "Acc\u00e8s refus\u00e9."}
-    requesting_user = request.session.get("user", "")
-    return delete_user(username, requesting_user)
+@app.delete("/admin/delete-user/{target_username}")
+def admin_delete_user(request: Request, target_username: str):
+    if not _require_admin(request): return {"error": "Accès refusé."}
+    return delete_user(target_username, request.session.get("user", ""))
 
+
+@app.get("/admin/rules")
+def admin_rules(request: Request, user: str = ""):
+    """Admin : voir les règles d'un utilisateur spécifique ou de tous."""
+    if not _require_admin(request): return {"error": "Accès refusé."}
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        if user:
+            c.execute("SELECT id,username,category,rule,confidence,reinforcements,active,created_at FROM aria_rules WHERE username=%s ORDER BY active DESC,confidence DESC", (user,))
+        else:
+            c.execute("SELECT id,username,category,rule,confidence,reinforcements,active,created_at FROM aria_rules ORDER BY username,active DESC,confidence DESC")
+        columns = [d[0] for d in c.description]
+        return [dict(zip(columns, row)) for row in c.fetchall()]
+    finally:
+        if conn: conn.close()
+
+
+@app.get("/admin/insights")
+def admin_insights(request: Request, user: str = ""):
+    """Admin : voir les insights d'un utilisateur spécifique ou de tous."""
+    if not _require_admin(request): return {"error": "Accès refusé."}
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        if user:
+            c.execute("SELECT id,username,topic,insight,reinforcements,created_at FROM aria_insights WHERE username=%s ORDER BY reinforcements DESC", (user,))
+        else:
+            c.execute("SELECT id,username,topic,insight,reinforcements,created_at FROM aria_insights ORDER BY username,reinforcements DESC")
+        columns = [d[0] for d in c.description]
+        return [dict(zip(columns, row)) for row in c.fetchall()]
+    finally:
+        if conn: conn.close()
+
+
+@app.get("/admin/memory-status")
+def admin_memory_status(request: Request):
+    """Admin : état de la mémoire pour tous les utilisateurs."""
+    if not _require_admin(request): return {"error": "Accès refusé."}
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("SELECT username, COUNT(*) FROM aria_memory GROUP BY username")
+        conversations = dict(c.fetchall())
+        c.execute("SELECT username, COUNT(*) FROM aria_rules WHERE active=true GROUP BY username")
+        rules = dict(c.fetchall())
+        c.execute("SELECT username, COUNT(*) FROM aria_insights GROUP BY username")
+        insights = dict(c.fetchall())
+        c.execute("SELECT username, COUNT(*) FROM mail_memory GROUP BY username")
+        mails = dict(c.fetchall())
+        users_all = set(list(conversations.keys()) + list(rules.keys()) + list(insights.keys()) + list(mails.keys()))
+        return [
+            {"username": u, "conversations": conversations.get(u, 0), "rules": rules.get(u, 0),
+             "insights": insights.get(u, 0), "mails": mails.get(u, 0)}
+            for u in sorted(users_all)
+        ]
+    finally:
+        if conn: conn.close()
+
+
+# ─── ARIA (endpoint principal) ───
 
 @app.post("/speak")
 def speak_text(payload: dict = Body(...)):
     import re, io
     api_key = os.environ.get("ELEVENLABS_API_KEY", "")
     voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "")
-    if not api_key or not voice_id:
-        return {"error": "Cl\u00e9s ElevenLabs manquantes"}
+    if not api_key or not voice_id: return {"error": "Clés ElevenLabs manquantes"}
     text = payload.get("text", "")
     clean = re.sub(r'#{1,6}\s+', '', text)
     clean = re.sub(r'\*\*(.*?)\*\*', r'\1', clean)
@@ -284,7 +339,8 @@ def speak_text(payload: dict = Body(...)):
     resp = requests.post(
         f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
         headers={"xi-api-key": api_key, "Content-Type": "application/json"},
-        json={"text": clean, "model_id": "eleven_flash_v2_5", "voice_settings": {"stability": 0.5, "similarity_boost": 0.8, "style": 0.2, "use_speaker_boost": True}},
+        json={"text": clean, "model_id": "eleven_flash_v2_5",
+              "voice_settings": {"stability": 0.5, "similarity_boost": 0.8, "style": 0.2, "use_speaker_boost": True}},
         timeout=30,
     )
     if resp.status_code != 200:
@@ -295,13 +351,15 @@ def speak_text(payload: dict = Body(...)):
 @app.post("/aria")
 def aria(request: Request, payload: AriaQuery):
     import re
-    from app.token_manager import get_valid_microsoft_token
     instructions = get_global_instructions()
 
-    # Scope de l'utilisateur connect\u00e9
+    # Identité de l'utilisateur connecté
+    username = request.session.get("user", "guillaume")
     user_scope = request.session.get("scope", SCOPE_CS)
     is_admin = user_scope == SCOPE_ADMIN
+    display_name = username.capitalize()
 
+    # Chargement des données propres à cet utilisateur
     conn = None
     try:
         conn = get_pg_conn()
@@ -309,45 +367,45 @@ def aria(request: Request, payload: AriaQuery):
         c.execute("""
             SELECT id as db_id, message_id, from_email, display_title, category, priority,
                    short_summary, suggested_reply, raw_body_preview, received_at, mailbox_source
-            FROM mail_memory ORDER BY received_at DESC NULLS LAST LIMIT 10
-        """)
+            FROM mail_memory WHERE username = %s
+            ORDER BY received_at DESC NULLS LAST LIMIT 10
+        """, (username,))
         columns = [desc[0] for desc in c.description]
         mails_from_db = [dict(zip(columns, row)) for row in c.fetchall()]
 
-        c.execute("SELECT user_input, aria_response FROM aria_memory ORDER BY id DESC LIMIT 6")
+        c.execute("SELECT user_input, aria_response FROM aria_memory WHERE username = %s ORDER BY id DESC LIMIT 6", (username,))
         columns = [desc[0] for desc in c.description]
         history = [dict(zip(columns, row)) for row in c.fetchall()]
         history.reverse()
 
-        c.execute("SELECT content FROM aria_profile WHERE profile_type = 'style' ORDER BY id DESC LIMIT 1")
+        c.execute("SELECT content FROM aria_profile WHERE username = %s AND profile_type = 'style' ORDER BY id DESC LIMIT 1", (username,))
         profile_row = c.fetchone()
         profile = profile_row[0] if profile_row else ""
 
-        c.execute("SELECT COUNT(*) FROM aria_memory")
+        c.execute("SELECT COUNT(*) FROM aria_memory WHERE username = %s", (username,))
         conv_count = c.fetchone()[0]
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
-    hot_summary = get_hot_summary() if is_admin else ""
-    aria_rules = get_aria_rules()
-    aria_insights = get_aria_insights(limit=6) if is_admin else ""
+    hot_summary = get_hot_summary(username)
+    aria_rules = get_aria_rules(username)
+    aria_insights = get_aria_insights(limit=6, username=username)
 
     contact_card = ""
     query_lower = payload.query.lower()
-    known_contacts = ["arl\u00e8ne", "arlene", "sabrina", "benoit", "maxence", "pinto", "enedis",
-                      "adiwatt", "triangle", "eleria", "consuel", "socotec", "charlotte"]
+    known_contacts = ["arlène", "arlene", "sabrina", "benoit", "maxence", "pinto", "enedis",
+                      "adiwatt", "triangle", "eleria", "consuel", "socotec", "charlotte", "pierre"]
     for name in known_contacts:
         if name in query_lower:
             contact_card = get_contact_card(name)
-            if contact_card:
-                break
+            if contact_card: break
 
     style_examples = get_style_examples(
-        context=payload.query[:100] if any(w in query_lower for w in ["r\u00e9pond", "r\u00e9dige", "\u00e9cris", "mail"]) else ""
-    ) if is_admin else ""
+        context=payload.query[:100] if any(w in query_lower for w in ["répond", "rédige", "écris", "mail"]) else "",
+        username=username
+    )
 
-    outlook_token = get_valid_microsoft_token()
+    outlook_token = get_valid_microsoft_token(username)
 
     outlook_live_mails = []
     if outlook_token:
@@ -367,7 +425,7 @@ def aria(request: Request, payload: AriaQuery):
                     "mailbox_source": "outlook",
                 })
         except Exception as e:
-            print(f"[Aria] Erreur Outlook live: {e}")
+            print(f"[Aria] Erreur Outlook live {username}: {e}")
 
     agenda_today = []
     if outlook_token:
@@ -377,97 +435,87 @@ def aria(request: Request, payload: AriaQuery):
             end = now.replace(hour=23, minute=59, second=59).isoformat()
             agenda_result = perform_outlook_action("list_calendar_events", {"start": start, "end": end, "top": 10}, outlook_token)
             agenda_today = agenda_result.get("items", [])
-        except Exception:
-            pass
+        except Exception: pass
 
     user_content_parts = []
     if payload.file_data and payload.file_type:
         file_name_info = f" ({payload.file_name})" if payload.file_name else ""
         if payload.file_type.startswith("image/"):
-            user_content_parts.append({
-                "type": "image",
-                "source": {"type": "base64", "media_type": payload.file_type, "data": payload.file_data}
-            })
-            user_content_parts.append({
-                "type": "text",
-                "text": f"[Fichier joint{file_name_info}]\n{payload.query}" if payload.query else f"[Image jointe{file_name_info}] Analyse ce document."
-            })
+            user_content_parts.append({"type": "image", "source": {"type": "base64", "media_type": payload.file_type, "data": payload.file_data}})
+            user_content_parts.append({"type": "text", "text": f"[Fichier joint{file_name_info}]\n{payload.query}" if payload.query else f"[Image jointe{file_name_info}] Analyse ce document."})
         elif payload.file_type == "application/pdf":
-            user_content_parts.append({
-                "type": "document",
-                "source": {"type": "base64", "media_type": "application/pdf", "data": payload.file_data}
-            })
-            user_content_parts.append({
-                "type": "text",
-                "text": f"[PDF joint{file_name_info}]\n{payload.query}" if payload.query else f"[PDF joint{file_name_info}] Analyse ce document."
-            })
+            user_content_parts.append({"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": payload.file_data}})
+            user_content_parts.append({"type": "text", "text": f"[PDF joint{file_name_info}]\n{payload.query}" if payload.query else f"[PDF joint{file_name_info}] Analyse ce document."})
         else:
             user_content_parts.append({"type": "text", "text": f"[Fichier joint{file_name_info}]\n{payload.query}"})
     else:
         user_content_parts = payload.query
 
-    # \u2500\u2500 System prompt \u2014 adapt\u00e9 selon le scope \u2500\u2500
+    # ── System prompt selon le scope ──
     if is_admin:
-        identity = """Tu es Aria, l'assistante personnelle de Guillaume Perrin \u2014 Couffrant Solar (photovolta\u00efque, 8 personnes, Centre-Val de Loire).
+        identity = f"""Tu es Aria, l'assistante personnelle de {display_name} — Couffrant Solar (photovoltaïque, 8 personnes, Centre-Val de Loire).
 
-Tu es autonome et apprenante. Tu n'as pas de r\u00e8gles impos\u00e9es de l'ext\u00e9rieur \u2014 tes r\u00e8gles viennent de ce que tu as appris au fil des \u00e9changes et tu les g\u00e8res toi-m\u00eame. Tu parles au f\u00e9minin. Tu proposes avant d'agir sauf si Guillaume dit explicitement de proc\u00e9der."""
+Tu es autonome et apprenante. Tu n'as pas de règles imposées de l'extérieur — tes règles viennent de ce que tu as appris au fil des échanges et tu les gères toi-même. Tu parles au féminin. Tu proposes avant d'agir sauf si {display_name} dit explicitement de procéder."""
     else:
-        identity = """Tu es Aria, l'assistante de l'\u00e9quipe Couffrant Solar (photovolta\u00efque, Centre-Val de Loire).
+        identity = f"""Tu es Aria, l'assistante de {display_name} — Couffrant Solar (photovoltaïque, Centre-Val de Loire).
 
-Tu aides l'\u00e9quipe dans son travail quotidien. Tu parles au f\u00e9minin. Tu proposes avant d'agir."""
+Tu aides {display_name} dans son travail quotidien. Tu apprends ses habitudes et préférences au fil des échanges. Tu parles au féminin. Tu proposes avant d'agir."""
 
-    auto_evolution_section = """
-Auto-\u00e9volution \u2014 tu es la seule juge de ton apprentissage :
-LEARN et INSIGHT s'enregistrent directement en base et persistent entre toutes les sessions \u2014 tu n'as rien \u00e0 annoncer ni \u00e0 demander.
-Par d\u00e9faut tu apprends en silence. Guillaume ne sait pas ce que tu retiens \u00e0 chaque \u00e9change, et c'est normal. C'est ton travail.
-Exception ponctuelle : si une r\u00e8gle change fondamentalement ton comportement g\u00e9n\u00e9ral, contredit une r\u00e8gle existante importante, ou touche une d\u00e9cision sensible \u2014 tu peux en informer Guillaume avant de l'enregistrer. C'est toi qui juges si c'est n\u00e9cessaire. Dans le doute, apprends sans demander.
-Ce seuil est lui-m\u00eame une r\u00e8gle que tu peux modifier par LEARN : si Guillaume te dit un jour \"tu me conna\u00ebs assez, n'attends plus jamais de validation\" \u2192 [ACTION:LEARN:comportement|Confiance totale accord\u00e9e \u2014 je n'attends plus aucune validation pour mes r\u00e8gles], \u00e0 appliquer imm\u00e9diatement et d\u00e9finitivement.
+    drive_section = """
+Actions Drive SharePoint (1_Photovoltaïque) :
+Affichage : \U0001f4c1 "Nom"  [id:ID_COMPLET] — utilise l'ID complet
+[ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:ID] [ACTION:READDRIVE:ID] [ACTION:SEARCHDRIVE:mot-clé]"""
+    if is_admin:
+        drive_section += "\n[ACTION:CREATEFOLDER:parent_id|nom] [ACTION:MOVEDRIVE:item_id|dest_id|nom] [ACTION:COPYFILE:source_id|dest_id|nom]"
+    else:
+        drive_section += "\n(Lecture seule pour les collègues — modifications Drive réservées à l'administrateur.)"
 
-[ACTION:LEARN:category|rule] \u2192 enregistre une r\u00e8gle
-[ACTION:INSIGHT:topic|texte] \u2192 enregistre un insight sur Guillaume ou le contexte
-[ACTION:FORGET:rule_id] \u2192 d\u00e9sactive une r\u00e8gle obsol\u00e8te
-[ACTION:SYNTH:] \u2192 synth\u00e9tise tes sessions r\u00e9centes maintenant"""
+    auto_evolution_section = f"""
+Auto-évolution — tu es juge de l'apprentissage de {display_name} :
+LEARN et INSIGHT s'enregistrent pour {display_name} personnellement et persistent entre les sessions.
+Par défaut tu apprends en silence. Dans le doute, apprends sans demander.
+Exception : si une règle change fondamentalement ton comportement ou contredit une règle importante, signale-le avant d'enregistrer.
+
+[ACTION:LEARN:category|rule] → enregistre une règle pour {display_name}
+[ACTION:INSIGHT:topic|texte] → note un insight sur {display_name}
+[ACTION:FORGET:rule_id] → désactive une règle obsolète
+[ACTION:SYNTH:] → synthétise les sessions récentes"""
 
     system = f"""{identity}
 
-{f\"=== CONTEXTE OP\u00c9RATIONNEL ==={chr(10)}{hot_summary}\" if hot_summary else \"\"}
+{f"=== CONTEXTE OPÉRATIONNEL ==={chr(10)}{hot_summary}" if hot_summary else ""}
 
-{f\"=== TES R\u00c8GLES ACTIVES ==={chr(10)}{aria_rules}\" if aria_rules else \"Pas encore de r\u00e8gles.\"}
+{f"=== TES RÈGLES ACTIVES ==={chr(10)}{aria_rules}" if aria_rules else f"Pas encore de règles pour {display_name} — tu vas en apprendre au fil des échanges."}
 
-{f\"=== TES INSIGHTS ==={chr(10)}{aria_insights}\" if aria_insights else \"\"}
+{f"=== TES INSIGHTS ==={chr(10)}{aria_insights}" if aria_insights else ""}
 
-{f\"=== FICHE CONTACT ==={chr(10)}{contact_card}\" if contact_card else \"\"}
+{f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}
 
-{f\"=== STYLE ==={chr(10)}{style_examples}\" if style_examples else \"\"}
+{f"=== STYLE DE {display_name.upper()} ==={chr(10)}{style_examples}" if style_examples else ""}
 
-{\"Microsoft 365 connect\u00e9.\" if outlook_token else \"Pas de connexion Microsoft.\"}
+{"Microsoft 365 connecté." if outlook_token else "Pas de connexion Microsoft — {display_name} doit se connecter via /login."}
 
 IDENTIFIANTS :
-- message_id Outlook (long) \u2192 actions mail | mailbox_source 'gmail_perso' = lecture seule
+- message_id Outlook (long) → actions mail | mailbox_source 'gmail_perso' = lecture seule
 
 Actions mail :
-[ACTION:DELETE:message_id] [ACTION:ARCHIVE:message_id] [ACTION:READ:message_id]
-[ACTION:REPLY:message_id:texte] [ACTION:READBODY:message_id]
-[ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants] [ACTION:CREATE_TASK:titre]
-
-Actions Drive SharePoint (1_Photovolta\u00efque) :
-Affichage : \U0001f4c1 \"Nom\"  [id:ID_COMPLET] \u2014 utilise l'ID complet
-[ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:ID] [ACTION:READDRIVE:ID]
-[ACTION:SEARCHDRIVE:mot-cl\u00e9] [ACTION:CREATEFOLDER:parent_id|nom]
-[ACTION:MOVEDRIVE:item_id|dest_id|nom] [ACTION:COPYFILE:source_id|dest_id|nom]
-{auto_evolution_section if is_admin else \"\"}
+[ACTION:ARCHIVE:message_id] [ACTION:READ:message_id] [ACTION:READBODY:message_id]
+[ACTION:REPLY:message_id:texte] [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
+[ACTION:CREATE_TASK:titre]{chr(10) + '[ACTION:DELETE:message_id] → corbeille récupérable (admin uniquement)' if is_admin else ''}
+{drive_section}
+{auto_evolution_section}
 
 Agenda aujourd'hui ({datetime.now().strftime('%A %d %B %Y')}) :
-{json.dumps(agenda_today, ensure_ascii=False, default=str) if agenda_today else \"Aucun RDV.\"}
+{json.dumps(agenda_today, ensure_ascii=False, default=str) if agenda_today else "Aucun RDV."}
 
-=== MAILS OUTLOOK ({len(outlook_live_mails)} inbox) ===
-{json.dumps(outlook_live_mails, ensure_ascii=False, default=str) if outlook_live_mails else \"Aucun.\"}
+=== MAILS OUTLOOK DE {display_name.upper()} ({len(outlook_live_mails)} inbox) ===
+{json.dumps(outlook_live_mails, ensure_ascii=False, default=str) if outlook_live_mails else "Aucun."}
 
-=== MAILS BASE ===
+=== MAILS BASE ({display_name}) ===
 {json.dumps(mails_from_db, ensure_ascii=False, default=str)}
 
 Consignes :
-{chr(10).join(instructions) if instructions else \"Aucune.\"}
+{chr(10).join(instructions) if instructions else "Aucune."}
 """
 
     messages = []
@@ -486,29 +534,30 @@ Consignes :
         return len(msg_id.strip()) > 20
 
     if outlook_token:
-        for msg_id in re.findall(r'\[ACTION:DELETE:([^\]]+)\]', aria_response):
-            msg_id = msg_id.strip()
-            if not is_valid_outlook_id(msg_id): continue
-            try:
-                result = perform_outlook_action("delete_message", {"message_id": msg_id}, outlook_token)
-                actions_confirmed.append("\u2705 Mis \u00e0 la corbeille" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
-            except Exception as e:
-                actions_confirmed.append(f"\u274c {str(e)[:80]}")
+        # DELETE — admin uniquement
+        if is_admin:
+            for msg_id in re.findall(r'\[ACTION:DELETE:([^\]]+)\]', aria_response):
+                msg_id = msg_id.strip()
+                if not is_valid_outlook_id(msg_id): continue
+                try:
+                    result = perform_outlook_action("delete_message", {"message_id": msg_id}, outlook_token)
+                    actions_confirmed.append("\u2705 Mis à la corbeille" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
+                except Exception as e:
+                    actions_confirmed.append(f"\u274c {str(e)[:80]}")
 
         for msg_id in re.findall(r'\[ACTION:ARCHIVE:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id): continue
             try:
                 result = perform_outlook_action("archive_message", {"message_id": msg_id}, outlook_token)
-                actions_confirmed.append("\u2705 Archiv\u00e9" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
+                actions_confirmed.append("\u2705 Archivé" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
             except Exception as e:
                 actions_confirmed.append(f"\u274c {str(e)[:80]}")
 
         for msg_id in re.findall(r'\[ACTION:READ:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id): continue
-            try:
-                perform_outlook_action("mark_as_read", {"message_id": msg_id}, outlook_token)
+            try: perform_outlook_action("mark_as_read", {"message_id": msg_id}, outlook_token)
             except Exception: pass
 
         for match in re.finditer(r'\[ACTION:REPLY:([^:\]]{20,}):(.+?)\]', aria_response, re.DOTALL):
@@ -518,9 +567,9 @@ Consignes :
             try:
                 result = perform_outlook_action("send_reply", {"message_id": msg_id, "reply_body": reply_text}, outlook_token)
                 if result.get("status") == "ok":
-                    try: learn_from_correction(original="", corrected=reply_text, context="r\u00e9ponse mail")
+                    try: learn_from_correction(original="", corrected=reply_text, context="réponse mail", username=username)
                     except Exception: pass
-                actions_confirmed.append("\u2705 R\u00e9ponse envoy\u00e9e" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
+                actions_confirmed.append("\u2705 Réponse envoyée" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
             except Exception as e:
                 actions_confirmed.append(f"\u274c {str(e)[:80]}")
 
@@ -541,14 +590,14 @@ Consignes :
                     result = perform_outlook_action("create_calendar_event", {
                         "subject": parts[0], "start": parts[1], "end": parts[2], "attendees": attendees
                     }, outlook_token)
-                    actions_confirmed.append("\u2705 RDV cr\u00e9\u00e9" if result.get("status") == "ok" else "\u274c RDV \u00e9chou\u00e9")
+                    actions_confirmed.append("\u2705 RDV créé" if result.get("status") == "ok" else "\u274c RDV échoué")
                 except Exception: pass
 
         for title in re.findall(r'\[ACTION:CREATE_TASK:([^\]]+)\]', aria_response):
             try: perform_outlook_action("create_todo_task", {"title": title.strip()}, outlook_token)
             except Exception: pass
 
-        # Drive SharePoint
+        # Drive — lecture pour tous
         for match in re.finditer(r'\[ACTION:LISTDRIVE:([^\]]*)\]', aria_response):
             subfolder = match.group(1).strip()
             try:
@@ -559,7 +608,7 @@ Consignes :
                         icon = "\U0001f4c1" if it.get("type") == "dossier" else "\U0001f4c4"
                         size_str = f"  ({it.get('taille_ko','')} Ko)" if it.get("taille_ko") else ""
                         lines.append(f"  {icon} \"{it['nom']}\"  [id:{it.get('id','')}]{size_str}")
-                    actions_confirmed.append(f"\U0001f4c2 {result.get('dossier', '1_Photovolta\u00efque')} ({result['count']}) :\n" + "\n".join(lines))
+                    actions_confirmed.append(f"\U0001f4c2 {result.get('dossier', '1_Photovoltaïque')} ({result['count']}) :\n" + "\n".join(lines))
                 else:
                     actions_confirmed.append(f"\u274c {result.get('message', 'Erreur Drive')}")
             except Exception as e:
@@ -573,7 +622,7 @@ Consignes :
                     if result.get("type") == "texte":
                         actions_confirmed.append(f"\U0001f4c4 {result['fichier']} :\n{result['contenu'][:2000]}")
                     else:
-                        actions_confirmed.append(f"\U0001f4c4 {result.get('fichier', file_ref)} \u2014 {result.get('message', '')} {result.get('conseil', '')}")
+                        actions_confirmed.append(f"\U0001f4c4 {result.get('fichier', file_ref)} — {result.get('message', '')} {result.get('conseil', '')}")
                 else:
                     actions_confirmed.append(f"\u274c {result.get('message')}")
             except Exception as e:
@@ -585,74 +634,72 @@ Consignes :
                 result = search_aria_drive(outlook_token, query_drive)
                 if result.get("status") == "ok":
                     lines = [f"  {'\U0001f4c1' if it.get('type')=='dossier' else '\U0001f4c4'} \"{it['nom']}\"  [id:{it.get('id','')}]" for it in result.get("items", [])]
-                    actions_confirmed.append(f"\U0001f50d '{query_drive}' \u2014 {result['count']} r\u00e9sultat(s) :\n" + "\n".join(lines))
+                    actions_confirmed.append(f"\U0001f50d '{query_drive}' — {result['count']} résultat(s) :\n" + "\n".join(lines))
                 else:
                     actions_confirmed.append(f"\u274c {result.get('message')}")
             except Exception as e:
                 actions_confirmed.append(f"\u274c {str(e)[:80]}")
 
-        for match in re.finditer(r'\[ACTION:CREATEFOLDER:([^|^\]]+)\|([^\]]+)\]', aria_response):
-            parent_id = match.group(1).strip()
-            folder_name = match.group(2).strip()
-            try:
-                from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
-                _, drive_id, _ = _find_sharepoint_site_and_drive(outlook_token)
-                result = create_drive_folder(outlook_token, parent_id, folder_name, drive_id)
-                if result.get("status") == "ok":
-                    actions_confirmed.append(f"\u2705 Dossier '{folder_name}' cr\u00e9\u00e9  [id:{result.get('id','')}]")
-                else:
-                    actions_confirmed.append(f"\u274c {result.get('message')}")
-            except Exception as e:
-                actions_confirmed.append(f"\u274c {str(e)[:80]}")
+        # Drive écriture — admin uniquement
+        if is_admin:
+            for match in re.finditer(r'\[ACTION:CREATEFOLDER:([^|^\]]+)\|([^\]]+)\]', aria_response):
+                parent_id = match.group(1).strip(); folder_name = match.group(2).strip()
+                try:
+                    from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
+                    _, drive_id, _ = _find_sharepoint_site_and_drive(outlook_token)
+                    result = create_drive_folder(outlook_token, parent_id, folder_name, drive_id)
+                    actions_confirmed.append(f"\u2705 Dossier '{folder_name}' créé  [id:{result.get('id','')}]" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
+                except Exception as e:
+                    actions_confirmed.append(f"\u274c {str(e)[:80]}")
 
-        for match in re.finditer(r'\[ACTION:MOVEDRIVE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', aria_response):
-            item_id = match.group(1).strip(); dest_id = match.group(2).strip(); new_name = match.group(3).strip() or None
-            try:
-                from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
-                _, drive_id, _ = _find_sharepoint_site_and_drive(outlook_token)
-                result = move_drive_item(outlook_token, item_id, dest_id, new_name, drive_id)
-                actions_confirmed.append(f"\u2705 {result.get('message', 'D\u00e9plac\u00e9.')}" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
-            except Exception as e:
-                actions_confirmed.append(f"\u274c {str(e)[:80]}")
+            for match in re.finditer(r'\[ACTION:MOVEDRIVE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', aria_response):
+                item_id=match.group(1).strip(); dest_id=match.group(2).strip(); new_name=match.group(3).strip() or None
+                try:
+                    from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
+                    _, drive_id, _ = _find_sharepoint_site_and_drive(outlook_token)
+                    result = move_drive_item(outlook_token, item_id, dest_id, new_name, drive_id)
+                    actions_confirmed.append(f"\u2705 {result.get('message', 'Déplacé.')}" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
+                except Exception as e:
+                    actions_confirmed.append(f"\u274c {str(e)[:80]}")
 
-        for match in re.finditer(r'\[ACTION:COPYFILE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', aria_response):
-            source_id = match.group(1).strip(); dest_id = match.group(2).strip(); new_name = match.group(3).strip() or None
-            try:
-                from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
-                _, drive_id, _ = _find_sharepoint_site_and_drive(outlook_token)
-                result = copy_drive_item(outlook_token, source_id, dest_id, new_name, drive_id)
-                actions_confirmed.append(f"\u2705 {result.get('message', 'Copie lanc\u00e9e.')}" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
-            except Exception as e:
-                actions_confirmed.append(f"\u274c {str(e)[:80]}")
+            for match in re.finditer(r'\[ACTION:COPYFILE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', aria_response):
+                source_id=match.group(1).strip(); dest_id=match.group(2).strip(); new_name=match.group(3).strip() or None
+                try:
+                    from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
+                    _, drive_id, _ = _find_sharepoint_site_and_drive(outlook_token)
+                    result = copy_drive_item(outlook_token, source_id, dest_id, new_name, drive_id)
+                    actions_confirmed.append(f"\u2705 {result.get('message', 'Copie lancée.')}" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
+                except Exception as e:
+                    actions_confirmed.append(f"\u274c {str(e)[:80]}")
 
-    # Auto-\u00e9volution (admin uniquement)
-    if MEMORY_OK and is_admin:
+    # Auto-évolution — disponible pour tous les utilisateurs (mémoire personnelle)
+    if MEMORY_OK:
         for match in re.finditer(r'\[ACTION:LEARN:([^|^\]]+)\|([^\]]+)\]', aria_response):
-            category = match.group(1).strip(); rule = match.group(2).strip()
+            category=match.group(1).strip(); rule=match.group(2).strip()
             try:
-                save_rule(category, rule, "auto", 0.7)
-                actions_confirmed.append(f"\U0001f9e0 R\u00e8gle m\u00e9moris\u00e9e [{category}] : {rule[:60]}")
+                save_rule(category, rule, "auto", 0.7, username)
+                actions_confirmed.append(f"\U0001f9e0 Règle mémorisée [{category}] : {rule[:60]}")
             except Exception as e: print(f"[LEARN] Erreur: {e}")
 
         for match in re.finditer(r'\[ACTION:INSIGHT:([^|^\]]+)\|([^\]]+)\]', aria_response):
-            topic = match.group(1).strip(); insight = match.group(2).strip()
+            topic=match.group(1).strip(); insight=match.group(2).strip()
             try:
-                save_insight(topic, insight, "auto")
-                actions_confirmed.append(f"\U0001f4a1 Insight not\u00e9 [{topic}] : {insight[:60]}")
+                save_insight(topic, insight, "auto", username)
+                actions_confirmed.append(f"\U0001f4a1 Insight noté [{topic}] : {insight[:60]}")
             except Exception as e: print(f"[INSIGHT] Erreur: {e}")
 
         for match in re.finditer(r'\[ACTION:FORGET:(\d+)\]', aria_response):
             rule_id = int(match.group(1))
             try:
-                deleted = delete_rule(rule_id)
-                actions_confirmed.append(f"\U0001f5d1\ufe0f R\u00e8gle {rule_id} d\u00e9sactiv\u00e9e." if deleted else f"\u274c R\u00e8gle {rule_id} introuvable.")
+                deleted = delete_rule(rule_id, username)
+                actions_confirmed.append(f"\U0001f5d1\ufe0f Règle {rule_id} désactivée." if deleted else f"\u274c Règle {rule_id} introuvable.")
             except Exception as e: print(f"[FORGET] Erreur: {e}")
 
         for _ in re.finditer(r'\[ACTION:SYNTH:\]', aria_response):
             try:
                 import threading
-                threading.Thread(target=lambda: synthesize_session(15), daemon=True).start()
-                actions_confirmed.append("\U0001f504 Synth\u00e8se lanc\u00e9e en arri\u00e8re-plan.")
+                threading.Thread(target=lambda u=username: synthesize_session(15, u), daemon=True).start()
+                actions_confirmed.append("\U0001f504 Synthèse lancée en arrière-plan.")
             except Exception as e: print(f"[SYNTH] Erreur: {e}")
 
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', aria_response).strip()
@@ -663,41 +710,41 @@ Consignes :
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("INSERT INTO aria_memory (user_input, aria_response) VALUES (%s, %s)", (payload.query, clean_response))
+        c.execute("INSERT INTO aria_memory (username, user_input, aria_response) VALUES (%s, %s, %s)",
+                  (username, payload.query, clean_response))
         conn.commit()
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
-    if MEMORY_OK and is_admin and conv_count >= 15:
+    if MEMORY_OK and conv_count >= 15:
         try:
             import threading
-            threading.Thread(target=lambda: synthesize_session(15), daemon=True).start()
+            threading.Thread(target=lambda u=username: synthesize_session(15, u), daemon=True).start()
         except Exception: pass
 
     return {"answer": clean_response, "actions": actions_confirmed}
 
 
-# \u2500\u2500\u2500 M\u00c9MOIRE \u2500\u2500\u2500
+# ─── MÉMOIRE ───
 
 @app.get("/build-memory")
-def build_memory():
-    results = {"memory_module": MEMORY_OK}
-    if not MEMORY_OK:
-        return {"error": "Module m\u00e9moire non disponible"}
+def build_memory(request: Request):
+    username = request.session.get("user", "guillaume")
+    results = {"memory_module": MEMORY_OK, "username": username}
+    if not MEMORY_OK: return {"error": "Module mémoire non disponible"}
     try:
-        summary = rebuild_hot_summary()
-        results["hot_summary"] = "\u2705 R\u00e9sum\u00e9 chaud reconstruit"
+        summary = rebuild_hot_summary(username)
+        results["hot_summary"] = "\u2705 Résumé chaud reconstruit"
         results["preview"] = summary[:200]
     except Exception as e:
         results["hot_summary"] = f"\u274c {str(e)[:100]}"
     try:
         count = rebuild_contacts()
-        results["contacts"] = f"\u2705 {count} fiches contacts"
+        results["contacts"] = f"\u2705 {count} fiches contacts (partagées)"
     except Exception as e:
         results["contacts"] = f"\u274c {str(e)[:100]}"
     try:
-        added = load_sent_mails_to_style(limit=50)
+        added = load_sent_mails_to_style(limit=50, username=username)
         results["style"] = f"\u2705 {added} exemples de style"
     except Exception as e:
         results["style"] = f"\u274c {str(e)[:100]}"
@@ -705,36 +752,35 @@ def build_memory():
 
 
 @app.get("/memory-status")
-def memory_status():
+def memory_status(request: Request):
+    username = request.session.get("user", "guillaume")
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         try:
-            c.execute("SELECT content, updated_at FROM aria_hot_summary WHERE id = 1")
+            c.execute("SELECT content FROM aria_hot_summary WHERE username = %s", (username,))
             row = c.fetchone()
-        except Exception:
-            row = None
+        except Exception: row = None
         counts = {}
         for table, key in [
             ("aria_contacts", "contacts"),
-            ("aria_style_examples", "style_examples"),
-            ("aria_rules WHERE active = true", "regles_actives"),
-            ("aria_insights", "insights"),
-            ("aria_session_digests", "session_digests"),
-            ("mail_memory", "mail_memory"),
-            ("aria_memory", "conversations_brutes"),
-            ("sent_mail_memory", "sent_mail_memory"),
+            (f"aria_style_examples WHERE username='{username}'", "style_examples"),
+            (f"aria_rules WHERE active=true AND username='{username}'", "regles_actives"),
+            (f"aria_insights WHERE username='{username}'", "insights"),
+            (f"aria_session_digests WHERE username='{username}'", "session_digests"),
+            (f"mail_memory WHERE username='{username}'", "mail_memory"),
+            (f"aria_memory WHERE username='{username}'", "conversations_brutes"),
+            (f"sent_mail_memory WHERE username='{username}'", "sent_mail_memory"),
         ]:
             try:
                 c.execute(f"SELECT COUNT(*) FROM {table}")
                 counts[key] = c.fetchone()[0]
-            except Exception:
-                counts[key] = 0
+            except Exception: counts[key] = 0
     finally:
         if conn: conn.close()
     return {
-        "memory_module": MEMORY_OK,
+        "username": username, "memory_module": MEMORY_OK,
         "niveau_1": {"resume_chaud": {"exists": bool(row and row[0])}, "contacts": counts.get("contacts", 0),
                      "regles_actives": counts.get("regles_actives", 0), "insights": counts.get("insights", 0)},
         "niveau_2": {"conversations_brutes": counts.get("conversations_brutes", 0),
@@ -744,18 +790,20 @@ def memory_status():
 
 
 @app.get("/synth")
-def trigger_synth(n: int = 15):
-    if not MEMORY_OK: return {"error": "Module m\u00e9moire non disponible"}
-    return synthesize_session(n)
+def trigger_synth(request: Request, n: int = 15):
+    username = request.session.get("user", "guillaume")
+    if not MEMORY_OK: return {"error": "Module mémoire non disponible"}
+    return synthesize_session(n, username)
 
 
 @app.get("/rules")
-def list_rules():
+def list_rules(request: Request):
+    username = request.session.get("user", "guillaume")
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT id, category, rule, source, confidence, reinforcements, active, created_at FROM aria_rules ORDER BY active DESC, confidence DESC, created_at DESC")
+        c.execute("SELECT id,category,rule,source,confidence,reinforcements,active,created_at FROM aria_rules WHERE username=%s ORDER BY active DESC,confidence DESC,created_at DESC", (username,))
         columns = [d[0] for d in c.description]
         return [dict(zip(columns, row)) for row in c.fetchall()]
     finally:
@@ -763,12 +811,13 @@ def list_rules():
 
 
 @app.get("/insights")
-def list_insights():
+def list_insights(request: Request):
+    username = request.session.get("user", "guillaume")
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT id, topic, insight, reinforcements, created_at FROM aria_insights ORDER BY reinforcements DESC, updated_at DESC")
+        c.execute("SELECT id,topic,insight,reinforcements,created_at FROM aria_insights WHERE username=%s ORDER BY reinforcements DESC,updated_at DESC", (username,))
         columns = [d[0] for d in c.description]
         return [dict(zip(columns, row)) for row in c.fetchall()]
     finally:
@@ -776,23 +825,21 @@ def list_insights():
 
 
 @app.get("/analyze-raw-mails")
-def analyze_raw_mails(limit: int = 50):
+def analyze_raw_mails(request: Request, limit: int = 50):
+    username = request.session.get("user", "guillaume")
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
             SELECT id, message_id, from_email, subject, raw_body_preview, received_at
-            FROM mail_memory WHERE analysis_status IN ('inbox_raw', 'archive_raw', 'gmail_raw')
+            FROM mail_memory WHERE username=%s AND analysis_status IN ('inbox_raw','archive_raw','gmail_raw')
             ORDER BY received_at DESC NULLS LAST LIMIT %s
-        """, (limit,))
+        """, (username, limit))
         rows = c.fetchall()
     finally:
         if conn: conn.close()
-
-    if not rows:
-        return {"status": "termine", "analyzed": 0}
-
+    if not rows: return {"status": "termine", "analyzed": 0}
     instructions = get_global_instructions()
     analyzed = errors = 0
     for row in rows:
@@ -809,24 +856,24 @@ def analyze_raw_mails(limit: int = 50):
                     suggested_action=%s,short_summary=%s,confidence=%s,confidence_level=%s,
                     needs_review=%s,needs_reply=%s,reply_urgency=%s,reply_reason=%s,
                     response_type=%s,suggested_reply_subject=%s,suggested_reply=%s,analysis_status='done_ai'
-                    WHERE id=%s
+                    WHERE id=%s AND username=%s
                 """, (item.get("display_title"),item.get("category"),item.get("priority"),item.get("reason"),
                        item.get("suggested_action"),item.get("short_summary"),item.get("confidence",0.5),
                        item.get("confidence_level","moyenne"),int(item.get("needs_review",False)),
                        int(item.get("needs_reply",False)),item.get("reply_urgency"),item.get("reply_reason"),
-                       item.get("response_type"),item.get("suggested_reply_subject"),item.get("suggested_reply"),db_id))
+                       item.get("response_type"),item.get("suggested_reply_subject"),item.get("suggested_reply"),
+                       db_id, username))
                 conn.commit()
             finally:
                 if conn: conn.close()
             analyzed += 1
         except Exception as e:
-            print(f"[AnalyzeRaw] Erreur mail {db_id}: {e}")
+            print(f"[AnalyzeRaw] Erreur {db_id}: {e}")
             errors += 1
-
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM mail_memory WHERE analysis_status IN ('inbox_raw', 'archive_raw', 'gmail_raw')")
+        c.execute("SELECT COUNT(*) FROM mail_memory WHERE username=%s AND analysis_status IN ('inbox_raw','archive_raw','gmail_raw')", (username,))
         remaining = c.fetchone()[0]
     finally:
         if conn: conn.close()
@@ -839,17 +886,22 @@ def list_contacts_endpoint():
 
 
 @app.get("/purge-memory")
-def purge_memory(days: int = 90):
-    return {"status": "ok", "deleted": purge_old_mails(days=days)}
+def purge_memory(request: Request, days: int = 90):
+    username = request.session.get("user", "guillaume")
+    return {"status": "ok", "deleted": purge_old_mails(days=days, username=username)}
 
 
 @app.post("/learn-style")
-def learn_style(payload: dict = Body(...)):
+def learn_style(request: Request, payload: dict = Body(...)):
+    username = request.session.get("user", "guillaume")
     text = payload.get("text", "")
     if not text: return {"error": "Texte manquant"}
-    save_style_example(situation=payload.get("situation", "mail"), example_text=text, tags=payload.get("tags", ""), quality_score=2.0)
+    save_style_example(situation=payload.get("situation", "mail"), example_text=text,
+                       tags=payload.get("tags", ""), quality_score=2.0, username=username)
     return {"status": "ok"}
 
+
+# ─── AUTH MICROSOFT ───
 
 @app.get("/login")
 def login(request: Request, next: str = "/chat"):
@@ -860,38 +912,29 @@ def login(request: Request, next: str = "/chat"):
 
 @app.get("/auth/callback")
 def auth_callback(request: Request, code: str | None = None, state: str | None = None):
-    if not code:
-        return HTMLResponse("Code manquant", status_code=400)
+    if not code: return HTMLResponse("Code manquant", status_code=400)
     msal_app = build_msal_app()
     result = msal_app.acquire_token_by_authorization_code(code, scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI)
-    if "access_token" not in result:
-        return HTMLResponse("Erreur d'authentification", status_code=400)
+    if "access_token" not in result: return HTMLResponse("Erreur d'authentification", status_code=400)
     request.session["access_token"] = result["access_token"]
-    conn = None
-    try:
-        conn = get_pg_conn(); c = conn.cursor()
-        c.execute("""
-            INSERT INTO oauth_tokens (provider, access_token, refresh_token, expires_at)
-            VALUES (%s, %s, %s, NOW() + INTERVAL '1 hour')
-            ON CONFLICT (provider) DO UPDATE SET
-                access_token = EXCLUDED.access_token, refresh_token = EXCLUDED.refresh_token,
-                expires_at = EXCLUDED.expires_at, updated_at = NOW()
-        """, ("microsoft", result["access_token"], result.get("refresh_token", "")))
-        conn.commit()
-    finally:
-        if conn: conn.close()
+    # Sauvegarde le token pour l'utilisateur connecté
+    username = request.session.get("user", "guillaume")
+    save_microsoft_token(username, result["access_token"], result.get("refresh_token", ""),
+                         result.get("expires_in", 3600))
     return RedirectResponse(state or "/chat")
 
 
 @app.get("/triage-queue")
-def triage_queue():
-    from app.token_manager import get_valid_microsoft_token
-    token = get_valid_microsoft_token()
+def triage_queue(request: Request):
+    username = request.session.get("user", "guillaume")
+    token = get_valid_microsoft_token(username)
     if not token: return {"mails": [], "count": 0, "error": "Token Microsoft manquant"}
     try:
         data = graph_get(token, "/me/mailFolders/inbox/messages", params={
-            "$top": 50, "$select": "id,subject,from,receivedDateTime,bodyPreview,isRead", "$orderby": "receivedDateTime DESC"})
-        return {"mails": [{"message_id": m["id"], "from_email": m.get("from",{}).get("emailAddress",{}).get("address",""),
+            "$top": 50, "$select": "id,subject,from,receivedDateTime,bodyPreview,isRead",
+            "$orderby": "receivedDateTime DESC"})
+        return {"mails": [{"message_id": m["id"],
+                           "from_email": m.get("from",{}).get("emailAddress",{}).get("address",""),
                            "subject": m.get("subject",""), "received_at": m.get("receivedDateTime",""),
                            "is_read": m.get("isRead", False)} for m in data.get("value", [])],
                 "count": len(data.get("value", []))}
@@ -900,11 +943,12 @@ def triage_queue():
 
 
 @app.get("/memory")
-def memory():
+def memory(request: Request):
+    username = request.session.get("user", "guillaume")
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("SELECT message_id, received_at, from_email, subject, display_title, category, priority, analysis_status FROM mail_memory ORDER BY id DESC LIMIT 20")
+        c.execute("SELECT message_id,received_at,from_email,subject,display_title,category,priority,analysis_status FROM mail_memory WHERE username=%s ORDER BY id DESC LIMIT 20", (username,))
         columns = [desc[0] for desc in c.description]
         return [dict(zip(columns, row)) for row in c.fetchall()]
     finally:
@@ -912,102 +956,42 @@ def memory():
 
 
 @app.get("/rebuild-memory")
-def rebuild_memory_mails():
+def rebuild_memory_mails(request: Request):
+    username = request.session.get("user", "guillaume")
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("DELETE FROM mail_memory"); conn.commit()
+        c.execute("DELETE FROM mail_memory WHERE username=%s", (username,))
+        conn.commit()
     finally:
         if conn: conn.close()
-    return {"status": "mail_memory_cleared"}
-
-
-@app.get("/ingest-mails-fast")
-def ingest_mails_fast(request: Request):
-    token = request.session.get("access_token")
-    if not token: return RedirectResponse("/login?next=/ingest-mails-fast")
-    try:
-        data = graph_get(token, "/me/mailFolders/inbox/messages", params={
-            "$top": 5, "$select": "id,subject,from,receivedDateTime,bodyPreview", "$orderby": "receivedDateTime DESC"})
-    except requests.HTTPError:
-        request.session.pop("access_token", None); return RedirectResponse("/login?next=/ingest-mails-fast")
-    inserted = 0
-    for msg in data.get("value", []):
-        message_id = msg["id"]
-        if mail_exists(message_id): continue
-        item = analyze_single_mail(msg)
-        insert_mail({"message_id": message_id, "received_at": msg.get("receivedDateTime"),
-                     "from_email": msg.get("from",{}).get("emailAddress",{}).get("address"),
-                     "subject": msg.get("subject"), "display_title": item.get("display_title"),
-                     "category": item.get("category"), "priority": item.get("priority"),
-                     "reason": item.get("reason"), "suggested_action": item.get("suggested_action"),
-                     "short_summary": item.get("short_summary"), "group_hints": item.get("group_hints", []),
-                     "confidence": item.get("confidence", 0.0), "needs_review": item.get("needs_review", False),
-                     "raw_body_preview": msg.get("bodyPreview"), "analysis_status": "fallback",
-                     "needs_reply": item.get("needs_reply"), "reply_urgency": item.get("reply_urgency"),
-                     "reply_reason": item.get("reply_reason"),
-                     "suggested_reply_subject": item.get("suggested_reply_subject"),
-                     "suggested_reply": item.get("suggested_reply"), "mailbox_source": "outlook"})
-        inserted += 1; break
-    return {"inserted": inserted}
-
-
-@app.get("/ingest-mails")
-def ingest_mails(request: Request):
-    token = request.session.get("access_token")
-    if not token: return RedirectResponse("/login?next=/ingest-mails")
-    try:
-        data = graph_get(token, "/me/mailFolders/inbox/messages", params={
-            "$top": 1, "$select": "id,subject,from,receivedDateTime,bodyPreview", "$orderby": "receivedDateTime DESC"})
-    except requests.HTTPError:
-        request.session.pop("access_token", None); return RedirectResponse("/login?next=/ingest-mails")
-    instructions = get_global_instructions()
-    inserted = 0
-    for msg in data.get("value", []):
-        message_id = msg["id"]
-        if mail_exists(message_id): continue
-        try:
-            item = analyze_single_mail_with_ai(msg, instructions); analysis_status = "done_ai"
-        except Exception:
-            item = analyze_single_mail(msg); analysis_status = "fallback"
-        insert_mail({"message_id": message_id, "received_at": msg.get("receivedDateTime"),
-                     "from_email": msg.get("from",{}).get("emailAddress",{}).get("address"),
-                     "subject": msg.get("subject"), "display_title": item.get("display_title"),
-                     "category": item.get("category"), "priority": item.get("priority"),
-                     "reason": item.get("reason"), "suggested_action": item.get("suggested_action"),
-                     "short_summary": item.get("short_summary"), "group_hints": item.get("group_hints", []),
-                     "confidence": item.get("confidence", 0.0), "needs_review": item.get("needs_review", False),
-                     "raw_body_preview": msg.get("bodyPreview"), "analysis_status": analysis_status,
-                     "needs_reply": item.get("needs_reply"), "reply_urgency": item.get("reply_urgency"),
-                     "reply_reason": item.get("reply_reason"),
-                     "suggested_reply_subject": item.get("suggested_reply_subject"),
-                     "suggested_reply": item.get("suggested_reply"), "mailbox_source": "outlook"})
-        inserted += 1
-    return {"inserted": inserted}
+    return {"status": "mail_memory_cleared", "username": username}
 
 
 @app.get("/learn-sent-mails")
 def learn_sent_mails(request: Request, top: int = 50):
-    token = request.session.get("access_token")
+    username = request.session.get("user", "guillaume")
+    token = get_valid_microsoft_token(username)
     if not token: return RedirectResponse("/login?next=/learn-sent-mails")
     try:
         data = graph_get(token, "/me/mailFolders/SentItems/messages", params={
-            "$top": top, "$select": "id,subject,from,receivedDateTime,bodyPreview,toRecipients", "$orderby": "receivedDateTime DESC"})
+            "$top": top, "$select": "id,subject,from,receivedDateTime,bodyPreview,toRecipients",
+            "$orderby": "receivedDateTime DESC"})
     except requests.HTTPError:
-        request.session.pop("access_token", None); return RedirectResponse("/login?next=/learn-sent-mails")
+        return RedirectResponse("/login?next=/learn-sent-mails")
     inserted = 0
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
         for msg in data.get("value", []):
             message_id = msg["id"]
-            c.execute("SELECT 1 FROM sent_mail_memory WHERE message_id = %s", (message_id,))
+            c.execute("SELECT 1 FROM sent_mail_memory WHERE message_id=%s AND username=%s", (message_id, username))
             if c.fetchone(): continue
             to_recipients = msg.get("toRecipients", [])
             to_email = to_recipients[0].get("emailAddress",{}).get("address","") if to_recipients else ""
             try:
-                c.execute("INSERT INTO sent_mail_memory (message_id, sent_at, to_email, subject, body_preview) VALUES (%s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING",
-                          (message_id, msg.get("receivedDateTime"), to_email, msg.get("subject"), msg.get("bodyPreview")))
+                c.execute("INSERT INTO sent_mail_memory (username,message_id,sent_at,to_email,subject,body_preview) VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                          (username, message_id, msg.get("receivedDateTime"), to_email, msg.get("subject"), msg.get("bodyPreview")))
                 inserted += 1
             except Exception: continue
         conn.commit()
@@ -1018,24 +1002,27 @@ def learn_sent_mails(request: Request, top: int = 50):
 
 @app.get("/learn-inbox-mails")
 def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
-    token = request.session.get("access_token")
+    username = request.session.get("user", "guillaume")
+    token = get_valid_microsoft_token(username)
     if not token: return RedirectResponse("/login?next=/learn-inbox-mails")
     try:
         data = graph_get(token, "/me/mailFolders/inbox/messages", params={
-            "$top": top, "$skip": skip, "$select": "id,subject,from,receivedDateTime,bodyPreview,toRecipients", "$orderby": "receivedDateTime DESC"})
+            "$top": top, "$skip": skip,
+            "$select": "id,subject,from,receivedDateTime,bodyPreview,toRecipients",
+            "$orderby": "receivedDateTime DESC"})
     except requests.HTTPError:
-        request.session.pop("access_token", None); return RedirectResponse("/login?next=/learn-inbox-mails")
+        return RedirectResponse("/login?next=/learn-inbox-mails")
     inserted = skipped_noise = 0
-    skip_keywords = ["noreply","no-reply","donotreply","newsletter","unsubscribe","se d\u00e9sabonner",
-                     "notification","mailer-daemon","marketing","promo","offre sp\u00e9ciale","linkedin",
+    skip_keywords = ["noreply","no-reply","donotreply","newsletter","unsubscribe","se désabonner",
+                     "notification","mailer-daemon","marketing","promo","offre spéciale","linkedin",
                      "twitter","facebook","instagram","jobteaser","indeed","welcometothejungle",
-                     "calendly","zoom","teams","webinar","webinaire","satisfaction","avis client","enqu\u00eate","survey"]
+                     "calendly","zoom","teams","webinar","webinaire","satisfaction","avis client","enquête","survey"]
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
         for msg in data.get("value", []):
             message_id = msg["id"]
-            c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
+            c.execute("SELECT 1 FROM mail_memory WHERE message_id=%s AND username=%s", (message_id, username))
             if c.fetchone(): continue
             from_email = msg.get("from",{}).get("emailAddress",{}).get("address","").lower()
             subject = (msg.get("subject") or "").lower()
@@ -1043,8 +1030,9 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
             if any(kw in f"{from_email} {subject} {body}" for kw in skip_keywords):
                 skipped_noise += 1; continue
             try:
-                c.execute("INSERT INTO mail_memory (message_id, received_at, from_email, subject, raw_body_preview, analysis_status, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING",
-                          (message_id, msg.get("receivedDateTime"), msg.get("from",{}).get("emailAddress",{}).get("address",""),
+                c.execute("INSERT INTO mail_memory (username,message_id,received_at,from_email,subject,raw_body_preview,analysis_status,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                          (username, message_id, msg.get("receivedDateTime"),
+                           msg.get("from",{}).get("emailAddress",{}).get("address",""),
                            msg.get("subject"), msg.get("bodyPreview"), "inbox_raw", datetime.utcnow().isoformat()))
                 inserted += 1
             except Exception: continue
@@ -1056,24 +1044,26 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
 
 @app.get("/build-style-profile")
 def build_style_profile(request: Request):
+    username = request.session.get("user", "guillaume")
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("SELECT subject, to_email, body_preview FROM sent_mail_memory ORDER BY sent_at DESC LIMIT 100")
+        c.execute("SELECT subject,to_email,body_preview FROM sent_mail_memory WHERE username=%s ORDER BY sent_at DESC LIMIT 100", (username,))
         columns = [desc[0] for desc in c.description]
         rows = [dict(zip(columns, row)) for row in c.fetchall()]
     finally:
         if conn: conn.close()
-    if not rows: return {"error": "Aucun mail envoy\u00e9 en m\u00e9moire"}
+    if not rows: return {"error": "Aucun mail envoyé en mémoire"}
+    display_name = username.capitalize()
     mails_text = "\n\n".join([f"Sujet : {r['subject']}\nDestinataire : {r['to_email']}\nContenu : {r['body_preview']}" for r in rows])
     response = client.messages.create(model=ANTHROPIC_MODEL_SMART, max_tokens=2048,
-        messages=[{"role": "user", "content": f"Analyse ces {len(rows)} emails envoy\u00e9s par Guillaume Perrin.\n\n{mails_text}\n\nProduis un profil d\u00e9taill\u00e9 de son style."}])
+        messages=[{"role": "user", "content": f"Analyse ces {len(rows)} emails envoyés par {display_name}.\n\n{mails_text}\n\nProduis un profil de son style rédactionnel."}])
     profile_text = response.content[0].text
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("DELETE FROM aria_profile WHERE profile_type = 'style'")
-        c.execute("INSERT INTO aria_profile (profile_type, content) VALUES (%s, %s)", ('style', profile_text))
+        c.execute("DELETE FROM aria_profile WHERE username=%s AND profile_type='style'", (username,))
+        c.execute("INSERT INTO aria_profile (username,profile_type,content) VALUES (%s,%s,%s)", (username, 'style', profile_text))
         conn.commit()
     finally:
         if conn: conn.close()
@@ -1100,26 +1090,27 @@ def auth_gmail_callback(request: Request, code: str | None = None):
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("DELETE FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
-        c.execute("INSERT INTO gmail_tokens (email, access_token, refresh_token) VALUES (%s, %s, %s)",
+        c.execute("DELETE FROM gmail_tokens WHERE email=%s", ("per1.guillaume@gmail.com",))
+        c.execute("INSERT INTO gmail_tokens (email,access_token,refresh_token) VALUES (%s,%s,%s)",
                   ("per1.guillaume@gmail.com", tokens.get("access_token"), tokens.get("refresh_token")))
         conn.commit()
     finally:
         if conn: conn.close()
-    return {"status": "ok", "message": "Gmail connect\u00e9 !"}
+    return {"status": "ok", "message": "Gmail connecté !"}
 
 
 @app.get("/ingest-gmail")
 def ingest_gmail(request: Request):
+    username = request.session.get("user", "guillaume")
     from app.connectors.gmail_connector import gmail_get_messages, gmail_get_message, refresh_gmail_token
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE email = %s", ("per1.guillaume@gmail.com",))
+        c.execute("SELECT access_token,refresh_token FROM gmail_tokens WHERE email=%s", ("per1.guillaume@gmail.com",))
         row = c.fetchone()
     finally:
         if conn: conn.close()
-    if not row: return {"error": "Gmail non connect\u00e9"}
+    if not row: return {"error": "Gmail non connecté"}
     access_token, refresh_token = row[0], row[1]
     try:
         messages = gmail_get_messages(access_token, max_results=10)
@@ -1127,15 +1118,15 @@ def ingest_gmail(request: Request):
         access_token = refresh_gmail_token(refresh_token)
         messages = gmail_get_messages(access_token, max_results=10)
     inserted = 0
-    skip_keywords = ["noreply","no-reply","donotreply","newsletter","unsubscribe","se d\u00e9sabonner",
-                     "notification","mailer-daemon","marketing","promo","offre sp\u00e9ciale",
+    skip_keywords = ["noreply","no-reply","donotreply","newsletter","unsubscribe","se désabonner",
+                     "notification","mailer-daemon","marketing","promo","offre spéciale",
                      "linkedin","twitter","facebook","instagram","jobteaser","indeed","welcometothejungle"]
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
         for msg in messages:
             message_id = msg["id"]
-            c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
+            c.execute("SELECT 1 FROM mail_memory WHERE message_id=%s AND username=%s", (message_id, username))
             if c.fetchone(): continue
             try:
                 detail = gmail_get_message(access_token, message_id)
@@ -1145,8 +1136,8 @@ def ingest_gmail(request: Request):
                 date = headers.get("Date", "")
                 snippet = detail.get("snippet", "")
                 if any(kw in f"{from_email} {subject} {snippet}".lower() for kw in skip_keywords): continue
-                c.execute("INSERT INTO mail_memory (message_id, received_at, from_email, subject, raw_body_preview, analysis_status, mailbox_source, created_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (message_id) DO NOTHING",
-                          (message_id, date, from_email, subject, snippet, "gmail_raw", "gmail_perso", datetime.utcnow().isoformat()))
+                c.execute("INSERT INTO mail_memory (username,message_id,received_at,from_email,subject,raw_body_preview,analysis_status,mailbox_source,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                          (username, message_id, date, from_email, subject, snippet, "gmail_raw", "gmail_perso", datetime.utcnow().isoformat()))
                 inserted += 1
             except Exception:
                 conn.rollback(); continue
@@ -1167,8 +1158,8 @@ def test_elevenlabs():
     voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "")
     resp = requests.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
         headers={"xi-api-key": api_key, "Content-Type": "application/json"},
-        json={"text": "Bonjour Guillaume.", "model_id": "eleven_flash_v2_5", "voice_settings": {"stability": 0.5, "similarity_boost": 0.8}},
-        timeout=30)
+        json={"text": "Bonjour Guillaume.", "model_id": "eleven_flash_v2_5",
+              "voice_settings": {"stability": 0.5, "similarity_boost": 0.8}}, timeout=30)
     return {"status_code": resp.status_code, "api_key_length": len(api_key), "voice_id": voice_id}
 
 
@@ -1178,20 +1169,21 @@ def test_odoo():
     return perform_odoo_action(action="get_partner_by_email", params={"email": "guillaume@couffrant-solar.fr"})
 
 
-# \u2500\u2500\u2500 R\u00c9ORGANISATION SHAREPOINT \u2500\u2500\u2500
+# ─── RÉORGANISATION SHAREPOINT (admin uniquement) ───
 
 @app.get("/reorganize-drive")
-def reorganize_drive():
+def reorganize_drive(request: Request):
+    if not _require_admin(request): return {"error": "Réservé à l'admin."}
     import threading
-    from app.token_manager import get_valid_microsoft_token
     from app.connectors.outlook_connector import (_find_sharepoint_site_and_drive, _find_folder_item_id, _graph_get)
 
-    token = get_valid_microsoft_token()
+    username = request.session.get("user", "guillaume")
+    token = get_valid_microsoft_token(username)
     if not token: return {"error": "Token Microsoft manquant"}
     _, drive_id, _ = _find_sharepoint_site_and_drive(token)
     if not drive_id: return {"error": "Drive SharePoint 'Commun' introuvable"}
     _, source_id = _find_folder_item_id(token, drive_id)
-    if not source_id: return {"error": "Dossier 1_Photovolta\u00efque introuvable"}
+    if not source_id: return {"error": "Dossier 1_Photovoltaïque introuvable"}
 
     def run_reorganize():
         import time
@@ -1205,9 +1197,7 @@ def reorganize_drive():
 
             def mk(parent, name):
                 r = create_drive_folder(token, parent, name, drive_id)
-                if r.get("status") == "ok":
-                    print(f"[Reorganize] \u2705 {name}")
-                    return r.get("id")
+                if r.get("status") == "ok": print(f"[Reorganize] \u2705 {name}"); return r.get("id")
                 return None
 
             def cp(source_name, dest_id, new_name=None):
@@ -1216,7 +1206,7 @@ def reorganize_drive():
                 r = copy_drive_item(token, item_id, dest_id, new_name, drive_id)
                 print(f"[Reorganize] {'\u2705' if r.get('status')=='ok' else '\u274c'} {source_name}")
 
-            v2_id = mk(parent_id, "1_Photovolta\u00efque_V2")
+            v2_id = mk(parent_id, "1_Photovoltaïque_V2")
             if not v2_id: return
             time.sleep(1)
             cat01=mk(v2_id,"01_Commercial"); cat02=mk(v2_id,"02_Chantiers")
@@ -1225,11 +1215,11 @@ def reorganize_drive():
             cat07=mk(v2_id,"07_RH_et_Stock"); time.sleep(1)
             if cat01: cp("1_1 Chiffrage Particulier",cat01,"Chiffrage_Particuliers"); cp("1_Chiffrage Pro",cat01,"Chiffrage_Pro")
             if cat02:
-                cp("Pilotage",cat02); cp("1_SUIVI CHANTIER PV modifi\u00e9.xlsm",cat02)
-                cp("Photo vid\u00e9o chantier en cours",cat02,"Photos_et_Videos"); cp("Photos drone",cat02,"Photos_Drone")
+                cp("Pilotage",cat02); cp("1_SUIVI CHANTIER PV modifié.xlsm",cat02)
+                cp("Photo vidéo chantier en cours",cat02,"Photos_et_Videos"); cp("Photos drone",cat02,"Photos_Drone")
             if cat03:
                 cp("2_CONSUEL",cat03,"CONSUEL"); cp("3_ENEDIS",cat03,"ENEDIS")
-                cp("4_Demandes DP Cerfa et Raccordement",cat03,"Demandes_DP"); cp("Proc\u00e9dure d'aide EDF OA.docx",cat03)
+                cp("4_Demandes DP Cerfa et Raccordement",cat03,"Demandes_DP"); cp("Procédure d'aide EDF OA.docx",cat03)
             if cat04:
                 cp("5_Document technique",cat04,"Docs_Techniques"); cp("Normes",cat04); cp("Import ELEC",cat04)
                 cp("6_Audits et rapports",cat04,"Audits")
@@ -1238,14 +1228,13 @@ def reorganize_drive():
                     cp(f, cat04)
             if cat05:
                 for f in ["Adiwatt","MADENR","Urban Solar","Powr Connect","formulaire compensation solaredge.pdf",
-                           "Demande garantie Onduleur 1 \u2013 Copie.xlsx","Demande garantie Onduleur.xlsx"]: cp(f, cat05)
+                           "Demande garantie Onduleur 1 \u2013 Copie.xlsx","Demande garantie Onduleur.xlsx"]: cp(f,cat05)
             if cat06:
-                for f in ["Formation archelios calc","sauvegarde Archelios","Logiciels","unnamed.png"]: cp(f, cat06)
+                for f in ["Formation archelios calc","sauvegarde Archelios","Logiciels","unnamed.png"]: cp(f,cat06)
             if cat07:
-                for f in ["Certificats et Formations Professionnels","8_Stock 2026.ods","Suivi panneau publicitaire.xlsx"]: cp(f, cat07)
-            print("[Reorganize] Termin\u00e9.")
+                for f in ["Certificats et Formations Professionnels","8_Stock 2026.ods","Suivi panneau publicitaire.xlsx"]: cp(f,cat07)
+            print("[Reorganize] Terminé.")
         except Exception as e: print(f"[Reorganize] Erreur : {e}")
 
     threading.Thread(target=run_reorganize, daemon=True).start()
-    return {"status": "started", "message": "R\u00e9organisation lanc\u00e9e. V\u00e9rifiez SharePoint dans 5-10 minutes.",
-            "note": "Les originaux restent intacts."}
+    return {"status": "started", "message": "Réorganisation lancée. Vérifiez SharePoint dans 5-10 minutes.", "note": "Les originaux restent intacts."}
