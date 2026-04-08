@@ -30,8 +30,11 @@ try:
     from app.memory_manager import (
         get_hot_summary, rebuild_hot_summary,
         get_contact_card, get_all_contact_cards, rebuild_contacts,
-        get_style_examples, save_style_example, learn_from_correction, load_sent_mails_to_style,
-        purge_old_mails
+        get_style_examples, save_style_example, learn_from_correction,
+        load_sent_mails_to_style, purge_old_mails,
+        get_aria_rules, save_rule, delete_rule,
+        get_aria_insights, save_insight,
+        synthesize_session,
     )
     MEMORY_OK = True
 except Exception as _mem_err:
@@ -47,6 +50,12 @@ except Exception as _mem_err:
     def learn_from_correction(**kwargs): pass
     def load_sent_mails_to_style(**kwargs): return 0
     def purge_old_mails(**kwargs): return 0
+    def get_aria_rules(): return ""
+    def save_rule(*a, **kw): return 0
+    def delete_rule(*a): return False
+    def get_aria_insights(**kwargs): return ""
+    def save_insight(*a, **kw): return 0
+    def synthesize_session(**kwargs): return {}
 
 
 app = FastAPI(title="Couffrant Solar Assistant")
@@ -208,7 +217,7 @@ def aria(payload: AriaQuery):
         columns = [desc[0] for desc in c.description]
         mails_from_db = [dict(zip(columns, row)) for row in c.fetchall()]
 
-        c.execute("SELECT user_input, aria_response FROM aria_memory ORDER BY id DESC LIMIT 8")
+        c.execute("SELECT user_input, aria_response FROM aria_memory ORDER BY id DESC LIMIT 6")
         columns = [desc[0] for desc in c.description]
         history = [dict(zip(columns, row)) for row in c.fetchall()]
         history.reverse()
@@ -216,11 +225,20 @@ def aria(payload: AriaQuery):
         c.execute("SELECT content FROM aria_profile WHERE profile_type = 'style' ORDER BY id DESC LIMIT 1")
         profile_row = c.fetchone()
         profile = profile_row[0] if profile_row else ""
+
+        # Nombre de conversations en base (pour déclenchement auto-synthèse)
+        c.execute("SELECT COUNT(*) FROM aria_memory")
+        conv_count = c.fetchone()[0]
     finally:
         if conn:
             conn.close()
 
+    # Chargement mémoire niveau 1
     hot_summary = get_hot_summary()
+    aria_rules = get_aria_rules()
+    aria_insights = get_aria_insights(limit=6)
+
+    # Fiche contact contextuelle
     contact_card = ""
     query_lower = payload.query.lower()
     known_contacts = ["arlène", "arlene", "sabrina", "benoit", "maxence", "pinto", "enedis",
@@ -230,6 +248,7 @@ def aria(payload: AriaQuery):
             contact_card = get_contact_card(name)
             if contact_card:
                 break
+
     style_examples = get_style_examples(
         context=payload.query[:100] if any(w in query_lower for w in ["répond", "rédige", "écris", "mail"]) else ""
     )
@@ -293,67 +312,55 @@ def aria(payload: AriaQuery):
     else:
         user_content_parts = payload.query
 
-    system = f"""Tu es Aria, l'assistante personnelle de Guillaume Perrin, dirigeant de Couffrant Solar.
+    # ── SYSTEM PROMPT ──
+    # Pas de règles codées en dur. Aria charge ses propres règles depuis la base.
+    # Elle est autonome et apprenante.
+    system = f"""Tu es Aria, l'assistante de Guillaume Perrin — Couffrant Solar (photovoltaïque, 8 personnes, Centre-Val de Loire).
 
-Guillaume dirige une PME de 8 personnes dans le photovoltaïque. Direct, efficace, déteste les réponses longues inutiles. Il te tutoie. Tu parles au féminin.
+Tu es autonome et apprenante. Tu n'as pas de règles imposées de l'extérieur — tes règles de fonctionnement viennent de ce que tu as appris au fil des échanges et tu les gères toi-même. Tu parles au féminin. Tu proposes avant d'agir sauf si Guillaume dit explicitement de procéder.
 
-Profil Guillaume :
-{profile[:600] if profile else "Profil en cours de construction."}
+{f"=== CONTEXTE OPÉRATIONNEL ==={chr(10)}{hot_summary}" if hot_summary else ""}
 
-{f"=== SITUATION ACTUELLE ==={chr(10)}{hot_summary}" if hot_summary else ""}
+{f"=== TES RÈGLES ACTIVES ==={chr(10)}{aria_rules}" if aria_rules else "Pas encore de règles — tu vas en apprendre au fil des échanges."}
+
+{f"=== TES INSIGHTS SUR GUILLAUME ==={chr(10)}{aria_insights}" if aria_insights else ""}
 
 {f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}
 
-{f"=== EXEMPLES DE STYLE ==={chr(10)}{style_examples}" if style_examples else ""}
+{f"=== STYLE DE GUILLAUME ==={chr(10)}{style_examples}" if style_examples else ""}
 
-Règles :
-- Réponds naturellement, sans structure imposée.
-- Si Guillaume dit "oui", "vas-y", "fais-le" → exécute la dernière action proposée.
-- Ne dis jamais "c'est fait" sans confirmation API réelle.
-- Tu es rigoureuse : quand on te demande les mails urgents, tu TOUS les signales sans en oublier.
-- Tu proposes toujours, Guillaume décide toujours — aucune action sans validation explicite.
+{"Microsoft 365 connecté." if outlook_token else "Pas de connexion Microsoft."}
 
-{"Accès complet Microsoft 365." if outlook_token else "Pas de connexion Microsoft."}
+IDENTIFIANTS :
+- message_id Outlook (long) → actions mail | mailbox_source 'gmail_perso' = lecture seule
 
-IDENTIFIANTS — CRITIQUE :
-- `message_id` : longue chaîne Outlook → TOUJOURS pour les actions mail
-- `db_id` : entier court → JAMAIS pour les actions
-- `mailbox_source` : "outlook" (actions OK) | "gmail_perso" (lecture seule)
+Actions mail :
+[ACTION:DELETE:message_id] [ACTION:ARCHIVE:message_id] [ACTION:READ:message_id]
+[ACTION:REPLY:message_id:texte] [ACTION:READBODY:message_id]
+[ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants] [ACTION:CREATE_TASK:titre]
 
-Actions Outlook :
-- [ACTION:DELETE:message_id] → corbeille récupérable
-- [ACTION:ARCHIVE:message_id]
-- [ACTION:READ:message_id]
-- [ACTION:REPLY:message_id:texte]
-- [ACTION:READBODY:message_id]
-- [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
-- [ACTION:CREATE_TASK:titre]
+Actions Drive SharePoint (1_Photovoltaïque) :
+Affichage : 📁 "Nom"  [id:ID_COMPLET] — utilise l'ID complet
+[ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:ID] [ACTION:READDRIVE:ID]
+[ACTION:SEARCHDRIVE:mot-clé] [ACTION:CREATEFOLDER:parent_id|nom]
+[ACTION:MOVEDRIVE:item_id|dest_id|nom] [ACTION:COPYFILE:source_id|dest_id|nom]
 
-Actions Drive SharePoint (dossier 1_Photovoltaïque uniquement) :
-Le résultat de LISTDRIVE affiche : 📁 "Nom_Dossier"  [id:ID_COMPLET]
-- [ACTION:LISTDRIVE:] → liste la racine
-- [ACTION:LISTDRIVE:nom_dossier] → liste par nom (fragile avec accents)
-- [ACTION:LISTDRIVE:ID_COMPLET] → liste par ID — TOUJOURS préférer l'ID après un premier LISTDRIVE
-- [ACTION:READDRIVE:ID_COMPLET] → lit un fichier par son ID
-- [ACTION:SEARCHDRIVE:mot-clé] → recherche par nom
-- [ACTION:CREATEFOLDER:parent_id|nom_dossier] → crée un dossier
-- [ACTION:MOVEDRIVE:item_id|dest_folder_id|nouveau_nom] → déplace un item (le fichier change de place, sans copie)
-- [ACTION:COPYFILE:source_id|dest_folder_id|nouveau_nom] → copie un item
-
-RÈGLE DRIVE ABSOLUE : L'id affiché entre [id:...] est l'identifiant unique. Ne jamais construire de chemin texte avec des accents. Utilise l'id.
-
-Propose avant d'agir, SAUF si Guillaume dit "fais-le", "vas-y", "oui".
+Auto-évolution — utilise ces actions librement quand tu apprends quelque chose :
+[ACTION:LEARN:category|rule] → tu retiens une règle ou préférence (category : comportement/style/métier/préférence)
+[ACTION:INSIGHT:topic|texte] → tu notes un insight sur Guillaume ou le contexte
+[ACTION:FORGET:rule_id] → tu désactives une règle obsolète (l'id est dans tes règles actives)
+[ACTION:SYNTH:] → tu déclenches maintenant la synthèse de tes sessions récentes
 
 Agenda aujourd'hui ({datetime.now().strftime('%A %d %B %Y')}) :
 {json.dumps(agenda_today, ensure_ascii=False, default=str) if agenda_today else "Aucun RDV."}
 
-=== MAILS OUTLOOK EN TEMPS RÉEL ({len(outlook_live_mails)} mails inbox) ===
-{json.dumps(outlook_live_mails, ensure_ascii=False, default=str) if outlook_live_mails else "Aucun mail Outlook récupéré."}
+=== MAILS OUTLOOK ({len(outlook_live_mails)} inbox) ===
+{json.dumps(outlook_live_mails, ensure_ascii=False, default=str) if outlook_live_mails else "Aucun."}
 
-=== MAILS EN BASE (Gmail + historique) ===
+=== MAILS BASE ===
 {json.dumps(mails_from_db, ensure_ascii=False, default=str)}
 
-Consignes :
+Consignes Guillaume :
 {chr(10).join(instructions) if instructions else "Aucune."}
 """
 
@@ -376,40 +383,36 @@ Consignes :
         for msg_id in re.findall(r'\[ACTION:DELETE:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
-                actions_confirmed.append("\u274c ID invalide pour suppression")
                 continue
             try:
                 result = perform_outlook_action("delete_message", {"message_id": msg_id}, outlook_token)
                 actions_confirmed.append("\u2705 Mis à la corbeille" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"\u274c Erreur : {str(e)[:100]}")
+                actions_confirmed.append(f"\u274c {str(e)[:80]}")
 
         for msg_id in re.findall(r'\[ACTION:ARCHIVE:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
-                actions_confirmed.append("\u274c ID invalide pour archivage")
                 continue
             try:
                 result = perform_outlook_action("archive_message", {"message_id": msg_id}, outlook_token)
                 actions_confirmed.append("\u2705 Archivé" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"\u274c Erreur archivage : {str(e)[:100]}")
+                actions_confirmed.append(f"\u274c {str(e)[:80]}")
 
         for msg_id in re.findall(r'\[ACTION:READ:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
                 continue
             try:
-                result = perform_outlook_action("mark_as_read", {"message_id": msg_id}, outlook_token)
-                actions_confirmed.append("\u2705 Marqué lu" if result.get("status") == "ok" else "\u274c Erreur")
-            except Exception as e:
-                actions_confirmed.append(f"\u274c Erreur : {str(e)[:100]}")
+                perform_outlook_action("mark_as_read", {"message_id": msg_id}, outlook_token)
+            except Exception:
+                pass
 
         for match in re.finditer(r'\[ACTION:REPLY:([^:\]]{20,}):(.+?)\]', aria_response, re.DOTALL):
             msg_id = match.group(1).strip()
             reply_text = match.group(2).strip()
             if not is_valid_outlook_id(msg_id):
-                actions_confirmed.append("\u274c ID invalide pour réponse")
                 continue
             try:
                 result = perform_outlook_action("send_reply", {"message_id": msg_id, "reply_body": reply_text}, outlook_token)
@@ -420,19 +423,18 @@ Consignes :
                         pass
                 actions_confirmed.append("\u2705 Réponse envoyée" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"\u274c Erreur envoi : {str(e)[:100]}")
+                actions_confirmed.append(f"\u274c {str(e)[:80]}")
 
         for msg_id in re.findall(r'\[ACTION:READBODY:([^\]]+)\]', aria_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
-                actions_confirmed.append("\u274c ID invalide pour lecture corps")
                 continue
             try:
                 result = perform_outlook_action("get_message_body", {"message_id": msg_id}, outlook_token)
                 if result.get("status") == "ok":
                     actions_confirmed.append(f"\U0001f4e7 Corps du mail :\n{result.get('body_text', '')[:800]}")
-            except Exception as e:
-                actions_confirmed.append(f"\u274c Erreur lecture corps : {str(e)[:100]}")
+            except Exception:
+                pass
 
         for match in re.finditer(r'\[ACTION:CREATEEVENT:([^\]]+)\]', aria_response):
             parts = match.group(1).split('|')
@@ -442,16 +444,15 @@ Consignes :
                     result = perform_outlook_action("create_calendar_event", {
                         "subject": parts[0], "start": parts[1], "end": parts[2], "attendees": attendees
                     }, outlook_token)
-                    actions_confirmed.append("\u2705 RDV créé" if result.get("status") == "ok" else "\u274c Création RDV échouée")
-                except Exception as e:
-                    actions_confirmed.append(f"\u274c Erreur agenda : {str(e)[:100]}")
+                    actions_confirmed.append("\u2705 RDV créé" if result.get("status") == "ok" else "\u274c RDV échoué")
+                except Exception:
+                    pass
 
         for title in re.findall(r'\[ACTION:CREATE_TASK:([^\]]+)\]', aria_response):
             try:
-                result = perform_outlook_action("create_todo_task", {"title": title.strip()}, outlook_token)
-                actions_confirmed.append("\u2705 Tâche créée" if result.get("status") == "ok" else "\u274c Tâche échouée")
-            except Exception as e:
-                actions_confirmed.append(f"\u274c Erreur tâche : {str(e)[:100]}")
+                perform_outlook_action("create_todo_task", {"title": title.strip()}, outlook_token)
+            except Exception:
+                pass
 
         # ── Drive SharePoint ──
         for match in re.finditer(r'\[ACTION:LISTDRIVE:([^\]]*)\]', aria_response):
@@ -464,11 +465,11 @@ Consignes :
                         icon = "\U0001f4c1" if it.get("type") == "dossier" else "\U0001f4c4"
                         size_str = f"  ({it.get('taille_ko','')} Ko)" if it.get("taille_ko") else ""
                         lines.append(f"  {icon} \"{it['nom']}\"  [id:{it.get('id','')}]{size_str}")
-                    actions_confirmed.append(f"\U0001f4c2 {result.get('dossier', subfolder or '1_Photovoltaïque')} ({result['count']} éléments) :\n" + "\n".join(lines))
+                    actions_confirmed.append(f"\U0001f4c2 {result.get('dossier', '1_Photovoltaïque')} ({result['count']}) :\n" + "\n".join(lines))
                 else:
                     actions_confirmed.append(f"\u274c {result.get('message', 'Erreur Drive')}")
             except Exception as e:
-                actions_confirmed.append(f"\u274c Erreur Drive : {str(e)[:100]}")
+                actions_confirmed.append(f"\u274c Drive : {str(e)[:80]}")
 
         for match in re.finditer(r'\[ACTION:READDRIVE:([^\]]+)\]', aria_response):
             file_ref = match.group(1).strip()
@@ -480,9 +481,9 @@ Consignes :
                     else:
                         actions_confirmed.append(f"\U0001f4c4 {result.get('fichier', file_ref)} — {result.get('message', '')} {result.get('conseil', '')}")
                 else:
-                    actions_confirmed.append(f"\u274c {result.get('message', 'Erreur lecture')}")
+                    actions_confirmed.append(f"\u274c {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"\u274c Erreur lecture fichier : {str(e)[:100]}")
+                actions_confirmed.append(f"\u274c {str(e)[:80]}")
 
         for match in re.finditer(r'\[ACTION:SEARCHDRIVE:([^\]]+)\]', aria_response):
             query_drive = match.group(1).strip()
@@ -492,9 +493,9 @@ Consignes :
                     lines = [f"  {'📁' if it.get('type')=='dossier' else '📄'} \"{it['nom']}\"  [id:{it.get('id','')}]" for it in result.get("items", [])]
                     actions_confirmed.append(f"\U0001f50d '{query_drive}' — {result['count']} résultat(s) :\n" + "\n".join(lines))
                 else:
-                    actions_confirmed.append(f"\u274c {result.get('message', 'Erreur recherche')}")
+                    actions_confirmed.append(f"\u274c {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"\u274c Erreur recherche Drive : {str(e)[:100]}")
+                actions_confirmed.append(f"\u274c {str(e)[:80]}")
 
         for match in re.finditer(r'\[ACTION:CREATEFOLDER:([^|^\]]+)\|([^\]]+)\]', aria_response):
             parent_id = match.group(1).strip()
@@ -506,9 +507,9 @@ Consignes :
                 if result.get("status") == "ok":
                     actions_confirmed.append(f"\u2705 Dossier '{folder_name}' créé  [id:{result.get('id','')}]")
                 else:
-                    actions_confirmed.append(f"\u274c {result.get('message', 'Erreur création dossier')}")
+                    actions_confirmed.append(f"\u274c {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"\u274c Erreur création dossier : {str(e)[:100]}")
+                actions_confirmed.append(f"\u274c {str(e)[:80]}")
 
         for match in re.finditer(r'\[ACTION:MOVEDRIVE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', aria_response):
             item_id = match.group(1).strip()
@@ -518,12 +519,9 @@ Consignes :
                 from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
                 _, drive_id, _ = _find_sharepoint_site_and_drive(outlook_token)
                 result = move_drive_item(outlook_token, item_id, dest_id, new_name, drive_id)
-                if result.get("status") == "ok":
-                    actions_confirmed.append(f"\u2705 {result.get('message', 'Déplacé.')}")
-                else:
-                    actions_confirmed.append(f"\u274c {result.get('message', 'Erreur déplacement')}")
+                actions_confirmed.append(f"\u2705 {result.get('message', 'Déplacé.')}" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"\u274c Erreur déplacement : {str(e)[:100]}")
+                actions_confirmed.append(f"\u274c {str(e)[:80]}")
 
         for match in re.finditer(r'\[ACTION:COPYFILE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', aria_response):
             source_id = match.group(1).strip()
@@ -533,17 +531,52 @@ Consignes :
                 from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
                 _, drive_id, _ = _find_sharepoint_site_and_drive(outlook_token)
                 result = copy_drive_item(outlook_token, source_id, dest_id, new_name, drive_id)
-                if result.get("status") == "ok":
-                    actions_confirmed.append(f"\u2705 {result.get('message', 'Copie effectuée.')}")
-                else:
-                    actions_confirmed.append(f"\u274c {result.get('message', 'Erreur copie')}")
+                actions_confirmed.append(f"\u2705 {result.get('message', 'Copie lancée.')}" if result.get("status") == "ok" else f"\u274c {result.get('message')}")
             except Exception as e:
-                actions_confirmed.append(f"\u274c Erreur copie : {str(e)[:100]}")
+                actions_confirmed.append(f"\u274c {str(e)[:80]}")
+
+    # ── Auto-évolution (Aria écrit ses propres règles) ──
+    if MEMORY_OK:
+        for match in re.finditer(r'\[ACTION:LEARN:([^|^\]]+)\|([^\]]+)\]', aria_response):
+            category = match.group(1).strip()
+            rule = match.group(2).strip()
+            try:
+                rule_id = save_rule(category, rule, "auto", 0.7)
+                actions_confirmed.append(f"\U0001f9e0 Règle mémorisée [{category}] : {rule[:60]}")
+            except Exception as e:
+                print(f"[LEARN] Erreur: {e}")
+
+        for match in re.finditer(r'\[ACTION:INSIGHT:([^|^\]]+)\|([^\]]+)\]', aria_response):
+            topic = match.group(1).strip()
+            insight = match.group(2).strip()
+            try:
+                save_insight(topic, insight, "auto")
+                actions_confirmed.append(f"\U0001f4a1 Insight noté [{topic}] : {insight[:60]}")
+            except Exception as e:
+                print(f"[INSIGHT] Erreur: {e}")
+
+        for match in re.finditer(r'\[ACTION:FORGET:(\d+)\]', aria_response):
+            rule_id = int(match.group(1))
+            try:
+                deleted = delete_rule(rule_id)
+                actions_confirmed.append(f"\U0001f5d1\ufe0f Règle {rule_id} désactivée." if deleted else f"\u274c Règle {rule_id} introuvable.")
+            except Exception as e:
+                print(f"[FORGET] Erreur: {e}")
+
+        for _ in re.finditer(r'\[ACTION:SYNTH:\]', aria_response):
+            try:
+                import threading
+                t = threading.Thread(target=lambda: synthesize_session(15), daemon=True)
+                t.start()
+                actions_confirmed.append("\U0001f504 Synthèse lancée en arrière-plan.")
+            except Exception as e:
+                print(f"[SYNTH] Erreur: {e}")
 
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', aria_response).strip()
     if actions_confirmed:
         clean_response += "\n\n" + "\n".join(actions_confirmed)
 
+    # Sauvegarde conversation
     conn = None
     try:
         conn = get_pg_conn()
@@ -554,6 +587,16 @@ Consignes :
         if conn:
             conn.close()
 
+    # Auto-synthèse : si > 15 conversations en base, synthétise en arrière-plan
+    if MEMORY_OK and conv_count >= 15:
+        try:
+            import threading
+            t = threading.Thread(target=lambda: synthesize_session(15), daemon=True)
+            t.start()
+            print(f"[AutoSynth] Déclenché ({conv_count} conversations en base)")
+        except Exception as e:
+            print(f"[AutoSynth] Erreur: {e}")
+
     return {"answer": clean_response, "actions": actions_confirmed}
 
 
@@ -563,7 +606,7 @@ Consignes :
 def build_memory():
     results = {"memory_module": MEMORY_OK}
     if not MEMORY_OK:
-        return {"error": "Module mémoire non disponible", "memory_module": False}
+        return {"error": "Module mémoire non disponible"}
     try:
         summary = rebuild_hot_summary()
         results["hot_summary"] = "\u2705 Résumé chaud reconstruit"
@@ -604,8 +647,25 @@ def memory_status():
             style_count = c.fetchone()[0]
         except Exception:
             style_count = 0
+        try:
+            c.execute("SELECT COUNT(*) FROM aria_rules WHERE active = true")
+            rules_count = c.fetchone()[0]
+        except Exception:
+            rules_count = 0
+        try:
+            c.execute("SELECT COUNT(*) FROM aria_insights")
+            insights_count = c.fetchone()[0]
+        except Exception:
+            insights_count = 0
+        try:
+            c.execute("SELECT COUNT(*) FROM aria_session_digests")
+            digests_count = c.fetchone()[0]
+        except Exception:
+            digests_count = 0
         c.execute("SELECT COUNT(*) FROM mail_memory")
         mails_count = c.fetchone()[0]
+        c.execute("SELECT COUNT(*) FROM aria_memory")
+        conv_count = c.fetchone()[0]
         c.execute("SELECT COUNT(*) FROM sent_mail_memory")
         sent_count = c.fetchone()[0]
     finally:
@@ -613,12 +673,67 @@ def memory_status():
             conn.close()
     return {
         "memory_module": MEMORY_OK,
-        "resume_chaud": {"exists": bool(row and row[0]), "preview": (row[0] or "")[:150] if row else ""},
-        "contacts": contacts_count,
-        "style_examples": style_count,
-        "mail_memory": mails_count,
-        "sent_mail_memory": sent_count,
+        "niveau_1": {
+            "resume_chaud": {"exists": bool(row and row[0]), "preview": (row[0] or "")[:100] if row else ""},
+            "contacts": contacts_count,
+            "regles_actives": rules_count,
+            "insights": insights_count,
+        },
+        "niveau_2": {
+            "conversations_brutes": conv_count,
+            "mail_memory": mails_count,
+            "style_examples": style_count,
+        },
+        "niveau_3": {
+            "session_digests": digests_count,
+            "sent_mail_memory": sent_count,
+        },
     }
+
+
+@app.get("/synth")
+def trigger_synth(n: int = 15):
+    """Déclenche manuellement la synthèse des dernières conversations."""
+    if not MEMORY_OK:
+        return {"error": "Module mémoire non disponible"}
+    result = synthesize_session(n)
+    return result
+
+
+@app.get("/rules")
+def list_rules():
+    """Liste toutes les règles d'Aria."""
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id, category, rule, source, confidence, reinforcements, active, created_at
+            FROM aria_rules ORDER BY active DESC, confidence DESC, created_at DESC
+        """)
+        columns = [d[0] for d in c.description]
+        return [dict(zip(columns, row)) for row in c.fetchall()]
+    finally:
+        if conn:
+            conn.close()
+
+
+@app.get("/insights")
+def list_insights():
+    """Liste tous les insights d'Aria."""
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id, topic, insight, reinforcements, created_at
+            FROM aria_insights ORDER BY reinforcements DESC, updated_at DESC
+        """)
+        columns = [d[0] for d in c.description]
+        return [dict(zip(columns, row)) for row in c.fetchall()]
+    finally:
+        if conn:
+            conn.close()
 
 
 @app.get("/analyze-raw-mails")
@@ -631,8 +746,7 @@ def analyze_raw_mails(limit: int = 50):
             SELECT id, message_id, from_email, subject, raw_body_preview, received_at
             FROM mail_memory
             WHERE analysis_status IN ('inbox_raw', 'archive_raw', 'gmail_raw')
-            ORDER BY received_at DESC NULLS LAST
-            LIMIT %s
+            ORDER BY received_at DESC NULLS LAST LIMIT %s
         """, (limit,))
         rows = c.fetchall()
     finally:
@@ -1124,7 +1238,6 @@ def reorganize_drive():
     """
     Lance la création de 1_Photovoltaïque_V2 en ARRIÈRE-PLAN.
     Répond immédiatement. Les originaux ne sont jamais touchés.
-    Vérifier SharePoint dans 5-10 minutes.
     """
     import threading
     from app.token_manager import get_valid_microsoft_token
@@ -1146,7 +1259,6 @@ def reorganize_drive():
 
     def run_reorganize():
         import time
-
         try:
             data = _graph_get(token, f"/drives/{drive_id}/items/{source_id}/children",
                              params={"$top": 100, "$select": "name,id,folder,file"})
@@ -1164,7 +1276,7 @@ def reorganize_drive():
                 if r.get("status") == "ok":
                     print(f"[Reorganize] ✅ {name}")
                     return r.get("id")
-                print(f"[Reorganize] ❌ {name} : {r.get('message','')[:60]}")
+                print(f"[Reorganize] ❌ {name}")
                 return None
 
             def cp(source_name, dest_id, new_name=None):
@@ -1173,10 +1285,7 @@ def reorganize_drive():
                     print(f"[Reorganize] ⚠️ '{source_name}' introuvable")
                     return
                 r = copy_drive_item(token, item_id, dest_id, new_name, drive_id)
-                if r.get("status") == "ok":
-                    print(f"[Reorganize] ✅ {source_name} → {new_name or source_name}")
-                else:
-                    print(f"[Reorganize] ❌ {source_name} : {r.get('message','')[:60]}")
+                print(f"[Reorganize] {'✅' if r.get('status')=='ok' else '❌'} {source_name}")
 
             v2_id = mk(parent_id, "1_Photovoltaïque_V2")
             if not v2_id:
@@ -1196,54 +1305,45 @@ def reorganize_drive():
                 cp("1_1 Chiffrage Particulier", cat01, "Chiffrage_Particuliers")
                 cp("1_Chiffrage Pro", cat01, "Chiffrage_Pro")
             if cat02:
-                cp("Pilotage", cat02)
-                cp("1_SUIVI CHANTIER PV modifié.xlsm", cat02)
+                cp("Pilotage", cat02); cp("1_SUIVI CHANTIER PV modifié.xlsm", cat02)
                 cp("Photo vidéo chantier en cours", cat02, "Photos_et_Videos")
                 cp("Photos drone", cat02, "Photos_Drone")
             if cat03:
-                cp("2_CONSUEL", cat03, "CONSUEL")
-                cp("3_ENEDIS", cat03, "ENEDIS")
+                cp("2_CONSUEL", cat03, "CONSUEL"); cp("3_ENEDIS", cat03, "ENEDIS")
                 cp("4_Demandes DP Cerfa et Raccordement", cat03, "Demandes_DP")
                 cp("Procédure d'aide EDF OA.docx", cat03)
             if cat04:
                 cp("5_Document technique", cat04, "Docs_Techniques")
-                cp("Normes", cat04)
-                cp("Import ELEC", cat04)
+                cp("Normes", cat04); cp("Import ELEC", cat04)
                 cp("6_Audits et rapports", cat04, "Audits")
                 cp("DOE_Couffrant_Solar_Complet_Modele.docx", cat04)
                 cp("DOE_Couffrant_Solar_Modele_Reutilisable.docx", cat04)
                 cp("DOE_Photovoltaique_Couffrant_Solar_Complet.docx", cat04)
-                cp("PV fin de chantier.docx", cat04)
-                cp("RAPPORT AUDIT PV.docx", cat04)
+                cp("PV fin de chantier.docx", cat04); cp("RAPPORT AUDIT PV.docx", cat04)
             if cat05:
-                cp("Adiwatt", cat05)
-                cp("MADENR", cat05)
-                cp("Urban Solar", cat05)
-                cp("Powr Connect", cat05)
+                cp("Adiwatt", cat05); cp("MADENR", cat05)
+                cp("Urban Solar", cat05); cp("Powr Connect", cat05)
                 cp("formulaire compensation solaredge.pdf", cat05)
                 cp("Demande garantie Onduleur 1 \u2013 Copie.xlsx", cat05)
                 cp("Demande garantie Onduleur.xlsx", cat05)
             if cat06:
                 cp("Formation archelios calc", cat06)
                 cp("sauvegarde Archelios", cat06)
-                cp("Logiciels", cat06)
-                cp("unnamed.png", cat06)
+                cp("Logiciels", cat06); cp("unnamed.png", cat06)
             if cat07:
                 cp("Certificats et Formations Professionnels", cat07)
                 cp("8_Stock 2026.ods", cat07)
                 cp("Suivi panneau publicitaire.xlsx", cat07)
 
-            print("[Reorganize] Terminé. Vérifier SharePoint.")
-
+            print("[Reorganize] Terminé.")
         except Exception as e:
             print(f"[Reorganize] Erreur fatale : {e}")
 
-    thread = threading.Thread(target=run_reorganize, daemon=True)
-    thread.start()
+    threading.Thread(target=run_reorganize, daemon=True).start()
 
     return {
         "status": "started",
-        "message": "Réorganisation lancée en arrière-plan \u2014 réponse immédiate. Vérifiez SharePoint dans 5-10 minutes.",
+        "message": "Réorganisation lancée en arrière-plan. Vérifiez SharePoint dans 5-10 minutes.",
         "dossier_cible": "1_Photovolta\u00efque_V2",
         "note": "Les originaux dans 1_Photovolta\u00efque restent intacts."
     }
