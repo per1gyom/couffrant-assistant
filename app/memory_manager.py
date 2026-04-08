@@ -1,21 +1,8 @@
 """
-Gestionnaire de mémoire intelligent d'Aria — 3 niveaux
+Gestionnaire de mémoire d'Aria — 3 niveaux, multi-utilisateurs.
 
-Niveau 1 (contexte immédiat, injecté à chaque réponse) :
-  - aria_hot_summary  : résumé opérationnel courant
-  - aria_contacts     : fiches contacts actifs
-  - aria_rules        : règles apprises par Aria (elle-même les gère)
-  - aria_insights     : insights sur Guillaume et son contexte
-
-Niveau 2 (mémoire active, fenêtre glissante) :
-  - aria_memory       : 20 conversations max, synthétisé au-delà
-  - mail_memory       : 90j, purgé en continu
-  - aria_style_examples : style rédactionnel
-
-Niveau 3 (archive froide, consultable sur demande) :
-  - aria_session_digests : synthèses des conversations passées
-  - sent_mail_memory     : mails envoyés
-  - aria_profile         : profil Guillaume
+Chaque utilisateur a sa propre mémoire (rules, insights, conversations, style, résumé).
+Les contacts (aria_contacts) sont partagés — contacts entreprise Couffrant Solar.
 """
 
 from app.database import get_pg_conn
@@ -27,34 +14,31 @@ from datetime import datetime
 
 
 # ─────────────────────────────────────────
-# NIVEAU 1 — RÉSUMÉ CHAUD
+# NIVEAU 1 — RÉSUMÉ CHAUD (par utilisateur)
 # ─────────────────────────────────────────
 
-def get_hot_summary() -> str:
+def get_hot_summary(username: str = 'guillaume') -> str:
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT content FROM aria_hot_summary ORDER BY updated_at DESC LIMIT 1")
+        c.execute("SELECT content FROM aria_hot_summary WHERE username = %s", (username,))
         row = c.fetchone()
         return row[0] if row else ""
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
-def rebuild_hot_summary() -> str:
-    """Reconstruit le résumé chaud depuis les données disponibles."""
+def rebuild_hot_summary(username: str = 'guillaume') -> str:
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-
         c.execute("""
-            SELECT from_email, display_title, category, priority, short_summary,
-                   received_at, mailbox_source
-            FROM mail_memory ORDER BY received_at DESC NULLS LAST LIMIT 30
-        """)
+            SELECT from_email, display_title, category, priority, short_summary, received_at, mailbox_source
+            FROM mail_memory WHERE username = %s
+            ORDER BY received_at DESC NULLS LAST LIMIT 30
+        """, (username,))
         cols = [d[0] for d in c.description]
         mails = [dict(zip(cols, row)) for row in c.fetchall()]
 
@@ -62,14 +46,15 @@ def rebuild_hot_summary() -> str:
         contacts = [{'name': r[0], 'summary': r[1]} for r in c.fetchall()]
 
         c.execute("""
-            SELECT user_input, aria_response FROM aria_memory ORDER BY id DESC LIMIT 8
-        """)
+            SELECT user_input, aria_response FROM aria_memory
+            WHERE username = %s ORDER BY id DESC LIMIT 8
+        """, (username,))
         history = [{'q': r[0][:150], 'a': r[1][:200]} for r in c.fetchall()]
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
-    prompt = f"""Tu es l'assistant de Guillaume Perrin, Couffrant Solar.
+    display_name = username.capitalize()
+    prompt = f"""Tu es l'assistant de {display_name} — Couffrant Solar.
 
 Mails récents :
 {json.dumps(mails, ensure_ascii=False, default=str)}
@@ -81,9 +66,8 @@ Dernières conversations :
 {json.dumps(history, ensure_ascii=False)}
 
 Génère un résumé opérationnel compact (~350 mots) :
-
 1. SITUATION ACTUELLE — Ce qui est en cours, urgent, en attente
-2. INTERLOCUTEURS CLÉS — Les 8-10 personnes/entités actives en ce moment
+2. INTERLOCUTEURS CLÉS — Les personnes/entités actives
 3. POINTS D'ATTENTION — Ce qui risque de déraper
 
 Factuel, direct, sans blabla."""
@@ -99,23 +83,21 @@ Factuel, direct, sans blabla."""
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
-            INSERT INTO aria_hot_summary (content, updated_at)
-            VALUES (%s, NOW())
-            ON CONFLICT (id) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()
-        """, (summary,))
+            INSERT INTO aria_hot_summary (username, content, updated_at)
+            VALUES (%s, %s, NOW())
+            ON CONFLICT (username) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()
+        """, (username, summary))
         conn.commit()
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
     return summary
 
 
 # ─────────────────────────────────────────
-# NIVEAU 1 — RÈGLES APPRISES (Aria les gère elle-même)
+# NIVEAU 1 — RÈGLES (par utilisateur)
 # ─────────────────────────────────────────
 
-def get_aria_rules() -> str:
-    """Charge les règles actives d'Aria. Injecté dans chaque réponse."""
+def get_aria_rules(username: str = 'guillaume') -> str:
     conn = None
     try:
         conn = get_pg_conn()
@@ -123,188 +105,151 @@ def get_aria_rules() -> str:
         c.execute("""
             SELECT id, category, rule, confidence, reinforcements
             FROM aria_rules
-            WHERE active = true
+            WHERE active = true AND username = %s
             ORDER BY confidence DESC, reinforcements DESC, created_at DESC
             LIMIT 25
-        """)
+        """, (username,))
         rows = c.fetchall()
-        if not rows:
-            return ""
+        if not rows: return ""
         return "\n".join([f"[id:{r[0]}][{r[1]}] {r[2]}" for r in rows])
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
-def save_rule(category: str, rule: str, source: str = "auto", confidence: float = 0.7) -> int:
-    """Aria sauvegarde une règle apprise. Si similaire existe, renforce."""
+def save_rule(category: str, rule: str, source: str = "auto", confidence: float = 0.7, username: str = 'guillaume') -> int:
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        # Vérifie si une règle très similaire existe déjà
         c.execute("""
-            SELECT id FROM aria_rules
-            WHERE active = true AND rule ILIKE %s
-            LIMIT 1
-        """, (f"%{rule[:40]}%",))
+            SELECT id FROM aria_rules WHERE active = true AND username = %s AND rule ILIKE %s LIMIT 1
+        """, (username, f"%{rule[:40]}%"))
         existing = c.fetchone()
         if existing:
             c.execute("""
-                UPDATE aria_rules SET
-                    reinforcements = reinforcements + 1,
-                    confidence = LEAST(1.0, confidence + 0.1),
-                    updated_at = NOW()
-                WHERE id = %s
+                UPDATE aria_rules SET reinforcements = reinforcements + 1,
+                confidence = LEAST(1.0, confidence + 0.1), updated_at = NOW() WHERE id = %s
             """, (existing[0],))
             conn.commit()
             return existing[0]
         else:
             c.execute("""
-                INSERT INTO aria_rules (category, rule, source, confidence)
-                VALUES (%s, %s, %s, %s) RETURNING id
-            """, (category, rule, source, confidence))
+                INSERT INTO aria_rules (username, category, rule, source, confidence)
+                VALUES (%s, %s, %s, %s, %s) RETURNING id
+            """, (username, category, rule, source, confidence))
             rule_id = c.fetchone()[0]
             conn.commit()
             return rule_id
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
-def delete_rule(rule_id: int) -> bool:
-    """Aria désactive une règle obsolète (soft delete — jamais supprimé en dur)."""
+def delete_rule(rule_id: int, username: str = 'guillaume') -> bool:
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute(
-            "UPDATE aria_rules SET active = false, updated_at = NOW() WHERE id = %s",
-            (rule_id,)
+            "UPDATE aria_rules SET active = false, updated_at = NOW() WHERE id = %s AND username = %s",
+            (rule_id, username)
         )
         conn.commit()
         return c.rowcount > 0
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
 # ─────────────────────────────────────────
-# NIVEAU 1 — INSIGHTS
+# NIVEAU 1 — INSIGHTS (par utilisateur)
 # ─────────────────────────────────────────
 
-def save_insight(topic: str, insight: str, source: str = "conversation") -> int:
-    """Aria sauvegarde un insight sur Guillaume ou le contexte métier."""
+def save_insight(topic: str, insight: str, source: str = "conversation", username: str = 'guillaume') -> int:
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
-            SELECT id FROM aria_insights WHERE topic ILIKE %s LIMIT 1
-        """, (f"%{topic[:30]}%",))
+            SELECT id FROM aria_insights WHERE username = %s AND topic ILIKE %s LIMIT 1
+        """, (username, f"%{topic[:30]}%"))
         existing = c.fetchone()
         if existing:
             c.execute("""
-                UPDATE aria_insights SET
-                    insight = %s,
-                    reinforcements = reinforcements + 1,
-                    updated_at = NOW()
-                WHERE id = %s
+                UPDATE aria_insights SET insight = %s, reinforcements = reinforcements + 1,
+                updated_at = NOW() WHERE id = %s
             """, (insight, existing[0]))
             conn.commit()
             return existing[0]
         else:
             c.execute("""
-                INSERT INTO aria_insights (topic, insight, source)
-                VALUES (%s, %s, %s) RETURNING id
-            """, (topic, insight, source))
+                INSERT INTO aria_insights (username, topic, insight, source)
+                VALUES (%s, %s, %s, %s) RETURNING id
+            """, (username, topic, insight, source))
             insight_id = c.fetchone()[0]
             conn.commit()
             return insight_id
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
-def get_aria_insights(limit: int = 8) -> str:
-    """Charge les insights les plus renforcés."""
+def get_aria_insights(limit: int = 8, username: str = 'guillaume') -> str:
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
-            SELECT topic, insight, reinforcements
-            FROM aria_insights
-            ORDER BY reinforcements DESC, updated_at DESC
-            LIMIT %s
-        """, (limit,))
+            SELECT topic, insight, reinforcements FROM aria_insights
+            WHERE username = %s
+            ORDER BY reinforcements DESC, updated_at DESC LIMIT %s
+        """, (username, limit))
         rows = c.fetchall()
-        if not rows:
-            return ""
+        if not rows: return ""
         return "\n".join([f"[{r[0]}] {r[1]}" for r in rows])
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
 # ─────────────────────────────────────────
-# NIVEAU 2 — SYNTHÈSE AUTO (conversations → mémoire durable)
+# NIVEAU 2 — SYNTHÈSE AUTO (par utilisateur)
 # ─────────────────────────────────────────
 
-def synthesize_session(n_conversations: int = 15) -> dict:
-    """
-    Synthétise les N dernières conversations brutes en :
-    - Un digest archivé (aria_session_digests)
-    - Des règles extractées (aria_rules)
-    - Des insights (aria_insights)
-    Puis purge les conversations synthétisées.
-    Garde toujours les 5 plus récentes en brut.
-    """
+def synthesize_session(n_conversations: int = 15, username: str = 'guillaume') -> dict:
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
-            SELECT id, user_input, aria_response, created_at
-            FROM aria_memory
-            ORDER BY id DESC
-            LIMIT %s
-        """, (n_conversations,))
+            SELECT id, user_input, aria_response, created_at FROM aria_memory
+            WHERE username = %s ORDER BY id DESC LIMIT %s
+        """, (username, n_conversations))
         conversations = c.fetchall()
-        c.execute("SELECT COUNT(*) FROM aria_memory")
+        c.execute("SELECT COUNT(*) FROM aria_memory WHERE username = %s", (username,))
         total = c.fetchone()[0]
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
     if not conversations or total <= 5:
         return {"status": "nothing_to_synthesize", "total": total}
 
+    display_name = username.capitalize()
     conv_text = "\n\n".join([
-        f"Guillaume: {r[1][:200]}\nAria: {r[2][:300]}"
+        f"{display_name}: {r[1][:200]}\nAria: {r[2][:300]}"
         for r in reversed(conversations)
     ])
 
-    prompt = f"""Tu es Aria, assistante de Guillaume Perrin (Couffrant Solar).
-Voici tes {len(conversations)} dernières conversations avec Guillaume.
+    prompt = f"""Tu es Aria, assistante de {display_name} (Couffrant Solar).
+Voici {len(conversations)} conversations récentes.
 
 {conv_text}
 
-Synthétise en JSON strict (sans backticks, sans texte avant/après) :
-{{
-  "summary": "résumé factuel ~150 mots de ce qui s'est passé",
-  "rules_learned": ["règle 1", "règle 2"],  -- préférences et habitudes de Guillaume, max 5
-  "insights": [{"topic": "sujet", "text": "insight"}],  -- contexte métier, max 5
-  "topics": ["sujet1", "sujet2"]  -- thèmes abordés
-}}"""
+Synthétise en JSON strict (sans backticks) :
+{{"summary": "~150 mots", "rules_learned": ["règle"], "insights": [{{"topic": "x", "text": "y"}}], "topics": ["sujet"]}}"""
 
     try:
         response = client.messages.create(
             model=ANTHROPIC_MODEL_FAST, max_tokens=1000,
             messages=[{"role": "user", "content": prompt}]
         )
-        raw = response.content[0].text.strip()
-        raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
+        raw = re.sub(r'^```(?:json)?\s*', '', response.content[0].text.strip(), flags=re.MULTILINE)
         raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
         parsed = json.loads(raw)
     except Exception as e:
@@ -314,64 +259,49 @@ Synthétise en JSON strict (sans backticks, sans texte avant/après) :
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-
-        # Archivage du digest
         c.execute("""
-            INSERT INTO aria_session_digests
-                (conversation_count, summary, rules_learned, topics, session_date)
-            VALUES (%s, %s, %s, %s, CURRENT_DATE)
+            INSERT INTO aria_session_digests (username, conversation_count, summary, rules_learned, topics, session_date)
+            VALUES (%s, %s, %s, %s, %s, CURRENT_DATE)
         """, (
-            len(conversations),
-            parsed.get("summary", ""),
+            username, len(conversations), parsed.get("summary", ""),
             json.dumps(parsed.get("rules_learned", []), ensure_ascii=False),
             json.dumps(parsed.get("topics", []), ensure_ascii=False),
         ))
-
         conn.commit()
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
-    # Sauvegarde des règles apprises
     for rule_text in parsed.get("rules_learned", []):
         if rule_text and len(rule_text) > 10:
-            save_rule("auto", rule_text, "synthesis", 0.6)
+            save_rule("auto", rule_text, "synthesis", 0.6, username)
 
-    # Sauvegarde des insights
     for item in parsed.get("insights", []):
         if isinstance(item, dict):
-            save_insight(item.get("topic", "général"), item.get("text", str(item)))
+            save_insight(item.get("topic", "général"), item.get("text", str(item)), username=username)
         elif isinstance(item, str) and len(item) > 10:
-            save_insight("général", item)
+            save_insight("général", item, username=username)
 
-    # Purge les conversations synthétisées (garde les 5 plus récentes)
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
-            DELETE FROM aria_memory
-            WHERE id NOT IN (
-                SELECT id FROM aria_memory ORDER BY id DESC LIMIT 5
+            DELETE FROM aria_memory WHERE username = %s AND id NOT IN (
+                SELECT id FROM aria_memory WHERE username = %s ORDER BY id DESC LIMIT 5
             )
-        """)
+        """, (username, username))
         purged = c.rowcount
         conn.commit()
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
-    return {
-        "status": "ok",
-        "conversations_synthesized": len(conversations),
-        "rules_extracted": len(parsed.get("rules_learned", [])),
-        "insights_extracted": len(parsed.get("insights", [])),
-        "purged": purged,
-    }
+    return {"status": "ok", "conversations_synthesized": len(conversations),
+            "rules_extracted": len(parsed.get("rules_learned", [])),
+            "insights_extracted": len(parsed.get("insights", [])), "purged": purged}
 
 
 # ─────────────────────────────────────────
-# NIVEAU 2 — CONTACTS
+# NIVEAU 2 — CONTACTS (partagés)
 # ─────────────────────────────────────────
 
 def get_contact_card(name_or_email: str) -> str:
@@ -381,19 +311,13 @@ def get_contact_card(name_or_email: str) -> str:
         c = conn.cursor()
         c.execute("""
             SELECT name, email, company, role, summary, last_seen, last_subject
-            FROM aria_contacts
-            WHERE name ILIKE %s OR email ILIKE %s
-            LIMIT 1
+            FROM aria_contacts WHERE name ILIKE %s OR email ILIKE %s LIMIT 1
         """, (f'%{name_or_email}%', f'%{name_or_email}%'))
         row = c.fetchone()
-        if not row:
-            return ""
-        return f"""{row[0]} ({row[1]}) — {row[2]} — {row[3]}
-Résumé : {row[4]}
-Dernier contact : {row[5]} | Sujet : {row[6]}"""
+        if not row: return ""
+        return f"{row[0]} ({row[1]}) — {row[2]} — {row[3]}\nRésumé : {row[4]}\nDernier contact : {row[5]} | Sujet : {row[6]}"
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
 def get_all_contact_cards() -> list:
@@ -401,17 +325,14 @@ def get_all_contact_cards() -> list:
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("""
-            SELECT name, email, company, summary, last_seen
-            FROM aria_contacts ORDER BY last_seen DESC LIMIT 30
-        """)
+        c.execute("SELECT name, email, company, summary, last_seen FROM aria_contacts ORDER BY last_seen DESC LIMIT 30")
         return [{'name': r[0], 'email': r[1], 'company': r[2], 'summary': r[3], 'last_seen': str(r[4])} for r in c.fetchall()]
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
 def rebuild_contacts() -> int:
+    """Reconstruit les fiches contacts depuis tous les mails (partagé)."""
     conn = None
     try:
         conn = get_pg_conn()
@@ -420,40 +341,30 @@ def rebuild_contacts() -> int:
             SELECT from_email,
                    array_agg(subject ORDER BY received_at DESC) as subjects,
                    array_agg(raw_body_preview ORDER BY received_at DESC) as previews,
-                   MAX(received_at) as last_seen,
-                   COUNT(*) as mail_count
+                   MAX(received_at) as last_seen, COUNT(*) as mail_count
             FROM mail_memory
             WHERE from_email IS NOT NULL AND from_email != ''
-            GROUP BY from_email
-            HAVING COUNT(*) >= 2
-            ORDER BY MAX(received_at) DESC
-            LIMIT 50
+            GROUP BY from_email HAVING COUNT(*) >= 2
+            ORDER BY MAX(received_at) DESC LIMIT 50
         """)
         rows = c.fetchall()
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
     updated = 0
     for row in rows:
         email, subjects, previews, last_seen, mail_count = row
         subjects_text = ' | '.join((subjects or [])[:5])
         preview_text = ' '.join((previews or [])[:3])
-
         prompt = f"""Analyse ces échanges avec {email} et crée une fiche contact :
-
-Sujets : {subjects_text}
-Extrait : {preview_text[:500]}
-
-Réponds en JSON avec : name, company, role, summary (2-3 lignes)"""
-
+Sujets : {subjects_text}\nExtrait : {preview_text[:500]}
+Réponds en JSON : name, company, role, summary (2-3 lignes)"""
         try:
             response = client.messages.create(
                 model=ANTHROPIC_MODEL_FAST, max_tokens=200,
                 messages=[{"role": "user", "content": prompt}]
             )
-            raw = response.content[0].text.strip()
-            raw = re.sub(r'^```(?:json)?\s*', '', raw, flags=re.MULTILINE)
+            raw = re.sub(r'^```(?:json)?\s*', '', response.content[0].text.strip(), flags=re.MULTILINE)
             raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
             try:
                 parsed = json.loads(raw)
@@ -462,43 +373,34 @@ Réponds en JSON avec : name, company, role, summary (2-3 lignes)"""
                 role = parsed.get("role", "")
                 summary = parsed.get("summary", raw)
             except Exception:
-                name = email.split('@')[0]
-                company = ""
-                role = ""
-                summary = raw
+                name = email.split('@')[0]; company = ""; role = ""; summary = raw
 
             conn = None
             try:
                 conn = get_pg_conn()
                 c2 = conn.cursor()
                 c2.execute("""
-                    INSERT INTO aria_contacts
-                        (email, name, company, role, summary, last_seen, last_subject, mail_count, updated_at)
+                    INSERT INTO aria_contacts (email, name, company, role, summary, last_seen, last_subject, mail_count, updated_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
                     ON CONFLICT (email) DO UPDATE SET
-                        name = EXCLUDED.name, company = EXCLUDED.company,
-                        role = EXCLUDED.role, summary = EXCLUDED.summary,
-                        last_seen = EXCLUDED.last_seen, last_subject = EXCLUDED.last_subject,
-                        mail_count = EXCLUDED.mail_count, updated_at = NOW()
-                """, (email, name, company, role, summary,
-                       str(last_seen), (subjects or [''])[0], mail_count))
+                        name=EXCLUDED.name, company=EXCLUDED.company, role=EXCLUDED.role,
+                        summary=EXCLUDED.summary, last_seen=EXCLUDED.last_seen,
+                        last_subject=EXCLUDED.last_subject, mail_count=EXCLUDED.mail_count, updated_at=NOW()
+                """, (email, name, company, role, summary, str(last_seen), (subjects or [''])[0], mail_count))
                 conn.commit()
             finally:
-                if conn:
-                    conn.close()
+                if conn: conn.close()
             updated += 1
         except Exception as e:
             print(f"[Contacts] Erreur {email}: {e}")
-            continue
-
     return updated
 
 
 # ─────────────────────────────────────────
-# NIVEAU 2 — STYLE RÉDACTIONNEL
+# NIVEAU 2 — STYLE (par utilisateur)
 # ─────────────────────────────────────────
 
-def get_style_examples(context: str = "") -> str:
+def get_style_examples(context: str = "", username: str = 'guillaume') -> str:
     conn = None
     try:
         conn = get_pg_conn()
@@ -506,41 +408,37 @@ def get_style_examples(context: str = "") -> str:
         if context:
             c.execute("""
                 SELECT situation, example_text FROM aria_style_examples
-                WHERE situation ILIKE %s OR tags ILIKE %s
+                WHERE username = %s AND (situation ILIKE %s OR tags ILIKE %s)
                 ORDER BY quality_score DESC, used_count DESC LIMIT 5
-            """, (f'%{context}%', f'%{context}%'))
+            """, (username, f'%{context}%', f'%{context}%'))
         else:
             c.execute("""
                 SELECT situation, example_text FROM aria_style_examples
-                ORDER BY quality_score DESC, used_count DESC LIMIT 8
-            """)
+                WHERE username = %s ORDER BY quality_score DESC, used_count DESC LIMIT 8
+            """, (username,))
         rows = c.fetchall()
-        if not rows:
-            return ""
+        if not rows: return ""
         return "\n\n".join([f"[{r[0]}]\n{r[1]}" for r in rows])
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
-def save_style_example(situation: str, example_text: str, tags: str = "", quality_score: float = 1.0):
+def save_style_example(situation: str, example_text: str, tags: str = "", quality_score: float = 1.0, username: str = 'guillaume'):
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
-            INSERT INTO aria_style_examples (situation, example_text, tags, quality_score, source, created_at)
-            VALUES (%s, %s, %s, %s, 'manual', NOW())
-        """, (situation, example_text, tags, quality_score))
+            INSERT INTO aria_style_examples (username, situation, example_text, tags, quality_score, source, created_at)
+            VALUES (%s, %s, %s, %s, %s, 'manual', NOW())
+        """, (username, situation, example_text, tags, quality_score))
         conn.commit()
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
 
-def learn_from_correction(original: str, corrected: str, context: str = ""):
-    if not corrected or len(corrected) < 10:
-        return
+def learn_from_correction(original: str, corrected: str, context: str = "", username: str = 'guillaume'):
+    if not corrected or len(corrected) < 10: return
     try:
         response = client.messages.create(
             model=ANTHROPIC_MODEL_FAST, max_tokens=20,
@@ -549,28 +447,27 @@ def learn_from_correction(original: str, corrected: str, context: str = ""):
         situation = response.content[0].text.strip()
     except Exception:
         situation = context or "réponse mail"
-    save_style_example(situation=situation, example_text=corrected, tags=context, quality_score=1.5)
+    save_style_example(situation=situation, example_text=corrected, tags=context, quality_score=1.5, username=username)
 
 
-def load_sent_mails_to_style(limit: int = 50):
+def load_sent_mails_to_style(limit: int = 50, username: str = 'guillaume'):
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
             SELECT subject, to_email, body_preview FROM sent_mail_memory
-            WHERE body_preview IS NOT NULL AND length(body_preview) > 30
+            WHERE username = %s AND body_preview IS NOT NULL AND length(body_preview) > 30
             ORDER BY sent_at DESC LIMIT %s
-        """, (limit,))
+        """, (username, limit))
         rows = c.fetchall()
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()
 
     added = 0
     for subject, to_email, body in rows:
         situation = f"Mail à {to_email.split('@')[0] if to_email else 'contact'} — {subject[:40] if subject else ''}"
-        save_style_example(situation=situation, example_text=body, tags="sent_mail", quality_score=1.0)
+        save_style_example(situation=situation, example_text=body, tags="sent_mail", quality_score=1.0, username=username)
         added += 1
     return added
 
@@ -579,19 +476,18 @@ def load_sent_mails_to_style(limit: int = 50):
 # PURGE
 # ─────────────────────────────────────────
 
-def purge_old_mails(days: int = 90) -> int:
+def purge_old_mails(days: int = 90, username: str = 'guillaume') -> int:
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
             DELETE FROM mail_memory
-            WHERE created_at < NOW() - (%s || ' days')::INTERVAL
+            WHERE username = %s AND created_at < NOW() - (%s || ' days')::INTERVAL
             AND mailbox_source IN ('outlook', 'gmail_perso')
-        """, (str(days),))
+        """, (username, str(days)))
         deleted = c.rowcount
         conn.commit()
         return deleted
     finally:
-        if conn:
-            conn.close()
+        if conn: conn.close()

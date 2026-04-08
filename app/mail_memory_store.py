@@ -8,37 +8,39 @@ def init_mail_db():
     init_postgres()
 
 
-def mail_exists(message_id: str) -> bool:
+def mail_exists(message_id: str, username: str = 'guillaume') -> bool:
+    """Vérifie si ce mail existe déjà pour cet utilisateur."""
     conn = get_pg_conn()
     c = conn.cursor()
-    c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s", (message_id,))
+    c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s AND username = %s", (message_id, username))
     result = c.fetchone()
     conn.close()
     return result is not None
 
 
 def insert_mail(data: dict):
+    """Insère un mail. Le champ 'username' doit être dans data."""
     conn = get_pg_conn()
     c = conn.cursor()
-
     c.execute("""
         INSERT INTO mail_memory (
-            message_id, thread_id, received_at, from_email, subject,
+            username, message_id, thread_id, received_at, from_email, subject,
             display_title, category, priority, reason, suggested_action,
             short_summary, references_json, group_hints_json, confidence,
             needs_review, raw_body_preview, analysis_status, created_at,
             needs_reply, reply_urgency, reply_reason, suggested_reply_subject,
-            suggested_reply, response_type, missing_fields, confidence_level
+            suggested_reply, response_type, missing_fields, confidence_level, mailbox_source
         ) VALUES (
+            %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s,
             %s, %s, %s, %s,
             %s, %s, %s, %s,
             %s, %s, %s, %s,
-            %s, %s, %s, %s
+            %s, %s, %s, %s, %s
         )
-        ON CONFLICT (message_id) DO NOTHING
+        ON CONFLICT DO NOTHING
     """, (
+        data.get("username", "guillaume"),
         data["message_id"],
         data.get("thread_id"),
         data.get("received_at"),
@@ -65,7 +67,7 @@ def insert_mail(data: dict):
         data.get("response_type"),
         json.dumps(data.get("missing_fields", [])),
         data.get("confidence_level"),
+        data.get("mailbox_source", "outlook"),
     ))
-
     conn.commit()
     conn.close()
