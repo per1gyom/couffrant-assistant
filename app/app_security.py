@@ -6,9 +6,9 @@ import time
 from app.database import get_pg_conn
 
 # ── Rate limiting en mémoire ──
-_login_attempts: dict = {}  # {ip: {"count": int, "locked_until": float}}
+_login_attempts: dict = {}
 MAX_ATTEMPTS = 5
-LOCKOUT_SECONDS = 15 * 60  # 15 minutes
+LOCKOUT_SECONDS = 15 * 60
 
 
 def check_rate_limit(ip: str) -> tuple[bool, str]:
@@ -55,10 +55,14 @@ def verify_password(password: str, stored_hash: str) -> bool:
 
 # ── Gestion des utilisateurs ──
 
+SCOPE_ADMIN = "admin"           # Guillaume — accès complet à tous les contextes
+SCOPE_CS    = "couffrant_solar" # Collègues — accès Couffrant Solar uniquement
+
+
 def init_default_user():
     """
-    Crée l'utilisateur admin par défaut (Guillaume) depuis les env vars.
-    scope='admin' = accès complet à tous les contextes.
+    Crée l'utilisateur admin par défaut (Guillaume) depuis les variables d'env.
+    APP_USERNAME / APP_PASSWORD — scope 'admin'.
     """
     username = os.getenv("APP_USERNAME", "guillaume").strip()
     password = os.getenv("APP_PASSWORD", "couffrant2026").strip()
@@ -72,18 +76,17 @@ def init_default_user():
             password_hash = hash_password(password)
             c.execute("""
                 INSERT INTO users (username, password_hash, scope)
-                VALUES (%s, %s, 'admin')
+                VALUES (%s, %s, %s)
                 ON CONFLICT (username) DO NOTHING
-            """, (username, password_hash))
+            """, (username, password_hash, SCOPE_ADMIN))
             conn.commit()
             print(f"[Auth] Utilisateur admin créé : {username}")
         else:
-            # Met à jour le scope admin si l'utilisateur existe déjà sans scope
+            # Assure que l'utilisateur admin a bien le scope 'admin'
             c.execute("""
-                UPDATE users SET scope = 'admin'
-                WHERE username = %s AND (scope IS NULL OR scope = 'couffrant_solar')
-                AND username = %s
-            """, (username, username))
+                UPDATE users SET scope = %s
+                WHERE username = %s AND scope = 'couffrant_solar'
+            """, (SCOPE_ADMIN, username))
             conn.commit()
     except Exception as e:
         print(f"[Auth] Erreur init_default_user: {e}")
@@ -93,6 +96,7 @@ def init_default_user():
 
 
 def authenticate(username: str, password: str) -> bool:
+    """Vérifie les credentials contre la base."""
     conn = None
     try:
         conn = get_pg_conn()
@@ -111,86 +115,84 @@ def authenticate(username: str, password: str) -> bool:
 
 
 def get_user_scope(username: str) -> str:
-    """
-    Retourne le scope de l'utilisateur.
-    'admin'           = Guillaume, accès complet
-    'couffrant_solar' = collègue, Couffrant Solar uniquement
-    """
+    """Retourne le scope de l'utilisateur. Défaut : couffrant_solar."""
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("SELECT scope FROM users WHERE username = %s", (username.strip(),))
         row = c.fetchone()
-        return row[0] if row and row[0] else 'couffrant_solar'
+        return row[0] if row else SCOPE_CS
     except Exception:
-        return 'couffrant_solar'
+        return SCOPE_CS
     finally:
         if conn:
             conn.close()
 
 
-def create_user(username: str, password: str, scope: str = 'couffrant_solar') -> dict:
-    """
-    Crée un nouvel utilisateur.
-    scope = 'couffrant_solar' pour les collègues (défaut).
-    """
+def create_user(username: str, password: str, scope: str = SCOPE_CS) -> dict:
+    """Crée un nouvel utilisateur. Retourne {status, message}."""
     if not username or not password:
-        return {"error": "Identifiant et mot de passe requis"}
-    if scope not in ('admin', 'couffrant_solar', 'sci_gaucherie', 'sci_romagui', 'sas_gplh', 'holding'):
-        return {"error": f"Scope invalide : {scope}"}
+        return {"status": "error", "message": "Identifiant et mot de passe requis."}
+    if len(password) < 8:
+        return {"status": "error", "message": "Mot de passe trop court (8 caractères minimum)."}
+    if scope not in (SCOPE_ADMIN, SCOPE_CS):
+        scope = SCOPE_CS
+
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT 1 FROM users WHERE username = %s", (username.strip(),))
-        if c.fetchone():
-            return {"error": f"L'utilisateur '{username}' existe déjà"}
         password_hash = hash_password(password)
         c.execute("""
             INSERT INTO users (username, password_hash, scope)
             VALUES (%s, %s, %s)
         """, (username.strip(), password_hash, scope))
         conn.commit()
-        return {"status": "ok", "username": username.strip(), "scope": scope}
+        print(f"[Auth] Utilisateur créé : {username} (scope: {scope})")
+        return {"status": "ok", "message": f"Utilisateur '{username}' créé avec le rôle {scope}."}
     except Exception as e:
-        return {"error": str(e)[:200]}
+        if "unique" in str(e).lower():
+            return {"status": "error", "message": f"L'identifiant '{username}' existe déjà."}
+        return {"status": "error", "message": str(e)[:100]}
     finally:
         if conn:
             conn.close()
 
 
-def delete_user(username: str) -> dict:
-    """Supprime un utilisateur (protection : impossible de supprimer un admin)."""
+def delete_user(username: str, requesting_user: str) -> dict:
+    """Supprime un utilisateur. Un admin ne peut pas se supprimer lui-même."""
+    if username.strip() == requesting_user.strip():
+        return {"status": "error", "message": "Impossible de supprimer ton propre compte."}
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT scope FROM users WHERE username = %s", (username.strip(),))
-        row = c.fetchone()
-        if not row:
-            return {"error": "Utilisateur introuvable"}
-        if row[0] == 'admin':
-            return {"error": "Impossible de supprimer un compte admin"}
-        c.execute("DELETE FROM users WHERE username = %s", (username.strip(),))
+        c.execute("DELETE FROM users WHERE username = %s AND username != %s",
+                  (username.strip(), requesting_user.strip()))
+        if c.rowcount == 0:
+            conn.rollback()
+            return {"status": "error", "message": "Utilisateur introuvable."}
         conn.commit()
-        return {"status": "ok", "deleted": username.strip()}
+        return {"status": "ok", "message": f"Utilisateur '{username}' supprimé."}
     except Exception as e:
-        return {"error": str(e)[:200]}
+        return {"status": "error", "message": str(e)[:100]}
     finally:
         if conn:
             conn.close()
 
 
 def list_users() -> list:
-    """Liste tous les utilisateurs (sans les hash de mots de passe)."""
+    """Liste tous les utilisateurs (sans les mots de passe)."""
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("SELECT username, scope, last_login, created_at FROM users ORDER BY created_at")
-        rows = c.fetchall()
-        return [{"username": r[0], "scope": r[1], "last_login": str(r[2]) if r[2] else None, "created_at": str(r[3])} for r in rows]
+        return [
+            {"username": r[0], "scope": r[1], "last_login": str(r[2]) if r[2] else None, "created_at": str(r[3])}
+            for r in c.fetchall()
+        ]
     except Exception:
         return []
     finally:
