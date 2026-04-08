@@ -33,6 +33,8 @@ from app.app_security import (
     get_user_tools, set_user_tool, remove_user_tool,
     LOGIN_PAGE_HTML, SCOPE_ADMIN, SCOPE_CS
 )
+# Rule engine — règles évolutives d'Aria (zéro règle métier codée en dur)
+from app.rule_engine import get_antispam_keywords, get_contacts_keywords, get_memoire_param
 
 try:
     from app.memory_manager import (
@@ -42,7 +44,7 @@ try:
         load_sent_mails_to_style, purge_old_mails,
         get_aria_rules, save_rule, delete_rule,
         get_aria_insights, save_insight,
-        synthesize_session,
+        synthesize_session, seed_default_rules,
     )
     MEMORY_OK = True
 except Exception as _mem_err:
@@ -64,6 +66,7 @@ except Exception as _mem_err:
     def get_aria_insights(**kwargs): return ""
     def save_insight(*a, **kw): return 0
     def synthesize_session(**kwargs): return {}
+    def seed_default_rules(username='guillaume'): pass
 
 
 app = FastAPI(title="Couffrant Solar Assistant")
@@ -87,6 +90,12 @@ def startup_event():
     except Exception as e:
         print(f"[Auth] Erreur init_default_user: {e}")
 
+    try:
+        admin_username = os.getenv("APP_USERNAME", "guillaume").strip()
+        seed_default_rules(admin_username)
+    except Exception as e:
+        print(f"[Seed] Erreur seed_default_rules: {e}")
+
     import threading
 
     def auto_ingest():
@@ -98,6 +107,7 @@ def startup_event():
                 from app.ai_client import analyze_single_mail_with_ai as _analyze_ai
                 from app.feedback_store import get_global_instructions as _get_instructions
                 from app.assistant_analyzer import analyze_single_mail as _analyze
+                from app.rule_engine import get_antispam_keywords as _get_spam, get_memoire_param as _get_param
 
                 users = get_all_users_with_tokens()
                 instructions = _get_instructions()
@@ -109,13 +119,17 @@ def startup_event():
                         data = _graph_get(token, "/me/mailFolders/inbox/messages",
                             params={"$top": 10, "$select": "id,subject,from,receivedDateTime,bodyPreview",
                                     "$orderby": "receivedDateTime DESC"})
+                        spam_kw = _get_spam(username)
                         for msg in data.get("value", []):
                             message_id = msg["id"]
                             if mail_exists(message_id, username): continue
+                            _from = msg.get("from", {}).get("emailAddress", {}).get("address", "").lower()
+                            _txt = f"{_from} {(msg.get('subject') or '').lower()} {(msg.get('bodyPreview') or '').lower()}"
+                            if any(kw in _txt for kw in spam_kw): continue
                             try:
-                                item = _analyze_ai(msg, instructions); analysis_status = "done_ai"
+                                item = _analyze_ai(msg, instructions, username); analysis_status = "done_ai"
                             except Exception:
-                                item = _analyze(msg); analysis_status = "fallback"
+                                item = _analyze(msg, username); analysis_status = "fallback"
                             insert_mail({
                                 "username": username, "message_id": message_id,
                                 "received_at": msg.get("receivedDateTime"),
@@ -135,7 +149,11 @@ def startup_event():
                         print(f"[AutoIngest] Erreur pour {username}: {e}")
 
                 cycle += 1
-                if cycle % 40 == 0 and MEMORY_OK:
+                try:
+                    _rebuild_cycle = _get_param(users[0] if users else 'guillaume', "rebuild_cycles", 40)
+                except Exception:
+                    _rebuild_cycle = 40
+                if cycle % _rebuild_cycle == 0 and MEMORY_OK:
                     for username in users:
                         try: rebuild_hot_summary(username)
                         except Exception as e: print(f"[Memory] Erreur rebuild {username}: {e}")
@@ -235,7 +253,7 @@ def admin_create_user(request: Request, payload: dict = Body(...)):
         payload.get("username", "").strip(),
         payload.get("password", ""),
         payload.get("scope", SCOPE_CS),
-        payload.get("tools"),  # liste optionnelle de surcharges outils
+        payload.get("tools"),
     )
 
 
@@ -302,37 +320,19 @@ def admin_memory_status(request: Request):
 
 @app.get("/admin/user-tools/{target_username}")
 def admin_get_user_tools(request: Request, target_username: str):
-    """
-    Voir les outils configurés pour un utilisateur.
-    GET /admin/user-tools/sabrina
-    """
     if not _require_admin(request): return {"error": "Accès refusé."}
     return get_user_tools(target_username, raw=True)
 
 
 @app.post("/admin/user-tools/{target_username}/{tool}")
-def admin_set_user_tool(request: Request, target_username: str, tool: str,
-                         payload: dict = Body(...)):
-    """
-    Créer ou mettre à jour un outil pour un utilisateur.
-    POST /admin/user-tools/sabrina/odoo
-    Body: {"access_level": "full", "enabled": true, "config": {}}
-    """
+def admin_set_user_tool(request: Request, target_username: str, tool: str, payload: dict = Body(...)):
     if not _require_admin(request): return {"error": "Accès refusé."}
-    return set_user_tool(
-        target_username, tool,
-        payload.get("access_level", "read_only"),
-        payload.get("enabled", True),
-        payload.get("config", {}),
-    )
+    return set_user_tool(target_username, tool,
+        payload.get("access_level", "read_only"), payload.get("enabled", True), payload.get("config", {}))
 
 
 @app.delete("/admin/user-tools/{target_username}/{tool}")
 def admin_remove_user_tool(request: Request, target_username: str, tool: str):
-    """
-    Supprimer un outil du profil d'un utilisateur.
-    DELETE /admin/user-tools/sabrina/gmail
-    """
     if not _require_admin(request): return {"error": "Accès refusé."}
     return remove_user_tool(target_username, tool)
 
@@ -370,33 +370,24 @@ def aria(request: Request, payload: AriaQuery):
     import re
     instructions = get_global_instructions()
 
-    # ── Identité et scope ──
     username = request.session.get("user", "guillaume")
     user_scope = request.session.get("scope", SCOPE_CS)
     is_admin = user_scope == SCOPE_ADMIN
     display_name = username.capitalize()
 
-    # ── Chargement du profil outils de l'utilisateur ──
     user_tools = get_user_tools(username)
-
-    # Drive
     drive_tool = user_tools.get('drive', {})
     drive_access = drive_tool.get('access_level', 'read_only') if drive_tool.get('enabled', True) else 'none'
     drive_write = drive_access in ('write', 'full')
     drive_can_delete = drive_tool.get('config', {}).get('can_delete', False)
-
-    # Mail
     mail_tool = user_tools.get('outlook', {})
     mail_can_delete = mail_tool.get('config', {}).get('can_delete_mail', False)
     mail_extra_boxes = mail_tool.get('config', {}).get('mailboxes', [])
-
-    # Odoo
     odoo_tool = user_tools.get('odoo', {})
     odoo_enabled = odoo_tool.get('enabled', False) and odoo_tool.get('access_level', 'none') != 'none'
     odoo_access = odoo_tool.get('access_level', 'none')
     odoo_shared_user = odoo_tool.get('config', {}).get('shared_user')
 
-    # ── Données mémoire ──
     conn = None
     try:
         conn = get_pg_conn()
@@ -409,15 +400,12 @@ def aria(request: Request, payload: AriaQuery):
         """, (username,))
         columns = [desc[0] for desc in c.description]
         mails_from_db = [dict(zip(columns, row)) for row in c.fetchall()]
-
         c.execute("SELECT user_input, aria_response FROM aria_memory WHERE username = %s ORDER BY id DESC LIMIT 6", (username,))
         columns = [desc[0] for desc in c.description]
         history = [dict(zip(columns, row)) for row in c.fetchall()]
         history.reverse()
-
         c.execute("SELECT content FROM aria_profile WHERE username = %s AND profile_type = 'style' ORDER BY id DESC LIMIT 1", (username,))
         profile_row = c.fetchone()
-
         c.execute("SELECT COUNT(*) FROM aria_memory WHERE username = %s", (username,))
         conv_count = c.fetchone()[0]
     finally:
@@ -429,8 +417,7 @@ def aria(request: Request, payload: AriaQuery):
 
     contact_card = ""
     query_lower = payload.query.lower()
-    known_contacts = ["arlène", "arlene", "sabrina", "benoit", "maxence", "pinto", "enedis",
-                      "adiwatt", "triangle", "eleria", "consuel", "socotec", "charlotte", "pierre"]
+    known_contacts = get_contacts_keywords(username)  # dynamique depuis aria_contacts + règles
     for name in known_contacts:
         if name in query_lower:
             contact_card = get_contact_card(name)
@@ -442,7 +429,6 @@ def aria(request: Request, payload: AriaQuery):
     )
 
     outlook_token = get_valid_microsoft_token(username)
-
     outlook_live_mails = []
     if outlook_token:
         try:
@@ -486,8 +472,6 @@ def aria(request: Request, payload: AriaQuery):
     else:
         user_content_parts = payload.query
 
-    # ── Sections du system prompt selon le profil outils ──
-
     if is_admin:
         identity = f"""Tu es Aria, l'assistante personnelle de {display_name} — Couffrant Solar (photovoltaïque, 8 personnes, Centre-Val de Loire).
 Tu es autonome et apprenante. Tu n'as pas de règles imposées de l'extérieur — tes règles viennent de ce que tu as appris au fil des échanges.
@@ -497,11 +481,8 @@ Tu parles au féminin. Tu proposes avant d'agir sauf si {display_name} dit expli
 Tu aides {display_name} dans son travail quotidien et apprends ses habitudes au fil des échanges.
 Tu parles au féminin. Tu proposes avant d'agir."""
 
-    # Section mail
     mail_delete_line = "[ACTION:DELETE:message_id] → corbeille récupérable" if mail_can_delete else ""
     mailboxes_line = f"Boîtes mail configurées : {', '.join(mail_extra_boxes)}" if mail_extra_boxes else ""
-
-    # Section Drive
     drive_section = """\nActions Drive SharePoint (1_Photovoltaïque) :
 Affichage : 📁 "Nom"  [id:ID_COMPLET] — utilise l'ID complet
 [ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:ID] [ACTION:READDRIVE:ID] [ACTION:SEARCHDRIVE:mot-clé]"""
@@ -511,8 +492,6 @@ Affichage : 📁 "Nom"  [id:ID_COMPLET] — utilise l'ID complet
         drive_section += "\n(Suppression de fichiers disponible — sera implémentée dans une prochaine version.)"
     if not drive_write:
         drive_section += "\n(Drive en lecture seule pour ton compte.)"
-
-    # Section Odoo
     odoo_section = ""
     if odoo_enabled:
         if odoo_access == 'full':
@@ -520,8 +499,6 @@ Affichage : 📁 "Nom"  [id:ID_COMPLET] — utilise l'ID complet
         else:
             shared_info = f" via les credentials de {odoo_shared_user.capitalize()}" if odoo_shared_user else ""
             odoo_section = f"\nOdoo (lecture seule{shared_info}) — tu peux consulter les données mais pas les modifier."
-
-    # Section auto-évolution
     auto_evolution_section = f"""
 Auto-évolution — tu es juge de l'apprentissage de {display_name} :
 LEARN et INSIGHT sont personnels à {display_name} et persistent entre les sessions. Tu apprends en silence.
@@ -580,7 +557,6 @@ Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
         return len(msg_id.strip()) > 20
 
     if outlook_token:
-        # DELETE mail — selon config outil
         if mail_can_delete:
             for msg_id in re.findall(r'\[ACTION:DELETE:([^\]]+)\]', aria_response):
                 msg_id = msg_id.strip()
@@ -641,7 +617,6 @@ Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
             try: perform_outlook_action("create_todo_task", {"title": title.strip()}, outlook_token)
             except Exception: pass
 
-        # Drive lecture — tous
         for match in re.finditer(r'\[ACTION:LISTDRIVE:([^\]]*)\]', aria_response):
             subfolder = match.group(1).strip()
             try:
@@ -684,7 +659,6 @@ Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
             except Exception as e:
                 actions_confirmed.append(f"❌ {str(e)[:80]}")
 
-        # Drive écriture — selon config outil (drive_write)
         if drive_write:
             for match in re.finditer(r'\[ACTION:CREATEFOLDER:([^|^\]]+)\|([^\]]+)\]', aria_response):
                 parent_id = match.group(1).strip(); folder_name = match.group(2).strip()
@@ -716,7 +690,6 @@ Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
                 except Exception as e:
                     actions_confirmed.append(f"❌ {str(e)[:80]}")
 
-    # Auto-évolution — tous les utilisateurs (mémoire personnelle)
     if MEMORY_OK:
         for match in re.finditer(r'\[ACTION:LEARN:([^|^\]]+)\|([^\]]+)\]', aria_response):
             category=match.group(1).strip(); rule=match.group(2).strip()
@@ -760,10 +733,11 @@ Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
     finally:
         if conn: conn.close()
 
-    if MEMORY_OK and conv_count >= 15:
+    synth_threshold = get_memoire_param(username, "synth_threshold", 15)
+    if MEMORY_OK and conv_count >= synth_threshold:
         try:
             import threading
-            threading.Thread(target=lambda u=username: synthesize_session(15, u), daemon=True).start()
+            threading.Thread(target=lambda u=username: synthesize_session(synth_threshold, u), daemon=True).start()
         except Exception: pass
 
     return {"answer": clean_response, "actions": actions_confirmed}
@@ -886,7 +860,7 @@ def analyze_raw_mails(request: Request, limit: int = 50):
         msg = {"id": message_id, "subject": subject, "from": {"emailAddress": {"address": from_email or ""}},
                "receivedDateTime": str(received_at) if received_at else "", "bodyPreview": body_preview or ""}
         try:
-            item = analyze_single_mail_with_ai(msg, instructions)
+            item = analyze_single_mail_with_ai(msg, instructions, username)
             conn = None
             try:
                 conn = get_pg_conn(); c = conn.cursor()
@@ -1047,10 +1021,7 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
     except requests.HTTPError:
         return RedirectResponse("/login?next=/learn-inbox-mails")
     inserted = skipped_noise = 0
-    skip_keywords = ["noreply","no-reply","donotreply","newsletter","unsubscribe","se désabonner",
-                     "notification","mailer-daemon","marketing","promo","offre spéciale","linkedin",
-                     "twitter","facebook","instagram","jobteaser","indeed","welcometothejungle",
-                     "calendly","zoom","teams","webinar","webinaire","satisfaction","avis client","enquête","survey"]
+    skip_keywords = get_antispam_keywords(username)  # dynamique depuis aria_rules
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -1182,8 +1153,9 @@ def ingest_gmail(request: Request):
 
 
 @app.get("/assistant-dashboard")
-def assistant_dashboard(days: int = 2):
-    return get_dashboard(days)
+def assistant_dashboard(request: Request, days: int = 2):
+    username = request.session.get("user", "guillaume")
+    return get_dashboard(days, username)
 
 
 @app.get("/test-elevenlabs")
