@@ -1,14 +1,5 @@
 """
 Gestionnaire de mémoire d'Aria — 3 niveaux, multi-utilisateurs.
-
-Chaque utilisateur a sa propre mémoire (rules, insights, conversations, style, résumé).
-Les contacts (aria_contacts) sont partagés — contacts entreprise Couffrant Solar.
-
-Architecture auto-évolutive :
-  Tout comportement d'Aria (tri mails, urgence, spam, regroupement, style, cycles)
-  est piloté par aria_rules. Aucune règle métier n'est codée en dur.
-  Seuls les garde-fous de sécurité (auth, suppression définitive, envoi sans confirmation)
-  restent immuables dans le code.
 """
 
 from app.database import get_pg_conn
@@ -18,10 +9,6 @@ import json
 import re
 from datetime import datetime
 
-
-# ─────────────────────────────────────────
-# NIVEAU 1 — RÉSUMÉ CHAUD (par utilisateur)
-# ─────────────────────────────────────────
 
 def get_hot_summary(username: str = 'guillaume') -> str:
     conn = None
@@ -47,10 +34,8 @@ def rebuild_hot_summary(username: str = 'guillaume') -> str:
         """, (username,))
         cols = [d[0] for d in c.description]
         mails = [dict(zip(cols, row)) for row in c.fetchall()]
-
         c.execute("SELECT name, summary FROM aria_contacts ORDER BY last_seen DESC LIMIT 15")
         contacts = [{'name': r[0], 'summary': r[1]} for r in c.fetchall()]
-
         c.execute("""
             SELECT user_input, aria_response FROM aria_memory
             WHERE username = %s ORDER BY id DESC LIMIT 8
@@ -99,15 +84,10 @@ Factuel, direct, sans blabla."""
     return summary
 
 
-# ─────────────────────────────────────────
-# NIVEAU 1 — RÈGLES (par utilisateur)
-# ─────────────────────────────────────────
-
 def get_aria_rules(username: str = 'guillaume') -> str:
     """
-    Retourne toutes les règles actives d'Aria pour injection dans le prompt.
-    Pas de filtre sur les catégories — Aria organise sa mémoire librement.
-    Seuls les paramètres 'memoire' (synth_threshold...) sont exclus — gérés par le code.
+    Toutes les règles actives sauf 'memoire' (paramètres techniques).
+    Aria organise sa mémoire librement, sans filtre de catégorie.
     """
     conn = None
     try:
@@ -116,8 +96,7 @@ def get_aria_rules(username: str = 'guillaume') -> str:
         c.execute("""
             SELECT id, category, rule, confidence, reinforcements
             FROM aria_rules
-            WHERE active = true AND username = %s
-            AND category != 'memoire'
+            WHERE active = true AND username = %s AND category != 'memoire'
             ORDER BY confidence DESC, reinforcements DESC, created_at DESC
             LIMIT 60
         """, (username,))
@@ -171,10 +150,6 @@ def delete_rule(rule_id: int, username: str = 'guillaume') -> bool:
         if conn: conn.close()
 
 
-# ─────────────────────────────────────────
-# NIVEAU 1 — INSIGHTS (par utilisateur)
-# ─────────────────────────────────────────
-
 def save_insight(topic: str, insight: str, source: str = "conversation", username: str = 'guillaume') -> int:
     conn = None
     try:
@@ -219,10 +194,6 @@ def get_aria_insights(limit: int = 8, username: str = 'guillaume') -> str:
     finally:
         if conn: conn.close()
 
-
-# ─────────────────────────────────────────
-# NIVEAU 2 — SYNTHÈSE AUTO (par utilisateur)
-# ─────────────────────────────────────────
 
 def synthesize_session(n_conversations: int = 15, username: str = 'guillaume') -> dict:
     conn = None
@@ -312,10 +283,6 @@ Synthétise en JSON strict (sans backticks) :
             "rules_extracted": len(parsed.get("rules_learned", [])),
             "insights_extracted": len(parsed.get("insights", [])), "purged": purged}
 
-
-# ─────────────────────────────────────────
-# NIVEAU 2 — CONTACTS (partagés)
-# ─────────────────────────────────────────
 
 def get_contact_card(name_or_email: str) -> str:
     conn = None
@@ -407,10 +374,6 @@ Réponds en JSON : name, company, role, summary (2-3 lignes)"""
     return updated
 
 
-# ─────────────────────────────────────────
-# NIVEAU 2 — STYLE (par utilisateur)
-# ─────────────────────────────────────────
-
 def get_style_examples(context: str = "", username: str = 'guillaume') -> str:
     conn = None
     try:
@@ -482,10 +445,6 @@ def load_sent_mails_to_style(limit: int = 50, username: str = 'guillaume'):
     return added
 
 
-# ─────────────────────────────────────────
-# PURGE
-# ─────────────────────────────────────────
-
 def purge_old_mails(days: int = None, username: str = 'guillaume') -> int:
     if days is None:
         days = get_memoire_param('purge_days', 90, username)
@@ -504,10 +463,6 @@ def purge_old_mails(days: int = None, username: str = 'guillaume') -> int:
     finally:
         if conn: conn.close()
 
-
-# ─────────────────────────────────────────
-# RÈGLES PAR CATÉGORIE — API interne
-# ─────────────────────────────────────────
 
 def get_rules_by_category(category: str, username: str = 'guillaume') -> list[str]:
     conn = None
@@ -606,9 +561,7 @@ def save_reply_learning(
 ) -> int:
     """
     Enregistre une correction pour l'apprentissage few-shot d'Aria.
-      ai_reply    : ce qu'Aria a suggéré
-      final_reply : ce que Guillaume a réellement envoyé (sa correction)
-    Alimenté automatiquement à chaque ACTION:REPLY et via POST /correction.
+    Fix 1 — username inclus pour isolation par utilisateur.
     """
     if not final_reply:
         return 0
@@ -618,10 +571,10 @@ def save_reply_learning(
         c = conn.cursor()
         c.execute("""
             INSERT INTO reply_learning_memory
-            (mail_subject, mail_from, mail_body_preview, category, ai_reply, final_reply)
-            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+            (username, mail_subject, mail_from, mail_body_preview, category, ai_reply, final_reply)
+            VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
         """, (
-            mail_subject[:200], mail_from[:200], mail_body_preview[:500],
+            username, mail_subject[:200], mail_from[:200], mail_body_preview[:500],
             category, ai_reply[:2000], final_reply[:2000]
         ))
         result_id = c.fetchone()[0]
@@ -636,8 +589,7 @@ def save_reply_learning(
 
 def seed_default_rules(username: str = 'guillaume'):
     """
-    Aria apprend d'elle-même à partir des échanges réels.
-    Aucune règle par défaut — elle commence avec une mémoire vierge.
-    Les garde-fous de sécurité sont immuables dans le code (system prompt).
+    Aria apprend d'elle-même. Aucune règle par défaut.
+    Les garde-fous de sécurité sont immuables dans le code.
     """
-    pass  # Intentionnellement vide — Aria construit sa propre mémoire
+    pass

@@ -15,7 +15,6 @@ def init_postgres():
     conn = get_pg_conn()
     c = conn.cursor()
 
-    # ── mail_memory — par utilisateur ──
     c.execute("""
         CREATE TABLE IF NOT EXISTS mail_memory (
             id SERIAL PRIMARY KEY,
@@ -191,11 +190,6 @@ def init_postgres():
         )
     """)
 
-    # ── user_tools — profil outils par utilisateur ──
-    # tool         : 'outlook', 'odoo', 'drive', 'gmail', ... (extensible)
-    # access_level : 'full', 'write', 'read_only', 'none'
-    # enabled      : active ou non
-    # config       : JSON libre (paramètres spécifiques à chaque outil)
     c.execute("""
         CREATE TABLE IF NOT EXISTS user_tools (
             id SERIAL PRIMARY KEY,
@@ -210,14 +204,17 @@ def init_postgres():
         )
     """)
 
+    # Fix 1 — reply_learning_memory avec username (isolation par utilisateur)
     c.execute("""
         CREATE TABLE IF NOT EXISTS reply_learning_memory (
             id SERIAL PRIMARY KEY,
+            username TEXT DEFAULT 'guillaume',
             mail_subject TEXT, mail_from TEXT, mail_body_preview TEXT,
             category TEXT, ai_reply TEXT, final_reply TEXT,
             created_at TIMESTAMP DEFAULT NOW()
         )
     """)
+
     c.execute("""
         CREATE TABLE IF NOT EXISTS global_instructions (
             id SERIAL PRIMARY KEY,
@@ -225,6 +222,7 @@ def init_postgres():
             created_at TIMESTAMP DEFAULT NOW()
         )
     """)
+
     c.execute("""
         CREATE TABLE IF NOT EXISTS gmail_tokens (
             id SERIAL PRIMARY KEY,
@@ -267,7 +265,8 @@ def init_postgres():
         "ALTER TABLE sent_mail_memory DROP CONSTRAINT IF EXISTS sent_mail_memory_message_id_key",
         "ALTER TABLE sent_mail_memory DROP CONSTRAINT IF EXISTS sent_mail_msg_user_unique",
         "ALTER TABLE sent_mail_memory ADD CONSTRAINT sent_mail_msg_user_unique UNIQUE (message_id, username)",
-        # user_tools : crée la table si elle n'existe pas encore (idempotent)
+        # Fix 1 — migration reply_learning_memory.username sur base existante
+        "ALTER TABLE reply_learning_memory ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
         """CREATE TABLE IF NOT EXISTS user_tools (
             id SERIAL PRIMARY KEY, username TEXT NOT NULL, tool TEXT NOT NULL,
             access_level TEXT DEFAULT 'read_only', enabled BOOLEAN DEFAULT true,

@@ -30,15 +30,18 @@ def _parse_json_safe(text: str) -> dict:
 
 
 def get_learning_examples(category: str, username: str = 'guillaume', limit: int = 3) -> list[dict]:
-    """Exemples de corrections passées pour le few-shot learning."""
+    """Exemples de corrections passées pour le few-shot learning — filtrés par username."""
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
+        # Fix 1c — filtre par username pour isolation correcte
         c.execute("""
             SELECT mail_subject, mail_from, mail_body_preview, category, ai_reply, final_reply
-            FROM reply_learning_memory WHERE category = %s ORDER BY id DESC LIMIT %s
-        """, (category, limit))
+            FROM reply_learning_memory
+            WHERE category = %s AND username = %s
+            ORDER BY id DESC LIMIT %s
+        """, (category, username, limit))
         return [{"mail_subject": r[0], "mail_from": r[1], "mail_body_preview": r[2],
                  "category": r[3], "ai_reply": r[4], "final_reply": r[5]} for r in c.fetchall()]
     except Exception:
@@ -78,7 +81,6 @@ def get_odoo_context(sender_email: str) -> dict:
 
 
 def get_style_profile(username: str = 'guillaume') -> str:
-    """Charge le profil de style de l'utilisateur depuis aria_profile."""
     conn = None
     try:
         conn = get_pg_conn()
@@ -96,17 +98,10 @@ def get_style_profile(username: str = 'guillaume') -> str:
 
 
 def _get_hint_category(full_text: str, username: str) -> str:
-    """
-    Détection légère de catégorie pour charger les bons exemples d'apprentissage.
-    Basé sur les règles tri_mails d'Aria, sans logique hardcodée.
-    Fallback : quelques termes clés de bootstrap si aucune règle.
-    """
     from app.rule_engine import extract_category_keywords
-
     categories = ["raccordement", "commercial", "reunion", "chantier", "financier"]
     for cat in categories:
         kws = extract_category_keywords(username, cat)
-        # Fallback si la règle n'a pas encore été seedée
         if not kws:
             fallbacks = {
                 "raccordement": ["enedis", "consuel", "raccordement"],
@@ -126,22 +121,12 @@ def analyze_single_mail_with_ai(
     instructions: list[str] | None = None,
     username: str = 'guillaume'
 ) -> dict:
-    """
-    Analyse un mail avec Claude.
-
-    Les règles de tri, d'urgence et de style viennent de aria_rules.
-    Aria les fait évoluer via LEARN/FORGET. Le code n'en contient aucune.
-    """
     instructions = instructions or []
-
     sender_email = message.get("from", {}).get("emailAddress", {}).get("address", "Expéditeur inconnu")
     odoo_context = get_odoo_context(sender_email)
     style_profile = get_style_profile(username)
-
-    # ── Règles Aria chargées dynamiquement ──
     rules_text = get_rules_as_text(username, ["tri_mails", "urgence", "style_reponse"])
 
-    # Exemples de corrections passées (few-shot)
     full_lower = (
         f"{message.get('subject', '')} "
         f"{message.get('bodyPreview', '')} "

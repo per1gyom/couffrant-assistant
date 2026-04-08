@@ -176,10 +176,6 @@ def remove_user_tool(username: str, tool: str) -> dict:
 # ── Gestion des utilisateurs ──
 
 def init_default_user():
-    """
-    Crée l'utilisateur admin (Guillaume) depuis APP_USERNAME / APP_PASSWORD.
-    Initialise ses outils et ses règles Aria par défaut.
-    """
     username = os.getenv("APP_USERNAME", "guillaume").strip()
     password = os.getenv("APP_PASSWORD", "couffrant2026").strip()
 
@@ -206,10 +202,8 @@ def init_default_user():
     finally:
         if conn: conn.close()
 
-    # Outils par défaut
     init_default_tools(username, SCOPE_ADMIN)
 
-    # Règles Aria par défaut — seed idempotent
     try:
         from app.memory_manager import seed_default_rules
         seed_default_rules(username)
@@ -248,10 +242,6 @@ def get_user_scope(username: str) -> str:
 
 def create_user(username: str, password: str, scope: str = SCOPE_CS,
                 tools: list = None) -> dict:
-    """
-    Crée un utilisateur + initialise ses outils et ses règles Aria.
-    tools : liste optionnelle de surcharges outils.
-    """
     if not username or not password:
         return {"status": "error", "message": "Identifiant et mot de passe requis."}
     if len(password) < 8:
@@ -277,17 +267,14 @@ def create_user(username: str, password: str, scope: str = SCOPE_CS,
     finally:
         if conn: conn.close()
 
-    # Seed des règles Aria par défaut — idempotent, n'écrase rien
     try:
         from app.memory_manager import seed_default_rules
         seed_default_rules(username.strip())
     except Exception as e:
         print(f"[Seed] Erreur seed_default_rules pour {username}: {e}")
 
-    # Outils par défaut selon le scope
     init_default_tools(username.strip(), scope)
 
-    # Surcharges outils passées par l'admin
     if tools:
         for t in tools:
             if "tool" in t:
@@ -302,6 +289,7 @@ def create_user(username: str, password: str, scope: str = SCOPE_CS,
 
 
 def delete_user(username: str, requesting_user: str) -> dict:
+    """Supprime un utilisateur et TOUTES ses données (cascade propre)."""
     if username.strip() == requesting_user.strip():
         return {"status": "error", "message": "Impossible de supprimer ton propre compte."}
     conn = None
@@ -313,9 +301,16 @@ def delete_user(username: str, requesting_user: str) -> dict:
         if c.rowcount == 0:
             conn.rollback()
             return {"status": "error", "message": "Utilisateur introuvable."}
-        c.execute("DELETE FROM user_tools WHERE username = %s", (username.strip(),))
+        # Fix 2 — cascade sur toutes les tables utilisateur
+        for table in [
+            "user_tools", "mail_memory", "aria_memory", "aria_rules",
+            "aria_insights", "aria_hot_summary", "aria_style_examples",
+            "aria_session_digests", "sent_mail_memory", "aria_profile",
+            "oauth_tokens", "reply_learning_memory"
+        ]:
+            c.execute(f"DELETE FROM {table} WHERE username = %s", (username.strip(),))
         conn.commit()
-        return {"status": "ok", "message": f"Utilisateur '{username}' supprimé."}
+        return {"status": "ok", "message": f"Utilisateur '{username}' et toutes ses données supprimés."}
     except Exception as e:
         return {"status": "error", "message": str(e)[:100]}
     finally:
