@@ -9,18 +9,8 @@ def get_pg_conn():
 
 
 def init_postgres():
-    """
-    Crée toutes les tables nécessaires.
-    3 niveaux de mémoire :
-      Niveau 1 (contexte immédiat) : hot_summary, contacts, rules, insights
-      Niveau 2 (mémoire active)   : mail_memory, aria_memory, style_examples
-      Niveau 3 (archive froide)   : session_digests, sent_mail_memory, aria_profile
-    """
-
     conn = get_pg_conn()
     c = conn.cursor()
-
-    # ── Niveau 2 : mémoire active ──
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS mail_memory (
@@ -78,8 +68,6 @@ def init_postgres():
         )
     """)
 
-    # ── Niveau 1 : contexte immédiat ──
-
     c.execute("""
         CREATE TABLE IF NOT EXISTS aria_hot_summary (
             id INTEGER PRIMARY KEY DEFAULT 1,
@@ -112,12 +100,13 @@ def init_postgres():
     c.execute("""
         CREATE TABLE IF NOT EXISTS aria_rules (
             id SERIAL PRIMARY KEY,
-            category TEXT DEFAULT 'général',
+            category TEXT DEFAULT 'g\u00e9n\u00e9ral',
             rule TEXT NOT NULL,
             source TEXT DEFAULT 'auto',
             confidence REAL DEFAULT 0.7,
             reinforcements INTEGER DEFAULT 1,
             active BOOLEAN DEFAULT true,
+            context TEXT DEFAULT 'couffrant_solar',
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW()
         )
@@ -130,12 +119,11 @@ def init_postgres():
             insight TEXT NOT NULL,
             source TEXT DEFAULT 'conversation',
             reinforcements INTEGER DEFAULT 1,
+            context TEXT DEFAULT 'couffrant_solar',
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW()
         )
     """)
-
-    # ── Niveau 3 : archive froide ──
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS aria_session_digests (
@@ -170,19 +158,19 @@ def init_postgres():
         )
     """)
 
-    # ── Auth utilisateurs ──
-
+    # users — scope d\u00e9termine les droits d'acc\u00e8s :
+    # 'admin'           : Guillaume, acc\u00e8s complet \u00e0 tous les contextes
+    # 'couffrant_solar' : coll\u00e8gues, acc\u00e8s Couffrant Solar uniquement
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
             username TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
+            scope TEXT DEFAULT 'couffrant_solar',
             last_login TIMESTAMP,
             created_at TIMESTAMP DEFAULT NOW()
         )
     """)
-
-    # ── Autres ──
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS reply_learning_memory (
@@ -229,7 +217,7 @@ def init_postgres():
     conn.commit()
     conn.close()
 
-    # ── Migrations indépendantes ──
+    # Migrations ind\u00e9pendantes
     conn = get_pg_conn()
     c = conn.cursor()
 
@@ -238,6 +226,9 @@ def init_postgres():
         "ALTER TABLE oauth_tokens ADD CONSTRAINT oauth_tokens_provider_unique UNIQUE (provider)",
         "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS reinforcements INTEGER DEFAULT 1",
         "ALTER TABLE aria_insights ADD COLUMN IF NOT EXISTS reinforcements INTEGER DEFAULT 1",
+        "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS context TEXT DEFAULT 'couffrant_solar'",
+        "ALTER TABLE aria_insights ADD COLUMN IF NOT EXISTS context TEXT DEFAULT 'couffrant_solar'",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS scope TEXT DEFAULT 'couffrant_solar'",
     ]:
         try:
             c.execute(migration)
