@@ -9,14 +9,18 @@ def get_pg_conn():
 
 
 def init_postgres():
-    """Crée toutes les tables nécessaires.
-    Les CREATE TABLE et les migrations sont dans des transactions séparées
-    pour éviter qu'un rollback de migration annule les créations de tables.
+    """
+    Crée toutes les tables nécessaires.
+    3 niveaux de mémoire :
+      Niveau 1 (contexte immédiat) : hot_summary, contacts, rules, insights
+      Niveau 2 (mémoire active)   : mail_memory, aria_memory, style_examples
+      Niveau 3 (archive froide)   : session_digests, sent_mail_memory, aria_profile
     """
 
-    # ── Transaction 1 : création de toutes les tables ──
     conn = get_pg_conn()
     c = conn.cursor()
+
+    # ── Niveau 2 : mémoire active ──
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS mail_memory (
@@ -62,14 +66,87 @@ def init_postgres():
     """)
 
     c.execute("""
-        CREATE TABLE IF NOT EXISTS reply_learning_memory (
+        CREATE TABLE IF NOT EXISTS aria_style_examples (
             id SERIAL PRIMARY KEY,
-            mail_subject TEXT,
-            mail_from TEXT,
-            mail_body_preview TEXT,
-            category TEXT,
-            ai_reply TEXT,
-            final_reply TEXT,
+            situation TEXT,
+            example_text TEXT,
+            tags TEXT,
+            quality_score REAL DEFAULT 1.0,
+            used_count INTEGER DEFAULT 0,
+            source TEXT DEFAULT 'sent_mail',
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
+    # ── Niveau 1 : contexte immédiat ──
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS aria_hot_summary (
+            id INTEGER PRIMARY KEY DEFAULT 1,
+            content TEXT,
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    c.execute("""
+        INSERT INTO aria_hot_summary (id, content, updated_at)
+        VALUES (1, '', NOW())
+        ON CONFLICT (id) DO NOTHING
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS aria_contacts (
+            id SERIAL PRIMARY KEY,
+            email TEXT UNIQUE,
+            name TEXT,
+            company TEXT,
+            role TEXT,
+            summary TEXT,
+            last_seen TEXT,
+            last_subject TEXT,
+            mail_count INTEGER DEFAULT 0,
+            tags TEXT,
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
+    # Règles apprises par Aria (gérées par elle-même, pas codées en dur)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS aria_rules (
+            id SERIAL PRIMARY KEY,
+            category TEXT DEFAULT 'général',
+            rule TEXT NOT NULL,
+            source TEXT DEFAULT 'auto',  -- 'auto', 'manuel', 'correction', 'synthesis'
+            confidence REAL DEFAULT 0.7,  -- 0.0 à 1.0, monte avec les confirmations
+            reinforcements INTEGER DEFAULT 1,
+            active BOOLEAN DEFAULT true,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
+    # Insights sur Guillaume et son contexte métier
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS aria_insights (
+            id SERIAL PRIMARY KEY,
+            topic TEXT,
+            insight TEXT NOT NULL,
+            source TEXT DEFAULT 'conversation',
+            reinforcements INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
+    # ── Niveau 3 : archive froide ──
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS aria_session_digests (
+            id SERIAL PRIMARY KEY,
+            session_date DATE DEFAULT CURRENT_DATE,
+            conversation_count INTEGER,
+            summary TEXT,
+            rules_learned JSONB DEFAULT '[]',
+            topics JSONB DEFAULT '[]',
             created_at TIMESTAMP DEFAULT NOW()
         )
     """)
@@ -91,6 +168,21 @@ def init_postgres():
             id SERIAL PRIMARY KEY,
             profile_type TEXT,
             content TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
+    # ── Autres ──
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS reply_learning_memory (
+            id SERIAL PRIMARY KEY,
+            mail_subject TEXT,
+            mail_from TEXT,
+            mail_body_preview TEXT,
+            category TEXT,
+            ai_reply TEXT,
+            final_reply TEXT,
             created_at TIMESTAMP DEFAULT NOW()
         )
     """)
@@ -124,69 +216,23 @@ def init_postgres():
         )
     """)
 
-    # COUCHE 1 — Résumé chaud
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS aria_hot_summary (
-            id INTEGER PRIMARY KEY DEFAULT 1,
-            content TEXT,
-            updated_at TIMESTAMP DEFAULT NOW()
-        )
-    """)
-    c.execute("""
-        INSERT INTO aria_hot_summary (id, content, updated_at)
-        VALUES (1, '', NOW())
-        ON CONFLICT (id) DO NOTHING
-    """)
-
-    # COUCHE 2 — Fiches contacts
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS aria_contacts (
-            id SERIAL PRIMARY KEY,
-            email TEXT UNIQUE,
-            name TEXT,
-            company TEXT,
-            role TEXT,
-            summary TEXT,
-            last_seen TEXT,
-            last_subject TEXT,
-            mail_count INTEGER DEFAULT 0,
-            tags TEXT,
-            updated_at TIMESTAMP DEFAULT NOW()
-        )
-    """)
-
-    # STYLE — Exemples de rédaction
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS aria_style_examples (
-            id SERIAL PRIMARY KEY,
-            situation TEXT,
-            example_text TEXT,
-            tags TEXT,
-            quality_score REAL DEFAULT 1.0,
-            used_count INTEGER DEFAULT 0,
-            source TEXT DEFAULT 'sent_mail',
-            created_at TIMESTAMP DEFAULT NOW()
-        )
-    """)
-
-    # Commit transaction 1 — toutes les tables sont créées
     conn.commit()
     conn.close()
 
-    # ── Transaction 2 : migrations (indépendantes) ──
+    # ── Migrations indépendantes ──
     conn = get_pg_conn()
     c = conn.cursor()
 
-    try:
-        c.execute("ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS mailbox_source TEXT DEFAULT 'outlook'")
-        conn.commit()
-    except Exception:
-        conn.rollback()
-
-    try:
-        c.execute("ALTER TABLE oauth_tokens ADD CONSTRAINT oauth_tokens_provider_unique UNIQUE (provider)")
-        conn.commit()
-    except Exception:
-        conn.rollback()
+    for migration in [
+        "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS mailbox_source TEXT DEFAULT 'outlook'",
+        "ALTER TABLE oauth_tokens ADD CONSTRAINT oauth_tokens_provider_unique UNIQUE (provider)",
+        "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS reinforcements INTEGER DEFAULT 1",
+        "ALTER TABLE aria_insights ADD COLUMN IF NOT EXISTS reinforcements INTEGER DEFAULT 1",
+    ]:
+        try:
+            c.execute(migration)
+            conn.commit()
+        except Exception:
+            conn.rollback()
 
     conn.close()
