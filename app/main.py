@@ -220,7 +220,8 @@ def health():
 
 
 @app.get("/init-db")
-def init_db_now():
+def init_db_now(request: Request):
+    if not _require_admin(request): return {"error": "Accès refusé."}
     init_postgres()
     try: init_default_user()
     except Exception: pass
@@ -238,6 +239,10 @@ def chat(request: Request):
 
 def _require_admin(request: Request) -> bool:
     return request.session.get("scope", SCOPE_CS) == SCOPE_ADMIN
+
+def _require_user(request: Request):
+    """Retourne username si connecté, sinon None. FIX 3 — auth endpoints."""
+    return request.session.get("user")
 
 
 @app.get("/admin/panel", response_class=HTMLResponse)
@@ -492,7 +497,7 @@ Tu parles au féminin. Tu proposes avant d'agir."""
     mail_delete_line = "[ACTION:DELETE:message_id] → corbeille récupérable" if mail_can_delete else ""
     mailboxes_line = f"Boîtes mail configurées : {', '.join(mail_extra_boxes)}" if mail_extra_boxes else ""
     drive_section = """\nActions Drive SharePoint (1_Photovoltaïque) :
-Affichage : 📁 "Nom"  [id:ID_COMPLET] — utilise l'ID complet
+Affichage : 📁 \"Nom\"  [id:ID_COMPLET] — utilise l'ID complet
 [ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:ID] [ACTION:READDRIVE:ID] [ACTION:SEARCHDRIVE:mot-clé]"""
     if drive_write:
         drive_section += "\n[ACTION:CREATEFOLDER:parent_id|nom] [ACTION:MOVEDRIVE:item_id|dest_id|nom] [ACTION:COPYFILE:source_id|dest_id|nom]"
@@ -698,6 +703,9 @@ Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
                 except Exception as e:
                     actions_confirmed.append(f"❌ {str(e)[:80]}")
 
+    # Bug #4 fix — synth_threshold calculé avant le bloc d'actions Aria
+    synth_threshold = get_memoire_param(username, "synth_threshold", 15)
+
     if MEMORY_OK:
         for match in re.finditer(r'\[ACTION:LEARN:([^|^\]]+)\|([^\]]+)\]', aria_response):
             category=match.group(1).strip(); rule=match.group(2).strip()
@@ -723,7 +731,7 @@ Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
         for _ in re.finditer(r'\[ACTION:SYNTH:\]', aria_response):
             try:
                 import threading
-                threading.Thread(target=lambda u=username: synthesize_session(15, u), daemon=True).start()
+                threading.Thread(target=lambda u=username, t=synth_threshold: synthesize_session(t, u), daemon=True).start()
                 actions_confirmed.append("🔄 Synthèse lancée en arrière-plan.")
             except Exception as e: print(f"[SYNTH] Erreur: {e}")
 
@@ -741,8 +749,8 @@ Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
     finally:
         if conn: conn.close()
 
-    synth_threshold = get_memoire_param(username, "synth_threshold", 15)
-    if MEMORY_OK and conv_count >= synth_threshold:
+    # FIX 1 — Synthèse uniquement aux multiples du seuil (15, 30, 45…)
+    if MEMORY_OK and conv_count > 0 and conv_count % synth_threshold == 0:
         try:
             import threading
             threading.Thread(target=lambda u=username: synthesize_session(synth_threshold, u), daemon=True).start()
@@ -755,7 +763,8 @@ Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
 
 @app.get("/build-memory")
 def build_memory(request: Request):
-    username = request.session.get("user", "guillaume")
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     results = {"memory_module": MEMORY_OK, "username": username}
     if not MEMORY_OK: return {"error": "Module mémoire non disponible"}
     try:
@@ -774,7 +783,8 @@ def build_memory(request: Request):
 
 @app.get("/memory-status")
 def memory_status(request: Request):
-    username = request.session.get("user", "guillaume")
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -815,14 +825,16 @@ def memory_status(request: Request):
 
 @app.get("/synth")
 def trigger_synth(request: Request, n: int = 15):
-    username = request.session.get("user", "guillaume")
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     if not MEMORY_OK: return {"error": "Module mémoire non disponible"}
     return synthesize_session(n, username)
 
 
 @app.get("/rules")
 def list_rules(request: Request):
-    username = request.session.get("user", "guillaume")
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -835,7 +847,8 @@ def list_rules(request: Request):
 
 @app.get("/insights")
 def list_insights(request: Request):
-    username = request.session.get("user", "guillaume")
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -848,7 +861,8 @@ def list_insights(request: Request):
 
 @app.get("/analyze-raw-mails")
 def analyze_raw_mails(request: Request, limit: int = 50):
-    username = request.session.get("user", "guillaume")
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -901,19 +915,22 @@ def analyze_raw_mails(request: Request, limit: int = 50):
 
 
 @app.get("/contacts")
-def list_contacts_endpoint():
+def list_contacts_endpoint(request: Request):
+    if not _require_user(request): return RedirectResponse("/login-app")
     return get_all_contact_cards()
 
 
 @app.get("/purge-memory")
 def purge_memory(request: Request, days: int = 90):
-    username = request.session.get("user", "guillaume")
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     return {"status": "ok", "deleted": purge_old_mails(days=days, username=username)}
 
 
 @app.post("/learn-style")
 def learn_style(request: Request, payload: dict = Body(...)):
-    username = request.session.get("user", "guillaume")
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     text = payload.get("text", "")
     if not text: return {"error": "Texte manquant"}
     save_style_example(situation=payload.get("situation", "mail"), example_text=text,
@@ -943,7 +960,8 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
 
 @app.get("/triage-queue")
 def triage_queue(request: Request):
-    username = request.session.get("user", "guillaume")
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     token = get_valid_microsoft_token(username)
     if not token: return {"mails": [], "count": 0, "error": "Token Microsoft manquant"}
     try:
@@ -961,7 +979,8 @@ def triage_queue(request: Request):
 
 @app.get("/memory")
 def memory(request: Request):
-    username = request.session.get("user", "guillaume")
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -974,7 +993,8 @@ def memory(request: Request):
 
 @app.get("/rebuild-memory")
 def rebuild_memory_mails(request: Request):
-    username = request.session.get("user", "guillaume")
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -986,7 +1006,8 @@ def rebuild_memory_mails(request: Request):
 
 @app.get("/learn-sent-mails")
 def learn_sent_mails(request: Request, top: int = 50):
-    username = request.session.get("user", "guillaume")
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     token = get_valid_microsoft_token(username)
     if not token: return RedirectResponse("/login?next=/learn-sent-mails")
     try:
@@ -1018,7 +1039,8 @@ def learn_sent_mails(request: Request, top: int = 50):
 
 @app.get("/learn-inbox-mails")
 def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
-    username = request.session.get("user", "guillaume")
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     token = get_valid_microsoft_token(username)
     if not token: return RedirectResponse("/login?next=/learn-inbox-mails")
     try:
@@ -1046,7 +1068,7 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
                 c.execute("INSERT INTO mail_memory (username,message_id,received_at,from_email,subject,raw_body_preview,analysis_status,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
                           (username, message_id, msg.get("receivedDateTime"),
                            msg.get("from",{}).get("emailAddress",{}).get("address",""),
-                           msg.get("subject"), msg.get("bodyPreview"), "inbox_raw", datetime.utcnow().isoformat()))
+                           msg.get("subject"), msg.get("bodyPreview"), "inbox_raw", datetime.now(timezone.utc).isoformat()))
                 inserted += 1
             except Exception: continue
         conn.commit()
@@ -1057,7 +1079,8 @@ def learn_inbox_mails(request: Request, top: int = 50, skip: int = 0):
 
 @app.get("/build-style-profile")
 def build_style_profile(request: Request):
-    username = request.session.get("user", "guillaume")
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -1114,7 +1137,9 @@ def auth_gmail_callback(request: Request, code: str | None = None):
 
 @app.get("/ingest-gmail")
 def ingest_gmail(request: Request):
-    username = request.session.get("user", "guillaume")
+    # FIX 2 — auth + spam filter dynamique
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     from app.connectors.gmail_connector import gmail_get_messages, gmail_get_message, refresh_gmail_token
     conn = None
     try:
@@ -1131,7 +1156,7 @@ def ingest_gmail(request: Request):
         access_token = refresh_gmail_token(refresh_token)
         messages = gmail_get_messages(access_token, max_results=10)
     inserted = 0
-    skip_keywords = get_antispam_keywords(username)
+    skip_keywords = get_antispam_keywords(username)  # dynamique depuis aria_rules
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -1148,7 +1173,7 @@ def ingest_gmail(request: Request):
                 snippet = detail.get("snippet", "")
                 if any(kw in f"{from_email} {subject} {snippet}".lower() for kw in skip_keywords): continue
                 c.execute("INSERT INTO mail_memory (username,message_id,received_at,from_email,subject,raw_body_preview,analysis_status,mailbox_source,created_at) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                          (username, message_id, date, from_email, subject, snippet, "gmail_raw", "gmail_perso", datetime.utcnow().isoformat()))
+                          (username, message_id, date, from_email, subject, snippet, "gmail_raw", "gmail_perso", datetime.now(timezone.utc).isoformat()))
                 inserted += 1
             except Exception:
                 conn.rollback(); continue
@@ -1160,12 +1185,14 @@ def ingest_gmail(request: Request):
 
 @app.get("/assistant-dashboard")
 def assistant_dashboard(request: Request, days: int = 2):
-    username = request.session.get("user", "guillaume")
+    username = _require_user(request)
+    if not username: return RedirectResponse("/login-app")
     return get_dashboard(days, username)
 
 
 @app.get("/test-elevenlabs")
-def test_elevenlabs():
+def test_elevenlabs(request: Request):
+    if not _require_admin(request): return {"error": "Accès refusé."}
     api_key = os.environ.get("ELEVENLABS_API_KEY", "")
     voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "")
     resp = requests.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
@@ -1176,7 +1203,8 @@ def test_elevenlabs():
 
 
 @app.get("/test-odoo")
-def test_odoo():
+def test_odoo(request: Request):
+    if not _require_admin(request): return {"error": "Accès refusé."}
     from app.connectors.odoo_connector import perform_odoo_action
     return perform_odoo_action(action="get_partner_by_email", params={"email": "guillaume@couffrant-solar.fr"})
 
