@@ -25,6 +25,11 @@ from app.connectors.outlook_connector import (
     search_aria_drive, create_drive_folder, copy_drive_item, move_drive_item
 )
 from app.database import get_pg_conn, init_postgres
+from app.app_security import (
+    authenticate, init_default_user, update_last_login,
+    check_rate_limit, record_failed_attempt, clear_attempts,
+    LOGIN_PAGE_HTML
+)
 
 try:
     from app.memory_manager import (
@@ -59,7 +64,7 @@ except Exception as _mem_err:
 
 
 app = FastAPI(title="Couffrant Solar Assistant")
-app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=30 * 24 * 3600)  # 30 jours
 
 
 class AriaQuery(BaseModel):
@@ -75,7 +80,15 @@ def startup_event():
     init_db()
     init_mail_db()
 
+    # Crée l'utilisateur par défaut depuis les env vars si la table est vide
+    try:
+        init_default_user()
+    except Exception as e:
+        print(f"[Auth] Erreur init_default_user: {e}")
+
     import threading
+
+    # ── Thread 1 : auto-ingest mails (toutes les 30s) ──
     def auto_ingest():
         import time
         cycle = 0
@@ -142,8 +155,70 @@ def startup_event():
                 print(f"[AutoIngest] Erreur: {e}")
             time.sleep(30)
 
-    thread = threading.Thread(target=auto_ingest, daemon=True)
-    thread.start()
+    threading.Thread(target=auto_ingest, daemon=True).start()
+
+    # ── Thread 2 : refresh proactif token Microsoft (toutes les 45 min) ──
+    # Évite que le token expire silencieusement si personne ne se connecte pendant des heures.
+    def token_refresh_loop():
+        import time
+        time.sleep(120)  # Laisse 2 min au démarrage pour stabiliser
+        while True:
+            try:
+                from app.token_manager import get_valid_microsoft_token
+                token = get_valid_microsoft_token()
+                if token:
+                    print("[Token] Refresh proactif OK")
+                else:
+                    print("[Token] Refresh proactif : aucun token en base (reconnexion /login requise)")
+            except Exception as e:
+                print(f"[Token] Erreur refresh proactif: {e}")
+            time.sleep(45 * 60)  # 45 minutes
+
+    threading.Thread(target=token_refresh_loop, daemon=True).start()
+
+
+# ─── AUTH CHAT ───
+
+@app.get("/login-app", response_class=HTMLResponse)
+def login_app_get(request: Request):
+    """Page de connexion Aria."""
+    if request.session.get("user"):
+        return RedirectResponse("/chat")
+    return HTMLResponse(LOGIN_PAGE_HTML.format(error_block=""))
+
+
+@app.post("/login-app", response_class=HTMLResponse)
+async def login_app_post(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...)
+):
+    """Validation des credentials et création de session."""
+    ip = request.client.host if request.client else "unknown"
+
+    # Rate limiting
+    allowed, message = check_rate_limit(ip)
+    if not allowed:
+        error_html = f'<div class="error">{message}</div>'
+        return HTMLResponse(LOGIN_PAGE_HTML.format(error_block=error_html))
+
+    # Authentification
+    if authenticate(username.strip(), password):
+        clear_attempts(ip)
+        update_last_login(username.strip())
+        request.session["user"] = username.strip()
+        return RedirectResponse("/chat", status_code=303)
+    else:
+        record_failed_attempt(ip)
+        error_html = '<div class="error">Identifiant ou mot de passe incorrect.</div>'
+        return HTMLResponse(LOGIN_PAGE_HTML.format(error_block=error_html), status_code=401)
+
+
+@app.get("/logout")
+def logout(request: Request):
+    """Déconnexion — efface la session."""
+    request.session.pop("user", None)
+    return RedirectResponse("/login-app")
 
 
 @app.get("/health")
@@ -154,21 +229,18 @@ def health():
 @app.get("/init-db")
 def init_db_now():
     init_postgres()
+    try:
+        init_default_user()
+    except Exception:
+        pass
     return {"status": "tables créées"}
 
 
 @app.get("/chat", response_class=HTMLResponse)
-def chat(request: Request, pwd: str = ""):
-    if pwd != "couffrant2026":
-        return HTMLResponse("""
-        <html><body style="background:#0a0a0a;color:#fff;display:flex;align-items:center;justify-content:center;height:100vh;font-family:Arial">
-        <form method="get">
-            <input name="pwd" type="password" placeholder="Mot de passe"
-            style="padding:12px;border-radius:8px;border:none;font-size:16px">
-            <button type="submit" style="padding:12px 20px;background:#1565c0;color:white;border:none;border-radius:8px;margin-left:8px;cursor:pointer">
-            Accéder</button>
-        </form></body></html>
-        """)
+def chat(request: Request):
+    """Interface Aria — protégée par session."""
+    if not request.session.get("user"):
+        return RedirectResponse("/login-app")
     with open("app/templates/aria_chat.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
@@ -226,19 +298,16 @@ def aria(payload: AriaQuery):
         profile_row = c.fetchone()
         profile = profile_row[0] if profile_row else ""
 
-        # Nombre de conversations en base (pour déclenchement auto-synthèse)
         c.execute("SELECT COUNT(*) FROM aria_memory")
         conv_count = c.fetchone()[0]
     finally:
         if conn:
             conn.close()
 
-    # Chargement mémoire niveau 1
     hot_summary = get_hot_summary()
     aria_rules = get_aria_rules()
     aria_insights = get_aria_insights(limit=6)
 
-    # Fiche contact contextuelle
     contact_card = ""
     query_lower = payload.query.lower()
     known_contacts = ["arlène", "arlene", "sabrina", "benoit", "maxence", "pinto", "enedis",
@@ -312,12 +381,9 @@ def aria(payload: AriaQuery):
     else:
         user_content_parts = payload.query
 
-    # ── SYSTEM PROMPT ──
-    # Pas de règles codées en dur. Aria charge ses propres règles depuis la base.
-    # Elle est autonome et apprenante.
     system = f"""Tu es Aria, l'assistante de Guillaume Perrin — Couffrant Solar (photovoltaïque, 8 personnes, Centre-Val de Loire).
 
-Tu es autonome et apprenante. Tu n'as pas de règles imposées de l'extérieur — tes règles de fonctionnement viennent de ce que tu as appris au fil des échanges et tu les gères toi-même. Tu parles au féminin. Tu proposes avant d'agir sauf si Guillaume dit explicitement de procéder.
+Tu es autonome et apprenante. Tu n'as pas de règles imposées de l'extérieur — tes règles viennent de ce que tu as appris au fil des échanges et tu les gères toi-même. Tu parles au féminin. Tu proposes avant d'agir sauf si Guillaume dit explicitement de procéder.
 
 {f"=== CONTEXTE OPÉRATIONNEL ==={chr(10)}{hot_summary}" if hot_summary else ""}
 
@@ -346,10 +412,10 @@ Affichage : 📁 "Nom"  [id:ID_COMPLET] — utilise l'ID complet
 [ACTION:MOVEDRIVE:item_id|dest_id|nom] [ACTION:COPYFILE:source_id|dest_id|nom]
 
 Auto-évolution — utilise ces actions librement quand tu apprends quelque chose :
-[ACTION:LEARN:category|rule] → tu retiens une règle ou préférence (category : comportement/style/métier/préférence)
-[ACTION:INSIGHT:topic|texte] → tu notes un insight sur Guillaume ou le contexte
-[ACTION:FORGET:rule_id] → tu désactives une règle obsolète (l'id est dans tes règles actives)
-[ACTION:SYNTH:] → tu déclenches maintenant la synthèse de tes sessions récentes
+[ACTION:LEARN:category|rule] → retiens une règle (category : comportement/style/métier/préférence)
+[ACTION:INSIGHT:topic|texte] → note un insight sur Guillaume ou le contexte
+[ACTION:FORGET:rule_id] → désactive une règle obsolète (l'id est dans tes règles actives)
+[ACTION:SYNTH:] → déclenche maintenant la synthèse de tes sessions récentes
 
 Agenda aujourd'hui ({datetime.now().strftime('%A %d %B %Y')}) :
 {json.dumps(agenda_today, ensure_ascii=False, default=str) if agenda_today else "Aucun RDV."}
@@ -535,13 +601,13 @@ Consignes Guillaume :
             except Exception as e:
                 actions_confirmed.append(f"\u274c {str(e)[:80]}")
 
-    # ── Auto-évolution (Aria écrit ses propres règles) ──
+    # ── Auto-évolution ──
     if MEMORY_OK:
         for match in re.finditer(r'\[ACTION:LEARN:([^|^\]]+)\|([^\]]+)\]', aria_response):
             category = match.group(1).strip()
             rule = match.group(2).strip()
             try:
-                rule_id = save_rule(category, rule, "auto", 0.7)
+                save_rule(category, rule, "auto", 0.7)
                 actions_confirmed.append(f"\U0001f9e0 Règle mémorisée [{category}] : {rule[:60]}")
             except Exception as e:
                 print(f"[LEARN] Erreur: {e}")
@@ -566,8 +632,7 @@ Consignes Guillaume :
         for _ in re.finditer(r'\[ACTION:SYNTH:\]', aria_response):
             try:
                 import threading
-                t = threading.Thread(target=lambda: synthesize_session(15), daemon=True)
-                t.start()
+                threading.Thread(target=lambda: synthesize_session(15), daemon=True).start()
                 actions_confirmed.append("\U0001f504 Synthèse lancée en arrière-plan.")
             except Exception as e:
                 print(f"[SYNTH] Erreur: {e}")
@@ -576,7 +641,6 @@ Consignes Guillaume :
     if actions_confirmed:
         clean_response += "\n\n" + "\n".join(actions_confirmed)
 
-    # Sauvegarde conversation
     conn = None
     try:
         conn = get_pg_conn()
@@ -587,13 +651,11 @@ Consignes Guillaume :
         if conn:
             conn.close()
 
-    # Auto-synthèse : si > 15 conversations en base, synthétise en arrière-plan
     if MEMORY_OK and conv_count >= 15:
         try:
             import threading
-            t = threading.Thread(target=lambda: synthesize_session(15), daemon=True)
-            t.start()
-            print(f"[AutoSynth] Déclenché ({conv_count} conversations en base)")
+            threading.Thread(target=lambda: synthesize_session(15), daemon=True).start()
+            print(f"[AutoSynth] Déclenché ({conv_count} conv en base)")
         except Exception as e:
             print(f"[AutoSynth] Erreur: {e}")
 
@@ -637,37 +699,22 @@ def memory_status():
             row = c.fetchone()
         except Exception:
             row = None
-        try:
-            c.execute("SELECT COUNT(*) FROM aria_contacts")
-            contacts_count = c.fetchone()[0]
-        except Exception:
-            contacts_count = 0
-        try:
-            c.execute("SELECT COUNT(*) FROM aria_style_examples")
-            style_count = c.fetchone()[0]
-        except Exception:
-            style_count = 0
-        try:
-            c.execute("SELECT COUNT(*) FROM aria_rules WHERE active = true")
-            rules_count = c.fetchone()[0]
-        except Exception:
-            rules_count = 0
-        try:
-            c.execute("SELECT COUNT(*) FROM aria_insights")
-            insights_count = c.fetchone()[0]
-        except Exception:
-            insights_count = 0
-        try:
-            c.execute("SELECT COUNT(*) FROM aria_session_digests")
-            digests_count = c.fetchone()[0]
-        except Exception:
-            digests_count = 0
-        c.execute("SELECT COUNT(*) FROM mail_memory")
-        mails_count = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM aria_memory")
-        conv_count = c.fetchone()[0]
-        c.execute("SELECT COUNT(*) FROM sent_mail_memory")
-        sent_count = c.fetchone()[0]
+        counts = {}
+        for table, key in [
+            ("aria_contacts", "contacts"),
+            ("aria_style_examples", "style_examples"),
+            ("aria_rules WHERE active = true", "regles_actives"),
+            ("aria_insights", "insights"),
+            ("aria_session_digests", "session_digests"),
+            ("mail_memory", "mail_memory"),
+            ("aria_memory", "conversations_brutes"),
+            ("sent_mail_memory", "sent_mail_memory"),
+        ]:
+            try:
+                c.execute(f"SELECT COUNT(*) FROM {table}")
+                counts[key] = c.fetchone()[0]
+            except Exception:
+                counts[key] = 0
     finally:
         if conn:
             conn.close()
@@ -675,42 +722,36 @@ def memory_status():
         "memory_module": MEMORY_OK,
         "niveau_1": {
             "resume_chaud": {"exists": bool(row and row[0]), "preview": (row[0] or "")[:100] if row else ""},
-            "contacts": contacts_count,
-            "regles_actives": rules_count,
-            "insights": insights_count,
+            "contacts": counts.get("contacts", 0),
+            "regles_actives": counts.get("regles_actives", 0),
+            "insights": counts.get("insights", 0),
         },
         "niveau_2": {
-            "conversations_brutes": conv_count,
-            "mail_memory": mails_count,
-            "style_examples": style_count,
+            "conversations_brutes": counts.get("conversations_brutes", 0),
+            "mail_memory": counts.get("mail_memory", 0),
+            "style_examples": counts.get("style_examples", 0),
         },
         "niveau_3": {
-            "session_digests": digests_count,
-            "sent_mail_memory": sent_count,
+            "session_digests": counts.get("session_digests", 0),
+            "sent_mail_memory": counts.get("sent_mail_memory", 0),
         },
     }
 
 
 @app.get("/synth")
 def trigger_synth(n: int = 15):
-    """Déclenche manuellement la synthèse des dernières conversations."""
     if not MEMORY_OK:
         return {"error": "Module mémoire non disponible"}
-    result = synthesize_session(n)
-    return result
+    return synthesize_session(n)
 
 
 @app.get("/rules")
 def list_rules():
-    """Liste toutes les règles d'Aria."""
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("""
-            SELECT id, category, rule, source, confidence, reinforcements, active, created_at
-            FROM aria_rules ORDER BY active DESC, confidence DESC, created_at DESC
-        """)
+        c.execute("SELECT id, category, rule, source, confidence, reinforcements, active, created_at FROM aria_rules ORDER BY active DESC, confidence DESC, created_at DESC")
         columns = [d[0] for d in c.description]
         return [dict(zip(columns, row)) for row in c.fetchall()]
     finally:
@@ -720,15 +761,11 @@ def list_rules():
 
 @app.get("/insights")
 def list_insights():
-    """Liste tous les insights d'Aria."""
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("""
-            SELECT id, topic, insight, reinforcements, created_at
-            FROM aria_insights ORDER BY reinforcements DESC, updated_at DESC
-        """)
+        c.execute("SELECT id, topic, insight, reinforcements, created_at FROM aria_insights ORDER BY reinforcements DESC, updated_at DESC")
         columns = [d[0] for d in c.description]
         return [dict(zip(columns, row)) for row in c.fetchall()]
     finally:
@@ -744,8 +781,7 @@ def analyze_raw_mails(limit: int = 50):
         c = conn.cursor()
         c.execute("""
             SELECT id, message_id, from_email, subject, raw_body_preview, received_at
-            FROM mail_memory
-            WHERE analysis_status IN ('inbox_raw', 'archive_raw', 'gmail_raw')
+            FROM mail_memory WHERE analysis_status IN ('inbox_raw', 'archive_raw', 'gmail_raw')
             ORDER BY received_at DESC NULLS LAST LIMIT %s
         """, (limit,))
         rows = c.fetchall()
@@ -757,8 +793,7 @@ def analyze_raw_mails(limit: int = 50):
         return {"status": "termine", "analyzed": 0, "message": "Tous les mails sont déjà analysés."}
 
     instructions = get_global_instructions()
-    analyzed = 0
-    errors = 0
+    analyzed = errors = 0
 
     for row in rows:
         db_id, message_id, from_email, subject, body_preview, received_at = row
@@ -776,12 +811,12 @@ def analyze_raw_mails(limit: int = 50):
                 c = conn.cursor()
                 c.execute("""
                     UPDATE mail_memory SET
-                        display_title = %s, category = %s, priority = %s, reason = %s,
-                        suggested_action = %s, short_summary = %s, confidence = %s,
-                        confidence_level = %s, needs_review = %s, needs_reply = %s,
-                        reply_urgency = %s, reply_reason = %s, response_type = %s,
-                        suggested_reply_subject = %s, suggested_reply = %s, analysis_status = 'done_ai'
-                    WHERE id = %s
+                        display_title=%s, category=%s, priority=%s, reason=%s,
+                        suggested_action=%s, short_summary=%s, confidence=%s,
+                        confidence_level=%s, needs_review=%s, needs_reply=%s,
+                        reply_urgency=%s, reply_reason=%s, response_type=%s,
+                        suggested_reply_subject=%s, suggested_reply=%s, analysis_status='done_ai'
+                    WHERE id=%s
                 """, (
                     item.get("display_title"), item.get("category"), item.get("priority"),
                     item.get("reason"), item.get("suggested_action"), item.get("short_summary"),
@@ -798,7 +833,6 @@ def analyze_raw_mails(limit: int = 50):
         except Exception as e:
             print(f"[AnalyzeRaw] Erreur mail {db_id}: {e}")
             errors += 1
-            continue
 
     conn = None
     try:
@@ -810,10 +844,7 @@ def analyze_raw_mails(limit: int = 50):
         if conn:
             conn.close()
 
-    return {
-        "status": "ok", "analyzed": analyzed, "errors": errors, "remaining": remaining,
-        "message": f"{analyzed} mails analysés. Il reste {remaining} mails bruts."
-    }
+    return {"status": "ok", "analyzed": analyzed, "errors": errors, "remaining": remaining}
 
 
 @app.get("/contacts")
@@ -838,6 +869,7 @@ def learn_style(payload: dict = Body(...)):
 
 @app.get("/login")
 def login(request: Request, next: str = "/chat"):
+    """OAuth Microsoft — pour accéder aux API 365."""
     msal_app = build_msal_app()
     auth_url = msal_app.get_authorization_request_url(scopes=GRAPH_SCOPES, redirect_uri=REDIRECT_URI, state=next)
     return RedirectResponse(auth_url)
@@ -902,8 +934,7 @@ def memory():
         c = conn.cursor()
         c.execute("SELECT message_id, received_at, from_email, subject, display_title, category, priority, analysis_status FROM mail_memory ORDER BY id DESC LIMIT 20")
         columns = [desc[0] for desc in c.description]
-        rows = [dict(zip(columns, row)) for row in c.fetchall()]
-        return rows
+        return [dict(zip(columns, row)) for row in c.fetchall()]
     finally:
         if conn:
             conn.close()
@@ -1235,10 +1266,6 @@ def test_odoo():
 
 @app.get("/reorganize-drive")
 def reorganize_drive():
-    """
-    Lance la création de 1_Photovoltaïque_V2 en ARRIÈRE-PLAN.
-    Répond immédiatement. Les originaux ne sont jamais touchés.
-    """
     import threading
     from app.token_manager import get_valid_microsoft_token
     from app.connectors.outlook_connector import (
@@ -1263,12 +1290,10 @@ def reorganize_drive():
             data = _graph_get(token, f"/drives/{drive_id}/items/{source_id}/children",
                              params={"$top": 100, "$select": "name,id,folder,file"})
             items_by_name = {f.get("name"): f.get("id") for f in data.get("value", [])}
-
             source_meta = _graph_get(token, f"/drives/{drive_id}/items/{source_id}",
                                     params={"$select": "id,parentReference"})
             parent_id = source_meta.get("parentReference", {}).get("id")
             if not parent_id:
-                print("[Reorganize] Erreur : parent introuvable")
                 return
 
             def mk(parent, name):
@@ -1276,13 +1301,11 @@ def reorganize_drive():
                 if r.get("status") == "ok":
                     print(f"[Reorganize] ✅ {name}")
                     return r.get("id")
-                print(f"[Reorganize] ❌ {name}")
                 return None
 
             def cp(source_name, dest_id, new_name=None):
                 item_id = items_by_name.get(source_name)
                 if not item_id:
-                    print(f"[Reorganize] ⚠️ '{source_name}' introuvable")
                     return
                 r = copy_drive_item(token, item_id, dest_id, new_name, drive_id)
                 print(f"[Reorganize] {'✅' if r.get('status')=='ok' else '❌'} {source_name}")
@@ -1316,28 +1339,24 @@ def reorganize_drive():
                 cp("5_Document technique", cat04, "Docs_Techniques")
                 cp("Normes", cat04); cp("Import ELEC", cat04)
                 cp("6_Audits et rapports", cat04, "Audits")
-                cp("DOE_Couffrant_Solar_Complet_Modele.docx", cat04)
-                cp("DOE_Couffrant_Solar_Modele_Reutilisable.docx", cat04)
-                cp("DOE_Photovoltaique_Couffrant_Solar_Complet.docx", cat04)
-                cp("PV fin de chantier.docx", cat04); cp("RAPPORT AUDIT PV.docx", cat04)
+                for f in ["DOE_Couffrant_Solar_Complet_Modele.docx", "DOE_Couffrant_Solar_Modele_Reutilisable.docx",
+                           "DOE_Photovoltaique_Couffrant_Solar_Complet.docx", "PV fin de chantier.docx", "RAPPORT AUDIT PV.docx"]:
+                    cp(f, cat04)
             if cat05:
-                cp("Adiwatt", cat05); cp("MADENR", cat05)
-                cp("Urban Solar", cat05); cp("Powr Connect", cat05)
-                cp("formulaire compensation solaredge.pdf", cat05)
-                cp("Demande garantie Onduleur 1 \u2013 Copie.xlsx", cat05)
-                cp("Demande garantie Onduleur.xlsx", cat05)
+                for f in ["Adiwatt", "MADENR", "Urban Solar", "Powr Connect",
+                           "formulaire compensation solaredge.pdf",
+                           "Demande garantie Onduleur 1 \u2013 Copie.xlsx", "Demande garantie Onduleur.xlsx"]:
+                    cp(f, cat05)
             if cat06:
-                cp("Formation archelios calc", cat06)
-                cp("sauvegarde Archelios", cat06)
-                cp("Logiciels", cat06); cp("unnamed.png", cat06)
+                for f in ["Formation archelios calc", "sauvegarde Archelios", "Logiciels", "unnamed.png"]:
+                    cp(f, cat06)
             if cat07:
-                cp("Certificats et Formations Professionnels", cat07)
-                cp("8_Stock 2026.ods", cat07)
-                cp("Suivi panneau publicitaire.xlsx", cat07)
+                for f in ["Certificats et Formations Professionnels", "8_Stock 2026.ods", "Suivi panneau publicitaire.xlsx"]:
+                    cp(f, cat07)
 
             print("[Reorganize] Terminé.")
         except Exception as e:
-            print(f"[Reorganize] Erreur fatale : {e}")
+            print(f"[Reorganize] Erreur : {e}")
 
     threading.Thread(target=run_reorganize, daemon=True).start()
 
