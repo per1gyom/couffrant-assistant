@@ -21,7 +21,8 @@ from app.mail_memory_store import init_mail_db, insert_mail, mail_exists
 from app.assistant_analyzer import analyze_single_mail
 from app.dashboard_service import get_dashboard
 from app.connectors.outlook_connector import (
-    perform_outlook_action, list_aria_drive, read_aria_drive_file, search_aria_drive
+    perform_outlook_action, list_aria_drive, read_aria_drive_file,
+    search_aria_drive, create_drive_folder, copy_drive_item
 )
 from app.database import get_pg_conn, init_postgres
 
@@ -54,9 +55,9 @@ app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET)
 
 class AriaQuery(BaseModel):
     query: str
-    file_data: Optional[str] = None    # base64 encodé
-    file_type: Optional[str] = None    # ex: "image/jpeg", "application/pdf"
-    file_name: Optional[str] = None    # nom du fichier pour contexte
+    file_data: Optional[str] = None
+    file_type: Optional[str] = None
+    file_name: Optional[str] = None
 
 
 @app.on_event("startup")
@@ -273,11 +274,7 @@ def aria(payload: AriaQuery):
         if payload.file_type.startswith("image/"):
             user_content_parts.append({
                 "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": payload.file_type,
-                    "data": payload.file_data,
-                }
+                "source": {"type": "base64", "media_type": payload.file_type, "data": payload.file_data}
             })
             user_content_parts.append({
                 "type": "text",
@@ -286,18 +283,14 @@ def aria(payload: AriaQuery):
         elif payload.file_type == "application/pdf":
             user_content_parts.append({
                 "type": "document",
-                "source": {
-                    "type": "base64",
-                    "media_type": "application/pdf",
-                    "data": payload.file_data,
-                }
+                "source": {"type": "base64", "media_type": "application/pdf", "data": payload.file_data}
             })
             user_content_parts.append({
                 "type": "text",
                 "text": f"[PDF joint{file_name_info}]\n{payload.query}" if payload.query else f"[PDF joint{file_name_info}] Analyse ce document."
             })
         else:
-            user_content_parts.append({"type": "text", "text": f"[Fichier joint{file_name_info} — type non supporté pour aperçu]\n{payload.query}"})
+            user_content_parts.append({"type": "text", "text": f"[Fichier joint{file_name_info}]\n{payload.query}"})
     else:
         user_content_parts = payload.query
 
@@ -324,12 +317,12 @@ Règles :
 {"Accès complet Microsoft 365." if outlook_token else "Pas de connexion Microsoft."}
 
 IDENTIFIANTS — CRITIQUE :
-- `message_id` : longue chaîne Outlook → TOUJOURS pour les actions
+- `message_id` : longue chaîne Outlook → TOUJOURS pour les actions mail
 - `db_id` : entier court → JAMAIS pour les actions
 - `mailbox_source` : "outlook" (actions OK) | "gmail_perso" (lecture seule)
 
 Actions Outlook :
-- [ACTION:DELETE:message_id] → corbeille récupérable (jamais suppression définitive)
+- [ACTION:DELETE:message_id] → corbeille récupérable
 - [ACTION:ARCHIVE:message_id]
 - [ACTION:READ:message_id]
 - [ACTION:REPLY:message_id:texte]
@@ -337,12 +330,18 @@ Actions Outlook :
 - [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
 - [ACTION:CREATE_TASK:titre]
 
-Actions OneDrive (restreintes au dossier 1_photovoltaïque uniquement) :
-- [ACTION:LISTDRIVE:chemin] → liste les fichiers (laisser vide = racine du dossier)
-- [ACTION:READDRIVE:chemin/fichier.txt] → lit le contenu d'un fichier texte
-- [ACTION:SEARCHDRIVE:mot-clé] → recherche des fichiers par nom dans le dossier
+Actions Drive SharePoint (dossier 1_Photovoltaïque uniquement) :
+- [ACTION:LISTDRIVE:] → liste la racine (chaque item retourne son 'id')
+- [ACTION:LISTDRIVE:nom_dossier] → liste un sous-dossier par son nom
+- [ACTION:LISTDRIVE:item_id] → liste par ID — TOUJOURS préférer l'id pour les sous-dossiers (évite les erreurs d'accent)
+- [ACTION:READDRIVE:item_id] → lit un fichier par son ID
+- [ACTION:SEARCHDRIVE:mot-clé] → recherche par nom dans tout le dossier
+- [ACTION:CREATEFOLDER:parent_item_id|nom_dossier] → crée un dossier (pour la copie uniquement, jamais dans l'original)
+- [ACTION:COPYFILE:source_item_id|dest_folder_id|nouveau_nom] → copie un fichier vers un dossier
 
-Propose avant d'agir, SAUF si Guillaume dit "fais-le", "vas-y", "oui", "supprime", "archive", "envoie".
+RÈGLE DRIVE CRITIQUE : Après un LISTDRIVE, chaque item a un champ "id". Pour explorer un sous-dossier, TOUJOURS utiliser son id dans [ACTION:LISTDRIVE:item_id]. Ne jamais construire des chemins texte avec des accents.
+
+Propose avant d'agir, SAUF si Guillaume dit "fais-le", "vas-y", "oui".
 
 Agenda aujourd'hui ({datetime.now().strftime('%A %d %B %Y')}) :
 {json.dumps(agenda_today, ensure_ascii=False, default=str) if agenda_today else "Aucun RDV."}
@@ -453,28 +452,28 @@ Consignes :
             except Exception as e:
                 actions_confirmed.append(f"\u274c Erreur tâche : {str(e)[:100]}")
 
-        # ── OneDrive — restreint à 1_photovoltaïque ──
+        # ── Drive SharePoint ──
         for match in re.finditer(r'\[ACTION:LISTDRIVE:([^\]]*)\]', aria_response):
             subfolder = match.group(1).strip()
             try:
                 result = list_aria_drive(outlook_token, subfolder)
                 if result.get("status") == "ok":
-                    lines = [f"  {it['type']} {it['nom']} ({it.get('taille_ko', '')} Ko — {it.get('modifié', '')})" for it in result.get("items", [])]
-                    actions_confirmed.append(f"\U0001f4c1 {result['dossier']} ({result['count']} éléments) :\n" + "\n".join(lines))
+                    lines = [f"  {it['type']} {it['nom']} (id:{it.get('id','')[:8]}… {it.get('taille_ko','')} Ko)" for it in result.get("items", [])]
+                    actions_confirmed.append(f"\U0001f4c1 {result.get('dossier', subfolder)} ({result['count']} éléments) :\n" + "\n".join(lines))
                 else:
                     actions_confirmed.append(f"\u274c {result.get('message', 'Erreur Drive')}")
             except Exception as e:
                 actions_confirmed.append(f"\u274c Erreur Drive : {str(e)[:100]}")
 
         for match in re.finditer(r'\[ACTION:READDRIVE:([^\]]+)\]', aria_response):
-            file_path = match.group(1).strip()
+            file_ref = match.group(1).strip()
             try:
-                result = read_aria_drive_file(outlook_token, file_path)
+                result = read_aria_drive_file(outlook_token, file_ref)
                 if result.get("status") == "ok":
                     if result.get("type") == "texte":
                         actions_confirmed.append(f"\U0001f4c4 {result['fichier']} :\n{result['contenu'][:2000]}")
                     else:
-                        actions_confirmed.append(f"\U0001f4c4 {result['fichier']} — {result.get('message', '')} {result.get('conseil', '')}")
+                        actions_confirmed.append(f"\U0001f4c4 {result.get('fichier', file_ref)} — {result.get('message', '')} {result.get('conseil', '')}")
                 else:
                     actions_confirmed.append(f"\u274c {result.get('message', 'Erreur lecture')}")
             except Exception as e:
@@ -485,12 +484,41 @@ Consignes :
             try:
                 result = search_aria_drive(outlook_token, query_drive)
                 if result.get("status") == "ok":
-                    lines = [f"  {it['type']} {it['nom']} ({it.get('modifié', '')})" for it in result.get("items", [])]
+                    lines = [f"  {it['type']} {it['nom']} (id:{it.get('id','')[:8]}…)" for it in result.get("items", [])]
                     actions_confirmed.append(f"\U0001f50d '{query_drive}' — {result['count']} résultat(s) :\n" + "\n".join(lines))
                 else:
                     actions_confirmed.append(f"\u274c {result.get('message', 'Erreur recherche')}")
             except Exception as e:
                 actions_confirmed.append(f"\u274c Erreur recherche Drive : {str(e)[:100]}")
+
+        for match in re.finditer(r'\[ACTION:CREATEFOLDER:([^|^\]]+)\|([^\]]+)\]', aria_response):
+            parent_id = match.group(1).strip()
+            folder_name = match.group(2).strip()
+            try:
+                from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
+                _, drive_id, _ = _find_sharepoint_site_and_drive(outlook_token)
+                result = create_drive_folder(outlook_token, parent_id, folder_name, drive_id)
+                if result.get("status") == "ok":
+                    actions_confirmed.append(f"\u2705 Dossier '{folder_name}' créé (id:{result.get('id','')[:8]}…)")
+                else:
+                    actions_confirmed.append(f"\u274c {result.get('message', 'Erreur création dossier')}")
+            except Exception as e:
+                actions_confirmed.append(f"\u274c Erreur création dossier : {str(e)[:100]}")
+
+        for match in re.finditer(r'\[ACTION:COPYFILE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', aria_response):
+            source_id = match.group(1).strip()
+            dest_id = match.group(2).strip()
+            new_name = match.group(3).strip() or None
+            try:
+                from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
+                _, drive_id, _ = _find_sharepoint_site_and_drive(outlook_token)
+                result = copy_drive_item(outlook_token, source_id, dest_id, new_name, drive_id)
+                if result.get("status") == "ok":
+                    actions_confirmed.append(f"\u2705 {result.get('message', 'Copie effectuée.')}")
+                else:
+                    actions_confirmed.append(f"\u274c {result.get('message', 'Erreur copie')}")
+            except Exception as e:
+                actions_confirmed.append(f"\u274c Erreur copie : {str(e)[:100]}")
 
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', aria_response).strip()
     if actions_confirmed:
@@ -575,7 +603,6 @@ def memory_status():
 
 @app.get("/analyze-raw-mails")
 def analyze_raw_mails(limit: int = 50):
-    """Analyse les mails bruts avec Claude — à appeler plusieurs fois jusqu'à épuisement."""
     conn = None
     try:
         conn = get_pg_conn()
@@ -602,8 +629,7 @@ def analyze_raw_mails(limit: int = 50):
     for row in rows:
         db_id, message_id, from_email, subject, body_preview, received_at = row
         msg = {
-            "id": message_id,
-            "subject": subject,
+            "id": message_id, "subject": subject,
             "from": {"emailAddress": {"address": from_email or ""}},
             "receivedDateTime": str(received_at) if received_at else "",
             "bodyPreview": body_preview or "",
@@ -676,8 +702,6 @@ def learn_style(payload: dict = Body(...)):
     return {"status": "ok"}
 
 
-# ─── AUTH MICROSOFT ───
-
 @app.get("/login")
 def login(request: Request, next: str = "/chat"):
     msal_app = build_msal_app()
@@ -712,8 +736,6 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     return RedirectResponse(state or "/chat")
 
 
-# ─── TRIAGE ───
-
 @app.get("/triage-queue")
 def triage_queue():
     from app.token_manager import get_valid_microsoft_token
@@ -737,8 +759,6 @@ def triage_queue():
     except Exception as e:
         return {"mails": [], "count": 0, "error": str(e)}
 
-
-# ─── INGESTION ───
 
 @app.get("/memory")
 def memory():
