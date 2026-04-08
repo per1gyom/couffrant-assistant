@@ -1,5 +1,5 @@
 """
-Couffrant Solar Assistant — Aria
+Raya — Assistant IA personnel (ex Couffrant Solar Assistant)
 Point d'entrée principal. Setup, middleware, startup, routes.
 """
 import os
@@ -19,17 +19,17 @@ from app.memory_loader import MEMORY_OK, rebuild_hot_summary, seed_default_rules
 
 from app.routes.auth import router as auth_router
 from app.routes.admin import router as admin_router
-from app.routes.aria import router as aria_router
+from app.routes.aria import router as raya_router
 from app.routes.memory import router as memory_router
 from app.routes.mail import router as mail_router
 from app.routes.reset_password import router as reset_router
 
-app = FastAPI(title="Couffrant Solar Assistant — Aria")
+app = FastAPI(title="Raya — Assistant IA")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=30 * 24 * 3600)
 
 app.include_router(auth_router)
 app.include_router(admin_router)
-app.include_router(aria_router)
+app.include_router(raya_router)
 app.include_router(memory_router)
 app.include_router(mail_router)
 app.include_router(reset_router)
@@ -37,7 +37,7 @@ app.include_router(reset_router)
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "memory_module": MEMORY_OK}
+    return {"status": "ok", "app": "Raya", "memory_module": MEMORY_OK}
 
 
 @app.on_event("startup")

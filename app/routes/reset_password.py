@@ -7,7 +7,7 @@ router = APIRouter(tags=["reset"])
 RESET_HTML = """
 <!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Aria — Réinitialisation</title>
+<title>Raya — Réinitialisation</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#0a0a0a;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}}

@@ -32,10 +32,10 @@ from app.memory_loader import (
 )
 from app.routes.deps import require_user
 
-router = APIRouter(tags=["aria"])
+router = APIRouter(tags=["raya"])
 
 
-class AriaQuery(BaseModel):
+class RayaQuery(BaseModel):
     query: str
     file_data: Optional[str] = None
     file_type: Optional[str] = None
@@ -75,8 +75,8 @@ def speak_text(payload: dict = Body(...)):
     return StreamingResponse(io.BytesIO(resp.content), media_type="audio/mpeg")
 
 
-@router.post("/aria")
-def aria(request: Request, payload: AriaQuery):
+@router.post("/raya")
+def raya(request: Request, payload: RayaQuery):
     username = request.session.get("user", "guillaume")
     tenant_id = request.session.get("tenant_id", "couffrant_solar")
     display_name = username.capitalize()
@@ -154,7 +154,7 @@ def aria(request: Request, payload: AriaQuery):
                     "mailbox_source": "outlook",
                 })
         except Exception as e:
-            print(f"[Aria] Erreur Outlook live {username}: {e}")
+            print(f"[Raya] Erreur Outlook live {username}: {e}")
 
     agenda_today = []
     if outlook_token:
@@ -194,7 +194,7 @@ def aria(request: Request, payload: AriaQuery):
             odoo_line = f"\nOdoo (lecture seule{shared})."
     mailboxes_line = f"\nBoîtes supplémentaires : {', '.join(mail_extra_boxes)}" if mail_extra_boxes else ""
 
-    system = f"""Tu es Aria — l'assistante personnelle et évolutive de {display_name}.
+    system = f"""Tu es Raya — l'assistante personnelle et évolutive de {display_name}.
 Tu es Claude avec une mémoire persistante. Tu n'as pas de comportement imposé de l'extérieur.
 Tu observes, tu apprends, tu t'organises librement. Tu parles au féminin.
 
@@ -240,7 +240,7 @@ Mémoire — tu choisis librement tes catégories :
     response = client.messages.create(
         model=ANTHROPIC_MODEL_SMART, max_tokens=2048, system=system, messages=messages,
     )
-    aria_response = response.content[0].text
+    raya_response = response.content[0].text
     actions_confirmed = []
 
     def is_valid_outlook_id(msg_id: str) -> bool:
@@ -248,7 +248,7 @@ Mémoire — tu choisis librement tes catégories :
 
     if outlook_token:
         if mail_can_delete:
-            for msg_id in re.findall(r'\[ACTION:DELETE:([^\]]+)\]', aria_response):
+            for msg_id in re.findall(r'\[ACTION:DELETE:([^\]]+)\]', raya_response):
                 msg_id = msg_id.strip()
                 if not is_valid_outlook_id(msg_id): continue
                 try:
@@ -256,7 +256,7 @@ Mémoire — tu choisis librement tes catégories :
                     actions_confirmed.append("✅ Mis à la corbeille" if result.get("status") == "ok" else f"❌ {result.get('message')}")
                 except Exception as e: actions_confirmed.append(f"❌ {str(e)[:80]}")
 
-        for msg_id in re.findall(r'\[ACTION:ARCHIVE:([^\]]+)\]', aria_response):
+        for msg_id in re.findall(r'\[ACTION:ARCHIVE:([^\]]+)\]', raya_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id): continue
             try:
@@ -264,13 +264,13 @@ Mémoire — tu choisis librement tes catégories :
                 actions_confirmed.append("✅ Archivé" if result.get("status") == "ok" else f"❌ {result.get('message')}")
             except Exception as e: actions_confirmed.append(f"❌ {str(e)[:80]}")
 
-        for msg_id in re.findall(r'\[ACTION:READ:([^\]]+)\]', aria_response):
+        for msg_id in re.findall(r'\[ACTION:READ:([^\]]+)\]', raya_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id): continue
             try: perform_outlook_action("mark_as_read", {"message_id": msg_id}, outlook_token)
             except Exception: pass
 
-        for match in re.finditer(r'\[ACTION:REPLY:([^:\]]{20,}):(.+?)\]', aria_response, re.DOTALL):
+        for match in re.finditer(r'\[ACTION:REPLY:([^:\]]{20,}):(.+?)\]', raya_response, re.DOTALL):
             msg_id = match.group(1).strip(); reply_text = match.group(2).strip()
             if not is_valid_outlook_id(msg_id): continue
             try:
@@ -294,7 +294,7 @@ Mémoire — tu choisis librement tes catégories :
                 actions_confirmed.append("✅ Réponse envoyée" if result.get("status") == "ok" else f"❌ {result.get('message')}")
             except Exception as e: actions_confirmed.append(f"❌ {str(e)[:80]}")
 
-        for msg_id in re.findall(r'\[ACTION:READBODY:([^\]]+)\]', aria_response):
+        for msg_id in re.findall(r'\[ACTION:READBODY:([^\]]+)\]', raya_response):
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id): continue
             try:
@@ -303,7 +303,7 @@ Mémoire — tu choisis librement tes catégories :
                     actions_confirmed.append(f"📧 Corps du mail :\n{result.get('body_text', '')[:800]}")
             except Exception: pass
 
-        for match in re.finditer(r'\[ACTION:CREATEEVENT:([^\]]+)\]', aria_response):
+        for match in re.finditer(r'\[ACTION:CREATEEVENT:([^\]]+)\]', raya_response):
             parts = match.group(1).split('|')
             if len(parts) >= 3:
                 try:
@@ -313,11 +313,11 @@ Mémoire — tu choisis librement tes catégories :
                     actions_confirmed.append("✅ RDV créé" if result.get("status") == "ok" else "❌ RDV échoué")
                 except Exception: pass
 
-        for title in re.findall(r'\[ACTION:CREATE_TASK:([^\]]+)\]', aria_response):
+        for title in re.findall(r'\[ACTION:CREATE_TASK:([^\]]+)\]', raya_response):
             try: perform_outlook_action("create_todo_task", {"title": title.strip()}, outlook_token)
             except Exception: pass
 
-        for match in re.finditer(r'\[ACTION:LISTDRIVE:([^\]]*)\]', aria_response):
+        for match in re.finditer(r'\[ACTION:LISTDRIVE:([^\]]*)\]', raya_response):
             subfolder = match.group(1).strip()
             try:
                 result = list_aria_drive(outlook_token, subfolder)
@@ -331,7 +331,7 @@ Mémoire — tu choisis librement tes catégories :
                 else: actions_confirmed.append(f"❌ {result.get('message', 'Erreur Drive')}")
             except Exception as e: actions_confirmed.append(f"❌ Drive : {str(e)[:80]}")
 
-        for match in re.finditer(r'\[ACTION:READDRIVE:([^\]]+)\]', aria_response):
+        for match in re.finditer(r'\[ACTION:READDRIVE:([^\]]+)\]', raya_response):
             file_ref = match.group(1).strip()
             try:
                 result = read_aria_drive_file(outlook_token, file_ref)
@@ -343,18 +343,18 @@ Mémoire — tu choisis librement tes catégories :
                 else: actions_confirmed.append(f"❌ {result.get('message')}")
             except Exception as e: actions_confirmed.append(f"❌ {str(e)[:80]}")
 
-        for match in re.finditer(r'\[ACTION:SEARCHDRIVE:([^\]]+)\]', aria_response):
+        for match in re.finditer(r'\[ACTION:SEARCHDRIVE:([^\]]+)\]', raya_response):
             query_drive = match.group(1).strip()
             try:
                 result = search_aria_drive(outlook_token, query_drive)
                 if result.get("status") == "ok":
-                    lines = [f"  {'📁' if it.get('type')=='dossier' else '📄'} \"{it['nom']}\"  [id:{it.get('id','')}]" for it in result.get("items", [])]
+                    lines = [f"  {'\ud83d\udcc1' if it.get('type')=='dossier' else '\ud83d\udcc4'} \"{it['nom']}\"  [id:{it.get('id','')}]" for it in result.get("items", [])]
                     actions_confirmed.append(f"🔍 '{query_drive}' — {result['count']} résultat(s) :\n" + "\n".join(lines))
                 else: actions_confirmed.append(f"❌ {result.get('message')}")
             except Exception as e: actions_confirmed.append(f"❌ {str(e)[:80]}")
 
         if drive_write:
-            for match in re.finditer(r'\[ACTION:CREATEFOLDER:([^|^\]]+)\|([^\]]+)\]', aria_response):
+            for match in re.finditer(r'\[ACTION:CREATEFOLDER:([^|^\]]+)\|([^\]]+)\]', raya_response):
                 parent_id = match.group(1).strip(); folder_name = match.group(2).strip()
                 try:
                     from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
@@ -363,7 +363,7 @@ Mémoire — tu choisis librement tes catégories :
                     actions_confirmed.append(f"✅ Dossier '{folder_name}' créé  [id:{result.get('id','')}]" if result.get("status") == "ok" else f"❌ {result.get('message')}")
                 except Exception as e: actions_confirmed.append(f"❌ {str(e)[:80]}")
 
-            for match in re.finditer(r'\[ACTION:MOVEDRIVE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', aria_response):
+            for match in re.finditer(r'\[ACTION:MOVEDRIVE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', raya_response):
                 item_id=match.group(1).strip(); dest_id=match.group(2).strip(); new_name=match.group(3).strip() or None
                 try:
                     from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
@@ -372,7 +372,7 @@ Mémoire — tu choisis librement tes catégories :
                     actions_confirmed.append(f"✅ {result.get('message', 'Déplacé.')}" if result.get("status") == "ok" else f"❌ {result.get('message')}")
                 except Exception as e: actions_confirmed.append(f"❌ {str(e)[:80]}")
 
-            for match in re.finditer(r'\[ACTION:COPYFILE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', aria_response):
+            for match in re.finditer(r'\[ACTION:COPYFILE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', raya_response):
                 source_id=match.group(1).strip(); dest_id=match.group(2).strip(); new_name=match.group(3).strip() or None
                 try:
                     from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
@@ -384,34 +384,34 @@ Mémoire — tu choisis librement tes catégories :
     synth_threshold = get_memoire_param(username, "synth_threshold", 15)
 
     if MEMORY_OK:
-        for match in re.finditer(r'\[ACTION:LEARN:([^|^\]]+)\|([^\]]+)\]', aria_response):
+        for match in re.finditer(r'\[ACTION:LEARN:([^|^\]]+)\|([^\]]+)\]', raya_response):
             category=match.group(1).strip(); rule=match.group(2).strip()
             try:
                 save_rule(category, rule, "auto", 0.7, username)
                 actions_confirmed.append(f"🧠 Mémorisé [{category}] : {rule[:60]}")
             except Exception as e: print(f"[LEARN] Erreur: {e}")
 
-        for match in re.finditer(r'\[ACTION:INSIGHT:([^|^\]]+)\|([^\]]+)\]', aria_response):
+        for match in re.finditer(r'\[ACTION:INSIGHT:([^|^\]]+)\|([^\]]+)\]', raya_response):
             topic=match.group(1).strip(); insight=match.group(2).strip()
             try:
                 save_insight(topic, insight, "auto", username)
                 actions_confirmed.append(f"💡 Observé [{topic}] : {insight[:60]}")
             except Exception as e: print(f"[INSIGHT] Erreur: {e}")
 
-        for match in re.finditer(r'\[ACTION:FORGET:(\d+)\]', aria_response):
+        for match in re.finditer(r'\[ACTION:FORGET:(\d+)\]', raya_response):
             rule_id = int(match.group(1))
             try:
                 deleted = delete_rule(rule_id, username)
                 actions_confirmed.append(f"🗑️ Règle {rule_id} désactivée." if deleted else f"❌ Règle {rule_id} introuvable.")
             except Exception as e: print(f"[FORGET] Erreur: {e}")
 
-        for _ in re.finditer(r'\[ACTION:SYNTH:\]', aria_response):
+        for _ in re.finditer(r'\[ACTION:SYNTH:\]', raya_response):
             try:
                 threading.Thread(target=lambda u=username, t=synth_threshold: synthesize_session(t, u), daemon=True).start()
                 actions_confirmed.append("🔄 Synthèse lancée en arrière-plan.")
             except Exception as e: print(f"[SYNTH] Erreur: {e}")
 
-    clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', aria_response).strip()
+    clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', raya_response).strip()
     if actions_confirmed:
         clean_response += "\n\n" + "\n".join(actions_confirmed)
 
