@@ -12,6 +12,7 @@ try:
         get_aria_rules, save_rule, delete_rule,
         get_aria_insights, save_insight,
         synthesize_session, seed_default_rules,
+        save_reply_learning,
     )
     MEMORY_OK = True
 except Exception as _mem_err:
@@ -35,3 +36,4 @@ except Exception as _mem_err:
     def save_insight(*a, **kw): return 0
     def synthesize_session(**kwargs): return {}
     def seed_default_rules(username="guillaume"): pass
+    def save_reply_learning(**kwargs): return 0

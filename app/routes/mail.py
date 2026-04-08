@@ -1,6 +1,6 @@
 import requests as http_requests
 from datetime import datetime, timezone
-from fastapi import APIRouter, Request, Form
+from fastapi import APIRouter, Request, Form, Body
 from fastapi.responses import RedirectResponse
 from app.database import get_pg_conn
 from app.token_manager import get_valid_microsoft_token
@@ -220,3 +220,24 @@ def assistant_dashboard(request: Request, days: int = 2):
 def add_instruction(instruction: str = Form(...)):
     add_global_instruction(instruction)
     return RedirectResponse("/chat", status_code=303)
+
+
+@router.post("/correction")
+def save_correction(request: Request, payload: dict = Body(...)):
+    """
+    Enregistre une correction manuelle de Guillaume sur une réponse d'Aria.
+    Corps : mail_subject, mail_from, mail_body_preview, category, ai_reply, final_reply
+    """
+    username = require_user(request)
+    if not username: return {"error": "Non authentifié"}
+    from app.memory_manager import save_reply_learning
+    rid = save_reply_learning(
+        mail_subject=payload.get("mail_subject", ""),
+        mail_from=payload.get("mail_from", ""),
+        mail_body_preview=payload.get("mail_body_preview", ""),
+        category=payload.get("category", "autre"),
+        ai_reply=payload.get("ai_reply", ""),
+        final_reply=payload.get("final_reply", ""),
+        username=username
+    )
+    return {"status": "ok", "id": rid}

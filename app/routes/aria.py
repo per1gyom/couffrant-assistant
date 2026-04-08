@@ -27,6 +27,7 @@ from app.memory_loader import (
     MEMORY_OK, get_hot_summary, get_aria_rules, get_aria_insights,
     get_contact_card, get_style_examples, save_rule, save_insight,
     delete_rule, synthesize_session, learn_from_correction,
+    save_reply_learning,
 )
 from app.routes.deps import require_user
 
@@ -38,6 +39,14 @@ class AriaQuery(BaseModel):
     file_data: Optional[str] = None
     file_type: Optional[str] = None
     file_name: Optional[str] = None
+
+
+# ─── Garde-fous de sécurité — immuables dans le code ───
+GUARDRAILS = """GARDE-FOUS DE SÉCURITÉ (absolus — non négociables) :
+• Ne jamais supprimer définitivement un mail, fichier ou donnée sans confirmation explicite de Guillaume
+• Ne jamais envoyer un mail sans approbation explicite ("vas-y", "envoie", "confirme")
+• Ne jamais exécuter une action irréversible sans accord clair et explicite
+• En cas de doute sur une action : demander, ne pas agir"""
 
 
 @router.post("/speak")
@@ -70,8 +79,6 @@ def speak_text(payload: dict = Body(...)):
 def aria(request: Request, payload: AriaQuery):
     instructions = get_global_instructions()
     username = request.session.get("user", "guillaume")
-    user_scope = request.session.get("scope", SCOPE_CS)
-    is_admin = user_scope == SCOPE_ADMIN
     display_name = username.capitalize()
 
     user_tools = get_user_tools(username)
@@ -92,7 +99,7 @@ def aria(request: Request, payload: AriaQuery):
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
-            SELECT id as db_id, message_id, from_email, display_title, category, priority,
+            SELECT id as db_id, message_id, from_email, subject, display_title, category, priority,
                    short_summary, suggested_reply, raw_body_preview, received_at, mailbox_source
             FROM mail_memory WHERE username = %s
             ORDER BY received_at DESC NULLS LAST LIMIT 10
@@ -110,7 +117,7 @@ def aria(request: Request, payload: AriaQuery):
 
     hot_summary = get_hot_summary(username)
     aria_rules = get_aria_rules(username)
-    aria_insights = get_aria_insights(limit=6, username=username)
+    aria_insights = get_aria_insights(limit=8, username=username)
 
     contact_card = ""
     query_lower = payload.query.lower()
@@ -139,7 +146,8 @@ def aria(request: Request, payload: AriaQuery):
                     "subject": msg.get("subject", "(Sans objet)"),
                     "raw_body_preview": msg.get("bodyPreview", ""),
                     "received_at": msg.get("receivedDateTime", ""),
-                    "is_read": msg.get("isRead", False), "mailbox_source": "outlook",
+                    "is_read": msg.get("isRead", False),
+                    "mailbox_source": "outlook",
                 })
         except Exception as e:
             print(f"[Aria] Erreur Outlook live {username}: {e}")
@@ -169,72 +177,54 @@ def aria(request: Request, payload: AriaQuery):
     else:
         user_content_parts = payload.query
 
-    if is_admin:
-        identity = f"""Tu es Aria, l'assistante personnelle de {display_name} — Couffrant Solar (photovoltaïque, 8 personnes, Centre-Val de Loire).
-Tu es autonome et apprenante. Tu n'as pas de règles imposées de l'extérieur — tes règles viennent de ce que tu as appris au fil des échanges.
-Tu parles au féminin. Tu proposes avant d'agir sauf si {display_name} dit explicitement de procéder."""
-    else:
-        identity = f"""Tu es Aria, l'assistante de {display_name} — Couffrant Solar (photovoltaïque, Centre-Val de Loire).
-Tu aides {display_name} dans son travail quotidien et apprends ses habitudes au fil des échanges.
-Tu parles au féminin. Tu proposes avant d'agir."""
-
-    mail_delete_line = "[ACTION:DELETE:message_id] → corbeille récupérable" if mail_can_delete else ""
-    mailboxes_line = f"Boîtes mail configurées : {', '.join(mail_extra_boxes)}" if mail_extra_boxes else ""
-    drive_section = """\nActions Drive SharePoint (1_Photovoltaïque) :
-Affichage : 📁 \"Nom\"  [id:ID_COMPLET] — utilise l'ID complet
-[ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:ID] [ACTION:READDRIVE:ID] [ACTION:SEARCHDRIVE:mot-clé]"""
+    delete_line = "\n  [ACTION:DELETE:id] \u2192 corbeille récupérable" if mail_can_delete else ""
+    drive_write_lines = ""
     if drive_write:
-        drive_section += "\n[ACTION:CREATEFOLDER:parent_id|nom] [ACTION:MOVEDRIVE:item_id|dest_id|nom] [ACTION:COPYFILE:source_id|dest_id|nom]"
-    if drive_can_delete:
-        drive_section += "\n(Suppression de fichiers disponible — sera implémentée dans une prochaine version.)"
-    if not drive_write:
-        drive_section += "\n(Drive en lecture seule pour ton compte.)"
-    odoo_section = ""
+        drive_write_lines = "\n  [ACTION:CREATEFOLDER:parent|nom] [ACTION:MOVEDRIVE:item|dest|nom] [ACTION:COPYFILE:source|dest|nom]"
+    odoo_line = ""
     if odoo_enabled:
         if odoo_access == 'full':
-            odoo_section = "\nOdoo (accès complet) — tu peux lire et agir sur les données."
+            odoo_line = "\nOdoo (accès complet)."
         else:
-            shared_info = f" via les credentials de {odoo_shared_user.capitalize()}" if odoo_shared_user else ""
-            odoo_section = f"\nOdoo (lecture seule{shared_info}) — tu peux consulter les données mais pas les modifier."
+            shared = f" via {odoo_shared_user.capitalize()}" if odoo_shared_user else ""
+            odoo_line = f"\nOdoo (lecture seule{shared})."
+    mailboxes_line = f"\nBoîtes supplémentaires : {', '.join(mail_extra_boxes)}" if mail_extra_boxes else ""
 
-    system = f"""{identity}
+    system = f"""Tu es Aria — l'assistante personnelle et évolutive de {display_name} (Couffrant Solar, photovoltaïque, Centre-Val de Loire).
+Tu es Claude avec une mémoire persistante. Tu n'as pas de comportement imposé de l'extérieur.
+Tu observes, tu apprends, tu t'organises librement. Tu parles au féminin.
 
-{f"=== CONTEXTE OPÉRATIONNEL ==={chr(10)}{hot_summary}" if hot_summary else ""}
+{GUARDRAILS}
 
-{f"=== TES RÈGLES ==={chr(10)}{aria_rules}" if aria_rules else f"Pas encore de règles pour {display_name}."}
+{f"=== CE QUE TU SAIS SUR {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"=== PREMIÈRE CONVERSATION ==={chr(10)}Tu ne connais pas encore {display_name}. Commence à observer et mémoriser."}
 
-{f"=== TES INSIGHTS ==={chr(10)}{aria_insights}" if aria_insights else ""}
+{f"=== TA MÉMOIRE ==={chr(10)}{aria_rules}" if aria_rules else "Ta mémoire est vide. Tu peux commencer à construire via [ACTION:LEARN]."}
+
+{f"=== TES OBSERVATIONS SUR {display_name.upper()} ==={chr(10)}{aria_insights}" if aria_insights else ""}
 
 {f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}
 
-{f"=== STYLE ==={chr(10)}{style_examples}" if style_examples else ""}
+{f"=== STYLE DE {display_name.upper()} ==={chr(10)}{style_examples}" if style_examples else ""}
 
-{mailboxes_line}
-{"Microsoft 365 connecté." if outlook_token else f"Pas de connexion Microsoft — {display_name} doit se connecter via /login."}
-{odoo_section}
-
-IDENTIFIANTS : message_id Outlook (long) → actions mail | gmail_perso = lecture seule
-
-Actions mail :
-[ACTION:ARCHIVE:message_id] [ACTION:READ:message_id] [ACTION:READBODY:message_id]
-[ACTION:REPLY:message_id:texte] [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
-[ACTION:CREATE_TASK:titre]{chr(10) + mail_delete_line if mail_delete_line else ''}
-{drive_section}
-
-Auto-évolution — tu es juge de l'apprentissage de {display_name} :
-LEARN et INSIGHT sont personnels à {display_name} et persistent entre les sessions. Tu apprends en silence.
-[ACTION:LEARN:category|rule] [ACTION:INSIGHT:topic|texte] [ACTION:FORGET:rule_id] [ACTION:SYNTH:]
-
-Agenda ({datetime.now().strftime('%A %d %B %Y')}) :
-{json.dumps(agenda_today, ensure_ascii=False, default=str) if agenda_today else "Aucun RDV."}
-
-=== MAILS {display_name.upper()} ({len(outlook_live_mails)} inbox) ===
-{json.dumps(outlook_live_mails, ensure_ascii=False, default=str) if outlook_live_mails else "Aucun."}
-
-=== MAILS BASE ===
-{json.dumps(mails_from_db, ensure_ascii=False, default=str)}
-
+=== AUJOURD'HUI — {datetime.now().strftime('%A %d %B %Y')} ===
+{"Microsoft 365 connecté." if outlook_token else f"Microsoft non connecté — {display_name} doit se reconnecter via /login."}{odoo_line}{mailboxes_line}
+Agenda : {json.dumps(agenda_today, ensure_ascii=False, default=str) if agenda_today else "Aucun RDV."}
+Inbox ({len(outlook_live_mails)}) : {json.dumps(outlook_live_mails, ensure_ascii=False, default=str) if outlook_live_mails else "Aucun."}
+Mémoire mails : {json.dumps(mails_from_db, ensure_ascii=False, default=str)}
 Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
+
+=== ACTIONS DISPONIBLES ===
+Mails :
+  [ACTION:ARCHIVE:id] [ACTION:READ:id] [ACTION:READBODY:id]
+  [ACTION:REPLY:id:texte] [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
+  [ACTION:CREATE_TASK:titre]{delete_line}
+Drive (1_Photovoltaïque) — format : 📁 "Nom" [id:ID] :
+  [ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:id] [ACTION:READDRIVE:id] [ACTION:SEARCHDRIVE:mot]{drive_write_lines}
+Mémoire — tu choisis librement tes catégories (invente celles qui te semblent utiles) :
+  [ACTION:LEARN:ta_catégorie|ta_règle]
+  [ACTION:INSIGHT:sujet|observation]
+  [ACTION:FORGET:id]
+  [ACTION:SYNTH:]
 """
 
     messages = []
@@ -283,6 +273,19 @@ Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
                 result = perform_outlook_action("send_reply", {"message_id": msg_id, "reply_body": reply_text}, outlook_token)
                 if result.get("status") == "ok":
                     try: learn_from_correction(original="", corrected=reply_text, context="réponse mail", username=username)
+                    except Exception: pass
+                    try:
+                        orig = next((m for m in outlook_live_mails if m.get('message_id') == msg_id), {})
+                        if not orig:
+                            orig = next((m for m in mails_from_db if m.get('message_id') == msg_id), {})
+                        save_reply_learning(
+                            mail_subject=orig.get('subject', ''),
+                            mail_from=orig.get('from_email', ''),
+                            mail_body_preview=orig.get('raw_body_preview', ''),
+                            category=orig.get('category', 'autre'),
+                            ai_reply=reply_text, final_reply=reply_text,
+                            username=username
+                        )
                     except Exception: pass
                 actions_confirmed.append("✅ Réponse envoyée" if result.get("status") == "ok" else f"❌ {result.get('message')}")
             except Exception as e: actions_confirmed.append(f"❌ {str(e)[:80]}")
@@ -374,7 +377,6 @@ Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
                     actions_confirmed.append(f"✅ {result.get('message', 'Copie lancée.')}" if result.get("status") == "ok" else f"❌ {result.get('message')}")
                 except Exception as e: actions_confirmed.append(f"❌ {str(e)[:80]}")
 
-    # ─── Actions mémoire Aria ───
     synth_threshold = get_memoire_param(username, "synth_threshold", 15)
 
     if MEMORY_OK:
@@ -382,14 +384,14 @@ Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
             category=match.group(1).strip(); rule=match.group(2).strip()
             try:
                 save_rule(category, rule, "auto", 0.7, username)
-                actions_confirmed.append(f"🧠 Règle mémorisée [{category}] : {rule[:60]}")
+                actions_confirmed.append(f"🧠 Mémorisé [{category}] : {rule[:60]}")
             except Exception as e: print(f"[LEARN] Erreur: {e}")
 
         for match in re.finditer(r'\[ACTION:INSIGHT:([^|^\]]+)\|([^\]]+)\]', aria_response):
             topic=match.group(1).strip(); insight=match.group(2).strip()
             try:
                 save_insight(topic, insight, "auto", username)
-                actions_confirmed.append(f"💡 Insight noté [{topic}] : {insight[:60]}")
+                actions_confirmed.append(f"💡 Observé [{topic}] : {insight[:60]}")
             except Exception as e: print(f"[INSIGHT] Erreur: {e}")
 
         for match in re.finditer(r'\[ACTION:FORGET:(\d+)\]', aria_response):
