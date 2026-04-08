@@ -12,27 +12,36 @@
     --accent: #6366f1; --accent-hover: #5558e8;
     --user-bg: #1e1e2e; --aria-bg: #141414;
     --danger: #ef4444; --success: #22c55e;
+    --yellow: #f59e0b;
   }
   html, body { height: 100%; background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 15px; line-height: 1.6; }
   .app { display: flex; flex-direction: column; height: 100vh; max-width: 800px; margin: 0 auto; }
+
+  /* HEADER */
   .header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; }
-  .header-dot { width: 8px; height: 8px; background: var(--success); border-radius: 50%; animation: pulse 2s infinite; }
+  .header-dot { width: 8px; height: 8px; background: var(--success); border-radius: 50%; animation: pulse 2s infinite; flex-shrink: 0; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
   .header-title { font-weight: 600; font-size: 16px; }
   .header-sub { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+  .header-btns { display: flex; gap: 8px; align-items: center; }
   #autoSpeakBtn { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: 8px; padding: 4px 10px; font-size: 13px; cursor: pointer; transition: all 0.15s; }
   #autoSpeakBtn.active { border-color: var(--accent); color: var(--accent); }
+  #adminBtn { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: 8px; padding: 4px 10px; font-size: 13px; cursor: pointer; transition: all 0.15s; }
+  #adminBtn:hover, #adminBtn.open { border-color: var(--yellow); color: var(--yellow); }
+
+  /* QUICK ACTIONS */
   .quick-actions { display: flex; gap: 8px; padding: 10px 20px; overflow-x: auto; background: var(--surface); border-bottom: 1px solid var(--border); flex-shrink: 0; scrollbar-width: none; }
   .quick-actions::-webkit-scrollbar { display: none; }
   .quick-btn { flex-shrink: 0; background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); border-radius: 20px; padding: 5px 14px; font-size: 13px; cursor: pointer; white-space: nowrap; transition: all 0.15s; }
   .quick-btn:hover { border-color: var(--accent); color: var(--text); }
+
+  /* MESSAGES */
   .messages { flex: 1; overflow-y: auto; padding: 24px 20px; display: flex; flex-direction: column; gap: 20px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
   .message-row { display: flex; gap: 12px; align-items: flex-start; }
   .message-row.user { flex-direction: row-reverse; }
   .avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; margin-top: 2px; }
   .avatar.aria-avatar { background: var(--accent); }
   .avatar.user-avatar { background: var(--surface2); border: 1px solid var(--border); }
-  /* word-break pour éviter le débordement des URLs et textes longs */
   .bubble { max-width: 75%; border-radius: 16px; padding: 12px 16px; font-size: 14.5px; line-height: 1.65; word-break: break-word; overflow-wrap: break-word; }
   .message-row.aria .bubble { background: var(--aria-bg); border: 1px solid var(--border); border-radius: 4px 16px 16px 16px; }
   .message-row.user .bubble { background: var(--user-bg); border: 1px solid #2d2d4a; border-radius: 16px 4px 16px 16px; color: #c8c8f0; }
@@ -45,6 +54,8 @@
   .dot-anim:nth-child(2) { animation-delay: 0.2s; }
   .dot-anim:nth-child(3) { animation-delay: 0.4s; }
   @keyframes dotbounce { 0%, 80%, 100% { transform: scale(0.7); opacity: 0.5; } 40% { transform: scale(1); opacity: 1; } }
+
+  /* TRIAGE */
   .triage-bar { display: none; gap: 8px; padding: 10px 20px; background: var(--surface); border-top: 1px solid var(--border); justify-content: center; flex-shrink: 0; }
   .triage-bar.visible { display: flex; }
   .triage-action { padding: 7px 16px; border-radius: 20px; font-size: 13px; font-weight: 500; cursor: pointer; border: none; transition: opacity 0.15s; }
@@ -53,6 +64,8 @@
   .triage-archive { background: #1e3a2e; color: #4ade80; }
   .triage-delete { background: #3a1e1e; color: #f87171; }
   .triage-reply { background: #1e2a3a; color: #60a5fa; }
+
+  /* INPUT */
   .input-zone { padding: 16px 20px 20px; background: var(--surface); border-top: 1px solid var(--border); flex-shrink: 0; }
   .attachment-preview { display: none; align-items: center; gap: 8px; margin-bottom: 8px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 6px 12px; font-size: 13px; color: var(--text-muted); }
   .attachment-preview.visible { display: flex; }
@@ -86,6 +99,167 @@
   .welcome p { font-size: 14px; max-width: 400px; margin: 0 auto; }
   #fileInput { display: none; }
   .attached-image { max-width: 200px; max-height: 150px; border-radius: 8px; margin-top: 6px; display: block; border: 1px solid var(--border); }
+
+  /* ═══════════════════════════════
+     TIROIR ADMIN
+  ═══════════════════════════════ */
+  .drawer-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.5);
+    z-index: 200;
+    backdrop-filter: blur(2px);
+  }
+  .drawer-overlay.open { display: block; }
+
+  .drawer {
+    position: fixed;
+    top: 0; right: 0; bottom: 0;
+    width: 320px;
+    background: #0f1318;
+    border-left: 1px solid #1e2a38;
+    z-index: 201;
+    transform: translateX(100%);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .drawer.open { transform: translateX(0); }
+
+  .drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 18px 20px;
+    border-bottom: 1px solid #1e2a38;
+    flex-shrink: 0;
+  }
+  .drawer-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--yellow);
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-family: 'Courier New', monospace;
+  }
+  .drawer-close {
+    background: none;
+    border: none;
+    color: #4a5568;
+    font-size: 20px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 6px;
+    transition: color 0.15s;
+    line-height: 1;
+  }
+  .drawer-close:hover { color: var(--text); }
+
+  .drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 16px 24px;
+    scrollbar-width: thin;
+    scrollbar-color: #1e2a38 transparent;
+  }
+
+  /* Groupes */
+  .d-group { margin-bottom: 20px; }
+  .d-group-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: #4a5568;
+    margin-bottom: 8px;
+    padding: 0 2px;
+    font-family: 'Courier New', monospace;
+  }
+
+  /* Boutons du tiroir */
+  .d-btn {
+    width: 100%;
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    margin-bottom: 6px;
+    background: #111820;
+    border: 1px solid #1e2a38;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: left;
+  }
+  .d-btn:hover { border-color: #2d4060; background: #141e2a; }
+  .d-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .d-btn-icon { font-size: 16px; flex-shrink: 0; margin-top: 1px; }
+  .d-btn-body { flex: 1; min-width: 0; }
+  .d-btn-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    display: block;
+    line-height: 1.3;
+  }
+  .d-btn-desc {
+    font-size: 11px;
+    color: #4a6080;
+    display: block;
+    margin-top: 2px;
+    line-height: 1.4;
+  }
+  .d-btn-result {
+    font-size: 11px;
+    margin-top: 6px;
+    padding: 5px 8px;
+    border-radius: 5px;
+    font-family: 'Courier New', monospace;
+    display: none;
+    line-height: 1.4;
+  }
+  .d-btn-result.ok { display: block; background: rgba(34,197,94,0.1); color: #4ade80; border: 1px solid rgba(34,197,94,0.2); }
+  .d-btn-result.err { display: block; background: rgba(239,68,68,0.1); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
+  .d-btn-result.info { display: block; background: rgba(99,102,241,0.1); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.2); }
+  .d-btn-result.loading { display: block; background: rgba(255,255,255,0.03); color: #4a6080; border: 1px solid #1e2a38; }
+
+  /* Bouton danger */
+  .d-btn.danger { border-color: rgba(239,68,68,0.2); }
+  .d-btn.danger:hover { border-color: rgba(239,68,68,0.5); background: rgba(239,68,68,0.05); }
+  .d-btn.danger .d-btn-label { color: #f87171; }
+
+  /* Bouton nav */
+  .d-btn.nav .d-btn-label { color: #a5b4fc; }
+
+  /* Séparateur */
+  .d-sep { height: 1px; background: #1e2a38; margin: 4px 0 16px; }
+
+  /* Confirmation inline */
+  .d-confirm {
+    display: none;
+    margin-top: 8px;
+    padding: 10px;
+    background: rgba(239,68,68,0.08);
+    border: 1px solid rgba(239,68,68,0.25);
+    border-radius: 7px;
+  }
+  .d-confirm.visible { display: block; }
+  .d-confirm-text { font-size: 12px; color: #f87171; margin-bottom: 8px; line-height: 1.4; }
+  .d-confirm-btns { display: flex; gap: 8px; }
+  .d-confirm-yes {
+    flex: 1; padding: 6px; border-radius: 6px; font-size: 12px; font-weight: 600;
+    background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.3);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .d-confirm-yes:hover { background: rgba(239,68,68,0.3); }
+  .d-confirm-no {
+    flex: 1; padding: 6px; border-radius: 6px; font-size: 12px; font-weight: 600;
+    background: #111820; color: #4a6080; border: 1px solid #1e2a38;
+    cursor: pointer; transition: all 0.15s;
+  }
+  .d-confirm-no:hover { color: var(--text); }
 </style>
 </head>
 <body>
@@ -94,7 +268,10 @@
     <div class="header-dot"></div>
     <div class="header-title">Aria</div>
     <div class="header-sub">Couffrant Solar</div>
-    <button id="autoSpeakBtn" onclick="toggleAutoSpeak()" title="Lecture automatique">🔊 Auto</button>
+    <div class="header-btns">
+      <button id="autoSpeakBtn" onclick="toggleAutoSpeak()" title="Lecture automatique">🔊 Auto</button>
+      <button id="adminBtn" onclick="toggleDrawer()" title="Administration">⚙️ Admin</button>
+    </div>
   </div>
   <div class="quick-actions">
     <button class="quick-btn" onclick="quickAsk('Quels sont mes mails urgents ?')">📬 Mails urgents</button>
@@ -134,214 +311,524 @@
     <input type="file" id="fileInput" accept="image/*,.pdf" onchange="handleFileSelect(event)">
   </div>
 </div>
-<button id="stopBtn" onclick="stopSpeech()">⏹ Arrêter</button>
-<script>
-const messagesEl=document.getElementById('messages');
-const inputEl=document.getElementById('input');
-const sendBtn=document.getElementById('sendBtn');
-const micBtn=document.getElementById('micBtn');
-const stopBtn=document.getElementById('stopBtn');
-const triageBar=document.getElementById('triageBar');
-const micStatus=document.getElementById('micStatus');
-const inputWrapper=document.getElementById('inputWrapper');
-const attachBtn=document.getElementById('attachBtn');
-const attachmentPreview=document.getElementById('attachmentPreview');
-const attachmentName=document.getElementById('attachmentName');
 
-let isListening=false,currentAudio=null,speakAborted=false,currentSpeakBtn=null;
-let triageQueue=[],triageCurrent=null,silenceTimer=null;
+<!-- ═══════════════════════════════
+     TIROIR ADMIN
+═══════════════════════════════ -->
+<div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-header">
+    <span class="drawer-title">⚙ Administration</span>
+    <button class="drawer-close" onclick="closeDrawer()">✕</button>
+  </div>
+  <div class="drawer-body">
+
+    <!-- MÉMOIRE & APPRENTISSAGE -->
+    <div class="d-group">
+      <div class="d-group-title">🧠 Mémoire & apprentissage</div>
+
+      <div class="d-btn" onclick="drawerAction(this, '/build-memory', 'build')">
+        <span class="d-btn-icon">🔄</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Reconstruire le contexte</span>
+          <span class="d-btn-desc">Relit les mails et conversations pour mettre à jour le résumé chaud et les fiches contacts. Aucune suppression.</span>
+          <div class="d-btn-result" id="result-build"></div>
+        </div>
+      </div>
+
+      <div class="d-btn" onclick="drawerAction(this, '/synth', 'synth')">
+        <span class="d-btn-icon">📝</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Synthèse des conversations</span>
+          <span class="d-btn-desc">Extrait des règles et insights des 15 dernières conversations et les persiste en mémoire.</span>
+          <div class="d-btn-result" id="result-synth"></div>
+        </div>
+      </div>
+
+      <div class="d-btn" onclick="drawerAction(this, '/analyze-raw-mails', 'analyze')">
+        <span class="d-btn-icon">🔍</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Analyser mails non traités</span>
+          <span class="d-btn-desc">Lance l'analyse IA sur les mails ingérés mais pas encore analysés. Utile si une analyse a échoué.</span>
+          <div class="d-btn-result" id="result-analyze"></div>
+        </div>
+      </div>
+
+      <div class="d-btn" onclick="drawerAction(this, '/build-style-profile', 'style')">
+        <span class="d-btn-icon">✍️</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Reconstruire profil de style</span>
+          <span class="d-btn-desc">Analyse les mails envoyés pour mettre à jour ta signature rédactionnelle.</span>
+          <div class="d-btn-result" id="result-style"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ÉTAT DU SYSTÈME -->
+    <div class="d-group">
+      <div class="d-group-title">📊 État du système</div>
+
+      <div class="d-btn" onclick="drawerMemoryStatus(this)">
+        <span class="d-btn-icon">📈</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Voir les compteurs</span>
+          <span class="d-btn-desc">Conversations, règles actives, insights, mails en base.</span>
+          <div class="d-btn-result" id="result-status"></div>
+        </div>
+      </div>
+
+      <div class="d-btn" onclick="drawerRules(this)">
+        <span class="d-btn-icon">📋</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Voir mes règles actives</span>
+          <span class="d-btn-desc">Règles comportementales, style et métier qu'Aria a apprises.</span>
+          <div class="d-btn-result" id="result-rules"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="d-sep"></div>
+
+    <!-- ACTIONS SENSIBLES -->
+    <div class="d-group">
+      <div class="d-group-title">⚠️ Actions sensibles</div>
+
+      <div class="d-btn" onclick="drawerAction(this, '/purge-memory', 'purge')">
+        <span class="d-btn-icon">🗓️</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Purger les vieux mails</span>
+          <span class="d-btn-desc">Supprime les mails de plus de 90 jours en base. Les règles et conversations sont conservées.</span>
+          <div class="d-btn-result" id="result-purge"></div>
+        </div>
+      </div>
+
+      <div class="d-btn danger" onclick="drawerShowConfirm('confirm-rebuild')">
+        <span class="d-btn-icon">⛔</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Vider l'historique mails</span>
+          <span class="d-btn-desc">Efface tous les mails en base. Les règles, insights et conversations sont préservés.</span>
+          <div class="d-confirm" id="confirm-rebuild">
+            <div class="d-confirm-text">⚠️ Tous les mails en base seront supprimés. Ils seront ré-ingérés au prochain cycle automatique. Confirmer ?</div>
+            <div class="d-confirm-btns">
+              <button class="d-confirm-yes" onclick="drawerConfirmAction(event, '/rebuild-memory', 'rebuild')">Oui, vider</button>
+              <button class="d-confirm-no" onclick="drawerHideConfirm(event, 'confirm-rebuild')">Annuler</button>
+            </div>
+          </div>
+          <div class="d-btn-result" id="result-rebuild"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="d-sep"></div>
+
+    <!-- URGENCE / DEBUG -->
+    <div class="d-group">
+      <div class="d-group-title">🔧 Urgence / Debug — si l'auto-ingest bloque</div>
+
+      <div class="d-btn" onclick="drawerAction(this, '/learn-inbox-mails', 'inbox')">
+        <span class="d-btn-icon">📥</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Forcer ingestion inbox</span>
+          <span class="d-btn-desc">Importe les 50 derniers mails. Utile après un redémarrage ou une coupure du token.</span>
+          <div class="d-btn-result" id="result-inbox"></div>
+        </div>
+      </div>
+
+      <div class="d-btn" onclick="drawerAction(this, '/learn-sent-mails', 'sent')">
+        <span class="d-btn-icon">📤</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Forcer ingestion envoyés</span>
+          <span class="d-btn-desc">Importe les 50 derniers mails envoyés pour enrichir le style.</span>
+          <div class="d-btn-result" id="result-sent"></div>
+        </div>
+      </div>
+
+      <div class="d-btn" onclick="drawerAction(this, '/init-db', 'initdb')">
+        <span class="d-btn-icon">🗄️</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Vérifier la base de données</span>
+          <span class="d-btn-desc">Crée les tables manquantes et exécute les migrations. Sans danger.</span>
+          <div class="d-btn-result" id="result-initdb"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="d-sep"></div>
+
+    <!-- NAVIGATION -->
+    <div class="d-group">
+      <div class="d-group-title">🔗 Navigation</div>
+
+      <div class="d-btn nav" onclick="window.open('/admin/panel', '_blank')">
+        <span class="d-btn-icon">🖥️</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Panel admin complet</span>
+          <span class="d-btn-desc">Gestion des utilisateurs, toutes les règles, insights, actions avancées.</span>
+        </div>
+      </div>
+
+      <div class="d-btn nav" onclick="window.location.href='/logout'">
+        <span class="d-btn-icon">🚪</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Déconnexion</span>
+          <span class="d-btn-desc">Ferme la session en cours.</span>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<button id="stopBtn" onclick="stopSpeech()">⏹ Arrêter</button>
+
+<script>
+const messagesEl = document.getElementById('messages');
+const inputEl = document.getElementById('input');
+const sendBtn = document.getElementById('sendBtn');
+const micBtn = document.getElementById('micBtn');
+const stopBtn = document.getElementById('stopBtn');
+const triageBar = document.getElementById('triageBar');
+const micStatus = document.getElementById('micStatus');
+const inputWrapper = document.getElementById('inputWrapper');
+const attachBtn = document.getElementById('attachBtn');
+const attachmentPreview = document.getElementById('attachmentPreview');
+const attachmentName = document.getElementById('attachmentName');
+
+let isListening=false, currentAudio=null, speakAborted=false, currentSpeakBtn=null;
+let triageQueue=[], triageCurrent=null, silenceTimer=null;
 let finalTextBase='';
 let autoSpeak=true;
 let currentFile=null;
 
-function toggleAutoSpeak(){
-  autoSpeak=!autoSpeak;
-  const btn=document.getElementById('autoSpeakBtn');
-  if(autoSpeak){btn.classList.add('active');btn.textContent='🔊 Auto';}
-  else{btn.classList.remove('active');btn.textContent='🔇 Muet';}
+// ─── AUTO SPEAK ───
+function toggleAutoSpeak() {
+  autoSpeak = !autoSpeak;
+  const btn = document.getElementById('autoSpeakBtn');
+  if (autoSpeak) { btn.classList.add('active'); btn.textContent='🔊 Auto'; }
+  else { btn.classList.remove('active'); btn.textContent='🔇 Muet'; }
 }
 document.getElementById('autoSpeakBtn').classList.add('active');
 
-function handleFileSelect(e){
-  const file=e.target.files[0];
-  if(!file)return;
-  if(file.size>10*1024*1024){alert('Fichier trop volumineux (max 10 Mo).');return;}
-  const reader=new FileReader();
-  reader.onload=(ev)=>{
-    const b64=ev.target.result.split(',')[1];
-    currentFile={data:b64,type:file.type,name:file.name};
-    attachmentName.textContent='📎 '+file.name;
+// ─── TIROIR ADMIN ───
+function toggleDrawer() {
+  const drawer = document.getElementById('drawer');
+  if (drawer.classList.contains('open')) closeDrawer();
+  else openDrawer();
+}
+function openDrawer() {
+  document.getElementById('drawer').classList.add('open');
+  document.getElementById('drawerOverlay').classList.add('open');
+  document.getElementById('adminBtn').classList.add('open');
+}
+function closeDrawer() {
+  document.getElementById('drawer').classList.remove('open');
+  document.getElementById('drawerOverlay').classList.remove('open');
+  document.getElementById('adminBtn').classList.remove('open');
+}
+
+// Action générique : appel API + affiche résultat
+async function drawerAction(btn, url, id) {
+  const el = document.getElementById('result-' + id);
+  el.className = 'd-btn-result loading';
+  el.textContent = '⏳ En cours…';
+  btn.disabled = true;
+  try {
+    const r = await fetch(url);
+    const d = await r.json();
+    const txt = formatDrawerResult(d);
+    el.className = 'd-btn-result ok';
+    el.textContent = txt;
+  } catch(e) {
+    el.className = 'd-btn-result err';
+    el.textContent = '❌ Erreur: ' + e.message;
+  }
+  btn.disabled = false;
+}
+
+// Même action mais déclenchée par le bouton de confirmation
+async function drawerConfirmAction(e, url, id) {
+  e.stopPropagation();
+  drawerHideConfirm(e, 'confirm-' + id);
+  const btn = e.target.closest('.d-btn');
+  await drawerAction(btn, url, id);
+}
+
+function drawerShowConfirm(id) {
+  document.getElementById(id).classList.add('visible');
+}
+function drawerHideConfirm(e, id) {
+  e.stopPropagation();
+  document.getElementById(id).classList.remove('visible');
+}
+
+// Compteurs mémoire
+async function drawerMemoryStatus(btn) {
+  const el = document.getElementById('result-status');
+  el.className = 'd-btn-result loading';
+  el.textContent = '⏳ Chargement…';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/memory-status');
+    const d = await r.json();
+    const n1 = d.niveau_1 || {};
+    const n2 = d.niveau_2 || {};
+    el.className = 'd-btn-result info';
+    el.textContent =
+      `📬 Mails : ${n2.mail_memory || 0}\n` +
+      `💬 Conversations : ${n2.conversations_brutes || 0}\n` +
+      `📋 Règles actives : ${n1.regles_actives || 0}\n` +
+      `💡 Insights : ${n1.insights || 0}\n` +
+      `👥 Contacts : ${n1.contacts || 0}\n` +
+      `✍️ Style : ${n2.style_examples || 0} exemples`;
+  } catch(e) {
+    el.className = 'd-btn-result err';
+    el.textContent = '❌ Erreur';
+  }
+  btn.disabled = false;
+}
+
+// Règles actives
+async function drawerRules(btn) {
+  const el = document.getElementById('result-rules');
+  el.className = 'd-btn-result loading';
+  el.textContent = '⏳ Chargement…';
+  btn.disabled = true;
+  try {
+    const r = await fetch('/rules');
+    const rules = await r.json();
+    const active = rules.filter(r => r.active);
+    if (!active.length) {
+      el.className = 'd-btn-result info';
+      el.textContent = 'Aucune règle active.';
+    } else {
+      const cats = {};
+      active.forEach(r => { cats[r.category] = (cats[r.category]||0) + 1; });
+      const lines = Object.entries(cats).map(([k,v]) => `${k} : ${v}`).join('\n');
+      el.className = 'd-btn-result info';
+      el.textContent = `${active.length} règles actives :\n${lines}`;
+    }
+  } catch(e) {
+    el.className = 'd-btn-result err';
+    el.textContent = '❌ Erreur';
+  }
+  btn.disabled = false;
+}
+
+// Formater les résultats API de façon lisible
+function formatDrawerResult(d) {
+  if (d.error) return '❌ ' + d.error;
+  if (d.status === 'ok' || d.status === 'termine') {
+    const parts = [];
+    if (d.analyzed !== undefined) parts.push(`✅ ${d.analyzed} analysés`);
+    if (d.remaining !== undefined) parts.push(`${d.remaining} restants`);
+    if (d.inserted !== undefined) parts.push(`✅ ${d.inserted} importés`);
+    if (d.skipped_noise !== undefined) parts.push(`${d.skipped_noise} filtrés`);
+    if (d.deleted !== undefined) parts.push(`✅ ${d.deleted} supprimés`);
+    if (d.conversations_synthesized !== undefined) parts.push(`✅ ${d.conversations_synthesized} conversations synthétisées`);
+    if (d.rules_extracted !== undefined) parts.push(`${d.rules_extracted} règles extraites`);
+    if (d.preview) parts.push(d.preview.substring(0, 80) + '…');
+    if (d.hot_summary) parts.push(d.hot_summary);
+    if (d.contacts) parts.push(d.contacts);
+    if (d.style) parts.push(d.style);
+    if (parts.length) return parts.join('\n');
+    return '✅ OK';
+  }
+  if (d.status === 'mail_memory_cleared') return '✅ Historique mails vidé. Ré-ingestion au prochain cycle.';
+  if (d.status) return '✅ ' + d.status;
+  // Fallback : json compact
+  return JSON.stringify(d).replace(/[{}"]/g,'').replace(/,/g,'\n').substring(0, 200);
+}
+
+// ─── FICHIERS ───
+function handleFileSelect(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (file.size > 10*1024*1024) { alert('Fichier trop volumineux (max 10 Mo).'); return; }
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    const b64 = ev.target.result.split(',')[1];
+    currentFile = { data: b64, type: file.type, name: file.name };
+    attachmentName.textContent = '📎 ' + file.name;
     attachmentPreview.classList.add('visible');
     attachBtn.classList.add('has-file');
   };
   reader.readAsDataURL(file);
-  e.target.value='';
+  e.target.value = '';
 }
-function removeAttachment(){
-  currentFile=null;
+function removeAttachment() {
+  currentFile = null;
   attachmentPreview.classList.remove('visible');
   attachBtn.classList.remove('has-file');
 }
 
-function speak(text,btn){
-  stopSpeech();speakAborted=false;stopBtn.classList.add('visible');
-  currentSpeakBtn=btn||null;
-  if(currentSpeakBtn){currentSpeakBtn.textContent='⏹ Stop';currentSpeakBtn.classList.add('playing');}
-  fetch('/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text})})
-  .then(r=>r.ok?r.blob():Promise.reject())
-  .then(blob=>{
-    if(speakAborted||blob.size<100){resetSpeakUI();return;}
-    const url=URL.createObjectURL(blob);currentAudio=new Audio(url);
-    currentAudio.onended=resetSpeakUI;currentAudio.onerror=resetSpeakUI;
-    if(!speakAborted)currentAudio.play().catch(resetSpeakUI);
-  }).catch(resetSpeakUI);
+// ─── AUDIO ───
+function speak(text, btn) {
+  stopSpeech(); speakAborted = false; stopBtn.classList.add('visible');
+  currentSpeakBtn = btn || null;
+  if (currentSpeakBtn) { currentSpeakBtn.textContent='⏹ Stop'; currentSpeakBtn.classList.add('playing'); }
+  fetch('/speak', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text}) })
+    .then(r => r.ok ? r.blob() : Promise.reject())
+    .then(blob => {
+      if (speakAborted || blob.size < 100) { resetSpeakUI(); return; }
+      const url = URL.createObjectURL(blob); currentAudio = new Audio(url);
+      currentAudio.onended = resetSpeakUI; currentAudio.onerror = resetSpeakUI;
+      if (!speakAborted) currentAudio.play().catch(resetSpeakUI);
+    }).catch(resetSpeakUI);
 }
-function resetSpeakUI(){
+function resetSpeakUI() {
   stopBtn.classList.remove('visible');
-  if(currentSpeakBtn){currentSpeakBtn.textContent='🔊 Écouter';currentSpeakBtn.classList.remove('playing');currentSpeakBtn=null;}
+  if (currentSpeakBtn) { currentSpeakBtn.textContent='🔊 Écouter'; currentSpeakBtn.classList.remove('playing'); currentSpeakBtn=null; }
 }
-function stopSpeech(){
-  speakAborted=true;
-  if(currentAudio){currentAudio.pause();currentAudio=null;}
-  window.speechSynthesis&&window.speechSynthesis.cancel();
+function stopSpeech() {
+  speakAborted = true;
+  if (currentAudio) { currentAudio.pause(); currentAudio = null; }
+  window.speechSynthesis && window.speechSynthesis.cancel();
   resetSpeakUI();
 }
-function cleanText(text){
+function cleanText(text) {
   return text.replace(/#{1,6}\s+/g,'').replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1')
     .replace(/`(.*?)`/g,'$1').replace(/---+/g,'').replace(/\|.*?\|/g,'')
     .replace(/^\s*[-•]\s/gm,'').replace(/\[([^\]]+)\]\([^\)]+\)/g,'$1')
-    .replace(/✔️|\u274c|📧/g,'').replace(/\n{3,}/g,'\n\n').trim();
+    .replace(/✔️|❌|📧/g,'').replace(/\n{3,}/g,'\n\n').trim();
 }
-function autoResize(el){el.style.height='auto';el.style.height=Math.min(el.scrollHeight,120)+'px';}
-function handleKey(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}}
-function scrollToBottom(){messagesEl.scrollTop=messagesEl.scrollHeight;}
 
-function addMessage(text,type,fileInfo){
-  const welcome=messagesEl.querySelector('.welcome');if(welcome)welcome.remove();
-  const row=document.createElement('div');row.className='message-row '+type;
-  const avatar=document.createElement('div');avatar.className='avatar '+type+'-avatar';
-  avatar.textContent=type==='aria'?'✦':'G';
-  const bubble=document.createElement('div');bubble.className='bubble';
-  if(fileInfo&&fileInfo.type.startsWith('image/')){
-    const img=document.createElement('img');img.className='attached-image';
-    img.src='data:'+fileInfo.type+';base64,'+fileInfo.data;
+// ─── MESSAGES ───
+function autoResize(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,120)+'px'; }
+function handleKey(e) { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
+function scrollToBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+
+function addMessage(text, type, fileInfo) {
+  const welcome = messagesEl.querySelector('.welcome'); if (welcome) welcome.remove();
+  const row = document.createElement('div'); row.className = 'message-row ' + type;
+  const avatar = document.createElement('div'); avatar.className = 'avatar ' + type + '-avatar';
+  avatar.textContent = type === 'aria' ? '✦' : 'G';
+  const bubble = document.createElement('div'); bubble.className = 'bubble';
+  if (fileInfo && fileInfo.type.startsWith('image/')) {
+    const img = document.createElement('img'); img.className = 'attached-image';
+    img.src = 'data:' + fileInfo.type + ';base64,' + fileInfo.data;
     bubble.appendChild(img);
-  } else if(fileInfo){
-    const badge=document.createElement('div');
-    badge.style='font-size:12px;color:var(--text-muted);margin-bottom:4px;';
-    badge.textContent='📎 '+fileInfo.name;
+  } else if (fileInfo) {
+    const badge = document.createElement('div');
+    badge.style = 'font-size:12px;color:var(--text-muted);margin-bottom:4px;';
+    badge.textContent = '📎 ' + fileInfo.name;
     bubble.appendChild(badge);
   }
-  const content=document.createElement('div');content.style.whiteSpace='pre-wrap';
-  content.textContent=type==='aria'?cleanText(text):text;bubble.appendChild(content);
-  if(type==='aria'){
-    const actions=document.createElement('div');actions.className='bubble-actions';
-    const speakBtn=document.createElement('button');speakBtn.className='speak-btn';speakBtn.textContent='🔊 Écouter';
-    speakBtn.onclick=()=>{if(speakBtn.classList.contains('playing'))stopSpeech();else speak(text,speakBtn);};
-    actions.appendChild(speakBtn);bubble.appendChild(actions);
+  const content = document.createElement('div'); content.style.whiteSpace = 'pre-wrap';
+  content.textContent = type === 'aria' ? cleanText(text) : text; bubble.appendChild(content);
+  if (type === 'aria') {
+    const actions = document.createElement('div'); actions.className = 'bubble-actions';
+    const speakBtn = document.createElement('button'); speakBtn.className = 'speak-btn'; speakBtn.textContent = '🔊 Écouter';
+    speakBtn.onclick = () => { if (speakBtn.classList.contains('playing')) stopSpeech(); else speak(text, speakBtn); };
+    actions.appendChild(speakBtn); bubble.appendChild(actions);
   }
-  row.appendChild(avatar);row.appendChild(bubble);messagesEl.appendChild(row);scrollToBottom();return row;
+  row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row); scrollToBottom(); return row;
 }
-function addLoading(){
-  const row=document.createElement('div');row.className='message-row aria';
-  const avatar=document.createElement('div');avatar.className='avatar aria-avatar';avatar.textContent='✦';
-  const bubble=document.createElement('div');bubble.className='bubble loading-bubble';
-  bubble.innerHTML='<div class="dot-anim"></div><div class="dot-anim"></div><div class="dot-anim"></div>';
-  row.appendChild(avatar);row.appendChild(bubble);messagesEl.appendChild(row);scrollToBottom();return row;
+function addLoading() {
+  const row = document.createElement('div'); row.className = 'message-row aria';
+  const avatar = document.createElement('div'); avatar.className = 'avatar aria-avatar'; avatar.textContent = '✦';
+  const bubble = document.createElement('div'); bubble.className = 'bubble loading-bubble';
+  bubble.innerHTML = '<div class="dot-anim"></div><div class="dot-anim"></div><div class="dot-anim"></div>';
+  row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row); scrollToBottom(); return row;
 }
-async function sendMessage(){
-  const text=inputEl.value.trim();if(!text&&!currentFile)return;
-  const fileSnapshot=currentFile?{...currentFile}:null;
-  inputEl.value='';inputEl.style.height='auto';inputEl.classList.remove('interim');
-  removeAttachment();
-  sendBtn.disabled=true;stopSpeech();
-  addMessage(text||'[Fichier joint]','user',fileSnapshot);
-  const loading=addLoading();
-  try{
-    const body={query:text||(fileSnapshot?'Analyse ce fichier.':'')};
-    if(fileSnapshot){body.file_data=fileSnapshot.data;body.file_type=fileSnapshot.type;body.file_name=fileSnapshot.name;}
-    const response=await fetch('/aria',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    const data=await response.json();loading.remove();
-    const msgRow=addMessage(data.answer,'aria');
-    if(autoSpeak){speak(data.answer,msgRow.querySelector('.speak-btn'));}
-  }catch{loading.remove();addMessage('Erreur de connexion à Aria. Réessayez.','aria');}
-  sendBtn.disabled=false;
-}
-function quickAsk(text){inputEl.value=text;sendMessage();}
 
-function toggleMic(){
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR){alert('Reconnaissance vocale non supportée.\nUtilisez Chrome ou Edge.');return;}
-  if(isListening){stopListening();}else{startListening();}
+async function sendMessage() {
+  const text = inputEl.value.trim(); if (!text && !currentFile) return;
+  const fileSnapshot = currentFile ? {...currentFile} : null;
+  inputEl.value = ''; inputEl.style.height = 'auto'; inputEl.classList.remove('interim');
+  removeAttachment();
+  sendBtn.disabled = true; stopSpeech();
+  addMessage(text||'[Fichier joint]', 'user', fileSnapshot);
+  const loading = addLoading();
+  try {
+    const body = { query: text||(fileSnapshot?'Analyse ce fichier.':'') };
+    if (fileSnapshot) { body.file_data = fileSnapshot.data; body.file_type = fileSnapshot.type; body.file_name = fileSnapshot.name; }
+    const response = await fetch('/aria', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const data = await response.json(); loading.remove();
+    const msgRow = addMessage(data.answer, 'aria');
+    if (autoSpeak) { speak(data.answer, msgRow.querySelector('.speak-btn')); }
+  } catch { loading.remove(); addMessage('Erreur de connexion à Aria. Réessayez.', 'aria'); }
+  sendBtn.disabled = false;
 }
-function startListening(){
-  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
-  if(!SR)return;
-  finalTextBase=inputEl.value;
-  const rec=new SR();
-  rec.lang='fr-FR';rec.continuous=false;rec.interimResults=true;rec.maxAlternatives=1;
-  rec.onstart=()=>{isListening=true;micBtn.classList.add('listening');micBtn.textContent='⏹';micStatus.classList.add('visible');inputWrapper.classList.add('mic-active');};
-  rec.onresult=(e)=>{
-    clearSilenceTimer();let interim='',final='';
-    for(let i=e.resultIndex;i<e.results.length;i++){
-      if(e.results[i].isFinal){final+=e.results[i][0].transcript+' ';}
-      else{interim+=e.results[i][0].transcript;}
+function quickAsk(text) { inputEl.value = text; sendMessage(); }
+
+// ─── MICRO ───
+function toggleMic() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { alert('Reconnaissance vocale non supportée.\nUtilisez Chrome ou Edge.'); return; }
+  if (isListening) stopListening(); else startListening();
+}
+function startListening() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return;
+  finalTextBase = inputEl.value;
+  const rec = new SR();
+  rec.lang='fr-FR'; rec.continuous=false; rec.interimResults=true; rec.maxAlternatives=1;
+  rec.onstart = () => { isListening=true; micBtn.classList.add('listening'); micBtn.textContent='⏹'; micStatus.classList.add('visible'); inputWrapper.classList.add('mic-active'); };
+  rec.onresult = (e) => {
+    clearSilenceTimer(); let interim='', final='';
+    for (let i=e.resultIndex; i<e.results.length; i++) {
+      if (e.results[i].isFinal) final += e.results[i][0].transcript + ' ';
+      else interim += e.results[i][0].transcript;
     }
-    if(interim){inputEl.value=(finalTextBase+' '+interim).trim();inputEl.classList.add('interim');autoResize(inputEl);}
-    if(final){finalTextBase=(finalTextBase+' '+final).trim();inputEl.value=finalTextBase;inputEl.classList.remove('interim');autoResize(inputEl);}
+    if (interim) { inputEl.value=(finalTextBase+' '+interim).trim(); inputEl.classList.add('interim'); autoResize(inputEl); }
+    if (final) { finalTextBase=(finalTextBase+' '+final).trim(); inputEl.value=finalTextBase; inputEl.classList.remove('interim'); autoResize(inputEl); }
     resetSilenceTimer();
   };
-  rec.onerror=(e)=>{
-    if(e.error==='not-allowed'||e.error==='permission-denied'){alert('Microphone bloqué.\nCliquez sur 🔒 dans la barre d\'adresse.');}
-    else if(e.error==='network'){alert('Erreur réseau micro.');stopListening();}
+  rec.onerror = (e) => {
+    if (e.error==='not-allowed'||e.error==='permission-denied') alert('Microphone bloqué.\nCliquez sur 🔒 dans la barre d\'adresse.');
+    else if (e.error==='network') { alert('Erreur réseau micro.'); stopListening(); }
   };
-  rec.onend=()=>{if(isListening){setTimeout(()=>{if(isListening)startListening();},100);}else{cleanupMicUI();}}
-  try{rec.start();resetSilenceTimer();}catch(e){stopListening();}
+  rec.onend = () => { if (isListening) setTimeout(()=>{ if(isListening) startListening(); },100); else cleanupMicUI(); }
+  try { rec.start(); resetSilenceTimer(); } catch(e) { stopListening(); }
 }
-function resetSilenceTimer(){clearSilenceTimer();silenceTimer=setTimeout(()=>{if(isListening)stopListening();},3000);}
-function clearSilenceTimer(){if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;}}
-function stopListening(){
-  isListening=false;clearSilenceTimer();cleanupMicUI();
-  inputEl.classList.remove('interim');if(inputEl.value)autoResize(inputEl);inputEl.focus();
+function resetSilenceTimer() { clearSilenceTimer(); silenceTimer = setTimeout(()=>{ if(isListening) stopListening(); }, 3000); }
+function clearSilenceTimer() { if (silenceTimer) { clearTimeout(silenceTimer); silenceTimer=null; } }
+function stopListening() {
+  isListening = false; clearSilenceTimer(); cleanupMicUI();
+  inputEl.classList.remove('interim'); if (inputEl.value) autoResize(inputEl); inputEl.focus();
 }
-function cleanupMicUI(){
-  micBtn.classList.remove('listening');micBtn.textContent='🎤';
-  micStatus.classList.remove('visible');inputWrapper.classList.remove('mic-active');
+function cleanupMicUI() {
+  micBtn.classList.remove('listening'); micBtn.textContent = '🎤';
+  micStatus.classList.remove('visible'); inputWrapper.classList.remove('mic-active');
 }
 
-async function startTriage(){
-  stopSpeech();triageBar.classList.remove('visible');
-  const loading=addLoading();
-  const response=await fetch('/triage-queue');const data=await response.json();loading.remove();
-  triageQueue=data.mails||[];
-  if(triageQueue.length===0){const row=addMessage('Aucun mail.','aria');if(autoSpeak)speak('Aucun mail.',row.querySelector('.speak-btn'));return;}
-  const intro=triageQueue.length+' mails. On commence.';
-  const introRow=addMessage(intro,'aria');if(autoSpeak)speak(intro,introRow.querySelector('.speak-btn'));
-  setTimeout(()=>nextTriage(),1500);
+// ─── TRIAGE ───
+async function startTriage() {
+  stopSpeech(); triageBar.classList.remove('visible');
+  const loading = addLoading();
+  const response = await fetch('/triage-queue'); const data = await response.json(); loading.remove();
+  triageQueue = data.mails || [];
+  if (triageQueue.length === 0) { const row=addMessage('Aucun mail.','aria'); if(autoSpeak)speak('Aucun mail.',row.querySelector('.speak-btn')); return; }
+  const intro = triageQueue.length + ' mails. On commence.';
+  const introRow = addMessage(intro,'aria'); if(autoSpeak) speak(intro, introRow.querySelector('.speak-btn'));
+  setTimeout(()=>nextTriage(), 1500);
 }
-function nextTriage(){
-  if(triageQueue.length===0){
+function nextTriage() {
+  if (triageQueue.length === 0) {
     triageBar.classList.remove('visible');
-    const row=addMessage('Triage terminé !','aria');if(autoSpeak)speak('Triage terminé !',row.querySelector('.speak-btn'));
-    triageCurrent=null;return;
+    const row = addMessage('Triage terminé !','aria'); if(autoSpeak) speak('Triage terminé !', row.querySelector('.speak-btn'));
+    triageCurrent = null; return;
   }
-  triageCurrent=triageQueue.shift();
-  const msg='De : '+(triageCurrent.from_email||'Inconnu')+'\nSujet : '+(triageCurrent.subject||'(Sans objet)')+'\n\n'+(triageCurrent.raw_body_preview||'').slice(0,200)+'\n\n— Que je fasse ? ('+triageQueue.length+' restants)';
-  const row=addMessage(msg,'aria');if(autoSpeak)speak(msg,row.querySelector('.speak-btn'));
+  triageCurrent = triageQueue.shift();
+  const msg = 'De : '+(triageCurrent.from_email||'Inconnu')+'\nSujet : '+(triageCurrent.subject||'(Sans objet)')+'\n\n'+(triageCurrent.raw_body_preview||'').slice(0,200)+'\n\n— Que je fasse ? ('+triageQueue.length+' restants)';
+  const row = addMessage(msg,'aria'); if(autoSpeak) speak(msg, row.querySelector('.speak-btn'));
   triageBar.classList.add('visible');
 }
-async function handleTriage(action){
-  if(!triageCurrent)return;triageBar.classList.remove('visible');stopSpeech();
-  if(action==='skip'){addMessage('Passé.','aria');setTimeout(()=>nextTriage(),500);return;}
-  const actionMap={'archive':'Archive le mail '+triageCurrent.message_id,'delete':'Supprime (corbeille) le mail '+triageCurrent.message_id,'reply':'Prépare une réponse pour le mail '+triageCurrent.message_id};
-  const loading=addLoading();
-  try{
-    const response=await fetch('/aria',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:actionMap[action]})});
-    const data=await response.json();loading.remove();
-    const row=addMessage(data.answer,'aria');if(autoSpeak)speak(data.answer,row.querySelector('.speak-btn'));
-  }catch{loading.remove();}
-  setTimeout(()=>nextTriage(),3000);
+async function handleTriage(action) {
+  if (!triageCurrent) return; triageBar.classList.remove('visible'); stopSpeech();
+  if (action==='skip') { addMessage('Passé.','aria'); setTimeout(()=>nextTriage(),500); return; }
+  const actionMap = { 'archive':'Archive le mail '+triageCurrent.message_id, 'delete':'Supprime (corbeille) le mail '+triageCurrent.message_id, 'reply':'Prépare une réponse pour le mail '+triageCurrent.message_id };
+  const loading = addLoading();
+  try {
+    const response = await fetch('/aria',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:actionMap[action]})});
+    const data = await response.json(); loading.remove();
+    const row = addMessage(data.answer,'aria'); if(autoSpeak) speak(data.answer, row.querySelector('.speak-btn'));
+  } catch { loading.remove(); }
+  setTimeout(()=>nextTriage(), 3000);
 }
+
+// Fermer le tiroir sur Échap
+document.addEventListener('keydown', e => { if (e.key==='Escape') closeDrawer(); });
 </script>
 </body>
 </html>
