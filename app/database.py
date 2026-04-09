@@ -44,6 +44,19 @@ def init_postgres():
     """)
 
     c.execute("""
+        CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+            id SERIAL PRIMARY KEY,
+            username TEXT NOT NULL,
+            subscription_id TEXT UNIQUE NOT NULL,
+            resource TEXT NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            client_state TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+
+    c.execute("""
         CREATE TABLE IF NOT EXISTS mail_memory (
             id SERIAL PRIMARY KEY,
             username TEXT DEFAULT 'guillaume',
@@ -185,11 +198,8 @@ def init_postgres():
         "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS mailbox_source TEXT DEFAULT 'outlook'",
         "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS reinforcements INTEGER DEFAULT 1",
         "ALTER TABLE aria_insights ADD COLUMN IF NOT EXISTS reinforcements INTEGER DEFAULT 1",
-        "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS context TEXT DEFAULT 'couffrant_solar'",
-        "ALTER TABLE aria_insights ADD COLUMN IF NOT EXISTS context TEXT DEFAULT 'couffrant_solar'",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS scope TEXT DEFAULT 'couffrant_solar'",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'couffrant_solar'",
-        # Nouveaux champs utilisateurs
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT",
         "ALTER TABLE aria_hot_summary ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
         "CREATE UNIQUE INDEX IF NOT EXISTS aria_hot_summary_username_idx ON aria_hot_summary (username)",
@@ -207,12 +217,15 @@ def init_postgres():
         "ALTER TABLE global_instructions ADD COLUMN IF NOT EXISTS tenant_id TEXT DEFAULT 'couffrant_solar'",
         "ALTER TABLE gmail_tokens ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
         "ALTER TABLE aria_contacts DROP CONSTRAINT IF EXISTS aria_contacts_email_key",
-        # Table reset tokens
         """CREATE TABLE IF NOT EXISTS password_reset_tokens (
             id SERIAL PRIMARY KEY, username TEXT NOT NULL,
             token TEXT UNIQUE NOT NULL, expires_at TIMESTAMP NOT NULL,
             used BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW())""",
-        # Tenants
+        """CREATE TABLE IF NOT EXISTS webhook_subscriptions (
+            id SERIAL PRIMARY KEY, username TEXT NOT NULL,
+            subscription_id TEXT UNIQUE NOT NULL, resource TEXT NOT NULL,
+            expires_at TIMESTAMP NOT NULL, client_state TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW())""",
         """CREATE TABLE IF NOT EXISTS tenants (
             id TEXT PRIMARY KEY, name TEXT NOT NULL,
             settings JSONB DEFAULT '{}', created_at TIMESTAMP DEFAULT NOW())""",
