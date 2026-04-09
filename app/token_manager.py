@@ -34,7 +34,6 @@ def get_valid_microsoft_token(username: str = 'guillaume') -> str | None:
         return None
 
     access_token_raw, refresh_token_raw, expires_at = row
-    # Déchiffrement transparent (passthrough si en clair)
     access_token  = decrypt_token(access_token_raw  or "")
     refresh_token = decrypt_token(refresh_token_raw or "")
 
@@ -62,10 +61,9 @@ def get_valid_microsoft_token(username: str = 'guillaume') -> str | None:
     if not result or "access_token" not in result:
         return access_token
 
-    new_token    = result["access_token"]
-    new_refresh  = result.get("refresh_token", refresh_token)
-    expires_in   = result.get("expires_in", 3600)
-    new_expires  = now + timedelta(seconds=expires_in)
+    new_token   = result["access_token"]
+    new_refresh = result.get("refresh_token", refresh_token)
+    expires_in  = result.get("expires_in", 3600)
 
     save_microsoft_token(username, new_token, new_refresh, expires_in)
     print(f"[Token/MS] Refresh OK pour {username}.")
@@ -115,7 +113,7 @@ def get_valid_google_token(username: str) -> str | None:
     """
     Retourne un token Google valide, avec auto-refresh et déchiffrement.
     Cherche d'abord dans oauth_tokens (provider='google'),
-    puis dans gmail_tokens (compat ascendante).
+    puis dans gmail_tokens (fallback lecture seule — table dépréciée).
     """
     conn = None
     try:
@@ -130,11 +128,11 @@ def get_valid_google_token(username: str) -> str | None:
         row = c.fetchone()
 
         if not row:
+            # Fallback lecture seule : migration depuis gmail_tokens
             c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE username = %s LIMIT 1", (username,))
             legacy = c.fetchone()
             if not legacy:
                 return None
-            # Migration vers oauth_tokens
             save_google_token(username, legacy[0], legacy[1])
             return legacy[0]
     finally:
@@ -178,7 +176,10 @@ def get_valid_google_token(username: str) -> str | None:
 
 def save_google_token(username: str, access_token: str, refresh_token: str,
                       email: str = "", expires_in: int = 3600):
-    """Sauvegarde un token Google chiffré dans oauth_tokens."""
+    """
+    Sauvegarde un token Google chiffré dans oauth_tokens.
+    gmail_tokens n'est plus alimenté (table dépréciée).
+    """
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
     conn = None
     try:
@@ -193,14 +194,6 @@ def save_google_token(username: str, access_token: str, refresh_token: str,
                 expires_at = EXCLUDED.expires_at,
                 updated_at = NOW()
         """, (username, encrypt_token(access_token), encrypt_token(refresh_token), expires_at))
-        # Sync compat gmail_tokens (en clair pour compat legacy)
-        c.execute("""
-            INSERT INTO gmail_tokens (username, email, access_token, refresh_token)
-            VALUES (%s, %s, %s, %s)
-            ON CONFLICT (username) DO UPDATE SET
-                access_token = EXCLUDED.access_token,
-                refresh_token = EXCLUDED.refresh_token
-        """, (username, email or f"{username}@gmail.com", access_token, refresh_token))
         conn.commit()
     finally:
         if conn: conn.close()

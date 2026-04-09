@@ -36,7 +36,6 @@ class _PooledConn:
     """
     Wrapper transparent autour d'une connexion psycopg2.
     close() retourne la connexion au pool au lieu de la fermer (TCP maintenu).
-    Utilise __dict__ directement pour éviter tout conflit de __setattr__.
     """
 
     def __init__(self, conn, pool):
@@ -72,10 +71,6 @@ class _PooledConn:
 
 
 def get_pg_conn():
-    """
-    Retourne une connexion depuis le pool (ou directe en fallback).
-    Utilisation identique à psycopg2.connect() pour tous les appelants.
-    """
     pool = _get_pool()
     if pool:
         try:
@@ -88,7 +83,6 @@ def get_pg_conn():
 
 
 def close_pool():
-    """Ferme proprement toutes les connexions du pool (arrêt de l'app)."""
     global _pool
     if _pool:
         try:
@@ -106,54 +100,36 @@ def init_postgres():
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS tenants (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            settings JSONB DEFAULT '{}',
-            created_at TIMESTAMP DEFAULT NOW()
+            id TEXT PRIMARY KEY, name TEXT NOT NULL,
+            settings JSONB DEFAULT '{}', created_at TIMESTAMP DEFAULT NOW()
         )
     """)
-
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            id SERIAL PRIMARY KEY,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            email TEXT,
-            scope TEXT DEFAULT 'user',
-            tenant_id TEXT DEFAULT 'couffrant_solar',
-            last_login TIMESTAMP,
-            created_at TIMESTAMP DEFAULT NOW()
+            id SERIAL PRIMARY KEY, username TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL, email TEXT,
+            scope TEXT DEFAULT 'user', tenant_id TEXT DEFAULT 'couffrant_solar',
+            last_login TIMESTAMP, created_at TIMESTAMP DEFAULT NOW()
         )
     """)
-
     c.execute("""
         CREATE TABLE IF NOT EXISTS password_reset_tokens (
-            id SERIAL PRIMARY KEY,
-            username TEXT NOT NULL,
-            token TEXT UNIQUE NOT NULL,
-            expires_at TIMESTAMP NOT NULL,
-            used BOOLEAN DEFAULT false,
-            created_at TIMESTAMP DEFAULT NOW()
+            id SERIAL PRIMARY KEY, username TEXT NOT NULL,
+            token TEXT UNIQUE NOT NULL, expires_at TIMESTAMP NOT NULL,
+            used BOOLEAN DEFAULT false, created_at TIMESTAMP DEFAULT NOW()
         )
     """)
-
     c.execute("""
         CREATE TABLE IF NOT EXISTS webhook_subscriptions (
-            id SERIAL PRIMARY KEY,
-            username TEXT NOT NULL,
-            subscription_id TEXT UNIQUE NOT NULL,
-            resource TEXT NOT NULL,
-            expires_at TIMESTAMP NOT NULL,
-            client_state TEXT NOT NULL,
-            created_at TIMESTAMP DEFAULT NOW(),
-            updated_at TIMESTAMP DEFAULT NOW()
+            id SERIAL PRIMARY KEY, username TEXT NOT NULL,
+            subscription_id TEXT UNIQUE NOT NULL, resource TEXT NOT NULL,
+            expires_at TIMESTAMP NOT NULL, client_state TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
         )
     """)
-
     c.execute("""
         CREATE TABLE IF NOT EXISTS mail_memory (
-            id SERIAL PRIMARY KEY,
-            username TEXT DEFAULT 'guillaume',
+            id SERIAL PRIMARY KEY, username TEXT DEFAULT 'guillaume',
             message_id TEXT, thread_id TEXT, received_at TEXT,
             from_email TEXT, subject TEXT, display_title TEXT,
             category TEXT, priority TEXT, reason TEXT, suggested_action TEXT,
@@ -163,11 +139,9 @@ def init_postgres():
             reply_urgency TEXT, reply_reason TEXT, suggested_reply_subject TEXT,
             suggested_reply TEXT, response_type TEXT, missing_fields TEXT,
             confidence_level TEXT, reply_status TEXT DEFAULT 'pending',
-            mailbox_source TEXT DEFAULT 'outlook',
-            UNIQUE(message_id, username)
+            mailbox_source TEXT DEFAULT 'outlook', UNIQUE(message_id, username)
         )
     """)
-
     c.execute("""
         CREATE TABLE IF NOT EXISTS aria_memory (
             id SERIAL PRIMARY KEY, username TEXT DEFAULT 'guillaume',
@@ -192,8 +166,7 @@ def init_postgres():
             id SERIAL PRIMARY KEY, tenant_id TEXT DEFAULT 'couffrant_solar',
             email TEXT, name TEXT, company TEXT, role TEXT, summary TEXT,
             last_seen TEXT, last_subject TEXT, mail_count INTEGER DEFAULT 0,
-            tags TEXT, updated_at TIMESTAMP DEFAULT NOW(),
-            UNIQUE(email, tenant_id)
+            tags TEXT, updated_at TIMESTAMP DEFAULT NOW(), UNIQUE(email, tenant_id)
         )
     """)
     c.execute("""
@@ -265,6 +238,7 @@ def init_postgres():
             instruction TEXT, created_at TIMESTAMP DEFAULT NOW()
         )
     """)
+    # gmail_tokens conservé pour lecture compat ascendante — plus alimenté
     c.execute("""
         CREATE TABLE IF NOT EXISTS gmail_tokens (
             id SERIAL PRIMARY KEY, username TEXT DEFAULT 'guillaume',
@@ -274,15 +248,10 @@ def init_postgres():
     """)
     c.execute("""
         CREATE TABLE IF NOT EXISTS teams_sync_state (
-            id SERIAL PRIMARY KEY,
-            username TEXT NOT NULL,
-            chat_id TEXT NOT NULL,
-            chat_type TEXT DEFAULT 'chat',
-            chat_label TEXT,
-            last_message_id TEXT,
-            last_synced_at TIMESTAMP DEFAULT NOW(),
-            notes TEXT,
-            UNIQUE(username, chat_id)
+            id SERIAL PRIMARY KEY, username TEXT NOT NULL, chat_id TEXT NOT NULL,
+            chat_type TEXT DEFAULT 'chat', chat_label TEXT,
+            last_message_id TEXT, last_synced_at TIMESTAMP DEFAULT NOW(),
+            notes TEXT, UNIQUE(username, chat_id)
         )
     """)
 
@@ -335,13 +304,21 @@ def init_postgres():
         "CREATE INDEX IF NOT EXISTS idx_insights_embedding ON aria_insights USING hnsw (embedding vector_cosine_ops)",
         "CREATE INDEX IF NOT EXISTS idx_memory_embedding ON aria_memory USING hnsw (embedding vector_cosine_ops)",
         "CREATE INDEX IF NOT EXISTS idx_contacts_embedding ON aria_contacts USING hnsw (embedding vector_cosine_ops)",
-        # Sécurité : verrouillage compte
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS must_reset_password BOOLEAN DEFAULT FALSE",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS account_locked BOOLEAN DEFAULT FALSE",
-        # Sécurité : compteurs de tentatives persistants (lockout multi-instance)
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_attempts_count INT DEFAULT 0",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_attempts_round INT DEFAULT 0",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMP",
+        # Migration gmail_tokens → oauth_tokens (consolidation tokens Google)
+        """INSERT INTO oauth_tokens (provider, username, access_token, refresh_token, expires_at)
+           SELECT 'google', g.username, g.access_token, g.refresh_token,
+                  NOW() + INTERVAL '1 hour'
+           FROM gmail_tokens g
+           WHERE g.access_token IS NOT NULL
+             AND NOT EXISTS (
+               SELECT 1 FROM oauth_tokens o
+               WHERE o.provider='google' AND o.username=g.username
+             )""",
     ]
     for m in migrations:
         try:
