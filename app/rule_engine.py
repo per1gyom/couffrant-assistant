@@ -2,36 +2,31 @@
 Rule Engine d'Aria — moteur de règles évolutif.
 
 Module autonome : n'importe que database.py.
-Peut être importé par ai_client.py, assistant_analyzer.py, dashboard_service.py,
-main.py sans risque d'import circulaire avec memory_manager.
-
-Toutes les règles métier d'Aria viennent de aria_rules en base.
+Toutes les règles métier viennent de aria_rules en base.
 Seuls les garde-fous de sécurité restent dans le code.
 
 Catégories de règles :
-  tri_mails      — classification des mails entrants (catégorie, priorité)
-  urgence        — critères de priorité haute
-  anti_spam      — mots-clés/domaines à filtrer (1 règle = une liste CSV)
-  style_reponse  — style des réponses suggérées
-  regroupement   — logique de groupement du dashboard
-  contacts_cles  — contacts à surveiller dans les conversations
-  memoire        — paramètres numériques (format "param:valeur")
-  comportement   — comportement général d'Aria
+  tri_mails        — classification des mails entrants
+  urgence          — critères de priorité haute
+  anti_spam        — mots-clés/domaines à filtrer
+  style_reponse    — style des réponses suggérées
+  regroupement     — logique de groupement du dashboard
+  contacts_cles    — contacts à surveiller
+  categories_mail  — catégories de mail (Raya les évole)
+  memoire          — paramètres numériques
+  comportement     — comportement général de Raya
 """
 
 import re
 from app.database import get_pg_conn
 
 
-# ────────────────────────────────────────
-# Chargement des règles
-# ────────────────────────────────────────
+# ─── CHARGEMENT DES RÈGLES ───
 
 def get_rules_by_category(username: str, category: str) -> list[str]:
     """
     Retourne les règles actives d'un utilisateur pour une catégorie.
-    Retourne une liste vide si aucune règle n'existe (les modules appelants
-    appliquent alors leur logique par défaut ou les seeds).
+    Retourne une liste vide si aucune règle n'existe.
     """
     conn = None
     try:
@@ -64,16 +59,15 @@ def get_rules_as_text(username: str, categories: list[str]) -> str:
 
 def get_antispam_keywords(username: str) -> list[str]:
     """
-    Extrait les mots-clés/domaines anti-spam depuis les règles Aria.
-    Chaque règle anti_spam est une liste CSV de mots-clés.
-    Aria ajoute un domaine via [ACTION:LEARN:anti_spam|nouveau.domaine.com, autre_mot].
+    Extrait les mots-clés anti-spam depuis les règles Aria.
+    Raya ajoute un domaine via [ACTION:LEARN:anti_spam|nouveau.domaine.com].
     """
     rules = get_rules_by_category(username, "anti_spam")
     keywords = []
     for rule in rules:
         parts = [p.strip().lower() for p in rule.replace("'", "").split(',')]
         keywords.extend([p for p in parts if len(p) > 2])
-    # Garde-fous absolus : toujours filtrés quelle que soit la config
+    # Garde-fous absolus
     for absolute in ['mailer-daemon', 'noreply@', 'no-reply@']:
         if absolute not in keywords:
             keywords.append(absolute)
@@ -84,8 +78,10 @@ def get_contacts_keywords(username: str) -> list[str]:
     """
     Retourne les noms/entités à détecter dans les conversations.
     Source 1 : aria_contacts (noms et parties locales des emails)
-    Source 2 : règles contacts_cles d'Aria
-    Fallback : liste statique si les tables sont vides (démarrage)
+    Source 2 : règles contacts_cles de Raya
+
+    Aucun nom n'est codé en dur. Raya construit cette liste
+    elle-même à partir des contacts et de ses règles apprises.
     """
     keywords = []
     conn = None
@@ -112,12 +108,6 @@ def get_contacts_keywords(username: str) -> list[str]:
         parts = [p.strip().lower() for p in rule.replace("'", "").split(',')]
         keywords.extend([p for p in parts if len(p) > 2])
 
-    # Fallback si aria_contacts vide (premier démarrage)
-    if not keywords:
-        keywords = ["arlène", "arlene", "sabrina", "benoit", "pierre", "maxence",
-                    "charlotte", "pinto", "enedis", "consuel", "adiwatt",
-                    "socotec", "triangle", "eleria", "edf"]
-
     return list(dict.fromkeys(keywords))
 
 
@@ -125,7 +115,7 @@ def get_memoire_param(username: str, param: str, default):
     """
     Lit un paramètre numérique depuis les règles memoire.
     Format : "nom_param:valeur" ex: "synth_threshold:15"
-    Aria modifie ces valeurs via [ACTION:LEARN:memoire|synth_threshold:20]
+    Raya modifie ces valeurs via [ACTION:LEARN:memoire|synth_threshold:20]
     """
     rules = get_rules_by_category(username, "memoire")
     for rule in rules:
@@ -141,8 +131,6 @@ def get_memoire_param(username: str, param: str, default):
 def extract_category_keywords(username: str, target_category: str) -> list[str]:
     """
     Extrait les mots-clés liés à une catégorie depuis les règles tri_mails.
-    Cherche les termes entre guillemets simples, ou après 'contenant'.
-    Utilisé par l'analyseur de fallback (sans Claude).
     """
     rules = get_rules_by_category(username, "tri_mails")
     keywords = []
@@ -150,12 +138,10 @@ def extract_category_keywords(username: str, target_category: str) -> list[str]:
         rule_l = rule.lower()
         if target_category.lower() not in rule_l:
             continue
-        # Termes entre guillemets simples
         found = re.findall(r"'([^']+)'", rule_l)
         if found:
             keywords.extend([k.strip() for k in found if len(k.strip()) > 2])
             continue
-        # Fallback : après 'contenant' jusqu'à '=' ou fin
         match = re.search(r"contenant\s+(.+?)(?:\s*=|\s*$)", rule_l)
         if match:
             parts = [p.strip().strip("'\"") for p in match.group(1).split(',')]
@@ -164,9 +150,6 @@ def extract_category_keywords(username: str, target_category: str) -> list[str]:
 
 
 def get_urgency_keywords(username: str) -> list[str]:
-    """
-    Extrait les mots-clés d'urgence depuis les règles urgence.
-    """
     rules = get_rules_by_category(username, "urgence")
     keywords = []
     for rule in rules:
@@ -185,16 +168,12 @@ def get_urgency_keywords(username: str) -> list[str]:
 
 
 def get_internal_domains(username: str) -> list[str]:
-    """
-    Extrait les domaines internes depuis les règles tri_mails.
-    """
     rules = get_rules_by_category(username, "tri_mails")
     domains = []
     for rule in rules:
         rule_l = rule.lower()
         if "interne" not in rule_l:
             continue
-        # Cherche les domaines (contiennent un point)
         parts = re.findall(r"[\w.-]+\.[a-z]{2,}", rule_l)
         domains.extend([p for p in parts if '.' in p and len(p) > 4])
     return domains if domains else ["couffrant-solar.fr"]
@@ -204,7 +183,6 @@ def parse_business_priority(category: str, title: str, username: str) -> str:
     """
     Détermine la priorité business d'un groupe de mails depuis les règles.
     Retourne : 'urgent', 'a_traiter', 'faible'
-    Utilisé par dashboard_service.
     """
     rules = get_rules_by_category(username, "regroupement")
     cat_l = (category or "").lower()
@@ -213,17 +191,17 @@ def parse_business_priority(category: str, title: str, username: str) -> str:
 
     for rule in rules:
         rule_l = rule.lower()
-        if "=" not in rule_l and "→" not in rule_l:
+        if "=" not in rule_l and "\u2192" not in rule_l:
             continue
-        sep = "→" if "→" in rule_l else "="
+        sep = "\u2192" if "\u2192" in rule_l else "="
         parts = rule_l.split(sep, 1)
         if len(parts) < 2:
             continue
         condition, outcome = parts[0].strip(), parts[1].strip()
 
         match = False
-        if "catégorie" in condition or "category" in condition:
-            cat_ref = re.sub(r"cat[eé]gorie\s*", "", condition).strip().strip("'\",")
+        if "cat\u00e9gorie" in condition or "category" in condition:
+            cat_ref = re.sub(r"cat[e\u00e9]gorie\s*", "", condition).strip().strip("'\",")
             if cat_ref and cat_ref in cat_l:
                 match = True
         elif "contenant" in condition:
@@ -245,9 +223,9 @@ def parse_business_priority(category: str, title: str, username: str) -> str:
                 return "a_traiter"
 
     # Défauts si aucune règle ne s'applique
-    if cat_l == "raccordement" or cat_l == "consuel":
+    if cat_l in ("raccordement", "consuel"):
         return "urgent"
-    if cat_l in ("financier",):
+    if cat_l == "financier":
         return "urgent" if "relance" in title_l or "retard" in title_l else "a_traiter"
     if cat_l == "notification":
         return "faible"

@@ -1,10 +1,12 @@
 """
 Analyse des mails entrants par Claude.
 
-Les règles de tri, d'urgence et de style sont chargées dynamiquement
-depuis aria_rules via rule_engine. Aucune règle métier n'est codée en dur.
+Principes :
+- Catégories de mail : lues depuis aria_rules (catégorie 'categories_mail') — Raya les évole librement
+- Prompt conditionnel : Odoo/style/exemples injectés uniquement si pertinents — économie 20-30% tokens
+- Zéro règle métier codée en dur
 
-Seuls garde-fous immuables dans ce module :
+Garde-fous immuables :
 - Retourner uniquement du JSON valide
 - Ne jamais inventer d'informations absentes du mail
 - Ne jamais inclure de signature dans suggested_reply
@@ -29,13 +31,45 @@ def _parse_json_safe(text: str) -> dict:
     return json.loads(text.strip())
 
 
+# ─── CATÉGORIES DYNAMIQUES ───
+
+_DEFAULT_CATEGORIES = [
+    "raccordement", "consuel", "chantier", "commercial", "financier",
+    "fournisseur", "reunion", "securite", "interne", "notification", "autre"
+]
+
+def get_mail_categories(username: str) -> list[str]:
+    """
+    Charge les catégories de mail depuis aria_rules (catégorie 'categories_mail').
+    Raya les fait évoluer via [ACTION:LEARN:categories_mail|nouvelle_categorie].
+    Si vide, retourne les catégories par défaut et les seed en base.
+    """
+    rules = get_rules_by_category(username, 'categories_mail')
+    if rules:
+        return [r.strip().lower() for r in rules if r.strip()]
+    # Première utilisation : seed en base pour que Raya puisse les modifier
+    _seed_default_categories(username)
+    return _DEFAULT_CATEGORIES
+
+
+def _seed_default_categories(username: str):
+    """Insère les catégories par défaut en base (une seule fois au premier démarrage)."""
+    try:
+        from app.memory_rules import save_rule
+        for cat in _DEFAULT_CATEGORIES:
+            save_rule('categories_mail', cat, 'seed', 0.9, username)
+    except Exception:
+        pass
+
+
+# ─── CONTEXTE ET PROFIL ───
+
 def get_learning_examples(category: str, username: str = 'guillaume', limit: int = 3) -> list[dict]:
-    """Exemples de corrections passées pour le few-shot learning — filtrés par username."""
+    """Exemples de corrections passées pour le few-shot learning."""
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        # Fix 1c — filtre par username pour isolation correcte
         c.execute("""
             SELECT mail_subject, mail_from, mail_body_preview, category, ai_reply, final_reply
             FROM reply_learning_memory
@@ -99,21 +133,33 @@ def get_style_profile(username: str = 'guillaume') -> str:
 
 def _get_hint_category(full_text: str, username: str) -> str:
     from app.rule_engine import extract_category_keywords
-    categories = ["raccordement", "commercial", "reunion", "chantier", "financier"]
+    # Catégories à tester : toutes sauf 'autre', 'notification', 'interne'
+    categories = get_mail_categories(username)
     for cat in categories:
+        if cat in ('autre', 'notification', 'interne', 'securite'):
+            continue
         kws = extract_category_keywords(username, cat)
         if not kws:
+            # Fallbacks légers uniquement pour les catégories techniques
             fallbacks = {
                 "raccordement": ["enedis", "consuel", "raccordement"],
                 "commercial":   ["devis", "offre", "contrat"],
                 "reunion":      ["réunion", "meeting", "teams.microsoft"],
                 "chantier":     ["chantier", "planning", "installation"],
                 "financier":    ["facture", "paiement", "échéance"],
+                "fournisseur":  ["fournisseur", "livraison", "commande"],
             }
             kws = fallbacks.get(cat, [])
         if any(kw in full_text for kw in kws):
             return cat
     return "autre"
+
+
+# ─── ANALYSE PRINCIPALE ───
+
+# Mots-clés indiquant qu'une réponse est probablement attendue
+_REPLY_HINTS = ["?", "merci de", "pouvez-vous", "peux-tu", "svp", "s'il vous plaît",
+                "pourriez", "auriez", "avez-vous", "avez vous", "demande"]
 
 
 def analyze_single_mail_with_ai(
@@ -123,17 +169,33 @@ def analyze_single_mail_with_ai(
 ) -> dict:
     instructions = instructions or []
     sender_email = message.get("from", {}).get("emailAddress", {}).get("address", "Expéditeur inconnu")
-    odoo_context = get_odoo_context(sender_email)
-    style_profile = get_style_profile(username)
-    rules_text = get_rules_as_text(username, ["tri_mails", "urgence", "style_reponse"])
 
     full_lower = (
         f"{message.get('subject', '')} "
         f"{message.get('bodyPreview', '')} "
         f"{sender_email}"
     ).lower()
+
+    # ─ Catégories dynamiques (depuis DB, évolutives par Raya)
+    mail_categories = get_mail_categories(username)
+    categories_str = ", ".join(mail_categories)
+
+    # ─ Règles métier
+    rules_text = get_rules_as_text(username, ["tri_mails", "urgence", "style_reponse"])
+
+    # ─ Détection de catégorie pour le few-shot
     hint_cat = _get_hint_category(full_lower, username)
-    learning_examples = get_learning_examples(hint_cat, username)
+
+    # ─ Odoo : uniquement si le client est trouvé (pas de requête inutile)
+    odoo_context = get_odoo_context(sender_email)
+    include_odoo = odoo_context.get("client_trouve", False)
+
+    # ─ Profil de style : uniquement si le mail semble nécessiter une réponse
+    needs_reply_hint = any(w in full_lower for w in _REPLY_HINTS)
+    style_profile = get_style_profile(username) if needs_reply_hint else ""
+
+    # ─ Exemples de corrections : uniquement si catégorie clairement détectée
+    learning_examples = get_learning_examples(hint_cat, username) if hint_cat != "autre" else []
     learning_text = build_learning_text(learning_examples)
 
     payload = {
@@ -146,22 +208,27 @@ def analyze_single_mail_with_ai(
             if isinstance(message.get("body"), dict)
             else message.get("body", "")
         ),
-        "odoo_context": odoo_context,
     }
 
     rules_section = (
-        f"=== RÈGLES D'ARIA (apprise et évolutives) ===\n{rules_text}\n"
+        f"=== RÈGLES (apprises, évolutives) ===\n{rules_text}\n"
         if rules_text else
-        "Pas encore de règles enregistrées. Utilise le bon sens métier photovoltaïque.\n"
+        "Pas encore de règles. Utilise le bon sens métier photovoltaïque.\n"
     )
 
-    system_prompt = f"""Tu es Aria, l'assistante de Couffrant Solar.
+    # Blocs conditionnels
+    odoo_block  = f"\nContexte Odoo :\n{json.dumps(odoo_context, ensure_ascii=False)}" if include_odoo else ""
+    style_block = f"\nProfil de style :\n{style_profile[:600]}" if style_profile else ""
+    examples_block = f"\nExemples de corrections passées :\n{learning_text}" if learning_text else ""
+    instructions_block = f"\nConsignes : {json.dumps(instructions, ensure_ascii=False)}" if instructions else ""
+
+    system_prompt = f"""Tu es Raya, l'assistante de Couffrant Solar.
 Analyse ce mail et retourne UNIQUEMENT un objet JSON valide, sans texte avant ou après, sans bloc markdown.
 
 {rules_section}
 
 Garde-fous immuables :
-- Retourner UNIQUEMENT du JSON valide, rien d'autre
+- Retourner UNIQUEMENT du JSON valide
 - Ne jamais inventer d'information absente du mail
 - Ne jamais mettre de signature dans suggested_reply
 
@@ -176,18 +243,7 @@ response_type (oui_non/planification/demande_info/demande_document/
 accuse_reception/relance/pas_de_reponse/autre),
 missing_fields (array), suggested_reply_subject, suggested_reply (sans signature)
 
-Catégories valides : raccordement, consuel, chantier, commercial, financier,
-fournisseur, reunion, securite, interne, notification, autre
-
-Profil de style :
-{style_profile[:600] if style_profile else "Écrire de façon directe et concise."}
-
-Contexte Odoo :
-{json.dumps(odoo_context, ensure_ascii=False)}
-
-Consignes additionnelles :
-{json.dumps(instructions, ensure_ascii=False)}
-{f"Exemples de corrections passées :{chr(10)}{learning_text}" if learning_text else ""}"""
+Catégories valides : {categories_str}{odoo_block}{style_block}{examples_block}{instructions_block}"""
 
     response = client.messages.create(
         model=MODEL, max_tokens=1024,
