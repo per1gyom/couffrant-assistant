@@ -1,12 +1,19 @@
 """
 Endpoint Microsoft Graph webhook.
 
-Reçoit les notifications de nouveaux mails.
-Pipeline de filtrage à 3 niveaux :
-  1. Filtre heuristique gratuit (noreply / newsletters / domaines connus)
-  2. Filtre règles anti_spam de l'utilisateur (mots-clés personnalisés)
-  3. Micro-appel Claude OUI/NON (seulement si ambiguë)
-  4. Analyse complète + stockage (seulement si OUI)
+Pipeline de filtrage à 4 niveaux :
+  1a. Whitelist Raya (mail_filter autoriser:) → court-circuite le filtre statique
+  1b. Filtre heuristique statique (noreply / newsletters / bulk domains)
+  1c. Blacklist Raya (mail_filter bloquer:) → bloc supplémentaire
+  2.  Règles anti_spam personnalisées
+  3.  Micro-appel Claude OUI/NON
+  4.  Analyse complète + stockage
+
+Raya peut affiner le filtre statique via :
+  [ACTION:LEARN:mail_filter|autoriser: dupont@example.com]
+  [ACTION:LEARN:mail_filter|autoriser: @couffrant-solar.fr]
+  [ACTION:LEARN:mail_filter|autoriser: sujet:devis chantier]
+  [ACTION:LEARN:mail_filter|bloquer: promo@fournisseur.fr]
 """
 import re
 import threading
@@ -14,9 +21,9 @@ from fastapi import APIRouter, Request, Response
 
 router = APIRouter(tags=["webhook"])
 
-# ─── Niveau 1 : patterns heuristiques statiques (coût zéro) ───
 
-# Préfixes d'expéditeurs quasi-certainement automatiques
+# ─── PATTERNS STATIQUES (filet de base) ───
+
 _NOREPLY_PREFIXES = (
     "noreply@", "no-reply@", "no_reply@", "donotreply@",
     "do-not-reply@", "mailer-daemon@", "postmaster@",
@@ -26,7 +33,6 @@ _NOREPLY_PREFIXES = (
     "info@noreply.", "reply@",
 )
 
-# Domaines d'envoi de masse connus
 _BULK_DOMAINS = (
     "sendgrid.net", "sendgrid.com", "mailchimp.com", "mandrillapp.com",
     "mailgun.org", "hubspot.com", "salesforce.com", "marketo.com",
@@ -36,7 +42,6 @@ _BULK_DOMAINS = (
     "twitter.com", "notifications.google.com",
 )
 
-# Mots-clés de sujets typiquement automatiques
 _BULK_SUBJECT_KEYWORDS = (
     "unsubscribe", "se désabonner", "newsletter", "digest",
     "weekly recap", "rapport hebdomadaire", "monthly report",
@@ -50,28 +55,71 @@ _BULK_SUBJECT_KEYWORDS = (
 )
 
 
+# ─── RÈGLES RAYA (mail_filter) ───
+
+def _get_mail_filter_rules(username: str) -> tuple:
+    """
+    Charge les règles mail_filter que Raya a posées.
+    Retourne (whitelist, blacklist).
+
+    Formats supportés :
+      autoriser: email@domaine.fr       → email exact
+      autoriser: @couffrant-solar.fr    → domaine entier
+      autoriser: sujet:devis chantier   → mot-clé dans le sujet
+      bloquer:   promo@fournisseur.fr   → bloquer cet expéditeur
+      bloquer:   sujet:pub              → bloquer ce mot-clé sujet
+    """
+    try:
+        from app.memory_rules import get_rules_by_category
+        rules = get_rules_by_category('mail_filter', username)
+        whitelist, blacklist = [], []
+        for rule in rules:
+            rl = rule.strip().lower()
+            if rl.startswith('autoriser:'):
+                whitelist.append(rl[10:].strip())
+            elif rl.startswith('bloquer:'):
+                blacklist.append(rl[8:].strip())
+        return whitelist, blacklist
+    except Exception:
+        return [], []
+
+
+def _matches_filter(sender: str, subject: str, patterns: list) -> bool:
+    """Vérifie si expéditeur ou sujet correspond à un pattern de filtre."""
+    sender_l = sender.lower()
+    subject_l = (subject or "").lower()
+    for pattern in patterns:
+        if pattern.startswith('@'):
+            # Domaine entier : @couffrant-solar.fr
+            if sender_l.endswith(pattern):
+                return True
+        elif pattern.startswith('sujet:'):
+            # Mot-clé dans le sujet
+            kw = pattern[6:].strip()
+            if kw and kw in subject_l:
+                return True
+        else:
+            # Email exact ou fragment
+            if pattern in sender_l:
+                return True
+    return False
+
+
 def _is_bulk_heuristic(sender: str, subject: str, preview: str) -> bool:
-    """
-    Niveau 1 — Filtre heuristique gratuit.
-    Retourne True si le mail est quasi-certainement automatique/publicitaire.
-    """
+    """Niveau 1b — Filtre heuristique statique."""
     sender_lower = sender.lower()
     subject_lower = (subject or "").lower()
 
-    # Vérif préfixe expéditeur
     if any(sender_lower.startswith(p) for p in _NOREPLY_PREFIXES):
         return True
 
-    # Vérif domaine d'envoi en masse
     domain = sender_lower.split("@")[-1] if "@" in sender_lower else ""
     if any(bulk in domain for bulk in _BULK_DOMAINS):
         return True
 
-    # Vérif sujet
     if any(kw in subject_lower for kw in _BULK_SUBJECT_KEYWORDS):
         return True
 
-    # Vérif en-têtes typiques des newsletters dans le preview
     preview_lower = (preview or "").lower()
     if "list-unsubscribe" in preview_lower or "view in browser" in preview_lower:
         return True
@@ -80,12 +128,9 @@ def _is_bulk_heuristic(sender: str, subject: str, preview: str) -> bool:
 
 
 def _is_spam_by_rules(sender: str, subject: str, preview: str, username: str) -> bool:
-    """
-    Niveau 2 — Filtre sur les règles anti_spam personnalisées de l'utilisateur.
-    Récupère les mots-clés de la catégorie anti_spam dans aria_rules.
-    """
+    """Niveau 2 — Règles anti_spam personnalisées."""
     try:
-        from app.memory_manager import get_antispam_keywords
+        from app.memory_rules import get_antispam_keywords
         keywords = get_antispam_keywords(username)
         text = f"{sender} {subject} {preview}".lower()
         return any(kw in text for kw in keywords if kw)
@@ -93,9 +138,10 @@ def _is_spam_by_rules(sender: str, subject: str, preview: str, username: str) ->
         return False
 
 
+# ─── WEBHOOK ENDPOINTS ───
+
 @router.get("/webhook/microsoft")
 async def webhook_validation(validationToken: str = ""):
-    """Validation de l'abonnement — Microsoft envoie un GET avec validationToken."""
     if validationToken:
         return Response(content=validationToken, media_type="text/plain", status_code=200)
     return Response(status_code=200)
@@ -103,11 +149,6 @@ async def webhook_validation(validationToken: str = ""):
 
 @router.post("/webhook/microsoft")
 async def webhook_notification(request: Request):
-    """
-    Reçoit les notifications Microsoft Graph.
-    Répond 202 immédiatement (exigé par Microsoft < 3 secondes).
-    Le traitement réel se fait en arrière-plan.
-    """
     try:
         body = await request.json()
     except Exception:
@@ -121,8 +162,6 @@ async def webhook_notification(request: Request):
         sub_info = get_subscription_info(subscription_id)
         if not sub_info:
             continue
-
-        # Vérification du client state pour authentifier la notification
         if notification.get("clientState") != sub_info["client_state"]:
             continue
 
@@ -147,13 +186,13 @@ async def webhook_notification(request: Request):
 
 def _process_mail(username: str, message_id: str):
     """
-    Traite un mail reçu par webhook.
-
-    Pipeline à 3 niveaux avant stockage :
-      Niveau 1 — heuristique gratuit (noreply, newsletters, bulk domains)
-      Niveau 2 — règles anti_spam personnalisées de l'utilisateur
-      Niveau 3 — micro-appel Claude OUI/NON pour les cas ambigus
-      → Si OUI : analyse complète + insertion en base
+    Pipeline de filtrage :
+      1a. Whitelist Raya → bypass heuristique si match
+      1b. Heuristique statique
+      1c. Blacklist Raya
+      2.  Anti-spam personnalisé
+      3.  Claude OUI/NON
+      4.  Analyse + stockage
     """
     try:
         from app.token_manager import get_valid_microsoft_token
@@ -167,11 +206,9 @@ def _process_mail(username: str, message_id: str):
         token = get_valid_microsoft_token(username)
         if not token:
             return
-
         if mail_exists(message_id, username):
             return
 
-        # Récupère le mail
         try:
             msg = graph_get(token, f"/me/messages/{message_id}", params={
                 "$select": "id,subject,from,receivedDateTime,bodyPreview,body,isRead"
@@ -184,25 +221,36 @@ def _process_mail(username: str, message_id: str):
         subject = msg.get("subject", "") or ""
         preview = msg.get("bodyPreview", "") or ""
 
-        # ── Niveau 1 : filtre heuristique gratuit ──
-        if _is_bulk_heuristic(sender, subject, preview):
-            print(f"[Webhook][L1-heuristique] Ignoré : '{subject[:50]}' de {sender}")
+        # Charge les règles mail_filter de Raya
+        whitelist, blacklist = _get_mail_filter_rules(username)
+
+        # 1a — Whitelist : Raya a explicitement autorisé cet expéditeur/sujet
+        whitelisted = _matches_filter(sender, subject, whitelist)
+        if whitelisted:
+            print(f"[Webhook][L1a-whitelist] Autorisé : '{subject[:50]}' de {sender}")
+
+        # 1b — Heuristique statique (sauté si whitelisted)
+        if not whitelisted and _is_bulk_heuristic(sender, subject, preview):
+            print(f"[Webhook][L1b-heuristique] Ignoré : '{subject[:50]}' de {sender}")
             return
 
-        # ── Niveau 2 : règles anti_spam personnalisées ──
+        # 1c — Blacklist Raya (appliquée même si pas dans l'heuristique)
+        if _matches_filter(sender, subject, blacklist):
+            print(f"[Webhook][L1c-blacklist] Bloqué : '{subject[:50]}' de {sender}")
+            return
+
+        # 2 — Anti-spam personnalisé
         if _is_spam_by_rules(sender, subject, preview, username):
             print(f"[Webhook][L2-règles] Ignoré : '{subject[:50]}' de {sender}")
             return
 
-        # ── Niveau 3 : Raya décide — micro-appel Claude ──
+        # 3 — Claude OUI/NON
         try:
             response = ai_client.messages.create(
                 model=ANTHROPIC_MODEL_FAST,
                 max_tokens=5,
                 messages=[{"role": "user", "content": (
-                    f"Mail reçu :\n"
-                    f"De : {sender}\n"
-                    f"Sujet : {subject}\n"
+                    f"Mail reçu :\nDe : {sender}\nSujet : {subject}\n"
                     f"Aperçu : {preview[:400]}\n\n"
                     f"Ce mail mérite-t-il d'être gardé en mémoire ? "
                     f"Réponds uniquement : OUI ou NON."
@@ -210,20 +258,20 @@ def _process_mail(username: str, message_id: str):
             )
             should_store = "OUI" in response.content[0].text.strip().upper()
         except Exception:
-            should_store = True  # En cas d'erreur → stocker par prudence
+            should_store = True
 
         if not should_store:
             print(f"[Webhook][L3-Claude] Ignoré : '{subject[:50]}' de {sender}")
             return
 
-        # ── Analyse complète ──
+        # 4 — Analyse complète
         tenant_id = get_tenant_id(username)
         instructions = get_global_instructions(tenant_id=tenant_id)
         try:
             item = analyze_single_mail_with_ai(msg, instructions, username)
             analysis_status = "done_ai"
         except Exception as e:
-            print(f"[Webhook] Erreur analyse complète {username}: {e}")
+            print(f"[Webhook] Erreur analyse {username}: {e}")
             from app.assistant_analyzer import analyze_single_mail
             item = analyze_single_mail(msg, username)
             analysis_status = "fallback"
