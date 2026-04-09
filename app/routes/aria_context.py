@@ -173,8 +173,8 @@ def build_system_prompt(
     live_mails: list,
     agenda: list,
     instructions: list,
-    teams_context: str = "",          # pré-chargé en parallèle dans raya_endpoint
-    mail_filter_summary: str = "",    # idem
+    teams_context: str = "",
+    mail_filter_summary: str = "",
 ) -> str:
     display_name = username.capitalize()
     query_lower = query.lower()
@@ -183,14 +183,14 @@ def build_system_prompt(
     aria_rules = get_aria_rules(username)
     aria_insights = get_aria_insights(limit=8, username=username)
 
-    # Si non pré-chargés, on les charge ici (compat ascendante)
     if not teams_context:
         teams_context = load_teams_context(username)
     if not mail_filter_summary:
         mail_filter_summary = load_mail_filter_summary(username)
 
     contact_card = ""
-    known_contacts = get_contacts_keywords(username=username, tenant_id=tenant_id)
+    # BUGFIX : get_contacts_keywords n'accepte que username (pas tenant_id)
+    known_contacts = get_contacts_keywords(username=username)
     for name in known_contacts:
         if name in query_lower:
             contact_card = get_contact_card(name, tenant_id=tenant_id)
