@@ -8,6 +8,7 @@ import time
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import SESSION_SECRET
@@ -39,6 +40,11 @@ app.include_router(memory_router)
 app.include_router(mail_router)
 app.include_router(reset_router)
 app.include_router(webhook_router)
+
+
+@app.get("/")
+def root():
+    return RedirectResponse("/chat")
 
 
 @app.get("/health")
