@@ -6,10 +6,11 @@ import os
 import threading
 import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import SESSION_SECRET
 from app.database import init_postgres
@@ -28,7 +29,41 @@ from app.routes.reset_password import router as reset_router
 from app.routes.webhook import router as webhook_router
 from app.routes.forced_reset import router as forced_reset_router
 
+
+# ─── MIDDLEWARE HEADERS DE SÉCURITÉ ───
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """
+    Ajoute les headers HTTP de sécurité sur toutes les réponses.
+    - X-Content-Type-Options : empêche le sniffing MIME
+    - X-Frame-Options : empêche le clickjacking
+    - X-XSS-Protection : protection XSS navigateurs anciens
+    - Referrer-Policy : limite les fuites d'URL
+    - Content-Security-Policy : restreint les sources de contenu
+    """
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        # CSP adaptée à l'app : Google Fonts, inline styles/scripts nécessaires
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data: https://couffrant-solar.fr; "
+            "connect-src 'self' https://api.anthropic.com; "
+            "media-src 'self' blob:"
+        )
+        return response
+
+
 app = FastAPI(title="Raya — Assistant IA")
+
+# Ordre important : SecurityHeaders avant SessionMiddleware
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=30 * 24 * 3600)
 
 # Fichiers statiques (CSS, JS)

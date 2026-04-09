@@ -1,21 +1,50 @@
 """
 Connecteur SharePoint Drive pour Raya.
 
-La configuration (nom du site, dossier racine) est lue depuis tenants.settings
-au lieu d'être codée en dur. Modifiable depuis le panel admin → onglet Sociétés.
-
-Fallback sur les valeurs par défaut si la table n'est pas configurée.
+La configuration (nom du site, dossier racine) est lue depuis tenants.settings.
+Le drive_id est mis en cache 30 min pour éviter les appels Graph redondants.
 """
+import time
 import requests
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 
-# Valeurs par défaut (utilisées si non configurées en base)
+# Valeurs par défaut
 _DEFAULTS = {
     "site_name": "Commun",
     "folder_name": "1_Photovoltaïque",
     "drive_name": "Documents",
 }
+
+# ─── CACHE DRIVE ───
+# Clé : site_name — Valeur : {site_id, drive_id, expires}
+_drive_cache: dict = {}
+_CACHE_TTL = 1800  # 30 minutes
+
+
+def _cache_get(site_name: str):
+    """Retourne (site_id, drive_id) depuis le cache si encore valide, sinon None."""
+    entry = _drive_cache.get(site_name)
+    if entry and entry["expires"] > time.time():
+        return entry["site_id"], entry["drive_id"]
+    return None, None
+
+
+def _cache_set(site_name: str, site_id: str, drive_id: str):
+    """Met en cache le drive pour 30 min."""
+    _drive_cache[site_name] = {
+        "site_id": site_id,
+        "drive_id": drive_id,
+        "expires": time.time() + _CACHE_TTL,
+    }
+
+
+def _cache_invalidate(site_name: str = None):
+    """Invalide le cache (après mise à jour de config SharePoint)."""
+    if site_name:
+        _drive_cache.pop(site_name, None)
+    else:
+        _drive_cache.clear()
 
 
 def _h(token: str) -> dict:
@@ -58,7 +87,7 @@ def get_drive_config(tenant_id: str = "couffrant_solar") -> dict:
 
 def save_drive_config(tenant_id: str, site_name: str, folder_name: str,
                       drive_name: str = "Documents") -> dict:
-    """Sauvegarde la config SharePoint dans tenants.settings."""
+    """Sauvegarde la config SharePoint + invalide le cache."""
     try:
         from app.database import get_pg_conn
         conn = get_pg_conn()
@@ -73,23 +102,23 @@ def save_drive_config(tenant_id: str, site_name: str, folder_name: str,
         ))
         conn.commit()
         conn.close()
+        # Invalide le cache pour ce site
+        _cache_invalidate(site_name)
         return {"status": "ok", "message": "Configuration SharePoint mise à jour."}
     except Exception as e:
         return {"status": "error", "message": str(e)[:200]}
 
 
 def _build_candidates(folder_name: str) -> list:
-    """Génère les chemins candidats pour trouver le dossier racine."""
     return [
         folder_name,
         f"Documents/{folder_name}",
         f"Shared Documents/{folder_name}",
-        folder_name.replace("ï", "i"),  # sans accent
+        folder_name.replace("ï", "i"),
     ]
 
 
 def _get_config_for_username(username: str) -> dict:
-    """Charge la config Drive à partir du tenant de l'utilisateur."""
     try:
         from app.app_security import get_tenant_id
         tenant_id = get_tenant_id(username)
@@ -98,13 +127,21 @@ def _get_config_for_username(username: str) -> dict:
         return get_drive_config()
 
 
-# ─── DÉCOUVERTE SHAREPOINT ───
+# ─── DÉCOUVERTE SHAREPOINT (avec cache drive_id) ───
 
 def _find_sharepoint_site_and_drive(token: str, config: dict = None) -> tuple:
-    """Trouve le site SharePoint et le drive documentaire."""
+    """
+    Trouve le site SharePoint et le drive documentaire.
+    Le drive_id est mis en cache 30 min pour éviter les appels Graph répétés.
+    """
     if config is None:
         config = get_drive_config()
     site_name = config["site_name"]
+
+    # Vérification du cache
+    cached_site_id, cached_drive_id = _cache_get(site_name)
+    if cached_site_id and cached_drive_id:
+        return cached_site_id, cached_drive_id, []
 
     site_id = None
     drive_id = None
@@ -132,13 +169,11 @@ def _find_sharepoint_site_and_drive(token: str, config: dict = None) -> tuple:
                                    headers=_h(token), timeout=15).json()
         all_drives = drives_data.get("value", [])
         drive_name = config.get("drive_name", "Documents").lower()
-        # Cherche le drive configuré en premier
         for drive in all_drives:
             if drive.get("driveType") == "documentLibrary" and \
                drive_name in drive.get("name", "").lower():
                 drive_id = drive.get("id")
                 break
-        # Fallback : premier documentLibrary
         if not drive_id:
             for drive in all_drives:
                 if drive.get("driveType") == "documentLibrary":
@@ -149,11 +184,14 @@ def _find_sharepoint_site_and_drive(token: str, config: dict = None) -> tuple:
     except Exception:
         pass
 
+    # Mise en cache si trouvé
+    if site_id and drive_id:
+        _cache_set(site_name, site_id, drive_id)
+
     return site_id, drive_id, all_drives
 
 
 def _find_folder_root(token: str, drive_id: str, config: dict = None) -> tuple:
-    """Trouve l'item_id du dossier racine configuré."""
     if config is None:
         config = get_drive_config()
     for candidate in config["path_candidates"]:
@@ -188,10 +226,6 @@ def _fmt(items: list) -> list:
 # ─── ACTIONS DRIVE ───
 
 def list_drive(token: str, subfolder: str = "", username: str = None) -> dict:
-    """
-    Liste les fichiers dans le dossier racine configuré.
-    subfolder : vide (racine), nom de sous-dossier, ou item_id direct.
-    """
     try:
         config = _get_config_for_username(username) if username else get_drive_config()
         folder_name = config["folder_name"]
@@ -200,7 +234,6 @@ def list_drive(token: str, subfolder: str = "", username: str = None) -> dict:
         _, drive_id, _ = _find_sharepoint_site_and_drive(token, config)
 
         if not drive_id:
-            # Fallback OneDrive personnel
             try:
                 data = requests.get(
                     f"{GRAPH}/me/drive/root:/{folder_name}:/children",
@@ -236,7 +269,6 @@ def list_drive(token: str, subfolder: str = "", username: str = None) -> dict:
                     "count": len(items), "items": items}
 
         subfolder = subfolder.strip()
-        # item_id direct
         if len(subfolder) > 20 and "/" not in subfolder and " " not in subfolder:
             data = requests.get(f"{GRAPH}/drives/{drive_id}/items/{subfolder}/children",
                                 headers=_h(token), params=params_q, timeout=20).json()
@@ -245,7 +277,6 @@ def list_drive(token: str, subfolder: str = "", username: str = None) -> dict:
                     "dossier": f"(id={subfolder[:12]}…)", "dossier_id": subfolder,
                     "count": len(items), "items": items}
 
-        # Sous-dossier par nom
         root_data = requests.get(f"{GRAPH}/drives/{drive_id}/items/{base_id}/children",
                                  headers=_h(token),
                                  params={"$top": 100, "$select": "name,id,folder"},
@@ -274,7 +305,6 @@ def list_drive(token: str, subfolder: str = "", username: str = None) -> dict:
 
 
 def read_drive_file(token: str, file_path_or_id: str, username: str = None) -> dict:
-    """Lit le contenu d'un fichier (par item_id ou chemin)."""
     try:
         config = _get_config_for_username(username) if username else get_drive_config()
         _, drive_id, _ = _find_sharepoint_site_and_drive(token, config)
@@ -343,7 +373,6 @@ def read_drive_file(token: str, file_path_or_id: str, username: str = None) -> d
 
 
 def search_drive(token: str, query: str, username: str = None) -> dict:
-    """Recherche dans le dossier racine configuré par nom."""
     try:
         config = _get_config_for_username(username) if username else get_drive_config()
         site_name = config["site_name"]

@@ -187,7 +187,8 @@ def synthesize_session(n_conversations: int = 15, username: str = 'guillaume') -
     finally:
         if conn: conn.close()
 
-    keep_recent = get_memoire_param('keep_recent', 5, username)
+    # BUGFIX : ordre des arguments corrigé (username, param, default)
+    keep_recent = get_memoire_param(username, 'keep_recent', 5)
     if not conversations or total <= keep_recent:
         return {"status": "nothing_to_synthesize", "total": total}
 
@@ -311,7 +312,8 @@ def _vectorize_conversations_batch(conversations: list, username: str):
 
 def purge_old_mails(days: int = None, username: str = 'guillaume') -> int:
     if days is None:
-        days = get_memoire_param('purge_days', 90, username)
+        # BUGFIX : ordre des arguments corrigé (username, param, default)
+        days = get_memoire_param(username, 'purge_days', 90)
     conn = None
     try:
         conn = get_pg_conn()
