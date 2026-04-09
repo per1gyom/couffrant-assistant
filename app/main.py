@@ -26,6 +26,7 @@ from app.routes.memory import router as memory_router
 from app.routes.mail import router as mail_router
 from app.routes.reset_password import router as reset_router
 from app.routes.webhook import router as webhook_router
+from app.routes.forced_reset import router as forced_reset_router
 
 app = FastAPI(title="Raya — Assistant IA")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=30 * 24 * 3600)
@@ -40,6 +41,7 @@ app.include_router(memory_router)
 app.include_router(mail_router)
 app.include_router(reset_router)
 app.include_router(webhook_router)
+app.include_router(forced_reset_router)
 
 
 @app.get("/")

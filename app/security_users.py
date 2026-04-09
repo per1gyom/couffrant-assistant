@@ -1,5 +1,5 @@
 """
-Gestion des utilisateurs : CRUD, auth, reset MDP.
+Gestion des utilisateurs : CRUD, auth, reset MDP, forçage redéfinition MDP.
 """
 import os
 import secrets
@@ -11,6 +11,53 @@ from app.security_tools import (
     init_default_tools,
 )
 
+
+# ─── MUST_RESET_PASSWORD ───
+
+def must_reset_password_check(username: str) -> bool:
+    """Retourne True si l'utilisateur doit redéfinir son mot de passe."""
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("SELECT must_reset_password FROM users WHERE username=%s", (username,))
+        row = c.fetchone()
+        return bool(row[0]) if row else False
+    except Exception:
+        return False
+    finally:
+        if conn: conn.close()
+
+
+def set_must_reset_password(username: str, value: bool = True):
+    """Active ou désactive le flag de redéfinition forcée du mot de passe."""
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("UPDATE users SET must_reset_password=%s WHERE username=%s", (value, username))
+        conn.commit()
+    except Exception as e:
+        print(f"[Auth] set_must_reset_password error: {e}")
+    finally:
+        if conn: conn.close()
+
+
+def _ensure_must_reset_column():
+    """Migration : ajoute la colonne must_reset_password si elle n'existe pas."""
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("""
+            ALTER TABLE users
+            ADD COLUMN IF NOT EXISTS must_reset_password BOOLEAN DEFAULT FALSE
+        """)
+        conn.commit()
+    except Exception:
+        pass
+    finally:
+        if conn: conn.close()
+
+
+# ─── CRUD ───
 
 def get_tenant_id(username: str) -> str:
     conn = None
@@ -181,6 +228,9 @@ def get_current_user(request):
 
 
 def init_default_user():
+    # Migration : ajoute la colonne must_reset_password si absente
+    _ensure_must_reset_column()
+
     try:
         from app.tenant_manager import ensure_default_tenant
         ensure_default_tenant()
@@ -223,6 +273,11 @@ def init_default_user():
 # ─── RÉINITIALISATION MOT DE PASSE ───
 
 def generate_reset_token(username: str, ttl_hours: int = 24) -> dict:
+    """
+    Génère un lien de réinitialisation.
+    Active aussi le flag must_reset_password pour forcer la redéfinition
+    si l'utilisateur est déjà connecté.
+    """
     token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
     conn = None
@@ -235,6 +290,8 @@ def generate_reset_token(username: str, ttl_hours: int = 24) -> dict:
         c.execute("SELECT email FROM users WHERE username=%s", (username,))
         row = c.fetchone()
         user_email = row[0] if row else None
+        # Force la redéfinition au prochain accès au chat
+        c.execute("UPDATE users SET must_reset_password=true WHERE username=%s", (username,))
         conn.commit()
     finally:
         if conn: conn.close()
@@ -317,7 +374,8 @@ def consume_reset_token(token: str, new_password: str) -> dict:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         if expires_at < datetime.now(timezone.utc):
             return {"status": "error", "message": "Lien expiré. Demandez-en un nouveau."}
-        c.execute("UPDATE users SET password_hash=%s WHERE username=%s", (hash_password(new_password), username))
+        c.execute("UPDATE users SET password_hash=%s, must_reset_password=false WHERE username=%s",
+                  (hash_password(new_password), username))
         c.execute("UPDATE password_reset_tokens SET used=true WHERE token=%s", (token,))
         conn.commit()
         return {"status": "ok", "message": "Mot de passe mis à jour."}

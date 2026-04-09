@@ -8,6 +8,7 @@ from app.app_security import (
     record_failed_attempt, clear_attempts, get_user_scope,
     get_tenant_id, LOGIN_PAGE_HTML,
 )
+from app.security_users import must_reset_password_check
 from app.database import get_pg_conn
 
 router = APIRouter(tags=["auth"])
@@ -36,6 +37,10 @@ async def login_app_post(
         request.session["user"] = username.strip()
         request.session["scope"] = scope
         request.session["tenant_id"] = tenant_id
+        # Si l'admin a forcé un renouvellement de mot de passe → page dédiée
+        if must_reset_password_check(username.strip()):
+            request.session["must_reset"] = True
+            return RedirectResponse("/forced-reset", status_code=303)
         return RedirectResponse("/chat", status_code=303)
     record_failed_attempt(ip)
     return HTMLResponse(
@@ -56,6 +61,11 @@ def logout(request: Request):
 def chat(request: Request):
     if not request.session.get("user"):
         return RedirectResponse("/login-app")
+    # Vérifie en base (au cas où le flag a été activé pendant la session)
+    username = request.session.get("user")
+    if must_reset_password_check(username):
+        request.session["must_reset"] = True
+        return RedirectResponse("/forced-reset")
     with open("app/templates/aria_chat.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
@@ -96,17 +106,12 @@ def login_gmail():
 
 @router.get("/auth/gmail/callback")
 def auth_gmail_callback(request: Request, code: str | None = None):
-    """
-    Callback OAuth Google — stocke dans oauth_tokens (provider='google').
-    Compatible Microsoft + Google : les deux coexistent par username.
-    """
     if not code:
         return HTMLResponse("Code manquant", status_code=400)
     from app.connectors.gmail_connector import exchange_code_for_tokens
     tokens = exchange_code_for_tokens(code)
     username = request.session.get("user", "guillaume")
     email = tokens.get("email", f"{username}@gmail.com")
-    # Stockage unifié dans oauth_tokens + sync gmail_tokens pour compat
     save_google_token(
         username=username,
         access_token=tokens.get("access_token", ""),
