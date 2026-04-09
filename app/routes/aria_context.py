@@ -1,6 +1,9 @@
 """
 Construction du contexte pour Raya.
 Isole la lecture DB, les mails live, l'agenda et la construction du prompt système.
+
+Les appels réseau (mails live, agenda, contexte Teams) sont lancés
+en parallèle depuis raya_endpoint() pour réduire la latence.
 """
 import json
 from datetime import datetime, timezone
@@ -108,6 +111,10 @@ def load_agenda(outlook_token: str) -> list:
 
 
 def load_teams_context(username: str) -> str:
+    """
+    Charge le contexte Teams : marqueurs actifs + insights récents.
+    Appelé en parallèle avec load_live_mails et load_agenda depuis raya_endpoint.
+    """
     try:
         from app.memory_teams import get_teams_context_summary
         markers_summary = get_teams_context_summary(username)
@@ -115,6 +122,7 @@ def load_teams_context(username: str) -> str:
         markers_summary = ""
 
     teams_insights = ""
+    conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
@@ -124,12 +132,13 @@ def load_teams_context(username: str) -> str:
             ORDER BY updated_at DESC LIMIT 5
         """, (username,))
         rows = c.fetchall()
-        conn.close()
         if rows:
             lines = [f"  [{r[0]}] {r[1]}" for r in rows]
             teams_insights = "Mémoire Teams récente :\n" + "\n".join(lines)
     except Exception:
         pass
+    finally:
+        if conn: conn.close()
 
     parts = [p for p in [markers_summary, teams_insights] if p]
     return "\n".join(parts) if parts else ""
@@ -164,6 +173,8 @@ def build_system_prompt(
     live_mails: list,
     agenda: list,
     instructions: list,
+    teams_context: str = "",          # pré-chargé en parallèle dans raya_endpoint
+    mail_filter_summary: str = "",    # idem
 ) -> str:
     display_name = username.capitalize()
     query_lower = query.lower()
@@ -171,8 +182,12 @@ def build_system_prompt(
     hot_summary = get_hot_summary(username)
     aria_rules = get_aria_rules(username)
     aria_insights = get_aria_insights(limit=8, username=username)
-    teams_context = load_teams_context(username)
-    mail_filter_summary = load_mail_filter_summary(username)
+
+    # Si non pré-chargés, on les charge ici (compat ascendante)
+    if not teams_context:
+        teams_context = load_teams_context(username)
+    if not mail_filter_summary:
+        mail_filter_summary = load_mail_filter_summary(username)
 
     contact_card = ""
     known_contacts = get_contacts_keywords(username=username, tenant_id=tenant_id)
