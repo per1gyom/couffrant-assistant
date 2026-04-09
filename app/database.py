@@ -179,6 +179,23 @@ def init_postgres():
         )
     """)
 
+    # ─── TABLE TEAMS SYNC STATE ───
+    # Marqueurs optionnels que Raya pose elle-même à sa discrétion.
+    # Le système ne les remplit jamais automatiquement.
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS teams_sync_state (
+            id SERIAL PRIMARY KEY,
+            username TEXT NOT NULL,
+            chat_id TEXT NOT NULL,           -- ID du chat ou canal Teams
+            chat_type TEXT DEFAULT 'chat',   -- 'chat' | 'channel'
+            chat_label TEXT,                 -- Nom lisible (ex: 'Canal Chantiers')
+            last_message_id TEXT,            -- Dernier message ingré
+            last_synced_at TIMESTAMP DEFAULT NOW(),
+            notes TEXT,                      -- Raya peut y noter ses observations
+            UNIQUE(username, chat_id)
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -186,6 +203,7 @@ def init_postgres():
     conn = get_pg_conn()
     c = conn.cursor()
     migrations = [
+        # Migrations historiques
         "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
         "ALTER TABLE aria_memory ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
         "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
@@ -235,6 +253,28 @@ def init_postgres():
             access_level TEXT DEFAULT 'read_only', enabled BOOLEAN DEFAULT true,
             config JSONB DEFAULT '{}', created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW(), UNIQUE(username, tool))""",
+
+        # ─── MIGRATIONS VECTORISATION (pgvector) ───
+        # Colonnes embedding — NULL par défaut, remplies progressivement
+        "CREATE EXTENSION IF NOT EXISTS vector",
+        "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS embedding vector(1536)",
+        "ALTER TABLE aria_insights ADD COLUMN IF NOT EXISTS embedding vector(1536)",
+        "ALTER TABLE aria_memory ADD COLUMN IF NOT EXISTS embedding vector(1536)",
+        "ALTER TABLE aria_contacts ADD COLUMN IF NOT EXISTS embedding vector(1536)",
+        "ALTER TABLE teams_sync_state ADD COLUMN IF NOT EXISTS embedding vector(1536)",
+
+        # Index HNSW pour recherche rapide par similarité cosinus
+        "CREATE INDEX IF NOT EXISTS idx_mail_embedding ON mail_memory USING hnsw (embedding vector_cosine_ops)",
+        "CREATE INDEX IF NOT EXISTS idx_insights_embedding ON aria_insights USING hnsw (embedding vector_cosine_ops)",
+        "CREATE INDEX IF NOT EXISTS idx_memory_embedding ON aria_memory USING hnsw (embedding vector_cosine_ops)",
+        "CREATE INDEX IF NOT EXISTS idx_contacts_embedding ON aria_contacts USING hnsw (embedding vector_cosine_ops)",
+
+        # Table Teams sync state
+        """CREATE TABLE IF NOT EXISTS teams_sync_state (
+            id SERIAL PRIMARY KEY, username TEXT NOT NULL, chat_id TEXT NOT NULL,
+            chat_type TEXT DEFAULT 'chat', chat_label TEXT,
+            last_message_id TEXT, last_synced_at TIMESTAMP DEFAULT NOW(),
+            notes TEXT, UNIQUE(username, chat_id))""",
     ]
     for m in migrations:
         try: c.execute(m); conn.commit()
