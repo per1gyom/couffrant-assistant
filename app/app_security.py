@@ -360,17 +360,11 @@ def get_current_user(request) -> str | None:
 # ─────────────────────────────────────────
 
 def generate_reset_token(username: str, ttl_hours: int = 24) -> dict:
-    """
-    Génère un token de réinitialisation à usage unique.
-    Retourne le token + l'URL de reset + l'email de l'utilisateur (si connu).
-    L'envoi email est géré séparément (SMTP optionnel).
-    """
     token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        # Invalide les anciens tokens non utilisés pour ce user
         c.execute("UPDATE password_reset_tokens SET used=true WHERE username=%s AND used=false", (username,))
         c.execute("""
             INSERT INTO password_reset_tokens (username, token, expires_at)
@@ -386,7 +380,6 @@ def generate_reset_token(username: str, ttl_hours: int = 24) -> dict:
     base_url = os.getenv("APP_BASE_URL", "https://couffrant-assistant-production.up.railway.app")
     reset_url = f"{base_url}/reset-password?token={token}"
 
-    # Tentative d'envoi email (optionnel — ne bloque pas si SMTP non configuré)
     email_sent = False
     if user_email:
         email_sent = _send_reset_email(user_email, username, reset_url)
@@ -402,12 +395,11 @@ def generate_reset_token(username: str, ttl_hours: int = 24) -> dict:
 
 
 def _send_reset_email(to_email: str, username: str, reset_url: str) -> bool:
-    """Envoie l'email de réinitialisation si SMTP est configuré."""
     smtp_host = os.getenv("SMTP_HOST")
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_user = os.getenv("SMTP_USER")
     smtp_pass = os.getenv("SMTP_PASS")
-    smtp_from = os.getenv("SMTP_FROM", smtp_user or "noreply@aria-app.fr")
+    smtp_from = os.getenv("SMTP_FROM", smtp_user or "noreply@raya-app.fr")
     if not smtp_host or not smtp_user or not smtp_pass:
         return False
     try:
@@ -415,7 +407,7 @@ def _send_reset_email(to_email: str, username: str, reset_url: str) -> bool:
         from email.mime.text import MIMEText
         from email.mime.multipart import MIMEMultipart
         msg = MIMEMultipart("alternative")
-        msg["Subject"] = "Réinitialisation de votre mot de passe Aria"
+        msg["Subject"] = "Réinitialisation de votre mot de passe Raya"
         msg["From"] = smtp_from
         msg["To"] = to_email
         html = f"""<p>Bonjour {username},</p>
@@ -434,10 +426,6 @@ def _send_reset_email(to_email: str, username: str, reset_url: str) -> bool:
 
 
 def validate_reset_token(token: str) -> dict | None:
-    """
-    Vérifie un token de réinitialisation.
-    Retourne {username, email} si valide, None sinon.
-    """
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -460,9 +448,6 @@ def validate_reset_token(token: str) -> dict | None:
 
 
 def consume_reset_token(token: str, new_password: str) -> dict:
-    """
-    Valide le token et change le mot de passe en une seule opération atomique.
-    """
     if len(new_password) < 8:
         return {"status": "error", "message": "Mot de passe trop court (8 caractères min.)."}
     conn = None
@@ -491,7 +476,7 @@ def consume_reset_token(token: str, new_password: str) -> dict:
 LOGIN_PAGE_HTML = """
 <!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Aria — Connexion</title>
+<title>Raya — Connexion</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:#0a0a0a;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}}
@@ -507,7 +492,7 @@ button:hover{{background:#1976d2}}
 .error{{background:rgba(220,50,50,0.1);border:1px solid rgba(220,50,50,0.3);color:#ff7070;padding:12px 16px;border-radius:8px;font-size:13px;margin-bottom:24px;text-align:center}}
 </style></head><body>
 <div class="card">
-  <div class="logo">⚡</div><h1>Aria</h1><div class="subtitle">Accès privé</div>
+  <div class="logo">⚡</div><h1>Raya</h1><div class="subtitle">Accès privé</div>
   {error_block}
   <form method="post" action="/login-app">
     <label>Identifiant</label><input type="text" name="username" autocomplete="username" required>
