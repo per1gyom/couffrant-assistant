@@ -1,0 +1,264 @@
+"""
+Mémoire : synthèse des sessions et résumé chaud.
+"""
+import json
+import re
+
+from app.database import get_pg_conn
+from app.ai_client import client
+from app.config import ANTHROPIC_MODEL_SMART, ANTHROPIC_MODEL_FAST
+from app.memory_rules import get_rules_by_category, get_memoire_param, save_rule
+
+DEFAULT_TENANT = 'couffrant_solar'
+
+
+def get_hot_summary(username: str = 'guillaume') -> str:
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("SELECT content FROM aria_hot_summary WHERE username = %s", (username,))
+        row = c.fetchone()
+        return row[0] if row else ""
+    finally:
+        if conn: conn.close()
+
+
+def rebuild_hot_summary(username: str = 'guillaume', tenant_id: str = DEFAULT_TENANT) -> str:
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT from_email, display_title, category, priority, short_summary, received_at, mailbox_source
+            FROM mail_memory WHERE username = %s
+            ORDER BY received_at DESC NULLS LAST LIMIT 30
+        """, (username,))
+        cols = [d[0] for d in c.description]
+        mails = [dict(zip(cols, row)) for row in c.fetchall()]
+        c.execute("""
+            SELECT name, summary FROM aria_contacts
+            WHERE tenant_id = %s ORDER BY last_seen DESC LIMIT 15
+        """, (tenant_id,))
+        contacts = [{'name': r[0], 'summary': r[1]} for r in c.fetchall()]
+        c.execute("""
+            SELECT user_input, aria_response FROM aria_memory
+            WHERE username = %s ORDER BY id DESC LIMIT 8
+        """, (username,))
+        history = [{'q': r[0][:150], 'a': r[1][:200]} for r in c.fetchall()]
+    finally:
+        if conn: conn.close()
+
+    display_name = username.capitalize()
+    prompt = f"""Tu es l'assistant de {display_name}.
+
+Mails récents :
+{json.dumps(mails, ensure_ascii=False, default=str)}
+
+Contacts actifs :
+{json.dumps(contacts, ensure_ascii=False)}
+
+Dernières conversations :
+{json.dumps(history, ensure_ascii=False)}
+
+Génère un résumé opérationnel compact (~350 mots) :
+1. SITUATION ACTUELLE — Ce qui est en cours, urgent, en attente
+2. INTERLOCUTEURS CLÉS — Les personnes/entités actives
+3. POINTS D'ATTENTION — Ce qui risque de déraper
+
+Factuel, direct, sans blabla."""
+
+    response = client.messages.create(
+        model=ANTHROPIC_MODEL_SMART, max_tokens=800,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    summary = response.content[0].text
+
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO aria_hot_summary (username, content, updated_at)
+            VALUES (%s, %s, NOW())
+            ON CONFLICT (username) DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()
+        """, (username, summary))
+        conn.commit()
+    finally:
+        if conn: conn.close()
+    return summary
+
+
+def get_aria_insights(limit: int = 8, username: str = 'guillaume') -> str:
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT topic, insight, reinforcements FROM aria_insights
+            WHERE username = %s
+            ORDER BY reinforcements DESC, updated_at DESC LIMIT %s
+        """, (username, limit))
+        rows = c.fetchall()
+        if not rows: return ""
+        return "\n".join([f"[{r[0]}] {r[1]}" for r in rows])
+    finally:
+        if conn: conn.close()
+
+
+def save_insight(topic: str, insight: str, source: str = "conversation",
+                username: str = 'guillaume') -> int:
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id FROM aria_insights WHERE username = %s AND topic ILIKE %s LIMIT 1
+        """, (username, f"%{topic[:30]}%"))
+        existing = c.fetchone()
+        if existing:
+            c.execute("""
+                UPDATE aria_insights SET insight = %s,
+                reinforcements = reinforcements + 1, updated_at = NOW()
+                WHERE id = %s
+            """, (insight, existing[0]))
+            conn.commit()
+            return existing[0]
+        c.execute("""
+            INSERT INTO aria_insights (username, topic, insight, source)
+            VALUES (%s, %s, %s, %s) RETURNING id
+        """, (username, topic, insight, source))
+        insight_id = c.fetchone()[0]
+        conn.commit()
+        return insight_id
+    finally:
+        if conn: conn.close()
+
+
+def synthesize_session(n_conversations: int = 15, username: str = 'guillaume') -> dict:
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id, user_input, aria_response, created_at FROM aria_memory
+            WHERE username = %s ORDER BY id DESC LIMIT %s
+        """, (username, n_conversations))
+        conversations = c.fetchall()
+        c.execute("SELECT COUNT(*) FROM aria_memory WHERE username = %s", (username,))
+        total = c.fetchone()[0]
+    finally:
+        if conn: conn.close()
+
+    keep_recent = get_memoire_param('keep_recent', 5, username)
+    if not conversations or total <= keep_recent:
+        return {"status": "nothing_to_synthesize", "total": total}
+
+    display_name = username.capitalize()
+    conv_text = "\n\n".join([
+        f"{display_name}: {r[1][:200]}\nRaya: {r[2][:300]}"
+        for r in reversed(conversations)
+    ])
+
+    prompt = f"""Tu es Raya, assistante de {display_name}.
+Voici {len(conversations)} conversations récentes.
+
+{conv_text}
+
+Synthétise en JSON strict (sans backticks) :
+{{"summary": "~150 mots", "rules_learned": ["règle"], "insights": [{{"topic": "x", "text": "y"}}], "topics": ["sujet"]}}"""
+
+    # Niveau 1 : ANTHROPIC_MODEL_FAST
+    parsed = None
+    try:
+        response = client.messages.create(
+            model=ANTHROPIC_MODEL_FAST, max_tokens=1000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = re.sub(r'^```(?:json)?\s*', '', response.content[0].text.strip(), flags=re.MULTILINE)
+        raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
+        parsed = json.loads(raw)
+    except Exception:
+        pass
+
+    # Niveau 2 : fallback ANTHROPIC_MODEL_SMART si JSON invalide
+    if parsed is None:
+        try:
+            response = client.messages.create(
+                model=ANTHROPIC_MODEL_SMART, max_tokens=1000,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            raw = re.sub(r'^```(?:json)?\s*', '', response.content[0].text.strip(), flags=re.MULTILINE)
+            raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
+            parsed = json.loads(raw)
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO aria_session_digests
+            (username, conversation_count, summary, rules_learned, topics, session_date)
+            VALUES (%s, %s, %s, %s, %s, CURRENT_DATE)
+        """, (
+            username, len(conversations), parsed.get("summary", ""),
+            json.dumps(parsed.get("rules_learned", []), ensure_ascii=False),
+            json.dumps(parsed.get("topics", []), ensure_ascii=False),
+        ))
+        conn.commit()
+    finally:
+        if conn: conn.close()
+
+    for rule_text in parsed.get("rules_learned", []):
+        if rule_text and len(rule_text) > 10:
+            save_rule("auto", rule_text, "synthesis", 0.6, username)
+
+    for item in parsed.get("insights", []):
+        if isinstance(item, dict):
+            save_insight(item.get("topic", "général"), item.get("text", str(item)), username=username)
+        elif isinstance(item, str) and len(item) > 10:
+            save_insight("général", item, username=username)
+
+    conn = None
+    purged = 0
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            DELETE FROM aria_memory WHERE username = %s AND id NOT IN (
+                SELECT id FROM aria_memory WHERE username = %s ORDER BY id DESC LIMIT %s
+            )
+        """, (username, username, keep_recent))
+        purged = c.rowcount
+        conn.commit()
+    finally:
+        if conn: conn.close()
+
+    return {
+        "status": "ok",
+        "conversations_synthesized": len(conversations),
+        "rules_extracted": len(parsed.get("rules_learned", [])),
+        "insights_extracted": len(parsed.get("insights", [])),
+        "purged": purged,
+    }
+
+
+def purge_old_mails(days: int = None, username: str = 'guillaume') -> int:
+    if days is None:
+        days = get_memoire_param('purge_days', 90, username)
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            DELETE FROM mail_memory
+            WHERE username = %s AND created_at < NOW() - (%s || ' days')::INTERVAL
+            AND mailbox_source IN ('outlook', 'gmail_perso')
+        """, (username, str(days)))
+        deleted = c.rowcount
+        conn.commit()
+        return deleted
+    finally:
+        if conn: conn.close()
