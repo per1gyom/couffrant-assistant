@@ -8,9 +8,10 @@ la latence de 300–400ms par conversation.
 import os
 import re
 import io
+import traceback
 import threading
 import requests as http_requests
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from fastapi import APIRouter, Request, Body
@@ -45,14 +46,9 @@ class RayaQuery(BaseModel):
 
 @router.get("/token-status")
 def token_status(request: Request):
-    """
-    Vérifie l'état des tokens de l'utilisateur connecté.
-    Utilisé par le chat pour afficher le bandeau d'alerte.
-    """
     username = request.session.get("user")
     if not username:
         return {"warnings": [], "ok": True}
-
     warnings = []
     try:
         token = get_valid_microsoft_token(username)
@@ -66,7 +62,6 @@ def token_status(request: Request):
             })
     except Exception:
         pass
-
     return {"warnings": warnings, "ok": len(warnings) == 0}
 
 
@@ -102,6 +97,19 @@ def raya_endpoint(request: Request, payload: RayaQuery):
     username = request.session.get("user", "guillaume")
     tenant_id = request.session.get("tenant_id", "couffrant_solar")
 
+    try:
+        return _raya_core(request, payload, username, tenant_id)
+    except Exception as e:
+        tb = traceback.format_exc()
+        print(f"[Raya] ERREUR ENDPOINT pour {username}:\n{tb}")
+        # Retourne l'erreur dans le chat pour diagnostic
+        return {"answer": f"⚠️ Erreur interne Raya : {str(e)[:200]}\n\nVoir les logs Railway pour le détail.",
+                "actions": []}
+
+
+def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: str) -> dict:
+    """Logique principale — séparée pour le try/except de diagnostic."""
+
     # 1. Chargement contexte DB (synchrone, rapide)
     tools = load_user_tools(username)
     db_ctx = load_db_context(username)
@@ -115,13 +123,13 @@ def raya_endpoint(request: Request, payload: RayaQuery):
         f_agenda = pool.submit(load_agenda, outlook_token)
         f_teams  = pool.submit(load_teams_context, username)
         f_filter = pool.submit(load_mail_filter_summary, username)
-        try: live_mails   = f_mails.result(timeout=8)
+        try: live_mails  = f_mails.result(timeout=8)
         except Exception: pass
-        try: agenda        = f_agenda.result(timeout=8)
+        try: agenda      = f_agenda.result(timeout=8)
         except Exception: pass
-        try: teams_ctx     = f_teams.result(timeout=5)
+        try: teams_ctx   = f_teams.result(timeout=5)
         except Exception: pass
-        try: mail_filter   = f_filter.result(timeout=3)
+        try: mail_filter = f_filter.result(timeout=3)
         except Exception: pass
 
     # 3. Construction du prompt système
@@ -208,5 +216,5 @@ def _build_user_content(payload: RayaQuery):
                       if payload.query else f"[PDF joint{file_name_info}] Analyse ce document."})
     else:
         parts.append({"type": "text",
-                      "text": f"[Fichier joint{file_name_info}]\n{payload.query}"})
+                      "text": f"[Fichier joint{file_name_info}]\n{payload.query}"}),
     return parts
