@@ -24,6 +24,12 @@ from app.connectors.outlook_connector import (
     perform_outlook_action, list_aria_drive, read_aria_drive_file,
     search_aria_drive, create_drive_folder, copy_drive_item, move_drive_item,
 )
+from app.connectors.teams_connector import (
+    list_teams, list_channels, read_channel_messages,
+    list_chats, read_chat_messages,
+    send_channel_message, send_chat_message,
+    send_message_to_user, create_group_chat,
+)
 from app.memory_loader import (
     MEMORY_OK, get_hot_summary, get_aria_rules, get_aria_insights,
     get_contact_card, get_style_examples, save_rule, save_insight,
@@ -44,7 +50,7 @@ class RayaQuery(BaseModel):
 
 GUARDRAILS = """GARDE-FOUS DE SÉCURITÉ (absolus — non négociables) :
 • Ne jamais supprimer définitivement un mail, fichier ou donnée sans confirmation explicite
-• Ne jamais envoyer un mail sans approbation explicite ("vas-y", "envoie", "confirme")
+• Ne jamais envoyer un mail ou un message Teams sans approbation explicite ("vas-y", "envoie", "confirme")
 • Ne jamais exécuter une action irréversible sans accord clair et explicite
 • En cas de doute sur une action : demander, ne pas agir"""
 
@@ -81,7 +87,6 @@ def raya(request: Request, payload: RayaQuery):
     tenant_id = request.session.get("tenant_id", "couffrant_solar")
     display_name = username.capitalize()
 
-    # Consignes globales scopées au tenant
     instructions = get_global_instructions(tenant_id=tenant_id)
 
     user_tools = get_user_tools(username)
@@ -122,7 +127,6 @@ def raya(request: Request, payload: RayaQuery):
     aria_rules = get_aria_rules(username)
     aria_insights = get_aria_insights(limit=8, username=username)
 
-    # Contacts filtrés par tenant
     contact_card = ""
     query_lower = payload.query.lower()
     known_contacts = get_contacts_keywords(username=username, tenant_id=tenant_id)
@@ -181,7 +185,7 @@ def raya(request: Request, payload: RayaQuery):
     else:
         user_content_parts = payload.query
 
-    delete_line = "\n  [ACTION:DELETE:id] \u2192 corbeille récupérable" if mail_can_delete else ""
+    delete_line = "\n  [ACTION:DELETE:id] → corbeille récupérable" if mail_can_delete else ""
     drive_write_lines = ""
     if drive_write:
         drive_write_lines = "\n  [ACTION:CREATEFOLDER:parent|nom] [ACTION:MOVEDRIVE:item|dest|nom] [ACTION:COPYFILE:source|dest|nom]"
@@ -224,6 +228,15 @@ Mails :
   [ACTION:CREATE_TASK:titre]{delete_line}
 Drive (1_Photovoltaïque) — format : 📁 "Nom" [id:ID] :
   [ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:id] [ACTION:READDRIVE:id] [ACTION:SEARCHDRIVE:mot]{drive_write_lines}
+Teams — ne jamais envoyer sans confirmation explicite :
+  [ACTION:TEAMS_LIST:]                          → liste équipes + canaux
+  [ACTION:TEAMS_CHANNEL:team_id|channel_id]     → lit les messages d'un canal
+  [ACTION:TEAMS_CHATS:]                         → liste les chats actifs
+  [ACTION:TEAMS_READCHAT:chat_id]               → lit les messages d'un chat
+  [ACTION:TEAMS_MSG:email|texte]                → envoie un message 1:1 à un collègue
+  [ACTION:TEAMS_REPLYCHAT:chat_id|texte]        → répond dans un chat existant
+  [ACTION:TEAMS_SENDCHANNEL:team_id|channel_id|texte] → envoie dans un canal
+  [ACTION:TEAMS_GROUPE:email1,email2|sujet|texte]     → crée un groupe + envoie
 Mémoire — tu choisis librement tes catégories :
   [ACTION:LEARN:ta_catégorie|ta_règle]
   [ACTION:INSIGHT:sujet|observation]
@@ -348,7 +361,7 @@ Mémoire — tu choisis librement tes catégories :
             try:
                 result = search_aria_drive(outlook_token, query_drive)
                 if result.get("status") == "ok":
-                    lines = [f"  {'\ud83d\udcc1' if it.get('type')=='dossier' else '\ud83d\udcc4'} \"{it['nom']}\"  [id:{it.get('id','')}]" for it in result.get("items", [])]
+                    lines = [f"  {'📁' if it.get('type')=='dossier' else '📄'} \"{it['nom']}\"  [id:{it.get('id','')}]" for it in result.get("items", [])]
                     actions_confirmed.append(f"🔍 '{query_drive}' — {result['count']} résultat(s) :\n" + "\n".join(lines))
                 else: actions_confirmed.append(f"❌ {result.get('message')}")
             except Exception as e: actions_confirmed.append(f"❌ {str(e)[:80]}")
@@ -380,6 +393,86 @@ Mémoire — tu choisis librement tes catégories :
                     result = copy_drive_item(outlook_token, source_id, dest_id, new_name, drive_id)
                     actions_confirmed.append(f"✅ {result.get('message', 'Copie lancée.')}" if result.get("status") == "ok" else f"❌ {result.get('message')}")
                 except Exception as e: actions_confirmed.append(f"❌ {str(e)[:80]}")
+
+        # ─── TEAMS ───
+        for match in re.finditer(r'\[ACTION:TEAMS_LIST:\]', raya_response):
+            try:
+                teams_result = list_teams(outlook_token)
+                if teams_result.get("status") == "ok":
+                    lines = []
+                    for t in teams_result.get("teams", []):
+                        ch_result = list_channels(outlook_token, t["id"])
+                        channels = ch_result.get("channels", []) if ch_result.get("status") == "ok" else []
+                        ch_names = ", ".join(c["name"] for c in channels[:5])
+                        lines.append(f"  🏢 {t['name']} [id:{t['id']}]\n     Canaux : {ch_names or '—'}")
+                    actions_confirmed.append(f"📋 Teams ({teams_result['count']}) :\n" + "\n".join(lines))
+                else:
+                    actions_confirmed.append(f"❌ Teams : {teams_result.get('message')}")
+            except Exception as e: actions_confirmed.append(f"❌ Teams : {str(e)[:80]}")
+
+        for match in re.finditer(r'\[ACTION:TEAMS_CHANNEL:([^|\]]+)\|([^\]]+)\]', raya_response):
+            team_id = match.group(1).strip(); channel_id = match.group(2).strip()
+            try:
+                result = read_channel_messages(outlook_token, team_id, channel_id)
+                if result.get("status") == "ok":
+                    lines = [f"  [{m['date'][:10]}] {m['sender']} : {m['content'][:120]}" for m in result.get("messages", [])]
+                    actions_confirmed.append(f"💬 Canal ({result['count']} messages) :\n" + "\n".join(lines))
+                else:
+                    actions_confirmed.append(f"❌ Canal : {result.get('message')}")
+            except Exception as e: actions_confirmed.append(f"❌ Canal : {str(e)[:80]}")
+
+        for match in re.finditer(r'\[ACTION:TEAMS_CHATS:\]', raya_response):
+            try:
+                result = list_chats(outlook_token)
+                if result.get("status") == "ok":
+                    lines = []
+                    for c in result.get("chats", []):
+                        type_icon = "👤" if c["type"] == "oneOnOne" else "👥"
+                        lines.append(f"  {type_icon} {c['topic']} [id:{c['id'][:20]}...]")
+                    actions_confirmed.append(f"💬 Chats Teams ({result['count']}) :\n" + "\n".join(lines))
+                else:
+                    actions_confirmed.append(f"❌ Chats : {result.get('message')}")
+            except Exception as e: actions_confirmed.append(f"❌ Chats : {str(e)[:80]}")
+
+        for match in re.finditer(r'\[ACTION:TEAMS_READCHAT:([^\]]+)\]', raya_response):
+            chat_id = match.group(1).strip()
+            try:
+                result = read_chat_messages(outlook_token, chat_id)
+                if result.get("status") == "ok":
+                    lines = [f"  [{m['date'][:10]}] {m['sender']} : {m['content'][:150]}" for m in result.get("messages", [])]
+                    actions_confirmed.append(f"💬 Chat ({result['count']} messages) :\n" + "\n".join(lines))
+                else:
+                    actions_confirmed.append(f"❌ Chat : {result.get('message')}")
+            except Exception as e: actions_confirmed.append(f"❌ Chat : {str(e)[:80]}")
+
+        for match in re.finditer(r'\[ACTION:TEAMS_MSG:([^|\]]+)\|(.+?)\]', raya_response, re.DOTALL):
+            email = match.group(1).strip(); text = match.group(2).strip()
+            try:
+                result = send_message_to_user(outlook_token, email, text)
+                actions_confirmed.append(result.get("message", "✅ Message Teams envoyé.") if result.get("status") == "ok" else f"❌ {result.get('message')}")
+            except Exception as e: actions_confirmed.append(f"❌ Teams MSG : {str(e)[:80]}")
+
+        for match in re.finditer(r'\[ACTION:TEAMS_REPLYCHAT:([^|\]]+)\|(.+?)\]', raya_response, re.DOTALL):
+            chat_id = match.group(1).strip(); text = match.group(2).strip()
+            try:
+                result = send_chat_message(outlook_token, chat_id, text)
+                actions_confirmed.append("✅ Réponse Teams envoyée." if result.get("status") == "ok" else f"❌ {result.get('message')}")
+            except Exception as e: actions_confirmed.append(f"❌ Teams reply : {str(e)[:80]}")
+
+        for match in re.finditer(r'\[ACTION:TEAMS_SENDCHANNEL:([^|\]]+)\|([^|\]]+)\|(.+?)\]', raya_response, re.DOTALL):
+            team_id = match.group(1).strip(); channel_id = match.group(2).strip(); text = match.group(3).strip()
+            try:
+                result = send_channel_message(outlook_token, team_id, channel_id, text)
+                actions_confirmed.append("✅ Message canal Teams envoyé." if result.get("status") == "ok" else f"❌ {result.get('message')}")
+            except Exception as e: actions_confirmed.append(f"❌ Teams canal : {str(e)[:80]}")
+
+        for match in re.finditer(r'\[ACTION:TEAMS_GROUPE:([^|\]]+)\|([^|\]]+)\|(.+?)\]', raya_response, re.DOTALL):
+            emails_raw = match.group(1).strip(); topic = match.group(2).strip(); text = match.group(3).strip()
+            emails = [e.strip() for e in emails_raw.split(',') if e.strip()]
+            try:
+                result = create_group_chat(outlook_token, emails, topic, text)
+                actions_confirmed.append(result.get("message", "✅ Groupe Teams créé.") if result.get("status") == "ok" else f"❌ {result.get('message')}")
+            except Exception as e: actions_confirmed.append(f"❌ Teams groupe : {str(e)[:80]}")
 
     synth_threshold = get_memoire_param(username, "synth_threshold", 15)
 
