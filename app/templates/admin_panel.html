@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Aria — Panel Admin</title>
+<title>Raya — Panel Admin</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -28,20 +28,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; }
 body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; min-height: 100vh; }
-
-/* === HEADER === */
-.header {
-  background: var(--bg2);
-  border-bottom: 1px solid var(--border);
-  padding: 0 28px;
-  height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  position: sticky;
-  top: 0;
-  z-index: 100;
-}
+.header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 28px; height: 56px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
 .header-left { display: flex; align-items: center; gap: 16px; }
 .logo { font-family: var(--mono); font-size: 18px; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
 .logo span { color: var(--accent); }
@@ -54,101 +41,34 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 #clock { font-family: var(--mono); font-size: 12px; color: var(--text3); }
 .btn-logout { font-family: var(--mono); font-size: 11px; color: var(--text3); background: none; border: 1px solid var(--border); padding: 5px 12px; border-radius: 4px; cursor: pointer; transition: all 0.15s; text-decoration: none; }
 .btn-logout:hover { color: var(--text); border-color: var(--border2); }
-
-/* === NAV TABS === */
-.nav-tabs {
-  background: var(--bg2);
-  border-bottom: 1px solid var(--border);
-  padding: 0 28px;
-  display: flex;
-  gap: 0;
-}
-.tab {
-  font-family: var(--mono);
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text3);
-  padding: 14px 20px;
-  cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: all 0.15s;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
-  user-select: none;
-}
+.nav-tabs { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 28px; display: flex; gap: 0; }
+.tab { font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--text3); padding: 14px 20px; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; letter-spacing: 0.5px; text-transform: uppercase; user-select: none; }
 .tab:hover { color: var(--text2); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-
-/* === LAYOUT === */
 .main { padding: 28px; max-width: 1400px; margin: 0 auto; }
 .section { display: none; }
 .section.active { display: block; }
-
-/* === STAT CARDS === */
 .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-bottom: 28px; }
-.stat-card {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 18px 20px;
-  transition: border-color 0.2s;
-}
+.stat-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 18px 20px; transition: border-color 0.2s; }
 .stat-card:hover { border-color: var(--border2); }
 .stat-label { font-family: var(--mono); font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
 .stat-value { font-family: var(--mono); font-size: 26px; font-weight: 700; color: #fff; }
 .stat-value.green { color: var(--green); }
 .stat-value.accent { color: var(--accent); }
-.stat-sub { font-family: var(--mono); font-size: 10px; color: var(--text3); margin-top: 4px; }
-
-/* === SECTION TITLE === */
-.section-title {
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text3);
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  margin-bottom: 14px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.section-title::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--border);
-}
-
-/* === TABLE === */
+.section-title { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 14px; display: flex; align-items: center; gap: 10px; }
+.section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 .table-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 28px; }
 table { width: 100%; border-collapse: collapse; }
-th {
-  font-family: var(--mono);
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text3);
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  padding: 12px 16px;
-  text-align: left;
-  background: var(--bg3);
-  border-bottom: 1px solid var(--border);
-}
+th { font-family: var(--mono); font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; padding: 12px 16px; text-align: left; background: var(--bg3); border-bottom: 1px solid var(--border); }
 td { padding: 12px 16px; border-bottom: 1px solid var(--border); color: var(--text); font-size: 13px; vertical-align: middle; }
 tr:last-child td { border-bottom: none; }
 tr:hover td { background: rgba(255,255,255,0.02); }
 .mono { font-family: var(--mono); font-size: 12px; }
-
-/* === BADGES === */
 .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; border-radius: 3px; font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.5px; }
 .badge-green { background: rgba(0,230,118,0.1); color: var(--green); border: 1px solid rgba(0,230,118,0.2); }
 .badge-blue { background: rgba(21,101,192,0.2); color: #64b5f6; border: 1px solid rgba(21,101,192,0.3); }
-.badge-yellow { background: rgba(255,202,40,0.1); color: var(--yellow); border: 1px solid rgba(255,202,40,0.2); }
 .badge-red { background: rgba(255,82,82,0.1); color: var(--red); border: 1px solid rgba(255,82,82,0.2); }
 .badge-gray { background: rgba(255,255,255,0.05); color: var(--text3); border: 1px solid var(--border); }
-
-/* === BUTTONS === */
 .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 6px; font-family: var(--mono); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; border: none; letter-spacing: 0.3px; }
 .btn-primary { background: var(--accent2); color: #fff; }
 .btn-primary:hover { background: #1976d2; }
@@ -158,93 +78,47 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 .btn-ghost:hover { border-color: var(--border2); color: var(--text); }
 .btn-accent { background: rgba(0,188,212,0.12); color: var(--accent); border: 1px solid rgba(0,188,212,0.25); }
 .btn-accent:hover { background: rgba(0,188,212,0.2); }
-button:disabled { opacity: 0.4; cursor: not-allowed; }
-
-/* === ACTIONS ROW === */
+.btn-warn { background: rgba(255,202,40,0.1); color: var(--yellow); border: 1px solid rgba(255,202,40,0.25); }
+.btn-warn:hover { background: rgba(255,202,40,0.2); }
 .actions-row { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
-
-/* === MODAL === */
-.modal-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.7);
-  z-index: 1000;
-  align-items: center;
-  justify-content: center;
-  backdrop-filter: blur(4px);
-}
+.modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
 .modal-overlay.open { display: flex; }
-.modal {
-  background: var(--bg2);
-  border: 1px solid var(--border2);
-  border-radius: 12px;
-  padding: 28px;
-  width: 100%;
-  max-width: 480px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-}
+.modal { background: var(--bg2); border: 1px solid var(--border2); border-radius: 12px; padding: 28px; width: 100%; max-width: 480px; box-shadow: 0 20px 60px rgba(0,0,0,0.6); max-height: 90vh; overflow-y: auto; }
 .modal-title { font-family: var(--mono); font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 20px; }
 .form-group { margin-bottom: 16px; }
 label { display: block; font-family: var(--mono); font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
-input[type=text], input[type=password], select {
-  width: 100%;
-  background: var(--bg3);
-  border: 1px solid var(--border2);
-  border-radius: 6px;
-  color: var(--text);
-  font-family: var(--mono);
-  font-size: 13px;
-  padding: 10px 12px;
-  outline: none;
-  transition: border-color 0.15s;
-}
+input[type=text], input[type=password], input[type=email], select { width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; color: var(--text); font-family: var(--mono); font-size: 13px; padding: 10px 12px; outline: none; transition: border-color 0.15s; }
 input:focus, select:focus { border-color: var(--accent); }
 select option { background: var(--bg3); }
 .modal-footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
-
-/* === ALERT === */
-.alert {
-  padding: 12px 16px;
-  border-radius: 6px;
-  font-family: var(--mono);
-  font-size: 12px;
-  margin-bottom: 16px;
-  display: none;
-}
+.alert { padding: 12px 16px; border-radius: 6px; font-family: var(--mono); font-size: 12px; margin-bottom: 16px; display: none; }
 .alert.ok { background: rgba(0,230,118,0.1); border: 1px solid rgba(0,230,118,0.2); color: var(--green); display: block; }
 .alert.err { background: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.2); color: var(--red); display: block; }
-
-/* === RULES TABLE === */
+.reset-box { background: rgba(0,230,118,0.07); border: 1px solid rgba(0,230,118,0.2); border-radius: 6px; padding: 12px 14px; margin-top: 12px; }
+.reset-link { font-family: var(--mono); font-size: 11px; word-break: break-all; color: var(--green); margin: 6px 0; }
 .filter-row { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
 .filter-row select { width: auto; min-width: 150px; }
-
-/* === LOADER === */
 .loader { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.6s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .loading-row td { color: var(--text3); font-family: var(--mono); font-size: 12px; text-align: center; padding: 28px; }
-
-/* === TOOLS GRID === */
 .tools-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; margin-top: 14px; }
 .tool-card { background: var(--bg3); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
 .tool-name { font-family: var(--mono); font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 8px; }
 .tool-meta { font-family: var(--mono); font-size: 11px; color: var(--text3); margin-bottom: 4px; }
-
-/* === QUICK ACTIONS === */
 .action-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
 .action-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
 .action-card-title { font-family: var(--mono); font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 6px; }
 .action-card-desc { font-size: 12px; color: var(--text2); margin-bottom: 16px; line-height: 1.5; }
 .action-result { font-family: var(--mono); font-size: 11px; color: var(--green); margin-top: 10px; min-height: 16px; }
 .action-result.err { color: var(--red); }
+.divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
 </style>
 </head>
 <body>
 
-<!-- HEADER -->
 <header class="header">
   <div class="header-left">
-    <div class="logo">⚡ Aria <span>//</span> Admin</div>
+    <div class="logo">⚡ Raya <span>//</span> Admin</div>
     <span class="badge-admin">PANEL</span>
     <span id="health-status" class="status-dot"><span class="dot off" id="health-dot"></span><span id="health-text">vérification...</span></span>
   </div>
@@ -255,7 +129,6 @@ select option { background: var(--bg3); }
   </div>
 </header>
 
-<!-- TABS -->
 <nav class="nav-tabs">
   <div class="tab active" onclick="switchTab('memory')">Mémoire</div>
   <div class="tab" onclick="switchTab('users')">Utilisateurs</div>
@@ -266,49 +139,41 @@ select option { background: var(--bg3); }
 
 <main class="main">
 
-<!-- ========== ONGLET MÉMOIRE ========== -->
+<!-- MÉMOIRE -->
 <section id="tab-memory" class="section active">
   <div class="stats-grid" id="memory-stats">
     <div class="stat-card"><div class="stat-label">Chargement</div><div class="stat-value"><span class="loader"></span></div></div>
   </div>
   <div class="section-title">Détail par utilisateur</div>
   <div class="table-wrap">
-    <table id="memory-table">
-      <thead><tr>
-        <th>Utilisateur</th><th>Conversations</th><th>Règles actives</th><th>Insights</th><th>Mails</th><th>Résumé chaud</th>
-      </tr></thead>
-      <tbody id="memory-tbody"><tr class="loading-row"><td colspan="6"><span class="loader"></span> Chargement...</td></tr></tbody>
+    <table>
+      <thead><tr><th>Utilisateur</th><th>Email</th><th>Scope</th><th>Conversations</th><th>Règles</th><th>Insights</th><th>Mails</th></tr></thead>
+      <tbody id="memory-tbody"><tr class="loading-row"><td colspan="7"><span class="loader"></span> Chargement...</td></tr></tbody>
     </table>
   </div>
 </section>
 
-<!-- ========== ONGLET UTILISATEURS ========== -->
+<!-- UTILISATEURS -->
 <section id="tab-users" class="section">
   <div class="actions-row">
     <button class="btn btn-primary" onclick="openModal('create-user')">+ Créer un utilisateur</button>
-    <button class="btn btn-ghost" onclick="loadUsers()">&#8635; Actualiser</button>
+    <button class="btn btn-ghost" onclick="loadUsers()">↺ Actualiser</button>
   </div>
-  <div id="user-alert"></div>
+  <div id="user-alert" class="alert"></div>
   <div class="table-wrap">
-    <table id="users-table">
-      <thead><tr>
-        <th>Utilisateur</th><th>Scope</th><th>Dernière connexion</th><th>Créé le</th><th>Outils</th><th>Actions</th>
-      </tr></thead>
+    <table>
+      <thead><tr><th>Identifiant</th><th>Email</th><th>Scope</th><th>Dernière connexion</th><th>Créé le</th><th>Actions</th></tr></thead>
       <tbody id="users-tbody"><tr class="loading-row"><td colspan="6"><span class="loader"></span> Chargement...</td></tr></tbody>
     </table>
   </div>
-
-  <!-- Outils d'un utilisateur -->
   <div id="tools-section" style="display:none">
     <div class="section-title" id="tools-title">Outils</div>
-    <div class="actions-row">
-      <button class="btn btn-ghost" onclick="hideTools()">Fermer</button>
-    </div>
+    <div class="actions-row"><button class="btn btn-ghost" onclick="hideTools()">Fermer</button></div>
     <div class="tools-grid" id="tools-grid"></div>
   </div>
 </section>
 
-<!-- ========== ONGLET RÈGLES ========== -->
+<!-- RÈGLES -->
 <section id="tab-rules" class="section">
   <div class="filter-row">
     <select id="rules-user-filter" onchange="loadRules()"><option value="">Tous les utilisateurs</option></select>
@@ -319,136 +184,161 @@ select option { background: var(--bg3); }
       <option>memoire</option><option>comportement</option><option>style</option><option>métier</option>
     </select>
     <select id="rules-active-filter" onchange="filterRulesDisplay()">
-      <option value="">Toutes (actives + inactives)</option>
+      <option value="">Toutes</option>
       <option value="true">Actives seulement</option>
       <option value="false">Inactives seulement</option>
     </select>
-    <button class="btn btn-ghost" onclick="loadRules()">&#8635; Actualiser</button>
-    <span id="rules-count" style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-left:8px;"></span>
+    <button class="btn btn-ghost" onclick="loadRules()">↺ Actualiser</button>
+    <span id="rules-count" style="font-family:var(--mono);font-size:11px;color:var(--text3)"></span>
   </div>
   <div class="table-wrap">
     <table>
-      <thead><tr>
-        <th>ID</th><th>User</th><th>Catégorie</th><th>Règle</th><th>Confiance</th><th>Renf.</th><th>Statut</th><th>Créé</th>
-      </tr></thead>
-      <tbody id="rules-tbody"><tr class="loading-row"><td colspan="8"><span class="loader"></span> Chargement...</td></tr></tbody>
+      <thead><tr><th>ID</th><th>User</th><th>Catégorie</th><th>Règle</th><th>Conf.</th><th>Renf.</th><th>Statut</th></tr></thead>
+      <tbody id="rules-tbody"><tr class="loading-row"><td colspan="7"><span class="loader"></span> Chargement...</td></tr></tbody>
     </table>
   </div>
 </section>
 
-<!-- ========== ONGLET INSIGHTS ========== -->
+<!-- INSIGHTS -->
 <section id="tab-insights" class="section">
   <div class="filter-row">
     <select id="insights-user-filter" onchange="loadInsights()"><option value="">Tous les utilisateurs</option></select>
-    <button class="btn btn-ghost" onclick="loadInsights()">&#8635; Actualiser</button>
-    <span id="insights-count" style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-left:8px;"></span>
+    <button class="btn btn-ghost" onclick="loadInsights()">↺ Actualiser</button>
+    <span id="insights-count" style="font-family:var(--mono);font-size:11px;color:var(--text3)"></span>
   </div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>User</th><th>Sujet</th><th>Insight</th><th>Renf.</th><th>Date</th></tr></thead>
-      <tbody id="insights-tbody"><tr class="loading-row"><td colspan="5"><span class="loader"></span> Chargement...</td></tr></tbody>
+      <thead><tr><th>User</th><th>Sujet</th><th>Insight</th><th>Renf.</th></tr></thead>
+      <tbody id="insights-tbody"><tr class="loading-row"><td colspan="4"><span class="loader"></span> Chargement...</td></tr></tbody>
     </table>
   </div>
 </section>
 
-<!-- ========== ONGLET ACTIONS ========== -->
+<!-- ACTIONS -->
 <section id="tab-actions" class="section">
   <div class="section-title">Actions rapides</div>
   <div class="action-cards">
-
     <div class="action-card">
       <div class="action-card-title">🧠 Rebuild mémoire</div>
-      <div class="action-card-desc">Reconstruit le résumé chaud, les fiches contacts et les exemples de style pour l’utilisateur connecté.</div>
-      <button class="btn btn-accent" onclick="quickAction('/build-memory', 'build-result')">Lancer</button>
+      <div class="action-card-desc">Reconstruit le résumé chaud, les fiches contacts et les exemples de style.</div>
+      <button class="btn btn-accent" onclick="quickAction('/build-memory','build-result')">Lancer</button>
       <div class="action-result" id="build-result"></div>
     </div>
-
     <div class="action-card">
       <div class="action-card-title">🔄 Synthèse session</div>
-      <div class="action-card-desc">Synthétise les 15 dernières conversations en règles et insights persistants.</div>
-      <button class="btn btn-accent" onclick="quickAction('/synth', 'synth-result')">Lancer</button>
+      <div class="action-card-desc">Synthétise les dernières conversations en règles et insights persistants.</div>
+      <button class="btn btn-accent" onclick="quickAction('/synth','synth-result')">Lancer</button>
       <div class="action-result" id="synth-result"></div>
     </div>
-
     <div class="action-card">
       <div class="action-card-title">📧 Analyser mails bruts</div>
-      <div class="action-card-desc">Lance l’analyse IA sur les mails ingurés non encore analysés (inbox_raw).</div>
-      <button class="btn btn-accent" onclick="quickAction('/analyze-raw-mails', 'analyze-result')">Lancer</button>
+      <div class="action-card-desc">Lance l'analyse IA sur les mails non encore analysés.</div>
+      <button class="btn btn-accent" onclick="quickAction('/analyze-raw-mails','analyze-result')">Lancer</button>
       <div class="action-result" id="analyze-result"></div>
     </div>
-
     <div class="action-card">
       <div class="action-card-title">📊 Build profil de style</div>
-      <div class="action-card-desc">Reconstruit le profil rédactionnel à partir des mails envoyés en mémoire.</div>
-      <button class="btn btn-accent" onclick="quickAction('/build-style-profile', 'style-result')">Lancer</button>
+      <div class="action-card-desc">Reconstruit le profil rédactionnel à partir des mails envoyés.</div>
+      <button class="btn btn-accent" onclick="quickAction('/build-style-profile','style-result')">Lancer</button>
       <div class="action-result" id="style-result"></div>
     </div>
-
     <div class="action-card">
-      <div class="action-card-title">📬 Ingestion mails inbox</div>
-      <div class="action-card-desc">Ingeste les 50 derniers mails inbox en base (sans analyse IA).</div>
-      <button class="btn btn-accent" onclick="quickAction('/learn-inbox-mails', 'inbox-result')">Lancer</button>
+      <div class="action-card-title">📬 Ingestion inbox</div>
+      <div class="action-card-desc">Ingeste les 50 derniers mails inbox en base.</div>
+      <button class="btn btn-accent" onclick="quickAction('/learn-inbox-mails','inbox-result')">Lancer</button>
       <div class="action-result" id="inbox-result"></div>
     </div>
-
     <div class="action-card">
-      <div class="action-card-title">📤 Ingestion mails envoyés</div>
+      <div class="action-card-title">📤 Ingestion envoyés</div>
       <div class="action-card-desc">Ingeste les mails envoyés pour enrichir le style rédactionnel.</div>
-      <button class="btn btn-accent" onclick="quickAction('/learn-sent-mails', 'sent-result')">Lancer</button>
+      <button class="btn btn-accent" onclick="quickAction('/learn-sent-mails','sent-result')">Lancer</button>
       <div class="action-result" id="sent-result"></div>
     </div>
-
     <div class="action-card">
       <div class="action-card-title">🗑️ Purge mémoire</div>
-      <div class="action-card-desc">Supprime les mails en base de plus de 90 jours (configurable via règle memoire/purge_days).</div>
-      <button class="btn btn-danger" onclick="quickAction('/purge-memory', 'purge-result')">Lancer</button>
+      <div class="action-card-desc">Supprime les mails en base de plus de 90 jours.</div>
+      <button class="btn btn-danger" onclick="quickAction('/purge-memory','purge-result')">Lancer</button>
       <div class="action-result" id="purge-result"></div>
     </div>
-
     <div class="action-card">
       <div class="action-card-title">⚙️ Init base de données</div>
-      <div class="action-card-desc">Crée les tables manquantes et exécute les migrations. Sans danger si appelé plusieurs fois.</div>
-      <button class="btn btn-ghost" onclick="quickAction('/init-db', 'initdb-result')">Lancer</button>
+      <div class="action-card-desc">Crée les tables manquantes et exécute les migrations.</div>
+      <button class="btn btn-ghost" onclick="quickAction('/init-db','initdb-result')">Lancer</button>
       <div class="action-result" id="initdb-result"></div>
     </div>
-
   </div>
 </section>
 
 </main>
 
-<!-- ========== MODAL CRÉATION USER ========== -->
+<!-- MODAL CRÉATION USER -->
 <div class="modal-overlay" id="modal-create-user">
   <div class="modal">
     <div class="modal-title">Créer un utilisateur</div>
-    <div id="create-user-alert"></div>
+    <div id="create-user-alert" class="alert"></div>
     <div class="form-group">
       <label>Identifiant</label>
-      <input type="text" id="new-username" placeholder="ex: sabrina" autocomplete="off">
+      <input type="text" id="new-username" placeholder="ex: arlene" autocomplete="off">
     </div>
     <div class="form-group">
-      <label>Mot de passe</label>
+      <label>Email</label>
+      <input type="email" id="new-email" placeholder="prenom@couffrant-solar.fr">
+    </div>
+    <div class="form-group">
+      <label>Mot de passe temporaire</label>
       <input type="password" id="new-password" placeholder="8 caractères minimum">
     </div>
     <div class="form-group">
-      <label>Scope</label>
+      <label>Rôle</label>
       <select id="new-scope">
-        <option value="couffrant_solar">couffrant_solar — Employé Couffrant Solar</option>
-        <option value="admin">admin — Administrateur (accès complet)</option>
+        <option value="user">Utilisateur</option>
+        <option value="tenant_admin">Admin société</option>
+        <option value="admin">Super-admin</option>
       </select>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('create-user')">Annuler</button>
-      <button class="btn btn-primary" onclick="createUser()">Créer le compte</button>
+      <button class="btn btn-primary" onclick="createUser()">Créer</button>
     </div>
   </div>
 </div>
 
-<!-- ========== MODAL CONFIRMATION SUPPRESSION ========== -->
+<!-- MODAL ÉDITION USER -->
+<div class="modal-overlay" id="modal-edit-user">
+  <div class="modal">
+    <div class="modal-title" id="edit-modal-title">Éditer l'utilisateur</div>
+    <div id="edit-user-alert" class="alert"></div>
+    <div class="form-group">
+      <label>Email</label>
+      <input type="email" id="edit-email" placeholder="prenom@domaine.fr">
+    </div>
+    <div class="form-group">
+      <label>Rôle</label>
+      <select id="edit-scope">
+        <option value="user">Utilisateur</option>
+        <option value="tenant_admin">Admin société</option>
+        <option value="admin">Super-admin</option>
+      </select>
+    </div>
+    <hr class="divider">
+    <p style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:10px">RÉINITIALISATION MOT DE PASSE</p>
+    <button class="btn btn-warn" style="width:100%" onclick="resetPassword()">Générer un lien de réinitialisation</button>
+    <div id="reset-result"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('edit-user')">Annuler</button>
+      <button class="btn btn-primary" onclick="saveUser()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL SUPPRESSION USER -->
 <div class="modal-overlay" id="modal-delete-user">
   <div class="modal">
-    <div class="modal-title">❌ Supprimer l’utilisateur</div>
-    <p style="color:var(--text2);font-size:13px;line-height:1.6;margin-bottom:20px;">Cette action supprimera le compte <strong id="delete-username-label" style="color:#fff"></strong> et ses outils configurés. Les données mémoire (mails, règles, conversations) seront conservées en base.</p>
+    <div class="modal-title">Supprimer l'utilisateur</div>
+    <p style="color:var(--text2);font-size:13px;line-height:1.6;margin-bottom:20px">
+      Supprimer le compte <strong id="delete-username-label" style="color:#fff"></strong> et tous ses outils.<br>
+      Les données mémoire (mails, règles, conversations) seront également supprimées.
+    </p>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('delete-user')">Annuler</button>
       <button class="btn btn-danger" onclick="confirmDeleteUser()">Supprimer</button>
@@ -457,285 +347,247 @@ select option { background: var(--bg3); }
 </div>
 
 <script>
-let allRules = [];
-let allInsights = [];
-let usernameToDelete = null;
+let allRules = [], allInsights = [];
+let currentEditUser = null, usernameToDelete = null;
 
-// === CLOCK ===
+// CLOCK
 function updateClock() {
-  const now = new Date();
-  document.getElementById('clock').textContent = now.toLocaleString('fr-FR', {weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  document.getElementById('clock').textContent = new Date().toLocaleString('fr-FR', {weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'});
 }
-setInterval(updateClock, 1000);
-updateClock();
+setInterval(updateClock, 1000); updateClock();
 
-// === HEALTH ===
+// HEALTH
 async function checkHealth() {
   try {
-    const r = await fetch('/health');
-    const d = await r.json();
-    const dot = document.getElementById('health-dot');
-    const txt = document.getElementById('health-text');
-    dot.className = 'dot';
-    txt.textContent = d.memory_module ? 'Online • mémoire OK' : 'Online • mémoire KO';
-    if (!d.memory_module) dot.style.background = 'var(--yellow)';
+    const d = await (await fetch('/health')).json();
+    document.getElementById('health-dot').className = 'dot';
+    document.getElementById('health-text').textContent = d.memory_module ? 'Online • mémoire OK' : 'Online • mémoire KO';
   } catch(e) {
     document.getElementById('health-dot').className = 'dot off';
     document.getElementById('health-text').textContent = 'Hors ligne';
   }
 }
-checkHealth();
-setInterval(checkHealth, 30000);
+checkHealth(); setInterval(checkHealth, 30000);
 
-// === TABS ===
+// TABS
 function switchTab(name) {
-  document.querySelectorAll('.tab').forEach((t, i) => {
-    const tabs = ['memory','users','rules','insights','actions'];
-    t.classList.toggle('active', tabs[i] === name);
-  });
+  const tabs = ['memory','users','rules','insights','actions'];
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', tabs[i] === name));
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
-  document.getElementById('tab-' + name).classList.add('active');
+  document.getElementById('tab-'+name).classList.add('active');
   if (name === 'memory') loadMemoryStatus();
   if (name === 'users') loadUsers();
   if (name === 'rules') { populateUserFilters(); loadRules(); }
   if (name === 'insights') { populateUserFilters(); loadInsights(); }
 }
 
-// === FORMAT ===
-function fmt(n) { return (n || 0).toLocaleString('fr-FR'); }
-function fmtDate(d) {
-  if (!d) return '—';
-  return new Date(d).toLocaleDateString('fr-FR', {day:'2-digit', month:'short', year:'numeric'});
-}
-function fmtDateShort(d) {
+// FORMAT
+const fmt = n => (n||0).toLocaleString('fr-FR');
+const fmtDate = d => d ? new Date(d).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+const fmtDateShort = d => {
   if (!d) return '—';
   const dt = new Date(d);
-  return dt.toLocaleDateString('fr-FR', {day:'2-digit', month:'short'}) + ' ' + dt.toLocaleTimeString('fr-FR', {hour:'2-digit', minute:'2-digit'});
-}
+  return dt.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'}) + ' ' + dt.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+};
 
-// === MEMORY ===
+// MEMORY
 async function loadMemoryStatus() {
-  const r = await fetch('/admin/memory-status');
-  const data = await r.json();
-  const statsEl = document.getElementById('memory-stats');
-  const tbody = document.getElementById('memory-tbody');
-
-  const totalUsers = data.length;
-  const totalMails = data.reduce((s, u) => s + u.mails, 0);
-  const totalConvs = data.reduce((s, u) => s + u.conversations, 0);
-  const totalRules = data.reduce((s, u) => s + u.rules, 0);
-  const totalInsights = data.reduce((s, u) => s + u.insights, 0);
-
-  statsEl.innerHTML = `
-    <div class="stat-card"><div class="stat-label">Utilisateurs</div><div class="stat-value accent">${totalUsers}</div></div>
-    <div class="stat-card"><div class="stat-label">Mails en base</div><div class="stat-value">${fmt(totalMails)}</div></div>
-    <div class="stat-card"><div class="stat-label">Conversations</div><div class="stat-value">${fmt(totalConvs)}</div></div>
-    <div class="stat-card"><div class="stat-label">Règles actives</div><div class="stat-value green">${fmt(totalRules)}</div></div>
-    <div class="stat-card"><div class="stat-label">Insights</div><div class="stat-value">${fmt(totalInsights)}</div></div>
-  `;
-
-  tbody.innerHTML = data.map(u => `
+  const data = await (await fetch('/admin/memory-status')).json();
+  const tot = (k) => data.reduce((s,u) => s+(u[k]||0), 0);
+  document.getElementById('memory-stats').innerHTML = `
+    <div class="stat-card"><div class="stat-label">Utilisateurs</div><div class="stat-value accent">${data.length}</div></div>
+    <div class="stat-card"><div class="stat-label">Mails en base</div><div class="stat-value">${fmt(tot('mails'))}</div></div>
+    <div class="stat-card"><div class="stat-label">Conversations</div><div class="stat-value">${fmt(tot('conversations') || tot('conv'))}</div></div>
+    <div class="stat-card"><div class="stat-label">Règles</div><div class="stat-value green">${fmt(tot('rules'))}</div></div>
+    <div class="stat-card"><div class="stat-label">Insights</div><div class="stat-value">${fmt(tot('insights'))}</div></div>`;
+  document.getElementById('memory-tbody').innerHTML = data.map(u => `
     <tr>
-      <td><span class="mono">${u.username}</span></td>
-      <td><span class="mono">${fmt(u.conversations)}</span></td>
-      <td><span class="badge badge-green">${fmt(u.rules)}</span></td>
-      <td><span class="mono">${fmt(u.insights)}</span></td>
-      <td><span class="mono">${fmt(u.mails)}</span></td>
-      <td><span class="badge badge-gray">N/A</span></td>
+      <td><strong class="mono">${u.username}</strong></td>
+      <td style="font-size:12px;color:var(--text2)">${u.email||'—'}</td>
+      <td><span class="badge ${u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope||'user'}</span></td>
+      <td class="mono">${fmt(u.conversations||u.conv||0)}</td>
+      <td><span class="badge badge-green">${fmt(u.rules||0)}</span></td>
+      <td class="mono">${fmt(u.insights||0)}</td>
+      <td class="mono">${fmt(u.mails||0)}</td>
     </tr>`).join('');
 }
 
-// === USERS ===
+// USERS
 async function loadUsers() {
-  const tbody = document.getElementById('users-tbody');
-  tbody.innerHTML = '<tr class="loading-row"><td colspan="6"><span class="loader"></span> Chargement...</td></tr>';
-  const r = await fetch('/admin/users');
-  const data = await r.json();
-  tbody.innerHTML = data.map(u => `
+  document.getElementById('users-tbody').innerHTML = '<tr class="loading-row"><td colspan="6"><span class="loader"></span> Chargement...</td></tr>';
+  const data = await (await fetch('/admin/users')).json();
+  document.getElementById('users-tbody').innerHTML = data.map(u => `
     <tr>
       <td><strong class="mono">${u.username}</strong></td>
-      <td><span class="badge ${u.scope === 'admin' ? 'badge-blue' : 'badge-gray'}">${u.scope}</span></td>
-      <td class="mono" style="font-size:11px;color:var(--text2)">${u.last_login ? fmtDateShort(u.last_login) : '—'}</td>
+      <td style="font-size:12px;color:var(--text2)">${u.email||'—'}</td>
+      <td><span class="badge ${u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope||'user'}</span></td>
+      <td class="mono" style="font-size:11px;color:var(--text2)">${fmtDateShort(u.last_login)}</td>
       <td class="mono" style="font-size:11px;color:var(--text3)">${fmtDate(u.created_at)}</td>
-      <td><button class="btn btn-ghost" style="padding:5px 10px;font-size:11px" onclick="showTools('${u.username}')">Voir outils</button></td>
-      <td>${u.scope !== 'admin' ? `<button class="btn btn-danger" style="padding:5px 10px;font-size:11px" onclick="askDeleteUser('${u.username}')">Supprimer</button>` : '<span style="color:var(--text3);font-size:11px">protégé</span>'}</td>
+      <td style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="showTools('${u.username}')">Outils</button>
+        <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope||'user'}')">Éditer</button>
+        ${u.scope!=='admin'?`<button class="btn btn-danger" style="padding:4px 9px;font-size:11px" onclick="askDeleteUser('${u.username}')">Suppr.</button>`:''}
+      </td>
     </tr>`).join('');
 }
 
 async function showTools(username) {
   const section = document.getElementById('tools-section');
   const grid = document.getElementById('tools-grid');
-  const title = document.getElementById('tools-title');
-  title.innerHTML = `Outils de <strong style="color:#fff">${username}</strong>`;
+  document.getElementById('tools-title').innerHTML = `Outils de <strong style="color:#fff">${username}</strong>`;
   grid.innerHTML = '<span class="loader"></span>';
   section.style.display = 'block';
   section.scrollIntoView({behavior:'smooth', block:'nearest'});
-  const r = await fetch(`/admin/user-tools/${username}`);
-  const tools = await r.json();
+  const tools = await (await fetch(`/admin/user-tools/${username}`)).json();
   if (!tools.length) { grid.innerHTML = '<p style="color:var(--text3);font-family:var(--mono);font-size:12px">Aucun outil configuré.</p>'; return; }
   grid.innerHTML = tools.map(t => `
     <div class="tool-card">
       <div class="tool-name">${t.tool}</div>
-      <div class="tool-meta">Niveau : <span class="badge ${t.access_level === 'full' ? 'badge-green' : t.access_level === 'write' ? 'badge-blue' : 'badge-gray'}">${t.access_level}</span></div>
-      <div class="tool-meta">Actif : <span class="badge ${t.enabled ? 'badge-green' : 'badge-red'}">${t.enabled ? 'oui' : 'non'}</span></div>
-      ${Object.keys(t.config||{}).length ? `<div class="tool-meta" style="margin-top:8px;font-size:10px;color:var(--text3)">${JSON.stringify(t.config)}</div>` : ''}
+      <div class="tool-meta">Niveau : <span class="badge ${t.access_level==='full'?'badge-green':t.access_level==='write'?'badge-blue':'badge-gray'}">${t.access_level}</span></div>
+      <div class="tool-meta">Actif : <span class="badge ${t.enabled?'badge-green':'badge-red'}">${t.enabled?'oui':'non'}</span></div>
+      ${Object.keys(t.config||{}).length?`<div class="tool-meta" style="margin-top:6px;font-size:10px;color:var(--text3)">${JSON.stringify(t.config)}</div>`:''}
     </div>`).join('');
 }
+function hideTools() { document.getElementById('tools-section').style.display='none'; }
 
-function hideTools() { document.getElementById('tools-section').style.display = 'none'; }
+// MODALS
+function openModal(name) { document.getElementById('modal-'+name).classList.add('open'); }
+function closeModal(name) { document.getElementById('modal-'+name).classList.remove('open'); }
+function setAlert(id, msg, type) { const el=document.getElementById(id); el.className='alert '+type; el.textContent=msg; }
 
-// === CREATE USER ===
-function openModal(name) { document.getElementById('modal-' + name).classList.add('open'); }
-function closeModal(name) { document.getElementById('modal-' + name).classList.remove('open'); }
-
-function setAlert(id, msg, type) {
-  const el = document.getElementById(id);
-  el.className = 'alert ' + type;
-  el.textContent = msg;
-}
-
+// CREATE USER
 async function createUser() {
   const username = document.getElementById('new-username').value.trim();
+  const email = document.getElementById('new-email').value.trim();
   const password = document.getElementById('new-password').value;
   const scope = document.getElementById('new-scope').value;
-  if (!username || !password) { setAlert('create-user-alert', 'Identifiant et mot de passe requis.', 'err'); return; }
-  const r = await fetch('/admin/create-user', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({username, password, scope})
-  });
-  const d = await r.json();
-  if (d.status === 'ok') {
-    setAlert('user-alert', `✅ ${d.message}`, 'ok');
+  if (!username || !password) { setAlert('create-user-alert','Identifiant et mot de passe requis.','err'); return; }
+  const d = await (await fetch('/admin/create-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password,email,scope})})).json();
+  if (d.status==='ok') {
+    setAlert('user-alert','✅ '+d.message,'ok');
     closeModal('create-user');
-    document.getElementById('new-username').value = '';
-    document.getElementById('new-password').value = '';
+    document.getElementById('new-username').value='';
+    document.getElementById('new-email').value='';
+    document.getElementById('new-password').value='';
     loadUsers();
-  } else {
-    setAlert('create-user-alert', `❌ ${d.message || d.error}`, 'err');
+  } else { setAlert('create-user-alert','❌ '+(d.message||d.error),'err'); }
+}
+
+// EDIT USER
+function editUser(username, email, scope) {
+  currentEditUser = username;
+  document.getElementById('edit-modal-title').textContent = 'Éditer — ' + username;
+  document.getElementById('edit-email').value = email;
+  document.getElementById('edit-scope').value = scope;
+  document.getElementById('edit-user-alert').className = 'alert';
+  document.getElementById('reset-result').innerHTML = '';
+  openModal('edit-user');
+}
+
+async function saveUser() {
+  const email = document.getElementById('edit-email').value.trim();
+  const scope = document.getElementById('edit-scope').value;
+  const d = await (await fetch(`/admin/update-user/${currentEditUser}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,scope})})).json();
+  if (d.status==='ok') {
+    setAlert('user-alert','✅ Utilisateur mis à jour.','ok');
+    closeModal('edit-user');
+    loadUsers();
+  } else { setAlert('edit-user-alert','❌ '+(d.message||d.error),'err'); }
+}
+
+async function resetPassword() {
+  const d = await (await fetch(`/admin/reset-password/${currentEditUser}`,{method:'POST'})).json();
+  if (d.status==='ok') {
+    const sent = d.email_sent ? `Envoyé à ${d.email}` : 'Copiez le lien ci-dessous';
+    document.getElementById('reset-result').innerHTML = `
+      <div class="reset-box">
+        <div style="font-family:var(--mono);font-size:11px;color:var(--green);margin-bottom:4px">✓ Lien généré — ${sent}</div>
+        <div class="reset-link">${d.reset_url}</div>
+        <button class="btn btn-ghost" style="margin-top:8px;font-size:11px;padding:4px 10px" onclick="navigator.clipboard.writeText('${d.reset_url}').then(()=>this.textContent='Copié ✓')">Copier</button>
+      </div>`;
   }
 }
 
+// DELETE USER
 function askDeleteUser(username) {
   usernameToDelete = username;
   document.getElementById('delete-username-label').textContent = username;
   openModal('delete-user');
 }
-
 async function confirmDeleteUser() {
-  if (!usernameToDelete) return;
-  const r = await fetch(`/admin/delete-user/${usernameToDelete}`, {method:'DELETE'});
-  const d = await r.json();
-  if (d.status === 'ok') {
-    setAlert('user-alert', `✅ ${d.message}`, 'ok');
-    closeModal('delete-user');
-    loadUsers();
-  } else {
-    setAlert('user-alert', `❌ ${d.message || d.error}`, 'err');
-    closeModal('delete-user');
-  }
+  const d = await (await fetch(`/admin/delete-user/${usernameToDelete}`,{method:'DELETE'})).json();
+  if (d.status==='ok') { setAlert('user-alert','✅ '+d.message,'ok'); closeModal('delete-user'); loadUsers(); }
+  else { setAlert('user-alert','❌ '+(d.message||d.error),'err'); closeModal('delete-user'); }
   usernameToDelete = null;
 }
 
-// === RULES ===
+// FILTERS
 async function populateUserFilters() {
-  const r = await fetch('/admin/users');
-  const users = await r.json();
-  const selectors = ['rules-user-filter', 'insights-user-filter'];
-  selectors.forEach(id => {
+  const users = await (await fetch('/admin/users')).json();
+  ['rules-user-filter','insights-user-filter'].forEach(id => {
     const sel = document.getElementById(id);
-    if (sel.options.length <= 1) {
-      users.forEach(u => {
-        const opt = document.createElement('option');
-        opt.value = u.username; opt.textContent = u.username;
-        sel.appendChild(opt);
-      });
-    }
+    if (sel.options.length <= 1) users.forEach(u => { const o=document.createElement('option'); o.value=u.username; o.textContent=u.username; sel.appendChild(o); });
   });
 }
 
+// RULES
 async function loadRules() {
-  const tbody = document.getElementById('rules-tbody');
-  tbody.innerHTML = '<tr class="loading-row"><td colspan="8"><span class="loader"></span> Chargement...</td></tr>';
+  document.getElementById('rules-tbody').innerHTML = '<tr class="loading-row"><td colspan="7"><span class="loader"></span> Chargement...</td></tr>';
   const user = document.getElementById('rules-user-filter').value;
-  const url = user ? `/admin/rules?user=${user}` : '/admin/rules';
-  const r = await fetch(url);
-  allRules = await r.json();
+  allRules = await (await fetch(user?`/admin/rules?user=${user}`:'/admin/rules')).json();
   filterRulesDisplay();
 }
-
 function filterRulesDisplay() {
-  const catFilter = document.getElementById('rules-cat-filter').value;
-  const activeFilter = document.getElementById('rules-active-filter').value;
-  const tbody = document.getElementById('rules-tbody');
-  let filtered = allRules;
-  if (catFilter) filtered = filtered.filter(r => r.category === catFilter);
-  if (activeFilter === 'true') filtered = filtered.filter(r => r.active);
-  if (activeFilter === 'false') filtered = filtered.filter(r => !r.active);
-  document.getElementById('rules-count').textContent = `${filtered.length} règle(s)`;
-  if (!filtered.length) {
-    tbody.innerHTML = '<tr class="loading-row"><td colspan="8" style="color:var(--text3)">Aucune règle trouvée.</td></tr>';
-    return;
-  }
-  tbody.innerHTML = filtered.map(r => `
+  const cat = document.getElementById('rules-cat-filter').value;
+  const active = document.getElementById('rules-active-filter').value;
+  let f = allRules;
+  if (cat) f = f.filter(r => r.category===cat);
+  if (active==='true') f = f.filter(r => r.active);
+  if (active==='false') f = f.filter(r => !r.active);
+  document.getElementById('rules-count').textContent = `${f.length} règle(s)`;
+  document.getElementById('rules-tbody').innerHTML = f.length ? f.map(r => `
     <tr>
       <td class="mono" style="color:var(--text3);font-size:11px">${r.id}</td>
-      <td class="mono" style="font-size:12px">${r.username || '—'}</td>
+      <td class="mono" style="font-size:12px">${r.username||'—'}</td>
       <td><span class="badge badge-gray" style="font-size:9px">${r.category}</span></td>
       <td style="max-width:400px;font-size:12px;color:var(--text2)">${r.rule}</td>
-      <td class="mono" style="font-size:11px">${(r.confidence*100).toFixed(0)}%</td>
-      <td class="mono" style="font-size:11px">${r.reinforcements || 1}</td>
-      <td><span class="badge ${r.active ? 'badge-green' : 'badge-red'}">${r.active ? 'active' : 'inactive'}</span></td>
-      <td class="mono" style="font-size:10px;color:var(--text3)">${fmtDate(r.created_at)}</td>
-    </tr>`).join('');
+      <td class="mono" style="font-size:11px">${((r.confidence||0)*100).toFixed(0)}%</td>
+      <td class="mono" style="font-size:11px">${r.reinforcements||1}</td>
+      <td><span class="badge ${r.active?'badge-green':'badge-red'}">${r.active?'active':'inactive'}</span></td>
+    </tr>`).join('')
+  : '<tr class="loading-row"><td colspan="7" style="color:var(--text3)">Aucune règle.</td></tr>';
 }
 
-// === INSIGHTS ===
+// INSIGHTS
 async function loadInsights() {
-  const tbody = document.getElementById('insights-tbody');
-  tbody.innerHTML = '<tr class="loading-row"><td colspan="5"><span class="loader"></span> Chargement...</td></tr>';
+  document.getElementById('insights-tbody').innerHTML = '<tr class="loading-row"><td colspan="4"><span class="loader"></span> Chargement...</td></tr>';
   const user = document.getElementById('insights-user-filter').value;
-  const url = user ? `/admin/insights?user=${user}` : '/admin/insights';
-  const r = await fetch(url);
-  allInsights = await r.json();
+  allInsights = await (await fetch(user?`/admin/insights?user=${user}`:'/admin/insights')).json();
   document.getElementById('insights-count').textContent = `${allInsights.length} insight(s)`;
-  if (!allInsights.length) {
-    tbody.innerHTML = '<tr class="loading-row"><td colspan="5" style="color:var(--text3)">Aucun insight.</td></tr>';
-    return;
-  }
-  tbody.innerHTML = allInsights.map(i => `
+  document.getElementById('insights-tbody').innerHTML = allInsights.length ? allInsights.map(i => `
     <tr>
-      <td class="mono" style="font-size:12px">${i.username || '—'}</td>
+      <td class="mono" style="font-size:12px">${i.username||'—'}</td>
       <td><span class="badge badge-blue" style="font-size:10px">${i.topic}</span></td>
       <td style="font-size:12px;color:var(--text2);max-width:500px">${i.insight}</td>
       <td class="mono" style="font-size:11px">${i.reinforcements}</td>
-      <td class="mono" style="font-size:10px;color:var(--text3)">${fmtDate(i.created_at)}</td>
-    </tr>`).join('');
+    </tr>`).join('')
+  : '<tr class="loading-row"><td colspan="4" style="color:var(--text3)">Aucun insight.</td></tr>';
 }
 
-// === QUICK ACTIONS ===
-async function quickAction(url, resultId) {
-  const el = document.getElementById(resultId);
-  el.className = 'action-result';
-  el.textContent = 'En cours...';
+// QUICK ACTIONS
+async function quickAction(url, id) {
+  const el = document.getElementById(id);
+  el.className='action-result'; el.textContent='En cours...';
   try {
-    const r = await fetch(url);
-    const d = await r.json();
-    el.textContent = JSON.stringify(d).replace(/[{}",]/g, ' ').trim().substring(0, 120);
-    el.className = 'action-result';
-  } catch(e) {
-    el.textContent = 'Erreur: ' + e.message;
-    el.className = 'action-result err';
-  }
+    const d = await (await fetch(url)).json();
+    el.textContent = JSON.stringify(d).replace(/[{}"]/g,' ').trim().substring(0,120);
+  } catch(e) { el.textContent='Erreur: '+e.message; el.className='action-result err'; }
 }
 
-// === FERMER MODALS SUR ESC ET CLICK OUTSIDE ===
-document.addEventListener('keydown', e => { if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.open').forEach(m => m.classList.remove('open')); });
-document.querySelectorAll('.modal-overlay').forEach(overlay => {
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.classList.remove('open'); });
-});
+// KEYBOARD + CLICK OUTSIDE
+document.addEventListener('keydown', e => { if(e.key==='Escape') document.querySelectorAll('.modal-overlay.open').forEach(m=>m.classList.remove('open')); });
+document.querySelectorAll('.modal-overlay').forEach(o => o.addEventListener('click', e => { if(e.target===o) o.classList.remove('open'); }));
 
-// === INIT ===
 loadMemoryStatus();
 </script>
 </body>
