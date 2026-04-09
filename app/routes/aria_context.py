@@ -108,18 +108,12 @@ def load_agenda(outlook_token: str) -> list:
 
 
 def load_teams_context(username: str) -> str:
-    """
-    Charge le contexte Teams pour le prompt :
-    - Marqueurs actifs (chats/canaux que Raya surveille)
-    - Insights Teams récents extraits des conversations
-    """
     try:
         from app.memory_teams import get_teams_context_summary
         markers_summary = get_teams_context_summary(username)
     except Exception:
         markers_summary = ""
 
-    # Insights Teams récents (source='teams')
     teams_insights = ""
     try:
         conn = get_pg_conn()
@@ -141,6 +135,25 @@ def load_teams_context(username: str) -> str:
     return "\n".join(parts) if parts else ""
 
 
+def load_mail_filter_summary(username: str) -> str:
+    """Charge le résumé des règles mail_filter actives pour le contexte."""
+    try:
+        from app.memory_rules import get_rules_by_category
+        rules = get_rules_by_category('mail_filter', username)
+        if not rules:
+            return ""
+        whitelist = [r for r in rules if r.strip().lower().startswith('autoriser:')]
+        blacklist = [r for r in rules if r.strip().lower().startswith('bloquer:')]
+        parts = []
+        if whitelist:
+            parts.append(f"Whitelist ({len(whitelist)}) : " + ", ".join(w[10:].strip() for w in whitelist[:5]))
+        if blacklist:
+            parts.append(f"Blacklist ({len(blacklist)}) : " + ", ".join(b[8:].strip() for b in blacklist[:5]))
+        return "\n".join(parts)
+    except Exception:
+        return ""
+
+
 def build_system_prompt(
     username: str,
     tenant_id: str,
@@ -159,6 +172,7 @@ def build_system_prompt(
     aria_rules = get_aria_rules(username)
     aria_insights = get_aria_insights(limit=8, username=username)
     teams_context = load_teams_context(username)
+    mail_filter_summary = load_mail_filter_summary(username)
 
     contact_card = ""
     known_contacts = get_contacts_keywords(username=username, tenant_id=tenant_id)
@@ -187,6 +201,7 @@ def build_system_prompt(
     mailboxes_line = f"\nBoîtes supplémentaires : {', '.join(tools['mail_extra_boxes'])}" if tools["mail_extra_boxes"] else ""
 
     teams_context_block = f"\n\n=== TEAMS ==={chr(10)}{teams_context}" if teams_context else ""
+    mail_filter_block = f"\n\n=== FILTRE MAILS ==={chr(10)}{mail_filter_summary}" if mail_filter_summary else ""
 
     return f"""Tu es Raya — l'assistante personnelle et évolutive de {display_name}.
 Tu es Claude avec une mémoire persistante. Tu n'as pas de comportement imposé de l'extérieur.
@@ -198,7 +213,7 @@ Tu observes, tu apprends, tu t'organises librement. Tu parles au féminin.
 
 {f"=== TA MÉMOIRE ==={chr(10)}{aria_rules}" if aria_rules else "Ta mémoire est vide. Tu peux commencer à construire via [ACTION:LEARN]."}
 
-{f"=== TES OBSERVATIONS SUR {display_name.upper()} ==={chr(10)}{aria_insights}" if aria_insights else ""}{teams_context_block}
+{f"=== TES OBSERVATIONS SUR {display_name.upper()} ==={chr(10)}{aria_insights}" if aria_insights else ""}{teams_context_block}{mail_filter_block}
 
 {f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}
 
@@ -229,9 +244,16 @@ Teams — lecture/écriture (ne jamais envoyer sans confirmation) :
   [ACTION:TEAMS_GROUPE:email1,email2|sujet|texte]            → crée un groupe
 Teams — mémoire (tu décides librement quand les utiliser) :
   [ACTION:TEAMS_SYNC:chat_id|label?|type?]                   → ingère + synthétise depuis ton curseur
-  [ACTION:TEAMS_HISTORY:chat_id|label?|type?]                → explore l'historique complet (ignore le curseur)
-  [ACTION:TEAMS_MARK:chat_id|message_id|label?|type?]        → pose un curseur "j'ai lu jusqu'ici"
+  [ACTION:TEAMS_HISTORY:chat_id|label?|type?]                → explore l'historique complet
+  [ACTION:TEAMS_MARK:chat_id|message_id|label?|type?]        → pose un curseur
   Astuce : mémorise tes habitudes via [ACTION:LEARN:teams_ingestion|ta_règle]
+Filtre mails — tu peux ajuster ce qui est retenu ou ignoré :
+  [ACTION:LEARN:mail_filter|autoriser: email@domaine.fr]     → forcer la réception même si noreply
+  [ACTION:LEARN:mail_filter|autoriser: @couffrant-solar.fr]  → autoriser tout un domaine
+  [ACTION:LEARN:mail_filter|autoriser: sujet:devis chantier] → autoriser par mot-clé sujet
+  [ACTION:LEARN:mail_filter|bloquer: promo@xyz.fr]           → bloquer un expéditeur
+  [ACTION:LEARN:mail_filter|bloquer: sujet:pub]              → bloquer par mot-clé sujet
+  Si un mail important a été manqué : dis-le moi et j'ajuste mes règles.
 Mémoire — tu choisis librement tes catégories :
   [ACTION:LEARN:ta_catégorie|ta_règle]
   [ACTION:INSIGHT:sujet|observation]
