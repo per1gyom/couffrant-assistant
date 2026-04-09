@@ -17,11 +17,11 @@ from app.feedback_store import init_db
 from app.mail_memory_store import init_mail_db
 from app.token_manager import get_valid_microsoft_token, get_all_users_with_tokens
 from app.app_security import init_default_user
-from app.memory_loader import MEMORY_OK, rebuild_hot_summary, seed_default_rules
+from app.memory_loader import MEMORY_OK, seed_default_rules
 
 from app.routes.auth import router as auth_router
 from app.routes.admin import router as admin_router
-from app.routes.aria import router as raya_router
+from app.routes.raya import router as raya_router
 from app.routes.memory import router as memory_router
 from app.routes.mail import router as mail_router
 from app.routes.reset_password import router as reset_router
@@ -30,7 +30,7 @@ from app.routes.webhook import router as webhook_router
 app = FastAPI(title="Raya — Assistant IA")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=30 * 24 * 3600)
 
-# Fichiers statiques (CSS, JS) — mis en cache par le navigateur
+# Fichiers statiques (CSS, JS)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 app.include_router(auth_router)
@@ -60,12 +60,12 @@ def startup_event():
     try:
         init_default_user()
     except Exception as e:
-        print(f"[Auth] Erreur init_default_user: {e}")
+        print(f"[Raya] Erreur init_default_user: {e}")
     try:
         admin_username = os.getenv("APP_USERNAME", "guillaume").strip()
         seed_default_rules(admin_username)
     except Exception as e:
-        print(f"[Seed] Erreur seed_default_rules: {e}")
+        print(f"[Raya] Erreur seed_default_rules: {e}")
 
     def setup_webhooks():
         time.sleep(30)
@@ -101,7 +101,8 @@ def startup_event():
                             try:
                                 from app.connectors.microsoft_webhook import _send_revoked_alert
                                 _send_revoked_alert(username)
-                            except Exception: pass
+                            except Exception:
+                                pass
                         else:
                             print(f"[Token] Refresh {username}: OK")
                     except Exception as e:
