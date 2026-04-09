@@ -1,6 +1,8 @@
 """
 Mémoire : synthèse des sessions et résumé chaud.
 Vectorisation automatique des insights et conversations.
+
+Note : get_memoire_param vient de app.memory_rules avec signature (param, default, username).
 """
 import json
 import re
@@ -126,7 +128,6 @@ def save_insight(topic: str, insight: str, source: str = "conversation",
                 username: str = 'guillaume') -> int:
     """
     Sauvegarde un insight avec vectorisation automatique.
-    Le vecteur est généré sur topic + insight.
     """
     embed_text = f"[{topic}] {insight}"
     vec = _vec_str(_embed(embed_text))
@@ -187,8 +188,8 @@ def synthesize_session(n_conversations: int = 15, username: str = 'guillaume') -
     finally:
         if conn: conn.close()
 
-    # BUGFIX : ordre des arguments corrigé (username, param, default)
-    keep_recent = get_memoire_param(username, 'keep_recent', 5)
+    # memory_rules.py : signature (param, default, username) — ordre correct
+    keep_recent = get_memoire_param('keep_recent', 5, username)
     if not conversations or total <= keep_recent:
         return {"status": "nothing_to_synthesize", "total": total}
 
@@ -259,7 +260,6 @@ Synthétise en JSON strict (sans backticks) :
         elif isinstance(item, str) and len(item) > 10:
             save_insight("général", item, username=username)
 
-    # Vectorise aussi les conversations avant purge
     _vectorize_conversations_batch(conversations, username)
 
     conn = None
@@ -312,8 +312,8 @@ def _vectorize_conversations_batch(conversations: list, username: str):
 
 def purge_old_mails(days: int = None, username: str = 'guillaume') -> int:
     if days is None:
-        # BUGFIX : ordre des arguments corrigé (username, param, default)
-        days = get_memoire_param(username, 'purge_days', 90)
+        # memory_rules.py : signature (param, default, username) — ordre correct
+        days = get_memoire_param('purge_days', 90, username)
     conn = None
     try:
         conn = get_pg_conn()
