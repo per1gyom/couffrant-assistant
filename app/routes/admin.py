@@ -74,95 +74,100 @@ def update_profile_password(request: Request, payload: dict = Body(...)):
         if conn: conn.close()
 
 
+# ─── CONFIG SHAREPOINT ───
+
+@router.get("/admin/tenants/{tenant_id}/sharepoint")
+def get_sharepoint_config(request: Request, tenant_id: str):
+    """Retourne la config SharePoint actuelle d'un tenant."""
+    if not require_admin(request): return {"error": "Accès refusé."}
+    from app.connectors.drive_connector import get_drive_config
+    config = get_drive_config(tenant_id)
+    return {
+        "tenant_id": tenant_id,
+        "sharepoint_site": config["site_name"],
+        "sharepoint_folder": config["folder_name"],
+        "sharepoint_drive": config["drive_name"],
+    }
+
+
+@router.put("/admin/tenants/{tenant_id}/sharepoint")
+def update_sharepoint_config(request: Request, tenant_id: str, payload: dict = Body(...)):
+    """Met à jour la config SharePoint d'un tenant."""
+    if not require_admin(request): return {"error": "Accès refusé."}
+    site = payload.get("sharepoint_site", "").strip()
+    folder = payload.get("sharepoint_folder", "").strip()
+    drive = payload.get("sharepoint_drive", "Documents").strip()
+    if not site or not folder:
+        return {"status": "error", "message": "Site et dossier requis."}
+    from app.connectors.drive_connector import save_drive_config
+    return save_drive_config(tenant_id, site, folder, drive)
+
+
 # ─── SOCIÉTÉS (super-admin uniquement) ───
 
 @router.get("/admin/tenants-overview")
 def admin_tenants_overview(request: Request):
-    """
-    Vue complète des sociétés :
-    - Liste des tenants
-    - Pour chaque tenant : collaborateurs + stats
-    - Statut connexion Microsoft par utilisateur
-    """
     if not require_admin(request): return {"error": "Accès refusé."}
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-
-        # Tous les tenants
         c.execute("SELECT id, name, settings FROM tenants ORDER BY name")
         tenants_raw = c.fetchall()
-
-        # Tous les utilisateurs avec leurs stats
         c.execute("""
             SELECT u.username, u.email, u.scope, u.tenant_id, u.last_login, u.created_at
             FROM users u ORDER BY u.tenant_id, u.created_at
         """)
         users_raw = c.fetchall()
-
-        # Stats par username
         stats = {}
         for table, key in [("aria_memory","conv"),("aria_rules","rules"),("aria_insights","insights"),("mail_memory","mails")]:
             c.execute(f"SELECT username, COUNT(*) FROM {table} GROUP BY username")
             for u, cnt in c.fetchall(): stats.setdefault(u, {})[key] = cnt
-
-        # Tokens Microsoft actifs
         c.execute("SELECT username FROM oauth_tokens WHERE provider='microsoft'")
         ms_connected = {r[0] for r in c.fetchall()}
-
     finally:
         if conn: conn.close()
 
-    # Construction de la réponse
     users_by_tenant = {}
     for row in users_raw:
         username, email, scope, tenant_id, last_login, created_at = row
         tid = tenant_id or DEFAULT_TENANT
-        if tid not in users_by_tenant:
-            users_by_tenant[tid] = []
-        u_stats = stats.get(username, {})
-        users_by_tenant[tid].append({
-            "username": username,
-            "email": email or "",
-            "scope": scope or "user",
+        users_by_tenant.setdefault(tid, []).append({
+            "username": username, "email": email or "", "scope": scope or "user",
             "last_login": str(last_login) if last_login else None,
             "created_at": str(created_at) if created_at else None,
             "ms_connected": username in ms_connected,
-            "conv": u_stats.get("conv", 0),
-            "rules": u_stats.get("rules", 0),
-            "insights": u_stats.get("insights", 0),
-            "mails": u_stats.get("mails", 0),
+            **{k: stats.get(username, {}).get(k, 0) for k in ["conv","rules","insights","mails"]},
         })
 
     result = []
     for tenant_id, name, settings in tenants_raw:
         users = users_by_tenant.get(tenant_id, [])
         ms_ok = sum(1 for u in users if u["ms_connected"])
+        sp = settings or {}
         result.append({
-            "tenant_id": tenant_id,
-            "name": name or tenant_id,
-            "settings": settings or {},
-            "user_count": len(users),
-            "ms_connected_count": ms_ok,
+            "tenant_id": tenant_id, "name": name or tenant_id,
+            "settings": sp,
+            "sharepoint_site": sp.get("sharepoint_site", "Commun"),
+            "sharepoint_folder": sp.get("sharepoint_folder", "1_Photovoltaïque"),
+            "sharepoint_drive": sp.get("sharepoint_drive", "Documents"),
+            "user_count": len(users), "ms_connected_count": ms_ok,
             "total_mails": sum(u["mails"] for u in users),
             "total_conv": sum(u["conv"] for u in users),
             "users": users,
         })
 
-    # Utilisateurs sans tenant explicite
     orphans = users_by_tenant.get(DEFAULT_TENANT, [])
     if orphans and not any(t["tenant_id"] == DEFAULT_TENANT for t in result):
         result.insert(0, {
-            "tenant_id": DEFAULT_TENANT,
-            "name": "Couffrant Solar",
-            "settings": {},
+            "tenant_id": DEFAULT_TENANT, "name": "Couffrant Solar",
+            "settings": {}, "sharepoint_site": "Commun",
+            "sharepoint_folder": "1_Photovoltaïque", "sharepoint_drive": "Documents",
             "user_count": len(orphans),
             "ms_connected_count": sum(1 for u in orphans if u["ms_connected"]),
             "total_mails": sum(u["mails"] for u in orphans),
             "total_conv": sum(u["conv"] for u in orphans),
             "users": orphans,
         })
-
     return result
 
 
