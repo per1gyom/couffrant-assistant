@@ -1,3 +1,4 @@
+import re
 import requests
 from typing import Optional
 
@@ -6,6 +7,10 @@ GRAPH = "https://graph.microsoft.com/v1.0"
 
 def _headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+
+def _strip_html(text: str) -> str:
+    return re.sub(r'<[^>]+>', ' ', text or "").strip()
 
 
 # ─── LECTURE ───
@@ -29,8 +34,12 @@ def list_teams(token: str) -> dict:
 def list_channels(token: str, team_id: str) -> dict:
     """Liste les canaux d'une équipe."""
     try:
-        r = requests.get(f"{GRAPH}/teams/{team_id}/channels",
-                         headers=_headers(token), timeout=15)
+        r = requests.get(
+            f"{GRAPH}/teams/{team_id}/channels",
+            headers=_headers(token),
+            params={"$select": "id,displayName,description"},
+            timeout=15
+        )
         if r.status_code != 200:
             return {"status": "error", "message": f"Graph {r.status_code}: {r.text[:200]}"}
         channels = []
@@ -43,23 +52,19 @@ def list_channels(token: str, team_id: str) -> dict:
 
 
 def read_channel_messages(token: str, team_id: str, channel_id: str, top: int = 15) -> dict:
-    """Lit les derniers messages d'un canal."""
+    """Lit les derniers messages d'un canal. Pas de $orderby — non supporté par Graph."""
     try:
         r = requests.get(
             f"{GRAPH}/teams/{team_id}/channels/{channel_id}/messages",
             headers=_headers(token),
-            params={"$top": top, "$orderby": "lastModifiedDateTime desc"},
+            params={"$top": top},   # $orderby retiré — non supporté
             timeout=15
         )
         if r.status_code != 200:
             return {"status": "error", "message": f"Graph {r.status_code}: {r.text[:200]}"}
         messages = []
         for m in r.json().get("value", []):
-            body = m.get("body", {})
-            content = body.get("content", "")
-            # Nettoie le HTML basique
-            import re
-            content = re.sub(r'<[^>]+>', ' ', content).strip()
+            content = _strip_html(m.get("body", {}).get("content", ""))
             sender = (m.get("from") or {}).get("user", {}).get("displayName", "Inconnu")
             messages.append({
                 "id": m["id"],
@@ -73,13 +78,12 @@ def read_channel_messages(token: str, team_id: str, channel_id: str, top: int = 
 
 
 def list_chats(token: str) -> dict:
-    """Liste les chats 1:1 et de groupe actifs."""
+    """Liste les chats 1:1 et de groupe actifs. Pas de $orderby — non supporté par Graph."""
     try:
         r = requests.get(
             f"{GRAPH}/me/chats",
             headers=_headers(token),
-            params={"$expand": "members", "$top": 20,
-                    "$orderby": "lastUpdatedDateTime desc"},
+            params={"$expand": "members", "$top": 20},  # $orderby retiré — non supporté
             timeout=15
         )
         if r.status_code != 200:
@@ -87,14 +91,14 @@ def list_chats(token: str) -> dict:
         chats = []
         for c in r.json().get("value", []):
             members = [
-                m.get("displayName", m.get("email", ""))
+                m.get("displayName") or m.get("email", "")
                 for m in c.get("members", [])
                 if m.get("displayName") or m.get("email")
             ]
             chats.append({
                 "id": c["id"],
-                "type": c.get("chatType", ""),  # oneOnOne / group
-                "topic": c.get("topic") or ", ".join(members[:3]),
+                "type": c.get("chatType", ""),
+                "topic": c.get("topic") or ", ".join(members[:3]) or "(sans titre)",
                 "members": members,
                 "updated": c.get("lastUpdatedDateTime", ""),
             })
@@ -106,8 +110,9 @@ def list_chats(token: str) -> dict:
 def read_chat_messages(token: str, chat_id: str, top: int = 15) -> dict:
     """Lit les derniers messages d'un chat."""
     try:
+        # Endpoint correct : /chats/{id}/messages (pas /me/chats)
         r = requests.get(
-            f"{GRAPH}/me/chats/{chat_id}/messages",
+            f"{GRAPH}/chats/{chat_id}/messages",
             headers=_headers(token),
             params={"$top": top},
             timeout=15
@@ -115,10 +120,8 @@ def read_chat_messages(token: str, chat_id: str, top: int = 15) -> dict:
         if r.status_code != 200:
             return {"status": "error", "message": f"Graph {r.status_code}: {r.text[:200]}"}
         messages = []
-        import re
         for m in r.json().get("value", []):
-            body = m.get("body", {})
-            content = re.sub(r'<[^>]+>', ' ', body.get("content", "")).strip()
+            content = _strip_html(m.get("body", {}).get("content", ""))
             sender = (m.get("from") or {}).get("user", {}).get("displayName", "Inconnu")
             messages.append({
                 "id": m["id"],
@@ -152,8 +155,9 @@ def send_channel_message(token: str, team_id: str, channel_id: str, text: str) -
 def send_chat_message(token: str, chat_id: str, text: str) -> dict:
     """Envoie un message dans un chat existant."""
     try:
+        # Endpoint correct : /chats/{id}/messages (pas /me/chats)
         r = requests.post(
-            f"{GRAPH}/me/chats/{chat_id}/messages",
+            f"{GRAPH}/chats/{chat_id}/messages",
             headers=_headers(token),
             json={"body": {"contentType": "text", "content": text}},
             timeout=15
@@ -191,8 +195,8 @@ def find_or_create_chat_with_user(token: str, email: str) -> dict:
     if chats_result.get("status") == "ok":
         for chat in chats_result.get("chats", []):
             if chat.get("type") == "oneOnOne":
-                members = [m.lower() for m in chat.get("members", [])]
-                if email.lower() in members or any(email.lower() in m for m in members):
+                members_lower = [m.lower() for m in chat.get("members", [])]
+                if any(email.lower() in m for m in members_lower):
                     return {"status": "ok", "chat_id": chat["id"], "created": False}
 
     # 2. Résout l'ID utilisateur
