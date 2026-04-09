@@ -1,6 +1,6 @@
 """
 Mémoire : contacts partagés par tenant.
-Les contacts sont visibles par tous les utilisateurs d'une même société.
+Vectorisation automatique au moment de l'insertion.
 """
 import json
 import re
@@ -10,6 +10,19 @@ from app.ai_client import client
 from app.config import ANTHROPIC_MODEL_FAST
 
 DEFAULT_TENANT = 'couffrant_solar'
+
+
+def _embed(text: str):
+    try:
+        from app.embedding import embed
+        return embed(text)
+    except Exception:
+        return None
+
+
+def _vec_str(embedding) -> str | None:
+    if embedding is None: return None
+    return "[" + ",".join(str(x) for x in embedding) + "]"
 
 
 def get_contact_card(name_or_email: str, tenant_id: str = DEFAULT_TENANT) -> str:
@@ -132,19 +145,40 @@ Réponds en JSON : name, company, role, summary (2-3 lignes)"""
                 summary = parsed.get("summary", raw)
             except Exception:
                 name = email.split('@')[0]; company = ""; role = ""; summary = raw
+
+            # Vectorise la fiche contact
+            embed_text = f"{name} ({email}) — {company} — {role}\n{summary}"
+            vec = _vec_str(_embed(embed_text))
+
             conn2 = get_pg_conn()
             try:
                 c2 = conn2.cursor()
-                c2.execute("""
-                    INSERT INTO aria_contacts
-                    (tenant_id, email, name, company, role, summary, last_seen, last_subject, mail_count, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                    ON CONFLICT (email, tenant_id) DO UPDATE SET
-                        name=EXCLUDED.name, company=EXCLUDED.company, role=EXCLUDED.role,
-                        summary=EXCLUDED.summary, last_seen=EXCLUDED.last_seen,
-                        last_subject=EXCLUDED.last_subject, mail_count=EXCLUDED.mail_count, updated_at=NOW()
-                """, (tenant_id, email, name, company, role, summary,
-                       str(last_seen), (subjects or [''])[0], mail_count))
+                if vec:
+                    c2.execute("""
+                        INSERT INTO aria_contacts
+                        (tenant_id, email, name, company, role, summary, last_seen,
+                         last_subject, mail_count, updated_at, embedding)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW(),%s::vector)
+                        ON CONFLICT (email, tenant_id) DO UPDATE SET
+                            name=EXCLUDED.name, company=EXCLUDED.company, role=EXCLUDED.role,
+                            summary=EXCLUDED.summary, last_seen=EXCLUDED.last_seen,
+                            last_subject=EXCLUDED.last_subject, mail_count=EXCLUDED.mail_count,
+                            updated_at=NOW(), embedding=EXCLUDED.embedding
+                    """, (tenant_id, email, name, company, role, summary,
+                           str(last_seen), (subjects or [''])[0], mail_count, vec))
+                else:
+                    c2.execute("""
+                        INSERT INTO aria_contacts
+                        (tenant_id, email, name, company, role, summary, last_seen,
+                         last_subject, mail_count, updated_at)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,NOW())
+                        ON CONFLICT (email, tenant_id) DO UPDATE SET
+                            name=EXCLUDED.name, company=EXCLUDED.company, role=EXCLUDED.role,
+                            summary=EXCLUDED.summary, last_seen=EXCLUDED.last_seen,
+                            last_subject=EXCLUDED.last_subject, mail_count=EXCLUDED.mail_count,
+                            updated_at=NOW()
+                    """, (tenant_id, email, name, company, role, summary,
+                           str(last_seen), (subjects or [''])[0], mail_count))
                 conn2.commit()
             finally:
                 conn2.close()

@@ -1,5 +1,6 @@
 """
 Mémoire : synthèse des sessions et résumé chaud.
+Vectorisation automatique des insights et conversations.
 """
 import json
 import re
@@ -10,6 +11,21 @@ from app.config import ANTHROPIC_MODEL_SMART, ANTHROPIC_MODEL_FAST
 from app.memory_rules import get_rules_by_category, get_memoire_param, save_rule
 
 DEFAULT_TENANT = 'couffrant_solar'
+
+
+def _embed(text: str):
+    """Wrapper embedding avec dégradation gracieuse."""
+    try:
+        from app.embedding import embed
+        return embed(text)
+    except Exception:
+        return None
+
+
+def _vec_str(embedding) -> str | None:
+    if embedding is None:
+        return None
+    return "[" + ",".join(str(x) for x in embedding) + "]"
 
 
 def get_hot_summary(username: str = 'guillaume') -> str:
@@ -108,6 +124,13 @@ def get_aria_insights(limit: int = 8, username: str = 'guillaume') -> str:
 
 def save_insight(topic: str, insight: str, source: str = "conversation",
                 username: str = 'guillaume') -> int:
+    """
+    Sauvegarde un insight avec vectorisation automatique.
+    Le vecteur est généré sur topic + insight.
+    """
+    embed_text = f"[{topic}] {insight}"
+    vec = _vec_str(_embed(embed_text))
+
     conn = None
     try:
         conn = get_pg_conn()
@@ -117,17 +140,31 @@ def save_insight(topic: str, insight: str, source: str = "conversation",
         """, (username, f"%{topic[:30]}%"))
         existing = c.fetchone()
         if existing:
-            c.execute("""
-                UPDATE aria_insights SET insight = %s,
-                reinforcements = reinforcements + 1, updated_at = NOW()
-                WHERE id = %s
-            """, (insight, existing[0]))
+            if vec:
+                c.execute("""
+                    UPDATE aria_insights SET insight=%s,
+                    reinforcements=reinforcements+1, updated_at=NOW(),
+                    embedding=%s::vector WHERE id=%s
+                """, (insight, vec, existing[0]))
+            else:
+                c.execute("""
+                    UPDATE aria_insights SET insight=%s,
+                    reinforcements=reinforcements+1, updated_at=NOW()
+                    WHERE id=%s
+                """, (insight, existing[0]))
             conn.commit()
             return existing[0]
-        c.execute("""
-            INSERT INTO aria_insights (username, topic, insight, source)
-            VALUES (%s, %s, %s, %s) RETURNING id
-        """, (username, topic, insight, source))
+
+        if vec:
+            c.execute("""
+                INSERT INTO aria_insights (username, topic, insight, source, embedding)
+                VALUES (%s, %s, %s, %s, %s::vector) RETURNING id
+            """, (username, topic, insight, source, vec))
+        else:
+            c.execute("""
+                INSERT INTO aria_insights (username, topic, insight, source)
+                VALUES (%s, %s, %s, %s) RETURNING id
+            """, (username, topic, insight, source))
         insight_id = c.fetchone()[0]
         conn.commit()
         return insight_id
@@ -168,7 +205,7 @@ Voici {len(conversations)} conversations récentes.
 Synthétise en JSON strict (sans backticks) :
 {{"summary": "~150 mots", "rules_learned": ["règle"], "insights": [{{"topic": "x", "text": "y"}}], "topics": ["sujet"]}}"""
 
-    # Niveau 1 : ANTHROPIC_MODEL_FAST
+    # Niveau 1 : modèle rapide
     parsed = None
     try:
         response = client.messages.create(
@@ -181,7 +218,7 @@ Synthétise en JSON strict (sans backticks) :
     except Exception:
         pass
 
-    # Niveau 2 : fallback ANTHROPIC_MODEL_SMART si JSON invalide
+    # Niveau 2 : fallback modèle smart si JSON invalide
     if parsed is None:
         try:
             response = client.messages.create(
@@ -221,6 +258,9 @@ Synthétise en JSON strict (sans backticks) :
         elif isinstance(item, str) and len(item) > 10:
             save_insight("général", item, username=username)
 
+    # Vectorise aussi les conversations avant purge
+    _vectorize_conversations_batch(conversations, username)
+
     conn = None
     purged = 0
     try:
@@ -243,6 +283,30 @@ Synthétise en JSON strict (sans backticks) :
         "insights_extracted": len(parsed.get("insights", [])),
         "purged": purged,
     }
+
+
+def _vectorize_conversations_batch(conversations: list, username: str):
+    """Vectorise les conversations avant qu'elles soient purgées."""
+    try:
+        from app.embedding import embed_batch, is_available
+        if not is_available(): return
+
+        texts = [f"{r[1][:300]}\n{r[2][:300]}" for r in conversations]
+        embeddings = embed_batch(texts)
+
+        conn = get_pg_conn()
+        c = conn.cursor()
+        for (conv_id, _, _, _), emb in zip(conversations, embeddings):
+            if emb is None: continue
+            vec = "[" + ",".join(str(x) for x in emb) + "]"
+            c.execute(
+                "UPDATE aria_memory SET embedding=%s::vector WHERE id=%s",
+                (vec, conv_id)
+            )
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[Embedding] Erreur vectorize_conversations: {e}")
 
 
 def purge_old_mails(days: int = None, username: str = 'guillaume') -> int:
