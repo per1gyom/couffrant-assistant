@@ -5,17 +5,32 @@ import os
 import secrets
 from datetime import datetime, timezone, timedelta
 from app.database import get_pg_conn
-from app.security_auth import hash_password, verify_password
+from app.security_auth import hash_password, verify_password, validate_password_strength
 from app.security_tools import (
     ALL_SCOPES, SCOPE_ADMIN, SCOPE_USER, DEFAULT_TENANT,
     init_default_tools,
 )
 
 
-# ─── MUST_RESET_PASSWORD ───
+# ─── MIGRATIONS ───
+
+def _ensure_security_columns():
+    """Migration : ajoute les colonnes de sécurité si absentes."""
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS must_reset_password BOOLEAN DEFAULT FALSE")
+        c.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS account_locked BOOLEAN DEFAULT FALSE")
+        conn.commit()
+    except Exception as e:
+        print(f"[Migration] {e}")
+    finally:
+        if conn: conn.close()
+
+
+# ─── FLAG MUST_RESET_PASSWORD ───
 
 def must_reset_password_check(username: str) -> bool:
-    """Retourne True si l'utilisateur doit redéfinir son mot de passe."""
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -29,30 +44,13 @@ def must_reset_password_check(username: str) -> bool:
 
 
 def set_must_reset_password(username: str, value: bool = True):
-    """Active ou désactive le flag de redéfinition forcée du mot de passe."""
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
         c.execute("UPDATE users SET must_reset_password=%s WHERE username=%s", (value, username))
         conn.commit()
     except Exception as e:
-        print(f"[Auth] set_must_reset_password error: {e}")
-    finally:
-        if conn: conn.close()
-
-
-def _ensure_must_reset_column():
-    """Migration : ajoute la colonne must_reset_password si elle n'existe pas."""
-    conn = None
-    try:
-        conn = get_pg_conn(); c = conn.cursor()
-        c.execute("""
-            ALTER TABLE users
-            ADD COLUMN IF NOT EXISTS must_reset_password BOOLEAN DEFAULT FALSE
-        """)
-        conn.commit()
-    except Exception:
-        pass
+        print(f"[Auth] set_must_reset_password: {e}")
     finally:
         if conn: conn.close()
 
@@ -119,20 +117,27 @@ def get_user_scope(username: str) -> str:
 
 def create_user(username: str, password: str, scope: str = SCOPE_USER,
                 tools: list = None, tenant_id: str = DEFAULT_TENANT,
-                email: str = None) -> dict:
+                email: str = None, force_reset: bool = True) -> dict:
+    """
+    Crée un utilisateur.
+    force_reset=True (défaut) : l'utilisateur devra changer son mot de passe à la première connexion.
+    Le mot de passe temporaire doit respecter la politique minimale (8 chars) mais pas les critères forts —
+    c'est le nouveau mot de passe défini par l'utilisateur qui doit être fort.
+    """
     if not username or not password:
         return {"status": "error", "message": "Identifiant et mot de passe requis."}
     if len(password) < 8:
-        return {"status": "error", "message": "Mot de passe trop court (8 caractères min.)."}
+        return {"status": "error", "message": "Mot de passe temporaire trop court (8 caractères min.)."}
     if scope not in ALL_SCOPES:
         scope = SCOPE_USER
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
         c.execute("""
-            INSERT INTO users (username, password_hash, email, scope, tenant_id)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (username.strip(), hash_password(password), email or None, scope, tenant_id or DEFAULT_TENANT))
+            INSERT INTO users (username, password_hash, email, scope, tenant_id, must_reset_password)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (username.strip(), hash_password(password), email or None,
+               scope, tenant_id or DEFAULT_TENANT, force_reset))
         conn.commit()
     except Exception as e:
         if "unique" in str(e).lower():
@@ -201,10 +206,16 @@ def list_users() -> list:
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("SELECT username, email, scope, tenant_id, last_login, created_at FROM users ORDER BY tenant_id, created_at")
-        return [{"username": r[0], "email": r[1], "scope": r[2], "tenant_id": r[3],
-                 "last_login": str(r[4]) if r[4] else None, "created_at": str(r[5])}
-                for r in c.fetchall()]
+        c.execute("""
+            SELECT username, email, scope, tenant_id, last_login, created_at,
+                   COALESCE(account_locked, false), COALESCE(must_reset_password, false)
+            FROM users ORDER BY tenant_id, created_at
+        """)
+        return [{
+            "username": r[0], "email": r[1], "scope": r[2], "tenant_id": r[3],
+            "last_login": str(r[4]) if r[4] else None, "created_at": str(r[5]),
+            "account_locked": bool(r[6]), "must_reset_password": bool(r[7])
+        } for r in c.fetchall()]
     except Exception:
         return []
     finally:
@@ -228,8 +239,7 @@ def get_current_user(request):
 
 
 def init_default_user():
-    # Migration : ajoute la colonne must_reset_password si absente
-    _ensure_must_reset_column()
+    _ensure_security_columns()
 
     try:
         from app.tenant_manager import ensure_default_tenant
@@ -247,8 +257,8 @@ def init_default_user():
         c.execute("SELECT COUNT(*) FROM users")
         if c.fetchone()[0] == 0:
             c.execute("""
-                INSERT INTO users (username, password_hash, email, scope, tenant_id)
-                VALUES (%s, %s, %s, %s, %s) ON CONFLICT (username) DO NOTHING
+                INSERT INTO users (username, password_hash, email, scope, tenant_id, must_reset_password)
+                VALUES (%s, %s, %s, %s, %s, false) ON CONFLICT (username) DO NOTHING
             """, (username, hash_password(password), email or None, SCOPE_ADMIN, DEFAULT_TENANT))
             conn.commit()
         else:
@@ -275,8 +285,7 @@ def init_default_user():
 def generate_reset_token(username: str, ttl_hours: int = 24) -> dict:
     """
     Génère un lien de réinitialisation.
-    Active aussi le flag must_reset_password pour forcer la redéfinition
-    si l'utilisateur est déjà connecté.
+    Active aussi must_reset_password pour forcer la redéfinition à la prochaine connexion.
     """
     token = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
@@ -290,7 +299,6 @@ def generate_reset_token(username: str, ttl_hours: int = 24) -> dict:
         c.execute("SELECT email FROM users WHERE username=%s", (username,))
         row = c.fetchone()
         user_email = row[0] if row else None
-        # Force la redéfinition au prochain accès au chat
         c.execute("UPDATE users SET must_reset_password=true WHERE username=%s", (username,))
         conn.commit()
     finally:
@@ -311,7 +319,7 @@ def _send_reset_email(to_email: str, username: str, reset_url: str) -> bool:
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_user = os.getenv("SMTP_USER")
     smtp_pass = os.getenv("SMTP_PASS")
-    smtp_from = os.getenv("SMTP_FROM", smtp_user or "noreply@raya-app.fr")
+    smtp_from = os.getenv("SMTP_FROM", smtp_user or "noreply@raya-ia.fr")
     if not smtp_host or not smtp_user or not smtp_pass:
         return False
     try:
@@ -359,13 +367,16 @@ def validate_reset_token(token: str) -> dict | None:
 
 
 def consume_reset_token(token: str, new_password: str) -> dict:
-    if len(new_password) < 8:
-        return {"status": "error", "message": "Mot de passe trop court (8 caractères min.)."}
+    """Consomme un token de reset. Valide la force du MDP avant de l'enregistrer."""
+    ok, msg = validate_password_strength(new_password)
+    if not ok:
+        return {"status": "error", "message": msg}
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
         c.execute("""
-            SELECT username, expires_at FROM password_reset_tokens WHERE token=%s AND used=false FOR UPDATE
+            SELECT username, expires_at FROM password_reset_tokens
+            WHERE token=%s AND used=false FOR UPDATE
         """, (token,))
         row = c.fetchone()
         if not row: return {"status": "error", "message": "Lien invalide ou déjà utilisé."}
@@ -374,8 +385,9 @@ def consume_reset_token(token: str, new_password: str) -> dict:
             expires_at = expires_at.replace(tzinfo=timezone.utc)
         if expires_at < datetime.now(timezone.utc):
             return {"status": "error", "message": "Lien expiré. Demandez-en un nouveau."}
-        c.execute("UPDATE users SET password_hash=%s, must_reset_password=false WHERE username=%s",
-                  (hash_password(new_password), username))
+        c.execute("""
+            UPDATE users SET password_hash=%s, must_reset_password=false WHERE username=%s
+        """, (hash_password(new_password), username))
         c.execute("UPDATE password_reset_tokens SET used=true WHERE token=%s", (token,))
         conn.commit()
         return {"status": "ok", "message": "Mot de passe mis à jour."}

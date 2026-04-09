@@ -1,13 +1,16 @@
 """
 Page de redéfinition forcée du mot de passe.
 
-Déclenchée quand un admin génère un lien de reset pour un utilisateur.
-L'utilisateur ne peut pas accéder au chat tant qu'il n'a pas défini
-un nouveau mot de passe.
+Déclenchée quand :
+  - Un admin génère un lien de reset pour un utilisateur
+  - Un nouvel utilisateur se connecte pour la première fois
+
+L'utilisateur ne peut pas accéder au chat sans avoir défini
+un nouveau mot de passe fort conforme à la politique.
 """
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import RedirectResponse, HTMLResponse
-from app.security_auth import hash_password
+from app.security_auth import hash_password, validate_password_strength
 from app.security_users import set_must_reset_password
 from app.database import get_pg_conn
 
@@ -27,7 +30,6 @@ def forced_reset_get(request: Request):
     username = request.session.get("user")
     if not username:
         return RedirectResponse("/login-app")
-    # Si le flag n'est plus actif, renvoyer directement au chat
     if not request.session.get("must_reset"):
         return RedirectResponse("/chat")
     return HTMLResponse(_render(username=username))
@@ -43,19 +45,18 @@ async def forced_reset_post(
     if not username:
         return RedirectResponse("/login-app")
 
-    # Validations
-    if len(new_password) < 8:
-        return HTMLResponse(_render(
-            error="Le mot de passe doit contenir au moins 8 caractères.",
-            username=username
-        ))
     if new_password != confirm_password:
         return HTMLResponse(_render(
-            error="Les mots de passe ne correspondent pas. Vérifiez la confirmation.",
+            error="Les mots de passe ne correspondent pas.",
             username=username
         ))
 
-    # Mise à jour en base + désactivation du flag
+    # Validation force du mot de passe
+    ok, msg = validate_password_strength(new_password)
+    if not ok:
+        return HTMLResponse(_render(error=msg, username=username))
+
+    # Mise à jour en base
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -72,6 +73,5 @@ async def forced_reset_post(
     finally:
         if conn: conn.close()
 
-    # Nettoie le flag de session et redirige
     request.session.pop("must_reset", None)
     return RedirectResponse("/chat", status_code=303)

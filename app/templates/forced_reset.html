@@ -11,6 +11,7 @@
   --text: #111827; --text-muted: #6b7280;
   --accent: #6366f1; --accent-hover: #5558e8; --accent-light: #ede9fe;
   --danger: #ef4444; --danger-light: #fee2e2;
+  --success: #16a34a; --success-light: #dcfce7;
   --shadow: 0 4px 24px rgba(0,0,0,0.08);
 }
 html, body { height: 100%; background: var(--bg); color: var(--text);
@@ -18,38 +19,45 @@ html, body { height: 100%; background: var(--bg); color: var(--text);
   font-size: 15px; line-height: 1.6; }
 .page { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px;
-  padding: 40px; width: 100%; max-width: 400px; box-shadow: var(--shadow); }
-.icon { text-align: center; font-size: 40px; margin-bottom: 16px; }
+  padding: 40px; width: 100%; max-width: 420px; box-shadow: var(--shadow); }
+.icon { text-align: center; font-size: 40px; margin-bottom: 14px; }
 .title { font-size: 20px; font-weight: 700; text-align: center; margin-bottom: 6px; }
 .subtitle { font-size: 13px; color: var(--text-muted); text-align: center;
   margin-bottom: 24px; line-height: 1.5; }
 .user-hint { font-size: 12px; color: var(--text-muted); text-align: center;
   margin-bottom: 20px; background: var(--accent-light); border-radius: 8px;
-  padding: 7px 12px; }
+  padding: 7px 14px; }
 .error { background: var(--danger-light); border: 1px solid rgba(239,68,68,0.3);
   color: #b91c1c; border-radius: 8px; padding: 10px 14px; font-size: 13px;
   margin-bottom: 16px; }
 .form-group { margin-bottom: 16px; }
-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted);
+label { display: block; font-size: 11px; font-weight: 600; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
 input[type=password] { width: 100%; background: var(--bg); border: 1px solid var(--border);
   border-radius: 8px; color: var(--text); font-size: 14px; padding: 10px 12px;
   outline: none; transition: border-color 0.15s; }
-input[type=password]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
-.hint { font-size: 11px; color: var(--text-muted); margin-top: 5px; }
+input[type=password]:focus { border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
+.requirements { background: #f8fafc; border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 16px; margin-bottom: 20px; }
+.req-title { font-size: 10px; font-weight: 700; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
+.req-item { font-size: 12px; color: var(--text-muted); display: flex;
+  align-items: center; gap: 8px; padding: 2px 0; transition: color 0.2s; }
+.req-icon { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--border);
+  display: flex; align-items: center; justify-content: center; font-size: 9px;
+  flex-shrink: 0; transition: all 0.2s; background: var(--bg); }
+.req-item.ok { color: var(--success); }
+.req-item.ok .req-icon { background: var(--success-light); border-color: var(--success); color: var(--success); }
+.strength-bar-wrap { margin: 12px 0 20px; }
+.strength-label { font-size: 11px; color: var(--text-muted); margin-bottom: 5px; display: flex; justify-content: space-between; }
+.strength-bar { height: 4px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.strength-fill { height: 100%; border-radius: 4px; transition: width 0.3s, background 0.3s; width: 0; }
 .submit-btn { width: 100%; background: var(--accent); color: #fff; border: none;
   border-radius: 10px; padding: 12px; font-size: 15px; font-weight: 600;
-  cursor: pointer; transition: background 0.15s; margin-top: 8px; }
-.submit-btn:hover { background: var(--accent-hover); }
-.requirements { background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;
-  padding: 12px 14px; margin-bottom: 20px; }
-.req-title { font-size: 11px; font-weight: 700; color: var(--text-muted);
-  text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-.req-item { font-size: 12px; color: var(--text-muted); display: flex;
-  align-items: center; gap: 7px; margin-bottom: 4px; }
-.req-item::before { content: '○'; font-size: 10px; }
-.req-item.ok { color: #16a34a; }
-.req-item.ok::before { content: '✓'; }
+  cursor: pointer; transition: all 0.15s; margin-top: 4px; }
+.submit-btn:hover:not(:disabled) { background: var(--accent-hover); }
+.submit-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -57,44 +65,72 @@ input[type=password]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px 
   <div class="card">
     <div class="icon">🔑</div>
     <h1 class="title">Nouveau mot de passe requis</h1>
-    <p class="subtitle">Votre mot de passe a été réinitialisé par un administrateur.<br>Définissez un nouveau mot de passe pour continuer.</p>
+    <p class="subtitle">Définissez un mot de passe fort pour accéder à Raya.<br>
+    Vous ne pourrez pas continuer sans cette étape.</p>
     {{user_block}}
     {{error_block}}
     <div class="requirements">
-      <div class="req-title">Critères</div>
-      <div class="req-item" id="req-length">Au moins 8 caractères</div>
-      <div class="req-item" id="req-match">Les deux champs correspondent</div>
+      <div class="req-title">Critères obligatoires</div>
+      <div class="req-item" id="req-length"><span class="req-icon" id="icon-length"></span>12 caractères minimum</div>
+      <div class="req-item" id="req-upper"><span class="req-icon" id="icon-upper"></span>Une lettre majuscule</div>
+      <div class="req-item" id="req-lower"><span class="req-icon" id="icon-lower"></span>Une lettre minuscule</div>
+      <div class="req-item" id="req-digit"><span class="req-icon" id="icon-digit"></span>Un chiffre</div>
+      <div class="req-item" id="req-special"><span class="req-icon" id="icon-special"></span>Un caractère spécial (!@#$%&*...)</div>
+    </div>
+    <div class="strength-bar-wrap">
+      <div class="strength-label"><span>Force du mot de passe</span><span id="strength-text">—</span></div>
+      <div class="strength-bar"><div class="strength-fill" id="strength-fill"></div></div>
     </div>
     <form method="post" action="/forced-reset">
       <div class="form-group">
         <label>Nouveau mot de passe</label>
         <input type="password" name="new_password" id="new_password"
-               placeholder="8 caractères minimum" autocomplete="new-password"
-               oninput="checkRequirements()" required>
+               placeholder="Votre nouveau mot de passe" autocomplete="new-password"
+               oninput="checkAll()" required>
       </div>
       <div class="form-group">
         <label>Confirmer le mot de passe</label>
         <input type="password" name="confirm_password" id="confirm_password"
                placeholder="Répéter le mot de passe" autocomplete="new-password"
-               oninput="checkRequirements()" required>
-        <div class="hint">Vous ne pourrez pas accéder à Raya sans avoir défini ce mot de passe.</div>
+               oninput="checkAll()" required>
       </div>
-      <button type="submit" class="submit-btn" id="submitBtn">Définir mon mot de passe</button>
+      <button type="submit" class="submit-btn" id="submitBtn" disabled>Définir mon mot de passe</button>
     </form>
   </div>
 </div>
 <script>
-function checkRequirements() {
+const checks = [
+  {id:'req-length',  icon:'icon-length',  test: p => p.length >= 12},
+  {id:'req-upper',   icon:'icon-upper',   test: p => /[A-Z]/.test(p)},
+  {id:'req-lower',   icon:'icon-lower',   test: p => /[a-z]/.test(p)},
+  {id:'req-digit',   icon:'icon-digit',   test: p => /\d/.test(p)},
+  {id:'req-special', icon:'icon-special', test: p => /[^A-Za-z0-9]/.test(p)},
+];
+const STRENGTH_LABELS = ['', 'Très faible', 'Faible', 'Moyen', 'Bon', 'Fort'];
+const STRENGTH_COLORS = ['', '#ef4444', '#f97316', '#eab308', '#22c55e', '#16a34a'];
+
+function checkAll() {
   const pwd = document.getElementById('new_password').value;
   const conf = document.getElementById('confirm_password').value;
-  const lenOk = pwd.length >= 8;
-  const matchOk = pwd.length > 0 && pwd === conf;
-  document.getElementById('req-length').className = 'req-item' + (lenOk ? ' ok' : '');
-  document.getElementById('req-match').className = 'req-item' + (matchOk ? ' ok' : '');
-  document.getElementById('submitBtn').disabled = !(lenOk && matchOk);
-  document.getElementById('submitBtn').style.opacity = (lenOk && matchOk) ? '1' : '0.5';
+  let score = 0;
+  checks.forEach(c => {
+    const ok = c.test(pwd);
+    document.getElementById(c.id).classList.toggle('ok', ok);
+    document.getElementById(c.icon).textContent = ok ? '✓' : '';
+    if (ok) score++;
+  });
+  // Barre de force
+  const fill = document.getElementById('strength-fill');
+  const label = document.getElementById('strength-text');
+  fill.style.width = (score * 20) + '%';
+  fill.style.background = STRENGTH_COLORS[score] || '';
+  label.style.color = STRENGTH_COLORS[score] || '';
+  label.textContent = pwd.length > 0 ? (STRENGTH_LABELS[score] || '') : '—';
+  // Bouton
+  const allOk = score === 5 && pwd === conf && conf.length > 0;
+  document.getElementById('submitBtn').disabled = !allOk;
 }
-checkRequirements();
+checkAll();
 </script>
 </body>
 </html>

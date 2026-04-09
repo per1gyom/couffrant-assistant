@@ -11,6 +11,7 @@ from app.app_security import (
     authenticate, hash_password,
     SCOPE_CS, SCOPE_USER, SCOPE_TENANT_ADMIN, SCOPE_ADMIN, DEFAULT_TENANT,
 )
+from app.security_auth import validate_password_strength, unlock_account
 from app.token_manager import get_valid_microsoft_token
 from app.routes.deps import require_admin, require_tenant_admin, require_user, get_session_tenant_id, assert_same_tenant
 
@@ -59,14 +60,17 @@ def update_profile_password(request: Request, payload: dict = Body(...)):
     new_password = payload.get("new_password", "")
     if not current_password or not new_password:
         return {"status": "error", "message": "Mot de passe actuel et nouveau requis."}
-    if len(new_password) < 8:
-        return {"status": "error", "message": "Nouveau mot de passe trop court (8 caractères min.)."}
+    # Validation force du nouveau MDP
+    ok, msg = validate_password_strength(new_password)
+    if not ok:
+        return {"status": "error", "message": msg}
     if not authenticate(username, current_password):
         return {"status": "error", "message": "Mot de passe actuel incorrect."}
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("UPDATE users SET password_hash=%s WHERE username=%s", (hash_password(new_password), username))
+        c.execute("UPDATE users SET password_hash=%s WHERE username=%s",
+                  (hash_password(new_password), username))
         conn.commit()
         return {"status": "ok", "message": "Mot de passe mis à jour."}
     except Exception as e: return {"status": "error", "message": str(e)[:100]}
@@ -74,11 +78,19 @@ def update_profile_password(request: Request, payload: dict = Body(...)):
         if conn: conn.close()
 
 
+# ─── DÉBLOCAGE COMPTE ───
+
+@router.post("/admin/unlock-user/{target}")
+def admin_unlock_user(request: Request, target: str):
+    """Déverrouille un compte définitivement bloqué (admin uniquement)."""
+    if not require_admin(request): return {"error": "Accès refusé."}
+    return unlock_account(target)
+
+
 # ─── CONFIG SHAREPOINT ───
 
 @router.get("/admin/tenants/{tenant_id}/sharepoint")
 def get_sharepoint_config(request: Request, tenant_id: str):
-    """Retourne la config SharePoint actuelle d'un tenant."""
     if not require_admin(request): return {"error": "Accès refusé."}
     from app.connectors.drive_connector import get_drive_config
     config = get_drive_config(tenant_id)
@@ -92,7 +104,6 @@ def get_sharepoint_config(request: Request, tenant_id: str):
 
 @router.put("/admin/tenants/{tenant_id}/sharepoint")
 def update_sharepoint_config(request: Request, tenant_id: str, payload: dict = Body(...)):
-    """Met à jour la config SharePoint d'un tenant."""
     if not require_admin(request): return {"error": "Accès refusé."}
     site = payload.get("sharepoint_site", "").strip()
     folder = payload.get("sharepoint_folder", "").strip()
@@ -103,7 +114,7 @@ def update_sharepoint_config(request: Request, tenant_id: str, payload: dict = B
     return save_drive_config(tenant_id, site, folder, drive)
 
 
-# ─── SOCIÉTÉS (super-admin uniquement) ───
+# ─── SOCIÉTÉS ───
 
 @router.get("/admin/tenants-overview")
 def admin_tenants_overview(request: Request):
@@ -114,7 +125,8 @@ def admin_tenants_overview(request: Request):
         c.execute("SELECT id, name, settings FROM tenants ORDER BY name")
         tenants_raw = c.fetchall()
         c.execute("""
-            SELECT u.username, u.email, u.scope, u.tenant_id, u.last_login, u.created_at
+            SELECT u.username, u.email, u.scope, u.tenant_id, u.last_login, u.created_at,
+                   COALESCE(u.account_locked, false), COALESCE(u.must_reset_password, false)
             FROM users u ORDER BY u.tenant_id, u.created_at
         """)
         users_raw = c.fetchall()
@@ -129,20 +141,21 @@ def admin_tenants_overview(request: Request):
 
     users_by_tenant = {}
     for row in users_raw:
-        username, email, scope, tenant_id, last_login, created_at = row
+        username, email, scope, tenant_id, last_login, created_at, locked, must_reset = row
         tid = tenant_id or DEFAULT_TENANT
         users_by_tenant.setdefault(tid, []).append({
             "username": username, "email": email or "", "scope": scope or "user",
             "last_login": str(last_login) if last_login else None,
             "created_at": str(created_at) if created_at else None,
             "ms_connected": username in ms_connected,
+            "account_locked": bool(locked),
+            "must_reset_password": bool(must_reset),
             **{k: stats.get(username, {}).get(k, 0) for k in ["conv","rules","insights","mails"]},
         })
 
     result = []
     for tenant_id, name, settings in tenants_raw:
         users = users_by_tenant.get(tenant_id, [])
-        ms_ok = sum(1 for u in users if u["ms_connected"])
         sp = settings or {}
         result.append({
             "tenant_id": tenant_id, "name": name or tenant_id,
@@ -150,7 +163,8 @@ def admin_tenants_overview(request: Request):
             "sharepoint_site": sp.get("sharepoint_site", "Commun"),
             "sharepoint_folder": sp.get("sharepoint_folder", "1_Photovoltaïque"),
             "sharepoint_drive": sp.get("sharepoint_drive", "Documents"),
-            "user_count": len(users), "ms_connected_count": ms_ok,
+            "user_count": len(users),
+            "ms_connected_count": sum(1 for u in users if u["ms_connected"]),
             "total_mails": sum(u["mails"] for u in users),
             "total_conv": sum(u["conv"] for u in users),
             "users": users,
@@ -171,7 +185,7 @@ def admin_tenants_overview(request: Request):
     return result
 
 
-# ─── TENANTS (super-admin) ───
+# ─── TENANTS ───
 
 @router.get("/admin/tenants")
 def list_tenants_endpoint(request: Request):
@@ -198,7 +212,7 @@ def update_tenant_endpoint(request: Request, tenant_id: str, payload: dict = Bod
     return update_tenant_settings(tenant_id, payload)
 
 
-# ─── PANEL & USERS (super-admin) ───
+# ─── PANEL & USERS ───
 
 @router.get("/admin/panel", response_class=HTMLResponse)
 def admin_panel(request: Request):

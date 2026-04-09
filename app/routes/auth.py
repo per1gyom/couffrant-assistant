@@ -4,9 +4,13 @@ from app.auth import build_msal_app
 from app.config import GRAPH_SCOPES, REDIRECT_URI
 from app.token_manager import save_microsoft_token, save_google_token
 from app.app_security import (
-    authenticate, update_last_login, check_rate_limit,
-    record_failed_attempt, clear_attempts, get_user_scope,
+    authenticate, update_last_login, get_user_scope,
     get_tenant_id, LOGIN_PAGE_HTML,
+)
+from app.security_auth import (
+    check_rate_limit, record_failed_attempt, clear_attempts,
+    check_user_lockout, record_user_failed, clear_user_attempts,
+    is_account_locked_db,
 )
 from app.security_users import must_reset_password_check
 from app.database import get_pg_conn
@@ -26,27 +30,58 @@ async def login_app_post(
     request: Request, username: str = Form(...), password: str = Form(...)
 ):
     ip = request.client.host if request.client else "unknown"
-    allowed, message = check_rate_limit(ip)
+    username_clean = username.strip()
+
+    # 1. Rate limit IP (anti-bot)
+    allowed, msg_ip = check_rate_limit(ip)
     if not allowed:
-        return HTMLResponse(LOGIN_PAGE_HTML.format(error_block=f'<div class="error">{message}</div>'))
-    if authenticate(username.strip(), password):
+        return HTMLResponse(LOGIN_PAGE_HTML.format(
+            error_block=f'<div class="error">{msg_ip}</div>'
+        ))
+
+    # 2. Compte définitivement bloqué (DB)
+    if is_account_locked_db(username_clean):
+        return HTMLResponse(LOGIN_PAGE_HTML.format(
+            error_block='<div class="error">Ce compte est bloqué. Contactez votre administrateur.</div>'
+        ))
+
+    # 3. Verrouillage temporaire en cours (mémoire)
+    ok, msg_lock, permanent = check_user_lockout(username_clean)
+    if not ok:
+        return HTMLResponse(LOGIN_PAGE_HTML.format(
+            error_block=f'<div class="error">{msg_lock}</div>'
+        ))
+
+    # 4. Authentification
+    if authenticate(username_clean, password):
         clear_attempts(ip)
-        update_last_login(username.strip())
-        scope = get_user_scope(username.strip())
-        tenant_id = get_tenant_id(username.strip())
-        request.session["user"] = username.strip()
+        clear_user_attempts(username_clean)
+        update_last_login(username_clean)
+        scope = get_user_scope(username_clean)
+        tenant_id = get_tenant_id(username_clean)
+        request.session["user"] = username_clean
         request.session["scope"] = scope
         request.session["tenant_id"] = tenant_id
-        # Si l'admin a forcé un renouvellement de mot de passe → page dédiée
-        if must_reset_password_check(username.strip()):
+        # Redéfinition MDP obligatoire ?
+        if must_reset_password_check(username_clean):
             request.session["must_reset"] = True
             return RedirectResponse("/forced-reset", status_code=303)
         return RedirectResponse("/chat", status_code=303)
+
+    # 5. Échec — enregistrer et appliquer le blocage progressif
     record_failed_attempt(ip)
+    result = record_user_failed(username_clean, ip)
+
+    if result.get("permanent"):
+        error_msg = "Compte bloqué définitivement après trop de tentatives. Contactez votre administrateur."
+    elif result.get("blocked"):
+        mins = result.get("minutes", 5)
+        error_msg = f"Trop d'échecs consécutifs. Compte verrouillé {mins} minute(s)."
+    else:
+        error_msg = "Identifiant ou mot de passe incorrect."
+
     return HTMLResponse(
-        LOGIN_PAGE_HTML.format(
-            error_block='<div class="error">Identifiant ou mot de passe incorrect.</div>'
-        ),
+        LOGIN_PAGE_HTML.format(error_block=f'<div class="error">{error_msg}</div>'),
         status_code=401,
     )
 
@@ -61,8 +96,8 @@ def logout(request: Request):
 def chat(request: Request):
     if not request.session.get("user"):
         return RedirectResponse("/login-app")
-    # Vérifie en base (au cas où le flag a été activé pendant la session)
     username = request.session.get("user")
+    # Vérification en base (si flag activé pendant la session)
     if must_reset_password_check(username):
         request.session["must_reset"] = True
         return RedirectResponse("/forced-reset")
