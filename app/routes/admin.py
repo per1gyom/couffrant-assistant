@@ -8,12 +8,76 @@ from app.app_security import (
     create_user, delete_user, update_user, list_users, init_default_user,
     get_user_tools, set_user_tool, remove_user_tool,
     get_users_in_tenant, get_tenant_id, generate_reset_token,
+    authenticate, hash_password,
     SCOPE_CS, SCOPE_USER, SCOPE_TENANT_ADMIN, DEFAULT_TENANT,
 )
 from app.token_manager import get_valid_microsoft_token
-from app.routes.deps import require_admin, require_tenant_admin, get_session_tenant_id, assert_same_tenant
+from app.routes.deps import require_admin, require_tenant_admin, require_user, get_session_tenant_id, assert_same_tenant
 
 router = APIRouter(tags=["admin"])
+
+
+# ─── PROFIL UTILISATEUR CONNECTÉ ───
+
+@router.get("/profile")
+def get_profile(request: Request):
+    """Retourne email + username de l'utilisateur connecté."""
+    if not require_user(request): return {"error": "Non connecté."}
+    username = request.session.get("user", "")
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("SELECT username, email, scope FROM users WHERE username=%s", (username,))
+        row = c.fetchone()
+        if not row: return {"error": "Utilisateur introuvable."}
+        return {"username": row[0], "email": row[1] or "", "scope": row[2]}
+    except Exception as e: return {"error": str(e)[:100]}
+    finally:
+        if conn: conn.close()
+
+
+@router.put("/profile/email")
+def update_profile_email(request: Request, payload: dict = Body(...)):
+    """Met à jour l'email de l'utilisateur connecté."""
+    if not require_user(request): return {"error": "Non connecté."}
+    username = request.session.get("user", "")
+    email = payload.get("email", "").strip()
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("UPDATE users SET email=%s WHERE username=%s", (email or None, username))
+        conn.commit()
+        return {"status": "ok", "message": "Email mis à jour."}
+    except Exception as e: return {"status": "error", "message": str(e)[:100]}
+    finally:
+        if conn: conn.close()
+
+
+@router.put("/profile/password")
+def update_profile_password(request: Request, payload: dict = Body(...)):
+    """
+    Change le mot de passe de l'utilisateur connecté.
+    Nécessite le mot de passe actuel pour sécuriser l'opération.
+    """
+    if not require_user(request): return {"error": "Non connecté."}
+    username = request.session.get("user", "")
+    current_password = payload.get("current_password", "")
+    new_password = payload.get("new_password", "")
+    if not current_password or not new_password:
+        return {"status": "error", "message": "Mot de passe actuel et nouveau requis."}
+    if len(new_password) < 8:
+        return {"status": "error", "message": "Nouveau mot de passe trop court (8 caractères min.)."}
+    if not authenticate(username, current_password):
+        return {"status": "error", "message": "Mot de passe actuel incorrect."}
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("UPDATE users SET password_hash=%s WHERE username=%s", (hash_password(new_password), username))
+        conn.commit()
+        return {"status": "ok", "message": "Mot de passe mis à jour."}
+    except Exception as e: return {"status": "error", "message": str(e)[:100]}
+    finally:
+        if conn: conn.close()
 
 
 # ─── TENANTS (super-admin) ───
@@ -38,7 +102,6 @@ def delete_tenant_endpoint(request: Request, tenant_id: str):
 
 @router.post("/admin/tenants/{tenant_id}/tools")
 def add_tenant_tool(request: Request, tenant_id: str, payload: dict = Body(...)):
-    """Ajoute un outil custom à un tenant."""
     if not require_admin(request): return {"error": "Accès refusé."}
     from app.tenant_manager import add_custom_tool
     return add_custom_tool(tenant_id, payload.get("tool_id","").strip(),
@@ -83,7 +146,6 @@ def admin_create_user(request: Request, payload: dict = Body(...)):
 
 @router.put("/admin/update-user/{target}")
 def admin_update_user(request: Request, target: str, payload: dict = Body(...)):
-    """Met à jour email et/ou scope d'un utilisateur."""
     if not require_admin(request): return {"error": "Accès refusé."}
     return update_user(target, email=payload.get("email"), scope=payload.get("scope"))
 
@@ -94,11 +156,6 @@ def admin_delete_user(request: Request, target: str):
 
 @router.post("/admin/reset-password/{target}")
 def admin_reset_password(request: Request, target: str):
-    """
-    Génère un lien de réinitialisation valable 24h.
-    Si l'utilisateur a un email et que SMTP est configuré, l'email est envoyé automatiquement.
-    Le lien est toujours retourné dans la réponse pour copie manuelle.
-    """
     if not require_tenant_admin(request): return {"error": "Accès refusé."}
     ok, err = assert_same_tenant(request, target)
     if not ok: return {"error": err}
@@ -147,14 +204,14 @@ def tenant_reset_password(request: Request, target: str):
 @router.get("/tenant/user-tools/{target}")
 def tenant_get_tools(request: Request, target: str):
     if not require_tenant_admin(request): return {"error": "Accès refusé."}
-    ok, err = assert_same_tenant(request, target); 
+    ok, err = assert_same_tenant(request, target)
     if not ok: return {"error": err}
     return get_user_tools(target, raw=True)
 
 @router.post("/tenant/user-tools/{target}/{tool}")
 def tenant_set_tool(request: Request, target: str, tool: str, payload: dict = Body(...)):
     if not require_tenant_admin(request): return {"error": "Accès refusé."}
-    ok, err = assert_same_tenant(request, target);
+    ok, err = assert_same_tenant(request, target)
     if not ok: return {"error": err}
     return set_user_tool(target, tool, payload.get("access_level","read_only"), payload.get("enabled",True), payload.get("config",{}))
 
@@ -260,7 +317,7 @@ def init_db_now(request: Request):
 @router.get("/test-elevenlabs")
 def test_elevenlabs(request: Request):
     if not require_admin(request): return {"error": "Accès refusé."}
-    import os; api_key=os.environ.get("ELEVENLABS_API_KEY",""); voice_id=os.environ.get("ELEVENLABS_VOICE_ID","")
+    api_key=os.environ.get("ELEVENLABS_API_KEY",""); voice_id=os.environ.get("ELEVENLABS_VOICE_ID","")
     resp=http_requests.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
         headers={"xi-api-key":api_key,"Content-Type":"application/json"},
         json={"text":"Bonjour.","model_id":"eleven_flash_v2_5","voice_settings":{"stability":0.5,"similarity_boost":0.8}},timeout=30)
