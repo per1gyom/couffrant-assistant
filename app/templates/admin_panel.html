@@ -96,7 +96,6 @@ select option { background: var(--bg3); }
 .action-result { font-family: var(--mono); font-size: 11px; color: var(--green); margin-top: 10px; min-height: 16px; }
 .action-result.err { color: var(--red); }
 .divider { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
-/* Profil */
 .profile-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 24px; max-width: 500px; }
 .profile-card + .profile-card { margin-top: 20px; }
 .profile-section-title { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
@@ -107,11 +106,21 @@ select option { background: var(--bg3); }
 .tenant-header { display: flex; align-items: center; gap: 14px; padding: 18px 20px; cursor: pointer; transition: background 0.15s; }
 .tenant-header:hover { background: var(--bg3); }
 .tenant-name { font-family: var(--mono); font-size: 15px; font-weight: 700; color: #fff; flex: 1; }
-.tenant-meta { font-family: var(--mono); font-size: 11px; color: var(--text3); display: flex; gap: 16px; }
+.tenant-meta { font-family: var(--mono); font-size: 11px; color: var(--text3); display: flex; gap: 16px; flex-wrap: wrap; }
 .tenant-toggle { font-size: 18px; color: var(--text3); transition: transform 0.2s; }
 .tenant-toggle.open { transform: rotate(90deg); }
 .tenant-body { display: none; border-top: 1px solid var(--border); }
 .tenant-body.open { display: block; }
+/* SharePoint config */
+.sp-config-panel { padding: 16px 20px; background: var(--bg3); border-top: 1px solid var(--border); }
+.sp-config-title { font-family: var(--mono); font-size: 10px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; }
+.sp-config-grid { display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 12px; align-items: end; }
+@media (max-width: 768px) { .sp-config-grid { grid-template-columns: 1fr; } }
+.sp-config-grid label { font-size: 9px; }
+.sp-config-grid input { padding: 7px 10px; font-size: 12px; }
+.sp-result { font-family: var(--mono); font-size: 11px; margin-top: 8px; min-height: 16px; transition: color 0.2s; }
+.sp-result.ok { color: var(--green); }
+.sp-result.err { color: var(--red); }
 </style>
 </head>
 <body>
@@ -176,8 +185,9 @@ select option { background: var(--bg3); }
     <select id="rules-cat-filter" onchange="filterRulesDisplay()">
       <option value="">Toutes les catégories</option>
       <option>tri_mails</option><option>urgence</option><option>anti_spam</option>
-      <option>style_reponse</option><option>regroupement</option><option>contacts_cles</option>
-      <option>memoire</option><option>comportement</option><option>style</option><option>métier</option>
+      <option>mail_filter</option><option>style_reponse</option><option>regroupement</option>
+      <option>contacts_cles</option><option>memoire</option><option>teams_ingestion</option>
+      <option>comportement</option><option>style</option><option>métier</option>
     </select>
     <select id="rules-active-filter" onchange="filterRulesDisplay()">
       <option value="">Toutes</option><option value="true">Actives seulement</option><option value="false">Inactives seulement</option>
@@ -371,7 +381,7 @@ async function showTools(username){
 }
 function hideTools(){document.getElementById('tools-section').style.display='none';}
 
-// SOCIÉTÉS
+// ─── SOCIÉTÉS ───
 async function loadCompanies(){
   document.getElementById('companies-list').innerHTML='<div style="color:var(--text3);font-family:var(--mono);font-size:12px"><span class="loader"></span> Chargement...</div>';
   try{
@@ -383,6 +393,9 @@ async function loadCompanies(){
     }
     document.getElementById('companies-list').innerHTML=tenants.map((t,i)=>{
       const msBar = t.user_count>0 ? `${t.ms_connected_count}/${t.user_count} MS connectés` : '—';
+      const spSite = t.sharepoint_site || 'Commun';
+      const spFolder = t.sharepoint_folder || '1_Photovoltaïque';
+      const spDrive = t.sharepoint_drive || 'Documents';
       return `
       <div class="tenant-card">
         <div class="tenant-header" onclick="toggleTenant(${i})">
@@ -393,6 +406,7 @@ async function loadCompanies(){
             <span>📬 ${fmt(t.total_mails)} mails</span>
             <span>💬 ${fmt(t.total_conv)} conversations</span>
             <span>🔗 ${msBar}</span>
+            <span style="color:var(--accent)">📁 ${spSite}/${spFolder}</span>
           </div>
         </div>
         <div class="tenant-body" id="body-${i}">
@@ -411,6 +425,28 @@ async function loadCompanies(){
               </tr>`).join('')}
             </tbody>
           </table>
+          <!-- CONFIG SHAREPOINT -->
+          <div class="sp-config-panel">
+            <div class="sp-config-title">⚙️ Configuration SharePoint</div>
+            <div class="sp-config-grid">
+              <div>
+                <label>Site SharePoint</label>
+                <input type="text" id="sp-site-${i}" value="${spSite}" placeholder="Commun">
+              </div>
+              <div>
+                <label>Dossier racine</label>
+                <input type="text" id="sp-folder-${i}" value="${spFolder}" placeholder="1_Photovoltaïque">
+              </div>
+              <div>
+                <label>Bibliothèque (Drive)</label>
+                <input type="text" id="sp-drive-${i}" value="${spDrive}" placeholder="Documents">
+              </div>
+              <div>
+                <button class="btn btn-accent" onclick="saveSharePointConfig('${t.tenant_id}',${i})">💾 Enregistrer</button>
+              </div>
+            </div>
+            <div class="sp-result" id="sp-result-${i}"></div>
+          </div>
         </div>
       </div>`;
     }).join('');
@@ -418,13 +454,30 @@ async function loadCompanies(){
     document.getElementById('companies-list').innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:12px">❌ Erreur: ${e.message}</div>`;
   }
 }
+
 function toggleTenant(i){
   const body=document.getElementById('body-'+i);
   const tog=document.getElementById('toggle-'+i);
   body.classList.toggle('open');
   tog.classList.toggle('open');
 }
-const fmt=n=>(n||0).toLocaleString('fr-FR');
+
+async function saveSharePointConfig(tenantId, i){
+  const site=document.getElementById(`sp-site-${i}`).value.trim();
+  const folder=document.getElementById(`sp-folder-${i}`).value.trim();
+  const drive=document.getElementById(`sp-drive-${i}`).value.trim() || 'Documents';
+  const result=document.getElementById(`sp-result-${i}`);
+  if(!site||!folder){result.className='sp-result err';result.textContent='❌ Site et dossier requis.';return;}
+  result.className='sp-result';result.textContent='⏳ Enregistrement...';
+  try{
+    const d=await(await fetch(`/admin/tenants/${tenantId}/sharepoint`,{
+      method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({sharepoint_site:site,sharepoint_folder:folder,sharepoint_drive:drive})
+    })).json();
+    if(d.status==='ok'){result.className='sp-result ok';result.textContent='✅ Config SharePoint mise à jour — prise en compte immédiate.';}
+    else{result.className='sp-result err';result.textContent='❌ '+(d.message||'Erreur');}
+  }catch(e){result.className='sp-result err';result.textContent='❌ '+e.message;}
+}
 
 // MODALS
 function openModal(name){document.getElementById('modal-'+name).classList.add('open');}
