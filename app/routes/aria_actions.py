@@ -5,9 +5,11 @@ Parse la réponse de Claude et exécute les [ACTION:...] correspondants.
 import re
 import threading
 
-from app.connectors.outlook_connector import (
-    perform_outlook_action, list_aria_drive, read_aria_drive_file,
-    search_aria_drive, create_drive_folder, copy_drive_item, move_drive_item,
+from app.connectors.outlook_connector import perform_outlook_action
+from app.connectors.drive_connector import (
+    list_drive, read_drive_file, search_drive,
+    create_folder, move_item, copy_item,
+    _find_sharepoint_site_and_drive,
 )
 from app.connectors.teams_connector import (
     list_teams_with_channels, list_channels, read_channel_messages,
@@ -125,7 +127,7 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
     return confirmed
 
 
-# ─── DRIVE ───
+# ─── DRIVE (via drive_connector) ───
 
 def _handle_drive_actions(response, token, drive_write):
     confirmed = []
@@ -133,7 +135,7 @@ def _handle_drive_actions(response, token, drive_write):
     for match in re.finditer(r'\[ACTION:LISTDRIVE:([^\]]*)\]', response):
         subfolder = match.group(1).strip()
         try:
-            r = list_aria_drive(token, subfolder)
+            r = list_drive(token, subfolder)
             if r.get("status") == "ok":
                 lines = []
                 for it in r.get("items", []):
@@ -147,7 +149,7 @@ def _handle_drive_actions(response, token, drive_write):
     for match in re.finditer(r'\[ACTION:READDRIVE:([^\]]+)\]', response):
         file_ref = match.group(1).strip()
         try:
-            r = read_aria_drive_file(token, file_ref)
+            r = read_drive_file(token, file_ref)
             if r.get("status") == "ok":
                 if r.get("type") == "texte":
                     confirmed.append(f"📄 {r['fichier']} :\n{r['contenu'][:2000]}")
@@ -159,7 +161,7 @@ def _handle_drive_actions(response, token, drive_write):
     for match in re.finditer(r'\[ACTION:SEARCHDRIVE:([^\]]+)\]', response):
         q = match.group(1).strip()
         try:
-            r = search_aria_drive(token, q)
+            r = search_drive(token, q)
             if r.get("status") == "ok":
                 lines = [f"  {'📁' if it.get('type')=='dossier' else '📄'} \"{it['nom']}\"  [id:{it.get('id','')}]" for it in r.get("items", [])]
                 confirmed.append(f"🔍 '{q}' — {r['count']} résultat(s) :\n" + "\n".join(lines))
@@ -170,27 +172,24 @@ def _handle_drive_actions(response, token, drive_write):
         for match in re.finditer(r'\[ACTION:CREATEFOLDER:([^|^\]]+)\|([^\]]+)\]', response):
             parent_id = match.group(1).strip(); folder_name = match.group(2).strip()
             try:
-                from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
                 _, drive_id, _ = _find_sharepoint_site_and_drive(token)
-                r = create_drive_folder(token, parent_id, folder_name, drive_id)
+                r = create_folder(token, parent_id, folder_name, drive_id)
                 confirmed.append(f"✅ Dossier '{folder_name}' créé  [id:{r.get('id','')}]" if r.get("status") == "ok" else f"❌ {r.get('message')}")
             except Exception as e: confirmed.append(f"❌ {str(e)[:80]}")
 
         for match in re.finditer(r'\[ACTION:MOVEDRIVE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', response):
             item_id = match.group(1).strip(); dest_id = match.group(2).strip(); new_name = match.group(3).strip() or None
             try:
-                from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
                 _, drive_id, _ = _find_sharepoint_site_and_drive(token)
-                r = move_drive_item(token, item_id, dest_id, new_name, drive_id)
+                r = move_item(token, item_id, dest_id, new_name, drive_id)
                 confirmed.append(f"✅ {r.get('message', 'Déplacé.')}" if r.get("status") == "ok" else f"❌ {r.get('message')}")
             except Exception as e: confirmed.append(f"❌ {str(e)[:80]}")
 
         for match in re.finditer(r'\[ACTION:COPYFILE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', response):
             source_id = match.group(1).strip(); dest_id = match.group(2).strip(); new_name = match.group(3).strip() or None
             try:
-                from app.connectors.outlook_connector import _find_sharepoint_site_and_drive
                 _, drive_id, _ = _find_sharepoint_site_and_drive(token)
-                r = copy_drive_item(token, source_id, dest_id, new_name, drive_id)
+                r = copy_item(token, source_id, dest_id, new_name, drive_id)
                 confirmed.append(f"✅ {r.get('message', 'Copie lancée.')}" if r.get("status") == "ok" else f"❌ {r.get('message')}")
             except Exception as e: confirmed.append(f"❌ {str(e)[:80]}")
 
@@ -202,7 +201,6 @@ def _handle_drive_actions(response, token, drive_write):
 def _handle_teams_actions(response, token, username):
     confirmed = []
 
-    # TEAMS_LIST : Option C — un seul appel avec équipes + canaux
     for _ in re.finditer(r'\[ACTION:TEAMS_LIST:\]', response):
         try:
             res = list_teams_with_channels(token)
@@ -273,51 +271,32 @@ def _handle_teams_actions(response, token, username):
             confirmed.append(res.get("message", "✅ Groupe Teams créé.") if res.get("status") == "ok" else f"❌ {res.get('message')}")
         except Exception as e: confirmed.append(f"❌ Teams groupe : {str(e)[:80]}")
 
-    # ─── ACTIONS MÉMOIRE TEAMS (Raya décide librement) ───
-
-    # TEAMS_MARK : Raya pose un curseur sur un chat/canal
+    # Mémoire Teams (Raya décide librement)
     for match in re.finditer(r'\[ACTION:TEAMS_MARK:([^|\]]+)\|([^|\]]+)\|?([^|\]]*)\|?([^\]]*)\]', response):
-        chat_id = match.group(1).strip()
-        message_id = match.group(2).strip()
-        label = match.group(3).strip() or ""
-        chat_type = match.group(4).strip() or "chat"
+        chat_id = match.group(1).strip(); message_id = match.group(2).strip()
+        label = match.group(3).strip(); chat_type = match.group(4).strip() or "chat"
         try:
             from app.memory_teams import set_teams_marker
             res = set_teams_marker(username, chat_id, message_id, label, chat_type)
             confirmed.append(res.get("message", "✅ Curseur Teams posé."))
         except Exception as e: confirmed.append(f"❌ Teams mark : {str(e)[:80]}")
 
-    # TEAMS_SYNC : ingère depuis le curseur + synthétise
     for match in re.finditer(r'\[ACTION:TEAMS_SYNC:([^|\]]+)\|?([^|\]]*)\|?([^\]]*)\]', response):
-        chat_id = match.group(1).strip()
-        label = match.group(2).strip() or ""
-        chat_type = match.group(3).strip() or "chat"
+        chat_id = match.group(1).strip(); label = match.group(2).strip(); chat_type = match.group(3).strip() or "chat"
         try:
             from app.memory_teams import ingest_and_synthesize, get_teams_markers
-            # Trouve le dernier message connu pour ce chat
             markers = get_teams_markers(username)
             marker = next((m for m in markers if m["chat_id"] == chat_id), None)
             since = marker["last_message_id"] if marker else None
-            threading.Thread(
-                target=lambda: ingest_and_synthesize(
-                    token, username, chat_id, label, chat_type, since
-                ),
-                daemon=True
-            ).start()
+            threading.Thread(target=lambda: ingest_and_synthesize(token, username, chat_id, label, chat_type, since), daemon=True).start()
             confirmed.append(f"🔄 Sync Teams '{label or chat_id[:20]}' lancée en arrière-plan.")
         except Exception as e: confirmed.append(f"❌ Teams sync : {str(e)[:80]}")
 
-    # TEAMS_HISTORY : explore l'historique complet (ignore le curseur)
     for match in re.finditer(r'\[ACTION:TEAMS_HISTORY:([^|\]]+)\|?([^|\]]*)\|?([^\]]*)\]', response):
-        chat_id = match.group(1).strip()
-        label = match.group(2).strip() or ""
-        chat_type = match.group(3).strip() or "chat"
+        chat_id = match.group(1).strip(); label = match.group(2).strip(); chat_type = match.group(3).strip() or "chat"
         try:
             from app.memory_teams import explore_history
-            threading.Thread(
-                target=lambda: explore_history(token, username, chat_id, label, chat_type),
-                daemon=True
-            ).start()
+            threading.Thread(target=lambda: explore_history(token, username, chat_id, label, chat_type), daemon=True).start()
             confirmed.append(f"🔍 Exploration historique Teams '{label or chat_id[:20]}' lancée.")
         except Exception as e: confirmed.append(f"❌ Teams history : {str(e)[:80]}")
 
