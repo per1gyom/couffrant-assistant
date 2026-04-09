@@ -1,42 +1,122 @@
 """
 Connecteur SharePoint Drive pour Raya.
 
-Isolé d'outlook_connector.py pour séparer les responsabilités :
-- drive_connector.py  → SharePoint / OneDrive
-- outlook_connector.py → Mails, calendrier, tâches, contacts
+La configuration (nom du site, dossier racine) est lue depuis tenants.settings
+au lieu d'être codée en dur. Modifiable depuis le panel admin → onglet Sociétés.
+
+Fallback sur les valeurs par défaut si la table n'est pas configurée.
 """
 import requests
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 
-SITE_NAME = "Commun"
-FOLDER_NAME = "1_Photovoltaïque"
-PATH_CANDIDATES = [
-    "1_Photovoltaïque",
-    "Documents/1_Photovoltaïque",
-    "Shared Documents/1_Photovoltaïque",
-    "1_Photovoltaique",
-]
+# Valeurs par défaut (utilisées si non configurées en base)
+_DEFAULTS = {
+    "site_name": "Commun",
+    "folder_name": "1_Photovoltaïque",
+    "drive_name": "Documents",
+}
 
 
 def _h(token: str) -> dict:
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
+# ─── CONFIG DYNAMIQUE ───
+
+def get_drive_config(tenant_id: str = "couffrant_solar") -> dict:
+    """
+    Charge la config SharePoint depuis tenants.settings.
+    Retourne un dict avec site_name, folder_name, drive_name, path_candidates.
+    Toujours fonctionnel même si la table n'est pas configurée.
+    """
+    try:
+        from app.database import get_pg_conn
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("SELECT settings FROM tenants WHERE id = %s", (tenant_id,))
+        row = c.fetchone()
+        conn.close()
+        if row and row[0]:
+            s = row[0]
+            folder = s.get("sharepoint_folder") or _DEFAULTS["folder_name"]
+            return {
+                "site_name": s.get("sharepoint_site") or _DEFAULTS["site_name"],
+                "folder_name": folder,
+                "drive_name": s.get("sharepoint_drive") or _DEFAULTS["drive_name"],
+                "path_candidates": _build_candidates(folder),
+            }
+    except Exception:
+        pass
+    return {
+        "site_name": _DEFAULTS["site_name"],
+        "folder_name": _DEFAULTS["folder_name"],
+        "drive_name": _DEFAULTS["drive_name"],
+        "path_candidates": _build_candidates(_DEFAULTS["folder_name"]),
+    }
+
+
+def save_drive_config(tenant_id: str, site_name: str, folder_name: str,
+                      drive_name: str = "Documents") -> dict:
+    """Sauvegarde la config SharePoint dans tenants.settings."""
+    try:
+        from app.database import get_pg_conn
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            UPDATE tenants
+            SET settings = settings || %s::jsonb
+            WHERE id = %s
+        """, (
+            f'{{"sharepoint_site": "{site_name}", "sharepoint_folder": "{folder_name}", "sharepoint_drive": "{drive_name}"}}',
+            tenant_id
+        ))
+        conn.commit()
+        conn.close()
+        return {"status": "ok", "message": "Configuration SharePoint mise à jour."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:200]}
+
+
+def _build_candidates(folder_name: str) -> list:
+    """Génère les chemins candidats pour trouver le dossier racine."""
+    return [
+        folder_name,
+        f"Documents/{folder_name}",
+        f"Shared Documents/{folder_name}",
+        folder_name.replace("ï", "i"),  # sans accent
+    ]
+
+
+def _get_config_for_username(username: str) -> dict:
+    """Charge la config Drive à partir du tenant de l'utilisateur."""
+    try:
+        from app.app_security import get_tenant_id
+        tenant_id = get_tenant_id(username)
+        return get_drive_config(tenant_id)
+    except Exception:
+        return get_drive_config()
+
+
 # ─── DÉCOUVERTE SHAREPOINT ───
 
-def _find_sharepoint_site_and_drive(token: str) -> tuple:
+def _find_sharepoint_site_and_drive(token: str, config: dict = None) -> tuple:
     """Trouve le site SharePoint et le drive documentaire."""
+    if config is None:
+        config = get_drive_config()
+    site_name = config["site_name"]
+
     site_id = None
     drive_id = None
     all_drives = []
 
     for endpoint in ["/sites", "/me/followedSites"]:
         try:
-            params = {"search": SITE_NAME} if endpoint == "/sites" else {}
-            data = requests.get(f"{GRAPH}{endpoint}", headers=_h(token), params=params, timeout=20).json()
+            params = {"search": site_name} if endpoint == "/sites" else {}
+            data = requests.get(f"{GRAPH}{endpoint}", headers=_h(token),
+                                params=params, timeout=20).json()
             for site in data.get("value", []):
-                if SITE_NAME.lower() in (site.get("name", "") + site.get("displayName", "")).lower():
+                if site_name.lower() in (site.get("name", "") + site.get("displayName", "")).lower():
                     site_id = site.get("id")
                     break
         except Exception:
@@ -48,12 +128,17 @@ def _find_sharepoint_site_and_drive(token: str) -> tuple:
         return None, None, []
 
     try:
-        drives_data = requests.get(f"{GRAPH}/sites/{site_id}/drives", headers=_h(token), timeout=15).json()
+        drives_data = requests.get(f"{GRAPH}/sites/{site_id}/drives",
+                                   headers=_h(token), timeout=15).json()
         all_drives = drives_data.get("value", [])
+        drive_name = config.get("drive_name", "Documents").lower()
+        # Cherche le drive configuré en premier
         for drive in all_drives:
-            if drive.get("driveType") == "documentLibrary" and "document" in drive.get("name", "").lower():
+            if drive.get("driveType") == "documentLibrary" and \
+               drive_name in drive.get("name", "").lower():
                 drive_id = drive.get("id")
                 break
+        # Fallback : premier documentLibrary
         if not drive_id:
             for drive in all_drives:
                 if drive.get("driveType") == "documentLibrary":
@@ -67,9 +152,11 @@ def _find_sharepoint_site_and_drive(token: str) -> tuple:
     return site_id, drive_id, all_drives
 
 
-def _find_folder_root(token: str, drive_id: str) -> tuple:
-    """Trouve l'item_id du dossier racine 1_Photovoltaïque."""
-    for candidate in PATH_CANDIDATES:
+def _find_folder_root(token: str, drive_id: str, config: dict = None) -> tuple:
+    """Trouve l'item_id du dossier racine configuré."""
+    if config is None:
+        config = get_drive_config()
+    for candidate in config["path_candidates"]:
         try:
             meta = requests.get(
                 f"{GRAPH}/drives/{drive_id}/root:/{candidate}",
@@ -83,7 +170,6 @@ def _find_folder_root(token: str, drive_id: str) -> tuple:
 
 
 def _fmt(items: list) -> list:
-    """Formate les items Drive pour affichage."""
     result = []
     for f in items:
         ext = f.get("name", "").rsplit(".", 1)[-1].lower() if "." in f.get("name", "") else ""
@@ -101,41 +187,53 @@ def _fmt(items: list) -> list:
 
 # ─── ACTIONS DRIVE ───
 
-def list_drive(token: str, subfolder: str = "") -> dict:
+def list_drive(token: str, subfolder: str = "", username: str = None) -> dict:
     """
-    Liste les fichiers dans 1_Photovoltaïque.
+    Liste les fichiers dans le dossier racine configuré.
     subfolder : vide (racine), nom de sous-dossier, ou item_id direct.
     """
     try:
-        _, drive_id, _ = _find_sharepoint_site_and_drive(token)
+        config = _get_config_for_username(username) if username else get_drive_config()
+        folder_name = config["folder_name"]
+        site_name = config["site_name"]
+
+        _, drive_id, _ = _find_sharepoint_site_and_drive(token, config)
 
         if not drive_id:
             # Fallback OneDrive personnel
             try:
                 data = requests.get(
-                    f"{GRAPH}/me/drive/root:/{FOLDER_NAME}:/children",
+                    f"{GRAPH}/me/drive/root:/{folder_name}:/children",
                     headers=_h(token),
-                    params={"$top": 100, "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl", "$orderby": "name"},
+                    params={"$top": 100,
+                            "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl",
+                            "$orderby": "name"},
                     timeout=20
                 ).json()
                 items = _fmt(data.get("value", []))
-                return {"status": "ok", "source": "OneDrive", "dossier": FOLDER_NAME,
-                        "count": len(items), "items": items}
+                return {"status": "ok", "source": "OneDrive",
+                        "dossier": folder_name, "count": len(items), "items": items}
             except Exception:
-                return {"status": "error", "message": f"Site SharePoint '{SITE_NAME}' introuvable."}
+                return {"status": "error",
+                        "message": f"Site SharePoint '{site_name}' introuvable."}
 
-        base_path, base_id = _find_folder_root(token, drive_id)
+        base_path, base_id = _find_folder_root(token, drive_id, config)
         if not base_id:
-            return {"status": "error", "message": f"Dossier '{FOLDER_NAME}' introuvable."}
+            return {"status": "error",
+                    "message": f"Dossier '{folder_name}' introuvable. "
+                               f"Vérifiez la config SharePoint dans le panel admin."}
 
-        params_q = {"$top": 100, "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl", "$orderby": "name"}
+        params_q = {"$top": 100,
+                    "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl",
+                    "$orderby": "name"}
 
         if not subfolder:
             data = requests.get(f"{GRAPH}/drives/{drive_id}/items/{base_id}/children",
                                 headers=_h(token), params=params_q, timeout=20).json()
             items = _fmt(data.get("value", []))
-            return {"status": "ok", "source": f"SharePoint {SITE_NAME}",
-                    "dossier": FOLDER_NAME, "root_id": base_id, "count": len(items), "items": items}
+            return {"status": "ok", "source": f"SharePoint {site_name}",
+                    "dossier": folder_name, "root_id": base_id,
+                    "count": len(items), "items": items}
 
         subfolder = subfolder.strip()
         # item_id direct
@@ -143,14 +241,15 @@ def list_drive(token: str, subfolder: str = "") -> dict:
             data = requests.get(f"{GRAPH}/drives/{drive_id}/items/{subfolder}/children",
                                 headers=_h(token), params=params_q, timeout=20).json()
             items = _fmt(data.get("value", []))
-            return {"status": "ok", "source": f"SharePoint {SITE_NAME}",
+            return {"status": "ok", "source": f"SharePoint {site_name}",
                     "dossier": f"(id={subfolder[:12]}…)", "dossier_id": subfolder,
                     "count": len(items), "items": items}
 
         # Sous-dossier par nom
         root_data = requests.get(f"{GRAPH}/drives/{drive_id}/items/{base_id}/children",
                                  headers=_h(token),
-                                 params={"$top": 100, "$select": "name,id,folder"}, timeout=15).json()
+                                 params={"$top": 100, "$select": "name,id,folder"},
+                                 timeout=15).json()
         target_id = None
         target_name = subfolder
         for item in root_data.get("value", []):
@@ -160,23 +259,26 @@ def list_drive(token: str, subfolder: str = "") -> dict:
                 break
 
         if not target_id:
-            return {"status": "error", "message": f"Sous-dossier '{subfolder}' introuvable."}
+            return {"status": "error",
+                    "message": f"Sous-dossier '{subfolder}' introuvable."}
 
         data = requests.get(f"{GRAPH}/drives/{drive_id}/items/{target_id}/children",
                             headers=_h(token), params=params_q, timeout=20).json()
         items = _fmt(data.get("value", []))
-        return {"status": "ok", "source": f"SharePoint {SITE_NAME}",
-                "dossier": target_name, "dossier_id": target_id, "count": len(items), "items": items}
+        return {"status": "ok", "source": f"SharePoint {site_name}",
+                "dossier": target_name, "dossier_id": target_id,
+                "count": len(items), "items": items}
 
     except Exception as e:
         return {"status": "error", "message": f"Erreur Drive : {str(e)[:300]}"}
 
 
-def read_drive_file(token: str, file_path_or_id: str) -> dict:
+def read_drive_file(token: str, file_path_or_id: str, username: str = None) -> dict:
     """Lit le contenu d'un fichier (par item_id ou chemin)."""
     try:
-        _, drive_id, _ = _find_sharepoint_site_and_drive(token)
-        base_path, _ = _find_folder_root(token, drive_id) if drive_id else (None, None)
+        config = _get_config_for_username(username) if username else get_drive_config()
+        _, drive_id, _ = _find_sharepoint_site_and_drive(token, config)
+        base_path, _ = _find_folder_root(token, drive_id, config) if drive_id else (None, None)
 
         file_ref = file_path_or_id.strip()
         meta = None
@@ -184,20 +286,23 @@ def read_drive_file(token: str, file_path_or_id: str) -> dict:
 
         if drive_id and len(file_ref) > 20 and "/" not in file_ref and " " not in file_ref:
             resp = requests.get(f"{GRAPH}/drives/{drive_id}/items/{file_ref}",
-                                headers=_h(token), params={"$select": "id,name,size,webUrl,file"}, timeout=15)
+                                headers=_h(token),
+                                params={"$select": "id,name,size,webUrl,file"}, timeout=15)
             if resp.ok:
                 meta = resp.json()
                 content_url = f"{GRAPH}/drives/{drive_id}/items/{file_ref}/content"
         elif drive_id and base_path:
+            folder_name = config["folder_name"]
             sub = file_ref.replace("\\", "/").strip("/")
-            for prefix in [base_path, FOLDER_NAME, "Documents"]:
+            for prefix in [base_path, folder_name, "Documents"]:
                 if sub.lower().startswith(prefix.lower() + "/"):
                     sub = sub[len(prefix)+1:]
                     break
             try:
                 target = f"{base_path}/{sub}"
                 resp = requests.get(f"{GRAPH}/drives/{drive_id}/root:/{target}",
-                                    headers=_h(token), params={"$select": "id,name,size,webUrl,file"}, timeout=15)
+                                    headers=_h(token),
+                                    params={"$select": "id,name,size,webUrl,file"}, timeout=15)
                 if resp.ok:
                     meta = resp.json()
                     content_url = f"{GRAPH}/drives/{drive_id}/root:/{target}:/content"
@@ -213,7 +318,8 @@ def read_drive_file(token: str, file_path_or_id: str) -> dict:
         ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
 
         if ext in {"txt", "md", "csv", "json", "xml", "log"}:
-            resp = requests.get(content_url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+            resp = requests.get(content_url,
+                                headers={"Authorization": f"Bearer {token}"}, timeout=30)
             resp.raise_for_status()
             return {"status": "ok", "fichier": name, "id": meta.get("id"),
                     "type": "texte", "contenu": resp.text[:5000], "lien": web_url}
@@ -236,31 +342,32 @@ def read_drive_file(token: str, file_path_or_id: str) -> dict:
         return {"status": "error", "message": f"Lecture impossible : {str(e)[:300]}"}
 
 
-def search_drive(token: str, query: str) -> dict:
-    """Recherche dans 1_Photovoltaïque par nom."""
+def search_drive(token: str, query: str, username: str = None) -> dict:
+    """Recherche dans le dossier racine configuré par nom."""
     try:
-        _, drive_id, _ = _find_sharepoint_site_and_drive(token)
-        _, base_id = _find_folder_root(token, drive_id) if drive_id else (None, None)
+        config = _get_config_for_username(username) if username else get_drive_config()
+        site_name = config["site_name"]
+        _, drive_id, _ = _find_sharepoint_site_and_drive(token, config)
+        _, base_id = _find_folder_root(token, drive_id, config) if drive_id else (None, None)
         q_safe = query.replace("'", "''")
 
         if drive_id and base_id:
             data = requests.get(
                 f"{GRAPH}/drives/{drive_id}/items/{base_id}/search(q='{q_safe}')",
                 headers=_h(token),
-                params={"$top": 20, "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl,parentReference"},
+                params={"$top": 20,
+                        "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl,parentReference"},
                 timeout=20
             ).json()
-            items = []
-            for f in data.get("value", []):
-                items.append({
-                    "nom": f.get("name"),
-                    "type": "dossier" if "folder" in f else "fichier",
-                    "dossier_parent": f.get("parentReference", {}).get("name", ""),
-                    "id": f.get("id"),
-                    "modifié": f.get("lastModifiedDateTime", "")[:10],
-                    "lien": f.get("webUrl", ""),
-                })
-            return {"status": "ok", "source": f"SharePoint {SITE_NAME}",
+            items = [{
+                "nom": f.get("name"),
+                "type": "dossier" if "folder" in f else "fichier",
+                "dossier_parent": f.get("parentReference", {}).get("name", ""),
+                "id": f.get("id"),
+                "modifié": f.get("lastModifiedDateTime", "")[:10],
+                "lien": f.get("webUrl", ""),
+            } for f in data.get("value", [])]
+            return {"status": "ok", "source": f"SharePoint {site_name}",
                     "recherche": query, "count": len(items), "items": items}
 
         return {"status": "error", "message": "Drive SharePoint introuvable."}
@@ -268,17 +375,19 @@ def search_drive(token: str, query: str) -> dict:
         return {"status": "error", "message": f"Recherche impossible : {str(e)[:300]}"}
 
 
-def create_folder(token: str, parent_id: str, folder_name: str, drive_id: str = None) -> dict:
-    """Crée un sous-dossier dans le Drive."""
+def create_folder(token: str, parent_id: str, folder_name: str,
+                  drive_id: str = None, username: str = None) -> dict:
     try:
         if not drive_id:
-            _, drive_id, _ = _find_sharepoint_site_and_drive(token)
+            config = _get_config_for_username(username) if username else get_drive_config()
+            _, drive_id, _ = _find_sharepoint_site_and_drive(token, config)
         if not drive_id:
             return {"status": "error", "message": "Drive SharePoint introuvable."}
         resp = requests.post(
             f"{GRAPH}/drives/{drive_id}/items/{parent_id}/children",
             headers=_h(token),
-            json={"name": folder_name, "folder": {}, "@microsoft.graph.conflictBehavior": "rename"},
+            json={"name": folder_name, "folder": {},
+                  "@microsoft.graph.conflictBehavior": "rename"},
             timeout=20
         ).json()
         return {"status": "ok", "message": f"Dossier '{folder_name}' créé.",
@@ -287,11 +396,12 @@ def create_folder(token: str, parent_id: str, folder_name: str, drive_id: str = 
         return {"status": "error", "message": f"Création impossible : {str(e)[:200]}"}
 
 
-def move_item(token: str, item_id: str, dest_id: str, new_name: str = None, drive_id: str = None) -> dict:
-    """Déplace un item vers un dossier destination."""
+def move_item(token: str, item_id: str, dest_id: str,
+             new_name: str = None, drive_id: str = None, username: str = None) -> dict:
     try:
         if not drive_id:
-            _, drive_id, _ = _find_sharepoint_site_and_drive(token)
+            config = _get_config_for_username(username) if username else get_drive_config()
+            _, drive_id, _ = _find_sharepoint_site_and_drive(token, config)
         if not drive_id:
             return {"status": "error", "message": "Drive SharePoint introuvable."}
         body = {"parentReference": {"driveId": drive_id, "id": dest_id}}
@@ -302,16 +412,18 @@ def move_item(token: str, item_id: str, dest_id: str, new_name: str = None, driv
             headers=_h(token), json=body, timeout=20
         ).json()
         label = new_name or resp.get("name", item_id[:8])
-        return {"status": "ok", "message": f"'{label}' déplacé.", "id": resp.get("id", item_id)}
+        return {"status": "ok", "message": f"'{label}' déplacé.",
+                "id": resp.get("id", item_id)}
     except Exception as e:
         return {"status": "error", "message": f"Déplacement impossible : {str(e)[:200]}"}
 
 
-def copy_item(token: str, item_id: str, dest_id: str, new_name: str = None, drive_id: str = None) -> dict:
-    """Copie un fichier/dossier (opération asynchrone)."""
+def copy_item(token: str, item_id: str, dest_id: str,
+             new_name: str = None, drive_id: str = None, username: str = None) -> dict:
     try:
         if not drive_id:
-            _, drive_id, _ = _find_sharepoint_site_and_drive(token)
+            config = _get_config_for_username(username) if username else get_drive_config()
+            _, drive_id, _ = _find_sharepoint_site_and_drive(token, config)
         if not drive_id:
             return {"status": "error", "message": "Drive SharePoint introuvable."}
         body = {"parentReference": {"driveId": drive_id, "id": dest_id}}
@@ -332,7 +444,7 @@ def copy_item(token: str, item_id: str, dest_id: str, new_name: str = None, driv
         return {"status": "error", "message": f"Copie impossible : {str(e)[:200]}"}
 
 
-# ─── ALIAS DE COMPATIBILITÉ (ancien code) ───
+# ─── ALIAS DE COMPATIBILITÉ ───
 list_aria_drive = list_drive
 read_aria_drive_file = read_drive_file
 search_aria_drive = search_drive
