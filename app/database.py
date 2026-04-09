@@ -40,12 +40,10 @@ class _PooledConn:
     """
 
     def __init__(self, conn, pool):
-        # Stockage direct dans __dict__ pour éviter toute récursion
         self.__dict__["_conn"] = conn
         self.__dict__["_pool"] = pool
 
     def __getattr__(self, name):
-        # Délégation transparente vers la connexion sous-jacente
         return getattr(self.__dict__["_conn"], name)
 
     def cursor(self, *args, **kwargs):
@@ -58,7 +56,6 @@ class _PooledConn:
         return self.__dict__["_conn"].rollback()
 
     def close(self):
-        """Remet la connexion dans le pool — ne ferme PAS le socket TCP."""
         pool = self.__dict__.get("_pool")
         conn = self.__dict__.get("_conn")
         if pool and conn:
@@ -67,7 +64,6 @@ class _PooledConn:
                 return
             except Exception:
                 pass
-        # Fallback : fermeture directe
         if conn:
             try:
                 conn.close()
@@ -88,7 +84,6 @@ def get_pg_conn():
                 return _PooledConn(conn, pool)
         except Exception as e:
             print(f"[DB] Pool getconn() échoué ({e}) — connexion directe")
-    # Fallback : connexion directe (comportement original)
     return psycopg2.connect(DATABASE_URL)
 
 
@@ -329,7 +324,7 @@ def init_postgres():
         "ALTER TABLE sent_mail_memory DROP CONSTRAINT IF EXISTS sent_mail_msg_user_unique",
         "ALTER TABLE sent_mail_memory ADD CONSTRAINT sent_mail_msg_user_unique UNIQUE (message_id, username)",
         "ALTER TABLE aria_contacts DROP CONSTRAINT IF EXISTS aria_contacts_email_key",
-        "INSERT INTO tenants (id, name, settings) VALUES ('couffrant_solar', 'Couffrant Solar', '{\"email_provider\": \"microsoft\", \"sharepoint_folder\": \"1_Photovoltaïque\"}') ON CONFLICT (id) DO NOTHING",
+        "INSERT INTO tenants (id, name, settings) VALUES ('couffrant_solar', 'Couffrant Solar', '{\"email_provider\": \"microsoft\", \"sharepoint_folder\": \"1_Photovolta\u00efque\"}') ON CONFLICT (id) DO NOTHING",
         "CREATE EXTENSION IF NOT EXISTS vector",
         "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS embedding vector(1536)",
         "ALTER TABLE aria_insights ADD COLUMN IF NOT EXISTS embedding vector(1536)",
@@ -340,8 +335,13 @@ def init_postgres():
         "CREATE INDEX IF NOT EXISTS idx_insights_embedding ON aria_insights USING hnsw (embedding vector_cosine_ops)",
         "CREATE INDEX IF NOT EXISTS idx_memory_embedding ON aria_memory USING hnsw (embedding vector_cosine_ops)",
         "CREATE INDEX IF NOT EXISTS idx_contacts_embedding ON aria_contacts USING hnsw (embedding vector_cosine_ops)",
+        # Sécurité : verrouillage compte
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS must_reset_password BOOLEAN DEFAULT FALSE",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS account_locked BOOLEAN DEFAULT FALSE",
+        # Sécurité : compteurs de tentatives persistants (lockout multi-instance)
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_attempts_count INT DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_attempts_round INT DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMP",
     ]
     for m in migrations:
         try:

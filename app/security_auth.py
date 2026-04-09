@@ -1,13 +1,18 @@
 """
 Auth : hachage, vérification, rate limiting progressif, validation MDP robuste.
 
-Logique de blocage par username :
-  Round 1 : 3 échecs → 5 min
-  Round 2 : 3 échecs → 30 min
-  Round 3 : 3 échecs → BLOCAGE DÉFINITIF en DB + alerte admin
+Logique de blocage par username (persistant en DB, multi-instance safe) :
+  Round 1 : 3 échecs → 5 min   (login_locked_until)
+  Round 2 : 3 échecs → 30 min  (login_locked_until)
+  Round 3 : 3 échecs → BLOCAGE DÉFINITIF (account_locked=true) + alerte admin
 
-Rate limiting par IP :
-  5 tentatives rapides → 15 min (anti-bot)
+Colonnes utilisées dans users :
+  login_attempts_count INT  — échecs dans le round courant
+  login_attempts_round INT  — round actuel (0, 1, 2)
+  login_locked_until TIMESTAMP — fin du verrouillage temporaire
+  account_locked BOOLEAN   — blocage définitif
+
+Rate limiting par IP : en mémoire (anti-bot, secondaire)
 """
 import hashlib
 import hmac
@@ -16,13 +21,12 @@ import re
 import base64
 import time
 
-_ip_attempts: dict = {}    # {ip: {count, locked_until}}
-_user_attempts: dict = {}  # {username_lower: {count, round, locked_until}}
+_ip_attempts: dict = {}  # {ip: {count, locked_until}} — rate limiting IP en mémoire
 
 _LOCKOUT_ROUNDS = [
-    (3, 5 * 60),   # Round 1 : 3 échecs → 5 min
-    (3, 30 * 60),  # Round 2 : 3 échecs → 30 min
-    (3, None),     # Round 3 : 3 échecs → PERMANENT
+    (3, 5 * 60),    # Round 1 : 3 échecs → 5 min
+    (3, 30 * 60),   # Round 2 : 3 échecs → 30 min
+    (3, None),      # Round 3 : 3 échecs → PERMANENT
 ]
 
 
@@ -30,7 +34,7 @@ _LOCKOUT_ROUNDS = [
 
 def validate_password_strength(password: str) -> tuple:
     """
-    Vérifie la robustesse d'un mot de passe.
+    Vérifie la robustesse du mot de passe.
     Critères : 12 chars min + majuscule + minuscule + chiffre + caractère spécial.
     Retourne (True, "") si valide, (False, "message") sinon.
     """
@@ -53,7 +57,7 @@ def validate_password_strength(password: str) -> tuple:
 # ─── RATE LIMITING PAR IP ───
 
 def check_rate_limit(ip: str) -> tuple:
-    """Vérifie si l'IP est temporairement bloquée."""
+    """Vérifie si l'IP est temporairement bloquée (anti-bot)."""
     now = time.time()
     data = _ip_attempts.get(ip, {})
     if data.get("locked_until", 0) > now:
@@ -63,7 +67,7 @@ def check_rate_limit(ip: str) -> tuple:
 
 
 def record_failed_attempt(ip: str):
-    """Incrémente le compteur IP. Alias backward-compat."""
+    """Incrémente le compteur IP."""
     now = time.time()
     data = _ip_attempts.setdefault(ip, {"count": 0})
     data["count"] = data.get("count", 0) + 1
@@ -76,58 +80,123 @@ def clear_attempts(ip: str):
     _ip_attempts.pop(ip, None)
 
 
-# ─── RATE LIMITING PAR USERNAME (progressif + blocage définitif) ───
+# ─── LOCKOUT PAR USERNAME (persistant en DB, multi-instance safe) ───
 
 def check_user_lockout(username: str) -> tuple:
     """
-    Vérifie si le compte est verrouillé (en mémoire ou en DB).
+    Vérifie si le compte est verrouillé (DB).
     Retourne (ok: bool, message: str, permanent: bool)
     """
-    if is_account_locked_db(username):
-        return False, "Compte bloqué suite à trop de tentatives. Contactez votre administrateur.", True
-    now = time.time()
-    data = _user_attempts.get(username.lower(), {})
-    locked_until = data.get("locked_until", 0)
-    if locked_until > now:
-        remaining = int((locked_until - now) / 60) + 1
-        return False, f"Compte temporairement verrouillé. Réessayez dans {remaining} minute(s).", False
+    from datetime import datetime, timezone
+    try:
+        from app.database import get_pg_conn
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            "SELECT account_locked, login_locked_until FROM users WHERE username=%s",
+            (username,)
+        )
+        row = c.fetchone()
+        conn.close()
+        if not row:
+            return True, "", False
+        account_locked, locked_until = row
+        if account_locked:
+            return False, "Compte bloqué suite à trop de tentatives. Contactez votre administrateur.", True
+        if locked_until:
+            now = datetime.now(timezone.utc)
+            if locked_until.tzinfo is None:
+                locked_until = locked_until.replace(tzinfo=timezone.utc)
+            if locked_until > now:
+                remaining = int((locked_until - now).total_seconds() / 60) + 1
+                return False, f"Compte temporairement verrouillé. Réessayez dans {remaining} minute(s).", False
+    except Exception as e:
+        print(f"[Auth] check_user_lockout: {e}")
     return True, "", False
 
 
 def record_user_failed(username: str, ip: str = "") -> dict:
     """
-    Enregistre un échec de connexion pour ce username.
-    Applique le blocage progressif et déclenche le blocage définitif au round 3.
-    Retourne {blocked, permanent, minutes?}
+    Enregistre un échec de connexion en DB.
+    Applique le blocage progressif. Retourne {blocked, permanent, minutes?}
     """
-    now = time.time()
-    key = username.lower()
-    data = _user_attempts.setdefault(key, {"count": 0, "round": 0})
-    data["count"] = data.get("count", 0) + 1
-    current_round = data.get("round", 0)
+    from datetime import datetime, timezone, timedelta
+    try:
+        from app.database import get_pg_conn
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            "SELECT login_attempts_count, login_attempts_round FROM users WHERE username=%s",
+            (username,)
+        )
+        row = c.fetchone()
+        if not row:
+            conn.close()
+            return {"blocked": False}
 
-    if current_round < len(_LOCKOUT_ROUNDS):
-        threshold, duration = _LOCKOUT_ROUNDS[current_round]
-        if data["count"] >= threshold:
-            data["count"] = 0
-            data["round"] = current_round + 1
-            if duration is None:
-                data["permanent"] = True
-                _lock_account_db(username)
-                _alert_admin_locked(username, ip)
-                return {"blocked": True, "permanent": True}
+        count        = (row[0] or 0) + 1
+        current_round = row[1] or 0
+
+        if current_round < len(_LOCKOUT_ROUNDS):
+            threshold, duration = _LOCKOUT_ROUNDS[current_round]
+            if count >= threshold:
+                next_round = current_round + 1
+                if duration is None:
+                    # BLOCAGE DÉFINITIF
+                    c.execute("""
+                        UPDATE users SET
+                            login_attempts_count=0, login_attempts_round=%s,
+                            account_locked=true, login_locked_until=NULL
+                        WHERE username=%s
+                    """, (next_round, username))
+                    conn.commit()
+                    conn.close()
+                    _alert_admin_locked(username, ip)
+                    return {"blocked": True, "permanent": True}
+                else:
+                    locked_until = datetime.now(timezone.utc) + timedelta(seconds=duration)
+                    c.execute("""
+                        UPDATE users SET
+                            login_attempts_count=0, login_attempts_round=%s,
+                            login_locked_until=%s
+                        WHERE username=%s
+                    """, (next_round, locked_until, username))
+                    conn.commit()
+                    conn.close()
+                    return {"blocked": True, "permanent": False, "minutes": duration // 60}
             else:
-                data["locked_until"] = now + duration
-                return {"blocked": True, "permanent": False, "minutes": duration // 60}
-
-    return {"blocked": False}
+                c.execute(
+                    "UPDATE users SET login_attempts_count=%s WHERE username=%s",
+                    (count, username)
+                )
+                conn.commit()
+        conn.close()
+        return {"blocked": False}
+    except Exception as e:
+        print(f"[Auth] record_user_failed: {e}")
+        return {"blocked": False}
 
 
 def clear_user_attempts(username: str):
-    _user_attempts.pop(username.lower(), None)
+    """Remet à zéro les compteurs après connexion réussie."""
+    try:
+        from app.database import get_pg_conn
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            UPDATE users SET
+                login_attempts_count=0,
+                login_attempts_round=0,
+                login_locked_until=NULL
+            WHERE username=%s
+        """, (username,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[Auth] clear_user_attempts: {e}")
 
 
-# ─── COMPTE EN BASE ───
+# ─── BLOCAGE DÉFINITIF EN BASE ───
 
 def is_account_locked_db(username: str) -> bool:
     """Vérifie le verrouillage définitif en DB."""
@@ -146,21 +215,31 @@ def is_account_locked_db(username: str) -> bool:
 def _lock_account_db(username: str):
     try:
         from app.database import get_pg_conn
-        conn = get_pg_conn(); c = conn.cursor()
+        conn = get_pg_conn()
+        c = conn.cursor()
         c.execute("UPDATE users SET account_locked=true WHERE username=%s", (username,))
-        conn.commit(); conn.close()
+        conn.commit()
+        conn.close()
     except Exception as e:
         print(f"[Auth] Erreur lock DB: {e}")
 
 
 def unlock_account(username: str) -> dict:
-    """Déverrouille un compte (action admin uniquement)."""
+    """Déverrouille un compte et remet les compteurs à zéro (action admin)."""
     try:
         from app.database import get_pg_conn
-        conn = get_pg_conn(); c = conn.cursor()
-        c.execute("UPDATE users SET account_locked=false WHERE username=%s", (username,))
-        conn.commit(); conn.close()
-        clear_user_attempts(username)
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            UPDATE users SET
+                account_locked=false,
+                login_attempts_count=0,
+                login_attempts_round=0,
+                login_locked_until=NULL
+            WHERE username=%s
+        """, (username,))
+        conn.commit()
+        conn.close()
         return {"status": "ok", "message": f"Compte '{username}' déverrouillé."}
     except Exception as e:
         return {"status": "error", "message": str(e)[:100]}
@@ -172,7 +251,8 @@ def _alert_admin_locked(username: str, ip: str = ""):
     """Envoie un email à l'admin du tenant quand un compte est définitivement bloqué."""
     try:
         from app.database import get_pg_conn
-        conn = get_pg_conn(); c = conn.cursor()
+        conn = get_pg_conn()
+        c = conn.cursor()
         c.execute("""
             SELECT u2.email FROM users u1
             JOIN users u2 ON u2.tenant_id = u1.tenant_id
@@ -194,7 +274,7 @@ def _alert_admin_locked(username: str, ip: str = ""):
 <div style="font-family:sans-serif;max-width:560px;color:#111">
   <h2 style="color:#dc2626">⚠️ Alerte sécurité Raya</h2>
   <p>Le compte <strong>{username}</strong> a été <strong>bloqué définitivement</strong>
-  après 9 tentatives de connexion échouées consécutives.</p>
+  après 9 tentatives de connexion échouées.</p>
   <table style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px;
     margin:16px 0;width:100%;border-spacing:0">
     <tr><td style="color:#6b7280;font-size:13px;padding:4px 8px">Compte :</td>
@@ -202,7 +282,7 @@ def _alert_admin_locked(username: str, ip: str = ""):
     <tr><td style="color:#6b7280;font-size:13px;padding:4px 8px">IP :</td>
         <td style="padding:4px 8px"><code>{ip or 'inconnue'}</code></td></tr>
   </table>
-  <p>Pour débloquer ce compte après vérification :</p>
+  <p>Pour débloquer après vérification :</p>
   <p><a href="{base_url}/admin/panel" style="background:#6366f1;color:#fff;
      padding:10px 20px;border-radius:8px;text-decoration:none;display:inline-block"
   >Ouvrir le panel admin</a></p>
