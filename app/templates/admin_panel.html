@@ -13,16 +13,15 @@
   --text: #c9d1d9; --text2: #8b949e; --text3: #4a5568;
   --accent: #00bcd4; --accent2: #1565c0;
   --green: #00e676; --red: #ff5252; --yellow: #ffca28;
-  --mono: 'JetBrains Mono', monospace;
-  --sans: 'IBM Plex Sans', sans-serif;
+  --mono: 'JetBrains Mono', monospace; --sans: 'IBM Plex Sans', sans-serif;
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; min-height: 100vh; }
 .header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 28px; height: 56px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
 .header-left { display: flex; align-items: center; gap: 16px; }
-.logo { font-family: var(--mono); font-size: 18px; font-weight: 700; color: #fff; letter-spacing: -0.5px; }
+.logo { font-family: var(--mono); font-size: 18px; font-weight: 700; color: #fff; }
 .logo span { color: var(--accent); }
-.badge-admin { background: rgba(0,188,212,0.12); border: 1px solid rgba(0,188,212,0.3); color: var(--accent); font-family: var(--mono); font-size: 10px; font-weight: 500; padding: 2px 8px; border-radius: 3px; letter-spacing: 1px; }
+.badge-admin { background: rgba(0,188,212,0.12); border: 1px solid rgba(0,188,212,0.3); color: var(--accent); font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 3px; letter-spacing: 1px; }
 .header-right { display: flex; align-items: center; gap: 16px; }
 .status-dot { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 11px; color: var(--text2); }
 .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse 2s infinite; }
@@ -32,7 +31,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 .btn-nav { font-family: var(--mono); font-size: 11px; color: var(--text3); background: none; border: 1px solid var(--border); padding: 5px 12px; border-radius: 4px; cursor: pointer; transition: all 0.15s; text-decoration: none; display: inline-block; }
 .btn-nav:hover { color: var(--text); border-color: var(--border2); }
 .nav-tabs { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 28px; display: flex; gap: 0; overflow-x: auto; }
-.tab { font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--text3); padding: 14px 20px; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; letter-spacing: 0.5px; text-transform: uppercase; user-select: none; white-space: nowrap; }
+.tab { font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--text3); padding: 14px 20px; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; text-transform: uppercase; letter-spacing: 0.5px; user-select: none; white-space: nowrap; }
 .tab:hover { color: var(--text2); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 .main { padding: 28px; max-width: 1400px; margin: 0 auto; }
@@ -42,8 +41,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--sans); font
 .stat-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 18px 20px; }
 .stat-label { font-family: var(--mono); font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
 .stat-value { font-family: var(--mono); font-size: 26px; font-weight: 700; color: #fff; }
-.stat-value.green { color: var(--green); }
-.stat-value.accent { color: var(--accent); }
+.stat-value.green { color: var(--green); } .stat-value.accent { color: var(--accent); }
 .section-title { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 14px; display: flex; align-items: center; gap: 10px; }
 .section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 .table-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 28px; overflow-x: auto; }
@@ -59,17 +57,13 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 .badge-yellow { background: rgba(255,202,40,0.1); color: var(--yellow); border: 1px solid rgba(255,202,40,0.2); }
 .badge-red { background: rgba(255,82,82,0.1); color: var(--red); border: 1px solid rgba(255,82,82,0.2); }
 .badge-gray { background: rgba(255,255,255,0.05); color: var(--text3); border: 1px solid var(--border); }
+.badge-ms-ok { background: rgba(0,188,212,0.1); color: var(--accent); border: 1px solid rgba(0,188,212,0.25); }
 .btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 6px; font-family: var(--mono); font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; border: none; }
-.btn-primary { background: var(--accent2); color: #fff; }
-.btn-primary:hover { background: #1976d2; }
-.btn-danger { background: rgba(255,82,82,0.15); color: var(--red); border: 1px solid rgba(255,82,82,0.3); }
-.btn-danger:hover { background: rgba(255,82,82,0.25); }
-.btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
-.btn-ghost:hover { border-color: var(--border2); color: var(--text); }
-.btn-accent { background: rgba(0,188,212,0.12); color: var(--accent); border: 1px solid rgba(0,188,212,0.25); }
-.btn-accent:hover { background: rgba(0,188,212,0.2); }
-.btn-warn { background: rgba(255,202,40,0.1); color: var(--yellow); border: 1px solid rgba(255,202,40,0.25); }
-.btn-warn:hover { background: rgba(255,202,40,0.2); }
+.btn-primary { background: var(--accent2); color: #fff; } .btn-primary:hover { background: #1976d2; }
+.btn-danger { background: rgba(255,82,82,0.15); color: var(--red); border: 1px solid rgba(255,82,82,0.3); } .btn-danger:hover { background: rgba(255,82,82,0.25); }
+.btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); } .btn-ghost:hover { border-color: var(--border2); color: var(--text); }
+.btn-accent { background: rgba(0,188,212,0.12); color: var(--accent); border: 1px solid rgba(0,188,212,0.25); } .btn-accent:hover { background: rgba(0,188,212,0.2); }
+.btn-warn { background: rgba(255,202,40,0.1); color: var(--yellow); border: 1px solid rgba(255,202,40,0.25); } .btn-warn:hover { background: rgba(255,202,40,0.2); }
 .actions-row { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
 .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(4px); }
 .modal-overlay.open { display: flex; }
@@ -108,6 +102,16 @@ select option { background: var(--bg3); }
 .profile-section-title { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
 .profile-info { font-family: var(--mono); font-size: 13px; color: var(--text2); margin-bottom: 16px; }
 .profile-info strong { color: var(--text); }
+/* Sociétés */
+.tenant-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 20px; overflow: hidden; }
+.tenant-header { display: flex; align-items: center; gap: 14px; padding: 18px 20px; cursor: pointer; transition: background 0.15s; }
+.tenant-header:hover { background: var(--bg3); }
+.tenant-name { font-family: var(--mono); font-size: 15px; font-weight: 700; color: #fff; flex: 1; }
+.tenant-meta { font-family: var(--mono); font-size: 11px; color: var(--text3); display: flex; gap: 16px; }
+.tenant-toggle { font-size: 18px; color: var(--text3); transition: transform 0.2s; }
+.tenant-toggle.open { transform: rotate(90deg); }
+.tenant-body { display: none; border-top: 1px solid var(--border); }
+.tenant-body.open { display: block; }
 </style>
 </head>
 <body>
@@ -131,6 +135,7 @@ select option { background: var(--bg3); }
   <div class="tab" onclick="switchTab('rules')">Règles</div>
   <div class="tab" onclick="switchTab('insights')">Insights</div>
   <div class="tab" onclick="switchTab('actions')">Actions</div>
+  <div class="tab" onclick="switchTab('companies')">Sociétés</div>
   <div class="tab" onclick="switchTab('profile')">Mon profil</div>
 </nav>
 
@@ -138,15 +143,11 @@ select option { background: var(--bg3); }
 
 <!-- MÉMOIRE -->
 <section id="tab-memory" class="section active">
-  <div class="stats-grid" id="memory-stats">
-    <div class="stat-card"><div class="stat-label">Chargement</div><div class="stat-value"><span class="loader"></span></div></div>
-  </div>
+  <div class="stats-grid" id="memory-stats"><div class="stat-card"><div class="stat-label">Chargement</div><div class="stat-value"><span class="loader"></span></div></div></div>
   <div class="section-title">Détail par utilisateur</div>
   <div class="table-wrap">
-    <table>
-      <thead><tr><th>Utilisateur</th><th>Email</th><th>Scope</th><th>Conversations</th><th>Règles</th><th>Insights</th><th>Mails</th></tr></thead>
-      <tbody id="memory-tbody"><tr class="loading-row"><td colspan="7"><span class="loader"></span> Chargement...</td></tr></tbody>
-    </table>
+    <table><thead><tr><th>Utilisateur</th><th>Email</th><th>Scope</th><th>Conversations</th><th>Règles</th><th>Insights</th><th>Mails</th></tr></thead>
+    <tbody id="memory-tbody"><tr class="loading-row"><td colspan="7"><span class="loader"></span> Chargement...</td></tr></tbody></table>
   </div>
 </section>
 
@@ -158,10 +159,8 @@ select option { background: var(--bg3); }
   </div>
   <div id="user-alert" class="alert"></div>
   <div class="table-wrap">
-    <table>
-      <thead><tr><th>Identifiant</th><th>Email</th><th>Scope</th><th>Dernière connexion</th><th>Créé le</th><th>Actions</th></tr></thead>
-      <tbody id="users-tbody"><tr class="loading-row"><td colspan="6"><span class="loader"></span> Chargement...</td></tr></tbody>
-    </table>
+    <table><thead><tr><th>Identifiant</th><th>Email</th><th>Scope</th><th>Dernière connexion</th><th>Créé le</th><th>Actions</th></tr></thead>
+    <tbody id="users-tbody"><tr class="loading-row"><td colspan="6"><span class="loader"></span> Chargement...</td></tr></tbody></table>
   </div>
   <div id="tools-section" style="display:none">
     <div class="section-title" id="tools-title">Outils</div>
@@ -181,18 +180,14 @@ select option { background: var(--bg3); }
       <option>memoire</option><option>comportement</option><option>style</option><option>métier</option>
     </select>
     <select id="rules-active-filter" onchange="filterRulesDisplay()">
-      <option value="">Toutes</option>
-      <option value="true">Actives seulement</option>
-      <option value="false">Inactives seulement</option>
+      <option value="">Toutes</option><option value="true">Actives seulement</option><option value="false">Inactives seulement</option>
     </select>
-    <button class="btn btn-ghost" onclick="loadRules()">&#8635; Actualiser</button>
+    <button class="btn btn-ghost" onclick="loadRules()">&#8635;</button>
     <span id="rules-count" style="font-family:var(--mono);font-size:11px;color:var(--text3)"></span>
   </div>
   <div class="table-wrap">
-    <table>
-      <thead><tr><th>ID</th><th>User</th><th>Catégorie</th><th>Règle</th><th>Conf.</th><th>Renf.</th><th>Statut</th></tr></thead>
-      <tbody id="rules-tbody"><tr class="loading-row"><td colspan="7"><span class="loader"></span> Chargement...</td></tr></tbody>
-    </table>
+    <table><thead><tr><th>ID</th><th>User</th><th>Catégorie</th><th>Règle</th><th>Conf.</th><th>Renf.</th><th>Statut</th></tr></thead>
+    <tbody id="rules-tbody"><tr class="loading-row"><td colspan="7"><span class="loader"></span> Chargement...</td></tr></tbody></table>
   </div>
 </section>
 
@@ -200,14 +195,12 @@ select option { background: var(--bg3); }
 <section id="tab-insights" class="section">
   <div class="filter-row">
     <select id="insights-user-filter" onchange="loadInsights()"><option value="">Tous les utilisateurs</option></select>
-    <button class="btn btn-ghost" onclick="loadInsights()">&#8635; Actualiser</button>
+    <button class="btn btn-ghost" onclick="loadInsights()">&#8635;</button>
     <span id="insights-count" style="font-family:var(--mono);font-size:11px;color:var(--text3)"></span>
   </div>
   <div class="table-wrap">
-    <table>
-      <thead><tr><th>User</th><th>Sujet</th><th>Insight</th><th>Renf.</th></tr></thead>
-      <tbody id="insights-tbody"><tr class="loading-row"><td colspan="4"><span class="loader"></span> Chargement...</td></tr></tbody>
-    </table>
+    <table><thead><tr><th>User</th><th>Sujet</th><th>Insight</th><th>Renf.</th></tr></thead>
+    <tbody id="insights-tbody"><tr class="loading-row"><td colspan="4"><span class="loader"></span> Chargement...</td></tr></tbody></table>
   </div>
 </section>
 
@@ -226,38 +219,31 @@ select option { background: var(--bg3); }
   </div>
 </section>
 
+<!-- SOCIÉTÉS -->
+<section id="tab-companies" class="section">
+  <div class="actions-row">
+    <button class="btn btn-ghost" onclick="loadCompanies()">&#8635; Actualiser</button>
+    <span id="companies-count" style="font-family:var(--mono);font-size:12px;color:var(--text3)"></span>
+  </div>
+  <div id="companies-list"><div style="color:var(--text3);font-family:var(--mono);font-size:12px">Chargement...</div></div>
+</section>
+
 <!-- MON PROFIL -->
 <section id="tab-profile" class="section">
   <div id="profile-alert" class="alert"></div>
-
-  <!-- Email -->
   <div class="profile-card">
     <div class="profile-section-title">📧 Adresse email</div>
     <div class="profile-info">Utilisée pour recevoir les liens de réinitialisation de mot de passe.<br>Compte connecté : <strong id="profile-username">—</strong></div>
-    <div class="form-group">
-      <label>Email</label>
-      <input type="email" id="profile-email" placeholder="votre@email.fr">
-    </div>
+    <div class="form-group"><label>Email</label><input type="email" id="profile-email" placeholder="votre@email.fr"></div>
     <button class="btn btn-primary" onclick="saveEmail()">Enregistrer l'email</button>
   </div>
-
-  <!-- Mot de passe -->
   <div class="profile-card">
     <div class="profile-section-title">🔑 Changer le mot de passe</div>
     <div class="profile-info">Le mot de passe actuel est requis pour valider le changement.</div>
     <div id="password-alert" class="alert"></div>
-    <div class="form-group">
-      <label>Mot de passe actuel</label>
-      <input type="password" id="current-password" placeholder="Votre mot de passe actuel" autocomplete="current-password">
-    </div>
-    <div class="form-group">
-      <label>Nouveau mot de passe</label>
-      <input type="password" id="new-password" placeholder="8 caractères minimum" autocomplete="new-password">
-    </div>
-    <div class="form-group">
-      <label>Confirmer le nouveau mot de passe</label>
-      <input type="password" id="confirm-password" placeholder="Répéter le nouveau mot de passe" autocomplete="new-password">
-    </div>
+    <div class="form-group"><label>Mot de passe actuel</label><input type="password" id="current-password" placeholder="Votre mot de passe actuel" autocomplete="current-password"></div>
+    <div class="form-group"><label>Nouveau mot de passe</label><input type="password" id="new-password" placeholder="8 caractères minimum" autocomplete="new-password"></div>
+    <div class="form-group"><label>Confirmer</label><input type="password" id="confirm-password" placeholder="Répéter" autocomplete="new-password"></div>
     <button class="btn btn-warn" onclick="changePassword()">🔒 Mettre à jour le mot de passe</button>
   </div>
 </section>
@@ -314,23 +300,17 @@ select option { background: var(--bg3); }
 let allRules=[], allInsights=[];
 let currentEditUser=null, usernameToDelete=null;
 
-// CLOCK
-function updateClock() { document.getElementById('clock').textContent=new Date().toLocaleString('fr-FR',{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+function updateClock(){document.getElementById('clock').textContent=new Date().toLocaleString('fr-FR',{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'});}
 setInterval(updateClock,1000); updateClock();
 
-// HEALTH
-async function checkHealth() {
-  try {
-    const d=await (await fetch('/health')).json();
-    document.getElementById('health-dot').className='dot';
-    document.getElementById('health-text').textContent=d.memory_module?'Online • mémoire OK':'Online • mémoire KO';
-  } catch(e) { document.getElementById('health-dot').className='dot off'; document.getElementById('health-text').textContent='Hors ligne'; }
+async function checkHealth(){
+  try{const d=await(await fetch('/health')).json();document.getElementById('health-dot').className='dot';document.getElementById('health-text').textContent=d.memory_module?'Online • mémoire OK':'Online • mémoire KO';}
+  catch(e){document.getElementById('health-dot').className='dot off';document.getElementById('health-text').textContent='Hors ligne';}
 }
-checkHealth(); setInterval(checkHealth,30000);
+checkHealth();setInterval(checkHealth,30000);
 
-// TABS
-function switchTab(name) {
-  const tabs=['memory','users','rules','insights','actions','profile'];
+function switchTab(name){
+  const tabs=['memory','users','rules','insights','actions','companies','profile'];
   document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',tabs[i]===name));
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
   document.getElementById('tab-'+name).classList.add('active');
@@ -338,90 +318,130 @@ function switchTab(name) {
   if(name==='users') loadUsers();
   if(name==='rules'){populateUserFilters();loadRules();}
   if(name==='insights'){populateUserFilters();loadInsights();}
+  if(name==='companies') loadCompanies();
   if(name==='profile') loadProfile();
 }
 
-// FORMAT
 const fmt=n=>(n||0).toLocaleString('fr-FR');
 const fmtDate=d=>d?new Date(d).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'}):'—';
 const fmtDateShort=d=>{if(!d)return'—';const dt=new Date(d);return dt.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'})+' '+dt.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});};
 
-// MEMORY
-async function loadMemoryStatus() {
-  const data=await (await fetch('/admin/memory-status')).json();
+async function loadMemoryStatus(){
+  const data=await(await fetch('/admin/memory-status')).json();
   const tot=k=>data.reduce((s,u)=>s+(u[k]||0),0);
   document.getElementById('memory-stats').innerHTML=`
     <div class="stat-card"><div class="stat-label">Utilisateurs</div><div class="stat-value accent">${data.length}</div></div>
-    <div class="stat-card"><div class="stat-label">Mails en base</div><div class="stat-value">${fmt(tot('mails'))}</div></div>
+    <div class="stat-card"><div class="stat-label">Mails</div><div class="stat-value">${fmt(tot('mails'))}</div></div>
     <div class="stat-card"><div class="stat-label">Conversations</div><div class="stat-value">${fmt(tot('conv')||tot('conversations'))}</div></div>
     <div class="stat-card"><div class="stat-label">Règles</div><div class="stat-value green">${fmt(tot('rules'))}</div></div>
     <div class="stat-card"><div class="stat-label">Insights</div><div class="stat-value">${fmt(tot('insights'))}</div></div>`;
   document.getElementById('memory-tbody').innerHTML=data.map(u=>`
-    <tr>
-      <td><strong class="mono">${u.username}</strong></td>
-      <td style="font-size:12px;color:var(--text2)">${u.email||'—'}</td>
-      <td><span class="badge ${u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope||'user'}</span></td>
-      <td class="mono">${fmt(u.conv||u.conversations||0)}</td>
-      <td><span class="badge badge-green">${fmt(u.rules||0)}</span></td>
-      <td class="mono">${fmt(u.insights||0)}</td>
-      <td class="mono">${fmt(u.mails||0)}</td>
-    </tr>`).join('');
+    <tr><td><strong class="mono">${u.username}</strong></td><td style="font-size:12px;color:var(--text2)">${u.email||'—'}</td>
+    <td><span class="badge ${u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope||'user'}</span></td>
+    <td class="mono">${fmt(u.conv||u.conversations||0)}</td>
+    <td><span class="badge badge-green">${fmt(u.rules||0)}</span></td>
+    <td class="mono">${fmt(u.insights||0)}</td><td class="mono">${fmt(u.mails||0)}</td></tr>`).join('');
 }
 
-// USERS
-async function loadUsers() {
+async function loadUsers(){
   document.getElementById('users-tbody').innerHTML='<tr class="loading-row"><td colspan="6"><span class="loader"></span> Chargement...</td></tr>';
-  const data=await (await fetch('/admin/users')).json();
+  const data=await(await fetch('/admin/users')).json();
   document.getElementById('users-tbody').innerHTML=data.map(u=>`
-    <tr>
-      <td><strong class="mono">${u.username}</strong></td>
-      <td style="font-size:12px;color:var(--text2)">${u.email||'—'}</td>
-      <td><span class="badge ${u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope||'user'}</span></td>
-      <td class="mono" style="font-size:11px;color:var(--text2)">${fmtDateShort(u.last_login)}</td>
-      <td class="mono" style="font-size:11px;color:var(--text3)">${fmtDate(u.created_at)}</td>
-      <td style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="showTools('${u.username}')">Outils</button>
-        <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope||'user'}')">Modifier</button>
-        ${u.scope!=='admin'?`<button class="btn btn-danger" style="padding:4px 9px;font-size:11px" onclick="askDeleteUser('${u.username}')">Suppr.</button>`:''}
-      </td>
-    </tr>`).join('');
+    <tr><td><strong class="mono">${u.username}</strong></td><td style="font-size:12px;color:var(--text2)">${u.email||'—'}</td>
+    <td><span class="badge ${u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope||'user'}</span></td>
+    <td class="mono" style="font-size:11px;color:var(--text2)">${fmtDateShort(u.last_login)}</td>
+    <td class="mono" style="font-size:11px;color:var(--text3)">${fmtDate(u.created_at)}</td>
+    <td style="display:flex;gap:6px;flex-wrap:wrap">
+      <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="showTools('${u.username}')">Outils</button>
+      <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope||'user'}')">Modifier</button>
+      ${u.scope!=='admin'?`<button class="btn btn-danger" style="padding:4px 9px;font-size:11px" onclick="askDeleteUser('${u.username}')">Suppr.</button>`:''}
+    </td></tr>`).join('');
 }
-
-async function showTools(username) {
+async function showTools(username){
   const section=document.getElementById('tools-section'),grid=document.getElementById('tools-grid');
   document.getElementById('tools-title').innerHTML=`Outils de <strong style="color:#fff">${username}</strong>`;
-  grid.innerHTML='<span class="loader"></span>'; section.style.display='block';
+  grid.innerHTML='<span class="loader"></span>';section.style.display='block';
   section.scrollIntoView({behavior:'smooth',block:'nearest'});
-  const tools=await (await fetch(`/admin/user-tools/${username}`)).json();
+  const tools=await(await fetch(`/admin/user-tools/${username}`)).json();
   if(!tools.length){grid.innerHTML='<p style="color:var(--text3);font-family:var(--mono);font-size:12px">Aucun outil configuré.</p>';return;}
-  grid.innerHTML=tools.map(t=>`
-    <div class="tool-card">
-      <div class="tool-name">${t.tool}</div>
-      <div class="tool-meta">Niveau : <span class="badge ${t.access_level==='full'?'badge-green':t.access_level==='write'?'badge-blue':'badge-gray'}">${t.access_level}</span></div>
-      <div class="tool-meta">Actif : <span class="badge ${t.enabled?'badge-green':'badge-red'}">${t.enabled?'oui':'non'}</span></div>
-      ${Object.keys(t.config||{}).length?`<div class="tool-meta" style="margin-top:6px;font-size:10px;color:var(--text3)">${JSON.stringify(t.config)}</div>`:''}
-    </div>`).join('');
+  grid.innerHTML=tools.map(t=>`<div class="tool-card"><div class="tool-name">${t.tool}</div>
+    <div class="tool-meta">Niveau : <span class="badge ${t.access_level==='full'?'badge-green':t.access_level==='write'?'badge-blue':'badge-gray'}">${t.access_level}</span></div>
+    <div class="tool-meta">Actif : <span class="badge ${t.enabled?'badge-green':'badge-red'}">${t.enabled?'oui':'non'}</span></div>
+    ${Object.keys(t.config||{}).length?`<div class="tool-meta" style="margin-top:6px;font-size:10px;color:var(--text3)">${JSON.stringify(t.config)}</div>`:''}</div>`).join('');
 }
 function hideTools(){document.getElementById('tools-section').style.display='none';}
+
+// SOCIÉTÉS
+async function loadCompanies(){
+  document.getElementById('companies-list').innerHTML='<div style="color:var(--text3);font-family:var(--mono);font-size:12px"><span class="loader"></span> Chargement...</div>';
+  try{
+    const tenants=await(await fetch('/admin/tenants-overview')).json();
+    document.getElementById('companies-count').textContent=`${tenants.length} société(s)`;
+    if(!tenants.length){
+      document.getElementById('companies-list').innerHTML='<div style="color:var(--text3);font-family:var(--mono);font-size:12px">Aucune société.</div>';
+      return;
+    }
+    document.getElementById('companies-list').innerHTML=tenants.map((t,i)=>{
+      const msBar = t.user_count>0 ? `${t.ms_connected_count}/${t.user_count} MS connectés` : '—';
+      return `
+      <div class="tenant-card">
+        <div class="tenant-header" onclick="toggleTenant(${i})">
+          <span class="tenant-toggle" id="toggle-${i}">›</span>
+          <span class="tenant-name">🏢 ${t.name}</span>
+          <div class="tenant-meta">
+            <span>👥 ${t.user_count} collaborateur(s)</span>
+            <span>📬 ${fmt(t.total_mails)} mails</span>
+            <span>💬 ${fmt(t.total_conv)} conversations</span>
+            <span>🔗 ${msBar}</span>
+          </div>
+        </div>
+        <div class="tenant-body" id="body-${i}">
+          <table>
+            <thead><tr><th>Identifiant</th><th>Email</th><th>Rôle</th><th>MS</th><th>Mails</th><th>Conv.</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
+            <tbody>${t.users.map(u=>`
+              <tr>
+                <td><strong class="mono">${u.username}</strong></td>
+                <td style="font-size:12px;color:var(--text2)">${u.email||'—'}</td>
+                <td><span class="badge ${u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope}</span></td>
+                <td><span class="badge ${u.ms_connected?'badge-ms-ok':'badge-red'}">${u.ms_connected?'✅ OK':'❌ Non'}</span></td>
+                <td class="mono">${fmt(u.mails)}</td>
+                <td class="mono">${fmt(u.conv)}</td>
+                <td class="mono" style="font-size:11px;color:var(--text2)">${fmtDateShort(u.last_login)}</td>
+                <td><button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope}')">Modifier</button></td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e){
+    document.getElementById('companies-list').innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:12px">❌ Erreur: ${e.message}</div>`;
+  }
+}
+function toggleTenant(i){
+  const body=document.getElementById('body-'+i);
+  const tog=document.getElementById('toggle-'+i);
+  body.classList.toggle('open');
+  tog.classList.toggle('open');
+}
+const fmt=n=>(n||0).toLocaleString('fr-FR');
 
 // MODALS
 function openModal(name){document.getElementById('modal-'+name).classList.add('open');}
 function closeModal(name){document.getElementById('modal-'+name).classList.remove('open');}
 function setAlert(id,msg,type){const el=document.getElementById(id);el.className='alert '+type;el.textContent=msg;}
 
-// CREATE USER
 async function createUser(){
   const username=document.getElementById('new-username').value.trim();
   const email=document.getElementById('new-email').value.trim();
   const password=document.getElementById('new-password-user').value;
   const scope=document.getElementById('new-scope').value;
   if(!username||!password){setAlert('create-user-alert','Identifiant et mot de passe requis.','err');return;}
-  const d=await (await fetch('/admin/create-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password,email,scope})})).json();
+  const d=await(await fetch('/admin/create-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password,email,scope})})).json();
   if(d.status==='ok'){setAlert('user-alert','✅ '+d.message,'ok');closeModal('create-user');document.getElementById('new-username').value='';document.getElementById('new-email').value='';document.getElementById('new-password-user').value='';loadUsers();}
   else{setAlert('create-user-alert','❌ '+(d.message||d.error),'err');}
 }
 
-// EDIT USER
 function editUser(username,email,scope){
   currentEditUser=username;
   document.getElementById('edit-modal-title').textContent='Éditer — '+username;
@@ -434,12 +454,12 @@ function editUser(username,email,scope){
 async function saveUser(){
   const email=document.getElementById('edit-email').value.trim();
   const scope=document.getElementById('edit-scope').value;
-  const d=await (await fetch(`/admin/update-user/${currentEditUser}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,scope})})).json();
+  const d=await(await fetch(`/admin/update-user/${currentEditUser}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,scope})})).json();
   if(d.status==='ok'){setAlert('user-alert','✅ Utilisateur mis à jour.','ok');closeModal('edit-user');loadUsers();}
   else{setAlert('edit-user-alert','❌ '+(d.message||d.error),'err');}
 }
 async function resetPassword(){
-  const d=await (await fetch(`/admin/reset-password/${currentEditUser}`,{method:'POST'})).json();
+  const d=await(await fetch(`/admin/reset-password/${currentEditUser}`,{method:'POST'})).json();
   if(d.status==='ok'){
     const sent=d.email_sent?`Envoyé à ${d.email}`:'Copiez le lien ci-dessous';
     document.getElementById('reset-result').innerHTML=`
@@ -450,29 +470,26 @@ async function resetPassword(){
       </div>`;}
 }
 
-// DELETE USER
 function askDeleteUser(username){usernameToDelete=username;document.getElementById('delete-username-label').textContent=username;openModal('delete-user');}
 async function confirmDeleteUser(){
-  const d=await (await fetch(`/admin/delete-user/${usernameToDelete}`,{method:'DELETE'})).json();
+  const d=await(await fetch(`/admin/delete-user/${usernameToDelete}`,{method:'DELETE'})).json();
   if(d.status==='ok'){setAlert('user-alert','✅ '+d.message,'ok');closeModal('delete-user');loadUsers();}
   else{setAlert('user-alert','❌ '+(d.message||d.error),'err');closeModal('delete-user');}
   usernameToDelete=null;
 }
 
-// FILTERS
 async function populateUserFilters(){
-  const users=await (await fetch('/admin/users')).json();
+  const users=await(await fetch('/admin/users')).json();
   ['rules-user-filter','insights-user-filter'].forEach(id=>{
     const sel=document.getElementById(id);
     if(sel.options.length<=1) users.forEach(u=>{const o=document.createElement('option');o.value=u.username;o.textContent=u.username;sel.appendChild(o);});
   });
 }
 
-// RULES
 async function loadRules(){
   document.getElementById('rules-tbody').innerHTML='<tr class="loading-row"><td colspan="7"><span class="loader"></span> Chargement...</td></tr>';
   const user=document.getElementById('rules-user-filter').value;
-  allRules=await (await fetch(user?`/admin/rules?user=${user}`:'/admin/rules')).json();
+  allRules=await(await fetch(user?`/admin/rules?user=${user}`:'/admin/rules')).json();
   filterRulesDisplay();
 }
 function filterRulesDisplay(){
@@ -484,59 +501,47 @@ function filterRulesDisplay(){
   if(active==='false') f=f.filter(r=>!r.active);
   document.getElementById('rules-count').textContent=`${f.length} règle(s)`;
   document.getElementById('rules-tbody').innerHTML=f.length?f.map(r=>`
-    <tr>
-      <td class="mono" style="color:var(--text3);font-size:11px">${r.id}</td>
-      <td class="mono" style="font-size:12px">${r.username||'—'}</td>
-      <td><span class="badge badge-gray" style="font-size:9px">${r.category}</span></td>
-      <td style="max-width:400px;font-size:12px;color:var(--text2)">${r.rule}</td>
-      <td class="mono" style="font-size:11px">${((r.confidence||0)*100).toFixed(0)}%</td>
-      <td class="mono" style="font-size:11px">${r.reinforcements||1}</td>
-      <td><span class="badge ${r.active?'badge-green':'badge-red'}">${r.active?'active':'inactive'}</span></td>
-    </tr>`).join('')
+    <tr><td class="mono" style="color:var(--text3);font-size:11px">${r.id}</td>
+    <td class="mono" style="font-size:12px">${r.username||'—'}</td>
+    <td><span class="badge badge-gray" style="font-size:9px">${r.category}</span></td>
+    <td style="max-width:400px;font-size:12px;color:var(--text2)">${r.rule}</td>
+    <td class="mono" style="font-size:11px">${((r.confidence||0)*100).toFixed(0)}%</td>
+    <td class="mono" style="font-size:11px">${r.reinforcements||1}</td>
+    <td><span class="badge ${r.active?'badge-green':'badge-red'}">${r.active?'active':'inactive'}</span></td></tr>`).join('')
   :'<tr class="loading-row"><td colspan="7" style="color:var(--text3)">Aucune règle.</td></tr>';
 }
 
-// INSIGHTS
 async function loadInsights(){
   document.getElementById('insights-tbody').innerHTML='<tr class="loading-row"><td colspan="4"><span class="loader"></span> Chargement...</td></tr>';
   const user=document.getElementById('insights-user-filter').value;
-  allInsights=await (await fetch(user?`/admin/insights?user=${user}`:'/admin/insights')).json();
+  allInsights=await(await fetch(user?`/admin/insights?user=${user}`:'/admin/insights')).json();
   document.getElementById('insights-count').textContent=`${allInsights.length} insight(s)`;
   document.getElementById('insights-tbody').innerHTML=allInsights.length?allInsights.map(i=>`
-    <tr>
-      <td class="mono" style="font-size:12px">${i.username||'—'}</td>
-      <td><span class="badge badge-blue" style="font-size:10px">${i.topic}</span></td>
-      <td style="font-size:12px;color:var(--text2);max-width:500px">${i.insight}</td>
-      <td class="mono" style="font-size:11px">${i.reinforcements}</td>
-    </tr>`).join('')
+    <tr><td class="mono" style="font-size:12px">${i.username||'—'}</td>
+    <td><span class="badge badge-blue" style="font-size:10px">${i.topic}</span></td>
+    <td style="font-size:12px;color:var(--text2);max-width:500px">${i.insight}</td>
+    <td class="mono" style="font-size:11px">${i.reinforcements}</td></tr>`).join('')
   :'<tr class="loading-row"><td colspan="4" style="color:var(--text3)">Aucun insight.</td></tr>';
 }
 
-// QUICK ACTIONS
 async function quickAction(url,id){
   const el=document.getElementById(id);
   el.className='action-result'; el.textContent='En cours...';
-  try{const d=await (await fetch(url)).json();el.textContent=JSON.stringify(d).replace(/[{}"]/g,' ').trim().substring(0,120);}
+  try{const d=await(await fetch(url)).json();el.textContent=JSON.stringify(d).replace(/[{}"]/g,' ').trim().substring(0,120);}
   catch(e){el.textContent='Erreur: '+e.message;el.className='action-result err';}
 }
 
-// PROFIL
 async function loadProfile(){
-  try{
-    const d=await (await fetch('/profile')).json();
-    document.getElementById('profile-username').textContent=d.username||'—';
-    document.getElementById('profile-email').value=d.email||'';
-  } catch(e){}
+  try{const d=await(await fetch('/profile')).json();document.getElementById('profile-username').textContent=d.username||'—';document.getElementById('profile-email').value=d.email||'';}
+  catch(e){}
 }
-
 async function saveEmail(){
   const email=document.getElementById('profile-email').value.trim();
-  const d=await (await fetch('/profile/email',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})})).json();
+  const d=await(await fetch('/profile/email',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})})).json();
   if(d.status==='ok') setAlert('profile-alert','✅ Email mis à jour.','ok');
   else setAlert('profile-alert','❌ '+(d.message||d.error),'err');
   setTimeout(()=>{const el=document.getElementById('profile-alert');el.className='alert';},4000);
 }
-
 async function changePassword(){
   const current=document.getElementById('current-password').value;
   const newPwd=document.getElementById('new-password').value;
@@ -544,19 +549,12 @@ async function changePassword(){
   if(!current||!newPwd||!confirm){setAlert('password-alert','Tous les champs sont requis.','err');return;}
   if(newPwd!==confirm){setAlert('password-alert','Les nouveaux mots de passe ne correspondent pas.','err');return;}
   if(newPwd.length<8){setAlert('password-alert','Mot de passe trop court (8 caractères min.).','err');return;}
-  const d=await (await fetch('/profile/password',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_password:current,new_password:newPwd})})).json();
-  if(d.status==='ok'){
-    setAlert('password-alert','✅ Mot de passe mis à jour avec succès.','ok');
-    document.getElementById('current-password').value='';
-    document.getElementById('new-password').value='';
-    document.getElementById('confirm-password').value='';
-  } else {
-    setAlert('password-alert','❌ '+(d.message||d.error),'err');
-  }
+  const d=await(await fetch('/profile/password',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_password:current,new_password:newPwd})})).json();
+  if(d.status==='ok'){setAlert('password-alert','✅ Mot de passe mis à jour avec succès.','ok');document.getElementById('current-password').value='';document.getElementById('new-password').value='';document.getElementById('confirm-password').value='';}
+  else{setAlert('password-alert','❌ '+(d.message||d.error),'err');}
   setTimeout(()=>{const el=document.getElementById('password-alert');el.className='alert';},5000);
 }
 
-// KEYBOARD + CLICK OUTSIDE
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') document.querySelectorAll('.modal-overlay.open').forEach(m=>m.classList.remove('open')); });
 document.querySelectorAll('.modal-overlay').forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('open'); }));
 
