@@ -7,6 +7,7 @@ import threading
 import time
 
 from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.config import SESSION_SECRET
@@ -27,6 +28,9 @@ from app.routes.webhook import router as webhook_router
 
 app = FastAPI(title="Raya — Assistant IA")
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=30 * 24 * 3600)
+
+# Fichiers statiques (CSS, JS) — mis en cache par le navigateur
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 app.include_router(auth_router)
 app.include_router(admin_router)
@@ -57,9 +61,8 @@ def startup_event():
     except Exception as e:
         print(f"[Seed] Erreur seed_default_rules: {e}")
 
-    # ── Webhook subscriptions — démarrage différé (tokens pas encore dispo) ──
     def setup_webhooks():
-        time.sleep(30)  # Laisse le temps aux tokens de se charger
+        time.sleep(30)
         try:
             from app.connectors.microsoft_webhook import ensure_all_subscriptions
             ensure_all_subscriptions()
@@ -68,9 +71,8 @@ def startup_event():
 
     threading.Thread(target=setup_webhooks, daemon=True).start()
 
-    # ── Renouvellement des abonnements toutes les 6h ──
     def webhook_renewal_loop():
-        time.sleep(60)  # Attendre le setup initial
+        time.sleep(60)
         while True:
             try:
                 time.sleep(6 * 3600)
@@ -81,7 +83,6 @@ def startup_event():
 
     threading.Thread(target=webhook_renewal_loop, daemon=True).start()
 
-    # ── Rafraîchissement des tokens Microsoft (toutes les 45 min) ──
     def token_refresh_loop():
         time.sleep(120)
         while True:
@@ -89,7 +90,14 @@ def startup_event():
                 for username in get_all_users_with_tokens():
                     try:
                         token = get_valid_microsoft_token(username)
-                        print(f"[Token] Refresh {username}: {'OK' if token else 'ECHEC'}")
+                        if not token:
+                            print(f"[Token] ECHEC refresh {username} — alerte envoyée")
+                            try:
+                                from app.connectors.microsoft_webhook import _send_revoked_alert
+                                _send_revoked_alert(username)
+                            except Exception: pass
+                        else:
+                            print(f"[Token] Refresh {username}: OK")
                     except Exception as e:
                         print(f"[Token] Erreur {username}: {e}")
             except Exception as e:

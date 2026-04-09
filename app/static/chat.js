@@ -1,0 +1,411 @@
+// Raya Chat — JavaScript
+
+// ─── ÉTAT GLOBAL ───
+const messagesEl = document.getElementById('messages');
+const inputEl = document.getElementById('input');
+const sendBtn = document.getElementById('sendBtn');
+const micBtn = document.getElementById('micBtn');
+const triageBar = document.getElementById('triageBar');
+const micStatus = document.getElementById('micStatus');
+const inputWrapper = document.getElementById('inputWrapper');
+
+let isListening=false, currentAudio=null, speakAborted=false, currentSpeakBtn=null;
+let triageQueue=[], triageCurrent=null, silenceTimer=null;
+let finalTextBase='';
+let autoSpeak=true;
+let currentFile=null;
+let currentUser='';
+let isAdmin=false;
+let shortcutsEditMode=false;
+let pendingShortcuts=[];
+
+// ─── INIT ───
+async function init() {
+  renderQuickActions();
+  checkHealth();
+  loadUserInfo();
+  loadMailCount();
+  document.getElementById('autoSpeakBtn').classList.add('active');
+  messagesEl.addEventListener('scroll', onMessagesScroll);
+}
+
+async function loadUserInfo() {
+  try {
+    const r = await fetch('/admin/users');
+    if (r.ok) {
+      isAdmin = true;
+      document.getElementById('adminPanelBtn').style.display = 'inline-flex';
+    }
+  } catch(e) {}
+}
+
+async function loadMailCount() {
+  try {
+    const r = await fetch('/memory-status');
+    const d = await r.json();
+    const n2 = d.niveau_2 || {};
+    const count = n2.mail_memory || 0;
+    if (count > 0) {
+      const el = document.getElementById('mailCount');
+      el.textContent = count > 99 ? '99+' : count;
+      el.classList.add('visible');
+    }
+  } catch(e) {}
+}
+
+async function checkHealth() {
+  const dot = document.getElementById('msStatus');
+  try {
+    const r = await fetch('/health');
+    const d = await r.json();
+    dot.className = d.status === 'ok' ? 'logo-dot' : 'logo-dot off';
+  } catch(e) { dot.className = 'logo-dot off'; }
+}
+
+// ─── TOASTS ───
+function showToast(msg, type='ok', duration=3000) {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = 'toast ' + type;
+  const icons = { ok: '✓', err: '✕', info: 'ℹ' };
+  toast.innerHTML = `<span>${icons[type]||'ℹ'}</span> <span>${msg}</span>`;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.style.animation = 'toastOut 0.3s ease forwards';
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
+// ─── AUTO SPEAK ───
+function toggleAutoSpeak() {
+  autoSpeak = !autoSpeak;
+  const btn = document.getElementById('autoSpeakBtn');
+  if (autoSpeak) { btn.classList.add('active'); btn.textContent='🔊 Auto'; }
+  else { btn.classList.remove('active'); btn.textContent='🔇 Muet'; }
+}
+
+// ─── RACCOURCIS ───
+const DEFAULT_SHORTCUTS = [
+  { icon:'📬', label:'Mails urgents', query:'Quels sont mes mails urgents ?' },
+  { icon:'📅', label:'Planning', query:"Quel est mon planning aujourd'hui ?" },
+  { icon:'⚡', label:'Chantiers', query:'Donne-moi un point sur mes chantiers en cours' },
+  { icon:'📊', label:'Point semaine', query:'Fais-moi un point de la semaine' },
+  { icon:'🔔', label:'Relances', query:'Quelles sont mes relances en attente ?' },
+  { icon:'📋', label:'Trier mes mails', query:'__TRIAGE__' },
+];
+
+function getShortcuts() {
+  try { const s = localStorage.getItem('raya_shortcuts'); if (s) return JSON.parse(s); } catch(e) {}
+  return DEFAULT_SHORTCUTS;
+}
+function saveShortcutsToStorage(s) { try { localStorage.setItem('raya_shortcuts', JSON.stringify(s)); } catch(e) {} }
+
+function renderQuickActions() {
+  const row = document.getElementById('quickRow');
+  const shortcuts = getShortcuts();
+  row.innerHTML = '';
+  shortcuts.forEach((s, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'quick-btn' + (shortcutsEditMode ? ' edit-mode' : '');
+    btn.innerHTML = `${s.icon||''} ${s.label}`;
+    if (shortcutsEditMode) { btn.onclick = () => removeShortcutDirect(i); btn.title = 'Cliquer pour supprimer'; }
+    else { btn.onclick = () => s.query === '__TRIAGE__' ? startTriage() : quickAsk(s.query); }
+    row.appendChild(btn);
+  });
+  const addBtn = document.createElement('button');
+  addBtn.className = 'quick-add-btn';
+  addBtn.textContent = '+ Ajouter';
+  addBtn.style.display = shortcutsEditMode ? 'inline-flex' : 'none';
+  addBtn.onclick = openShortcuts;
+  row.appendChild(addBtn);
+  const editBtn = document.createElement('button');
+  editBtn.className = 'quick-edit-btn';
+  editBtn.textContent = shortcutsEditMode ? '✓ Terminer' : '✏️';
+  editBtn.title = shortcutsEditMode ? "Terminer l'édition" : 'Personnaliser les raccourcis';
+  editBtn.onclick = toggleShortcutsEdit;
+  row.appendChild(editBtn);
+}
+
+function toggleShortcutsEdit() {
+  shortcutsEditMode = !shortcutsEditMode;
+  renderQuickActions();
+  if (shortcutsEditMode) showToast('Cliquez sur un raccourci pour le supprimer', 'info', 2500);
+}
+function removeShortcutDirect(index) {
+  const s = getShortcuts(); const removed = s[index]; s.splice(index,1);
+  saveShortcutsToStorage(s); renderQuickActions();
+  showToast(`"${removed.label}" supprimé`, 'ok', 2000);
+}
+function openShortcuts() {
+  pendingShortcuts = [...getShortcuts()]; renderShortcutList();
+  document.getElementById('modalShortcuts').classList.add('open');
+}
+function closeShortcuts() { document.getElementById('modalShortcuts').classList.remove('open'); }
+function renderShortcutList() {
+  document.getElementById('shortcutList').innerHTML = pendingShortcuts.map((s,i) =>
+    `<div class="shortcut-item"><span>${s.icon||''} ${s.label}</span><button class="shortcut-del" onclick="removePendingShortcut(${i})">✕</button></div>`
+  ).join('');
+}
+function removePendingShortcut(i) { pendingShortcuts.splice(i,1); renderShortcutList(); }
+function addShortcut() {
+  const input = document.getElementById('newShortcutText');
+  const text = input.value.trim(); if (!text) return;
+  const emojis = ['💬','🔧','📌','🗂','📝','🎯','💡','🔍'];
+  pendingShortcuts.push({ icon: emojis[pendingShortcuts.length % emojis.length], label: text, query: text });
+  renderShortcutList(); input.value = ''; input.focus();
+}
+function saveShortcuts() {
+  saveShortcutsToStorage(pendingShortcuts); renderQuickActions();
+  closeShortcuts(); showToast('Raccourcis enregistrés ✓', 'ok');
+}
+
+// ─── SCROLL ───
+function scrollToBottom(smooth=true) { messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: smooth ? 'smooth' : 'instant' }); }
+function onMessagesScroll() {
+  const dist = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
+  document.getElementById('scrollDownBtn').classList.toggle('visible', dist > 150);
+}
+
+// ─── MESSAGES ───
+function autoResize(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,120)+'px'; }
+function handleKey(e) { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
+function cleanText(t) {
+  return t.replace(/#{1,6}\s+/g,'').replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1')
+    .replace(/`(.*?)`/g,'$1').replace(/---+/g,'').replace(/\|.*?\|/g,'')
+    .replace(/^\s*[-•]\s/gm,'').replace(/\[([^\]]+)\]\([^\)]+\)/g,'$1')
+    .replace(/\n{3,}/g,'\n\n').trim();
+}
+
+function addMessage(text, type, fileInfo) {
+  const welcome = messagesEl.querySelector('.welcome');
+  if (welcome) welcome.remove();
+  const row = document.createElement('div'); row.className = 'message-row ' + type;
+  const avatar = document.createElement('div'); avatar.className = 'avatar ' + type + '-avatar';
+  avatar.textContent = type === 'raya' ? '✦' : (currentUser ? currentUser[0].toUpperCase() : 'G');
+  const bubble = document.createElement('div'); bubble.className = 'bubble';
+  if (fileInfo && fileInfo.type.startsWith('image/')) {
+    const img = document.createElement('img'); img.className = 'attached-image';
+    img.src = 'data:' + fileInfo.type + ';base64,' + fileInfo.data; bubble.appendChild(img);
+  } else if (fileInfo) {
+    const badge = document.createElement('div'); badge.style = 'font-size:12px;color:var(--text-muted);margin-bottom:4px';
+    badge.textContent = '📎 ' + fileInfo.name; bubble.appendChild(badge);
+  }
+  const content = document.createElement('div'); content.style.whiteSpace = 'pre-wrap';
+  content.textContent = type === 'raya' ? cleanText(text) : text; bubble.appendChild(content);
+  if (type === 'raya') {
+    const actions = document.createElement('div'); actions.className = 'bubble-actions';
+    const speakBtn = document.createElement('button'); speakBtn.className = 'speak-btn'; speakBtn.textContent = '🔊 Écouter';
+    speakBtn.onclick = () => { if (speakBtn.classList.contains('playing')) stopSpeech(); else speak(text, speakBtn); };
+    actions.appendChild(speakBtn); bubble.appendChild(actions);
+  }
+  row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row);
+  if (messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 200) scrollToBottom();
+  return row;
+}
+function addLoading() {
+  const row = document.createElement('div'); row.className = 'message-row raya';
+  const avatar = document.createElement('div'); avatar.className = 'avatar raya-avatar'; avatar.textContent = '✦';
+  const bubble = document.createElement('div'); bubble.className = 'bubble loading-bubble';
+  bubble.innerHTML = '<div class="dot-anim"></div><div class="dot-anim"></div><div class="dot-anim"></div>';
+  row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row); scrollToBottom(); return row;
+}
+
+async function sendMessage() {
+  const text = inputEl.value.trim(); if (!text && !currentFile) return;
+  const fileSnapshot = currentFile ? {...currentFile} : null;
+  inputEl.value = ''; inputEl.style.height = 'auto'; inputEl.classList.remove('interim');
+  removeAttachment(); sendBtn.disabled = true; stopSpeech();
+  addMessage(text||'[Fichier joint]', 'user', fileSnapshot);
+  const loading = addLoading();
+  try {
+    const body = { query: text||(fileSnapshot?'Analyse ce fichier.':'') };
+    if (fileSnapshot) { body.file_data=fileSnapshot.data; body.file_type=fileSnapshot.type; body.file_name=fileSnapshot.name; }
+    const response = await fetch('/raya', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const data = await response.json(); loading.remove();
+    const msgRow = addMessage(data.answer, 'raya');
+    if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'));
+    if (data.actions && data.actions.length > 0) {
+      const ok = data.actions.filter(a => a.startsWith('✅'));
+      const err = data.actions.filter(a => a.startsWith('❌'));
+      if (ok.length) showToast(ok[0].replace('✅','').trim(), 'ok', 3000);
+      if (err.length) showToast(err[0].replace('❌','').trim(), 'err', 4000);
+    }
+  } catch(e) {
+    loading.remove(); addMessage('Erreur de connexion à Raya. Réessayez.', 'raya');
+    showToast('Erreur de connexion', 'err');
+  }
+  sendBtn.disabled = false;
+}
+function quickAsk(text) { inputEl.value = text; sendMessage(); }
+
+// ─── FICHIERS ───
+function handleFileSelect(e) {
+  const file = e.target.files[0]; if (!file) return;
+  if (file.size > 10*1024*1024) { alert('Fichier trop volumineux (max 10 Mo).'); return; }
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    currentFile = { data: ev.target.result.split(',')[1], type: file.type, name: file.name };
+    document.getElementById('attachmentName').textContent = '📎 ' + file.name;
+    document.getElementById('attachmentPreview').classList.add('visible');
+    document.getElementById('attachBtn').classList.add('has-file');
+  };
+  reader.readAsDataURL(file); e.target.value = '';
+}
+function removeAttachment() {
+  currentFile = null;
+  document.getElementById('attachmentPreview').classList.remove('visible');
+  document.getElementById('attachBtn').classList.remove('has-file');
+}
+
+// ─── AUDIO ───
+function speak(text, btn) {
+  stopSpeech(); speakAborted = false; currentSpeakBtn = btn || null;
+  if (currentSpeakBtn) { currentSpeakBtn.textContent='⏹ Stop'; currentSpeakBtn.classList.add('playing'); }
+  fetch('/speak', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text}) })
+    .then(r => r.ok ? r.blob() : Promise.reject())
+    .then(blob => {
+      if (speakAborted || blob.size < 100) { resetSpeakUI(); return; }
+      const url = URL.createObjectURL(blob); currentAudio = new Audio(url);
+      currentAudio.onended = resetSpeakUI; currentAudio.onerror = resetSpeakUI;
+      if (!speakAborted) currentAudio.play().catch(resetSpeakUI);
+    }).catch(resetSpeakUI);
+}
+function resetSpeakUI() {
+  if (currentSpeakBtn) { currentSpeakBtn.textContent='🔊 Écouter'; currentSpeakBtn.classList.remove('playing'); currentSpeakBtn=null; }
+}
+function stopSpeech() {
+  speakAborted = true; if (currentAudio) { currentAudio.pause(); currentAudio=null; }
+  window.speechSynthesis && window.speechSynthesis.cancel(); resetSpeakUI();
+}
+
+// ─── MICRO ───
+function toggleMic() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { alert('Reconnaissance vocale non supportée.\nUtilisez Chrome ou Edge.'); return; }
+  if (isListening) stopListening(); else startListening();
+}
+function startListening() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) return;
+  finalTextBase = inputEl.value;
+  const rec = new SR(); rec.lang='fr-FR'; rec.continuous=false; rec.interimResults=true; rec.maxAlternatives=1;
+  rec.onstart = () => { isListening=true; micBtn.classList.add('listening'); micBtn.textContent='⏹'; micStatus.classList.add('visible'); inputWrapper.classList.add('mic-active'); };
+  rec.onresult = (e) => {
+    clearSilenceTimer(); let interim='', final='';
+    for (let i=e.resultIndex; i<e.results.length; i++) {
+      if (e.results[i].isFinal) final+=e.results[i][0].transcript+' ';
+      else interim+=e.results[i][0].transcript;
+    }
+    if (interim) { inputEl.value=(finalTextBase+' '+interim).trim(); inputEl.classList.add('interim'); autoResize(inputEl); }
+    if (final) { finalTextBase=(finalTextBase+' '+final).trim(); inputEl.value=finalTextBase; inputEl.classList.remove('interim'); autoResize(inputEl); }
+    resetSilenceTimer();
+  };
+  rec.onerror = (e) => {
+    if (e.error==='not-allowed'||e.error==='permission-denied') alert('Microphone bloqué.\nCliquez sur 🔒 dans la barre d\'adresse.');
+    else if (e.error==='network') { alert('Erreur réseau micro.'); stopListening(); }
+  };
+  rec.onend = () => { if (isListening) setTimeout(()=>{ if(isListening) startListening(); },100); else cleanupMicUI(); };
+  try { rec.start(); resetSilenceTimer(); } catch(e) { stopListening(); }
+}
+function resetSilenceTimer() { clearSilenceTimer(); silenceTimer=setTimeout(()=>{ if(isListening) stopListening(); },3000); }
+function clearSilenceTimer() { if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;} }
+function stopListening() { isListening=false; clearSilenceTimer(); cleanupMicUI(); inputEl.classList.remove('interim'); if(inputEl.value) autoResize(inputEl); inputEl.focus(); }
+function cleanupMicUI() { micBtn.classList.remove('listening'); micBtn.textContent='🎤'; micStatus.classList.remove('visible'); inputWrapper.classList.remove('mic-active'); }
+
+// ─── TRIAGE ───
+async function startTriage() {
+  stopSpeech(); triageBar.classList.remove('visible');
+  const loading = addLoading();
+  const data = await (await fetch('/triage-queue')).json(); loading.remove();
+  triageQueue = data.mails || [];
+  if (triageQueue.length===0) { const row=addMessage('Aucun mail en attente.','raya'); if(autoSpeak)speak('Aucun mail.',row.querySelector('.speak-btn')); return; }
+  const intro = triageQueue.length+" mails à trier. C'est parti !";
+  const introRow = addMessage(intro,'raya'); if(autoSpeak) speak(intro, introRow.querySelector('.speak-btn'));
+  setTimeout(()=>nextTriage(), 1500);
+}
+function nextTriage() {
+  if (triageQueue.length===0) { triageBar.classList.remove('visible'); const row=addMessage('Triage terminé !','raya'); if(autoSpeak) speak('Triage terminé !',row.querySelector('.speak-btn')); triageCurrent=null; return; }
+  triageCurrent = triageQueue.shift();
+  const msg='De : '+(triageCurrent.from_email||'Inconnu')+'\nSujet : '+(triageCurrent.subject||'(Sans objet)')+'\n\n'+(triageCurrent.raw_body_preview||'').slice(0,200)+'\n\n— Que je fasse ? ('+triageQueue.length+' restants)';
+  const row=addMessage(msg,'raya'); if(autoSpeak) speak(msg,row.querySelector('.speak-btn'));
+  triageBar.classList.add('visible');
+}
+async function handleTriage(action) {
+  if (!triageCurrent) return; triageBar.classList.remove('visible'); stopSpeech();
+  if (action==='skip') { addMessage('Passé.','raya'); setTimeout(()=>nextTriage(),500); return; }
+  const actionMap={'archive':'Archive le mail '+triageCurrent.message_id,'delete':'Supprime le mail '+triageCurrent.message_id,'reply':'Prépare une réponse pour le mail '+triageCurrent.message_id};
+  const loading=addLoading();
+  try {
+    const data=(await (await fetch('/raya',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:actionMap[action]})})).json()); loading.remove();
+    const row=addMessage(data.answer,'raya'); if(autoSpeak) speak(data.answer,row.querySelector('.speak-btn'));
+    if (data.actions && data.actions.some(a=>a.startsWith('✅'))) showToast('Action effectuée ✓','ok');
+  } catch { loading.remove(); }
+  setTimeout(()=>nextTriage(),3000);
+}
+
+// ─── TIROIR ADMIN ───
+function toggleDrawer() { const d=document.getElementById('drawer'); if(d.classList.contains('open')) closeDrawer(); else openDrawer(); }
+function openDrawer() { document.getElementById('drawer').classList.add('open'); document.getElementById('drawerOverlay').classList.add('open'); document.getElementById('adminBtn').classList.add('active'); }
+function closeDrawer() { document.getElementById('drawer').classList.remove('open'); document.getElementById('drawerOverlay').classList.remove('open'); document.getElementById('adminBtn').classList.remove('active'); }
+
+async function drawerAction(btn, url, id) {
+  const el=document.getElementById('result-'+id);
+  el.className='d-btn-result loading'; el.textContent='⏳ En cours…'; btn.disabled=true;
+  try {
+    const d=await (await fetch(url)).json(); const txt=formatDrawerResult(d);
+    el.className='d-btn-result ok'; el.textContent=txt;
+    showToast(txt.split('\n')[0].substring(0,60),'ok');
+  } catch(e) { el.className='d-btn-result err'; el.textContent='❌ Erreur: '+e.message; showToast("Erreur lors de l'action",'err'); }
+  btn.disabled=false;
+}
+async function drawerConfirmAction(e, url, id) { e.stopPropagation(); drawerHideConfirm(e,'confirm-'+id); await drawerAction(e.target.closest('.d-btn'), url, id); }
+function drawerShowConfirm(id) { document.getElementById(id).classList.add('visible'); }
+function drawerHideConfirm(e, id) { e.stopPropagation(); document.getElementById(id).classList.remove('visible'); }
+
+async function drawerMemoryStatus(btn) {
+  const el=document.getElementById('result-status');
+  el.className='d-btn-result loading'; el.textContent='⏳ Chargement…'; btn.disabled=true;
+  try {
+    const d=await (await fetch('/memory-status')).json(); const n1=d.niveau_1||{}, n2=d.niveau_2||{};
+    el.className='d-btn-result info';
+    el.textContent=`📬 Mails : ${n2.mail_memory||0}\n💬 Conversations : ${n2.conversations_brutes||0}\n📋 Règles actives : ${n1.regles_actives||0}\n💡 Insights : ${n1.insights||0}\n👥 Contacts : ${n1.contacts||0}\n✍️ Style : ${n2.style_examples||0} exemples`;
+  } catch(e) { el.className='d-btn-result err'; el.textContent='❌ Erreur'; }
+  btn.disabled=false;
+}
+async function drawerRules(btn) {
+  const el=document.getElementById('result-rules');
+  el.className='d-btn-result loading'; el.textContent='⏳ Chargement…'; btn.disabled=true;
+  try {
+    const rules=await (await fetch('/rules')).json(); const active=rules.filter(r=>r.active);
+    if (!active.length) { el.className='d-btn-result info'; el.textContent='Aucune règle active.'; }
+    else {
+      const cats={}; active.forEach(r=>{cats[r.category]=(cats[r.category]||0)+1;});
+      el.className='d-btn-result info';
+      el.textContent=`${active.length} règles actives :\n`+Object.entries(cats).map(([k,v])=>`${k} : ${v}`).join('\n');
+    }
+  } catch(e) { el.className='d-btn-result err'; el.textContent='❌ Erreur'; }
+  btn.disabled=false;
+}
+function formatDrawerResult(d) {
+  if (d.error) return '❌ '+d.error;
+  if (d.status==='ok'||d.status==='termine') {
+    const parts=[];
+    if (d.analyzed!==undefined) parts.push(`✅ ${d.analyzed} analysés`);
+    if (d.remaining!==undefined) parts.push(`${d.remaining} restants`);
+    if (d.inserted!==undefined) parts.push(`✅ ${d.inserted} importés`);
+    if (d.deleted!==undefined) parts.push(`✅ ${d.deleted} supprimés`);
+    if (d.conversations_synthesized!==undefined) parts.push(`✅ ${d.conversations_synthesized} synthétisées`);
+    if (d.rules_extracted!==undefined) parts.push(`${d.rules_extracted} règles extraites`);
+    if (parts.length) return parts.join('\n'); return '✅ OK';
+  }
+  if (d.status==='mail_memory_cleared') return '✅ Historique mails vidé.';
+  if (d.status) return '✅ '+d.status;
+  return JSON.stringify(d).replace(/[{}"]/g,'').replace(/,/g,'\n').substring(0,200);
+}
+
+// ─── KEYBOARD ───
+document.addEventListener('keydown', e => {
+  if (e.key==='Escape') { closeDrawer(); document.getElementById('modalShortcuts').classList.remove('open'); }
+});
+document.getElementById('modalShortcuts').addEventListener('click', e => { if(e.target===document.getElementById('modalShortcuts')) closeShortcuts(); });
+
+init();
