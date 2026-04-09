@@ -1,7 +1,5 @@
 """
-Endpoints Raya : /speak et /raya.
-La logique est déléguée à raya_context.py (construction du contexte)
-et raya_actions.py (exécution des actions).
+Endpoints Raya : /speak, /raya, /token-status.
 """
 import os
 import re
@@ -39,6 +37,35 @@ class RayaQuery(BaseModel):
     file_name: Optional[str] = None
 
 
+@router.get("/token-status")
+def token_status(request: Request):
+    """
+    Vérifie l'état des tokens de l'utilisateur connecté.
+    Utilisé par le chat pour afficher le bandeau d'alerte.
+    """
+    username = request.session.get("user")
+    if not username:
+        return {"warnings": [], "ok": True}
+
+    warnings = []
+
+    # Token Microsoft 365
+    try:
+        token = get_valid_microsoft_token(username)
+        if not token:
+            warnings.append({
+                "provider": "Microsoft 365",
+                "message": "Token expiré — mails, Teams et agenda inaccessibles.",
+                "action": "Se reconnecter",
+                "action_url": "/login",
+                "severity": "error"
+            })
+    except Exception:
+        pass
+
+    return {"warnings": warnings, "ok": len(warnings) == 0}
+
+
 @router.post("/speak")
 def speak_text(payload: dict = Body(...)):
     api_key = os.environ.get("ELEVENLABS_API_KEY", "")
@@ -71,7 +98,6 @@ def raya_endpoint(request: Request, payload: RayaQuery):
     username = request.session.get("user", "guillaume")
     tenant_id = request.session.get("tenant_id", "couffrant_solar")
 
-    # 1. Contexte
     tools = load_user_tools(username)
     db_ctx = load_db_context(username)
     instructions = get_global_instructions(tenant_id=tenant_id)
@@ -79,21 +105,18 @@ def raya_endpoint(request: Request, payload: RayaQuery):
     live_mails = load_live_mails(outlook_token, username)
     agenda = load_agenda(outlook_token)
 
-    # 2. Contenu utilisateur (texte + fichier)
     user_content_parts = _build_user_content(payload)
 
-    # 3. Prompt système
     system = build_system_prompt(
         username=username, tenant_id=tenant_id, query=payload.query or "",
         tools=tools, db_ctx=db_ctx, outlook_token=outlook_token,
         live_mails=live_mails, agenda=agenda, instructions=instructions,
     )
 
-    # 4. Historique + appel Claude
     messages = []
     for h in db_ctx["history"]:
         messages.append({"role": "user", "content": h["user_input"]})
-        messages.append({"role": "assistant", "content": h["aria_response"]})  # nom de colonne DB
+        messages.append({"role": "assistant", "content": h["aria_response"]})
     messages.append({"role": "user", "content": user_content_parts})
 
     response = client.messages.create(
@@ -101,7 +124,6 @@ def raya_endpoint(request: Request, payload: RayaQuery):
     )
     raya_response = response.content[0].text
 
-    # 5. Exécution des actions
     actions_confirmed = execute_actions(
         raya_response=raya_response,
         username=username,
@@ -111,12 +133,10 @@ def raya_endpoint(request: Request, payload: RayaQuery):
         tools=tools,
     )
 
-    # 6. Réponse propre (supprime les balises [ACTION:...])
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', raya_response).strip()
     if actions_confirmed:
         clean_response += "\n\n" + "\n".join(actions_confirmed)
 
-    # 7. Sauvegarde en base
     conn = None
     try:
         conn = get_pg_conn()
@@ -129,7 +149,6 @@ def raya_endpoint(request: Request, payload: RayaQuery):
     finally:
         if conn: conn.close()
 
-    # 8. Synthèse auto si seuil atteint
     synth_threshold = get_memoire_param(username, "synth_threshold", 15)
     if MEMORY_OK and db_ctx["conv_count"] > 0 and db_ctx["conv_count"] % synth_threshold == 0:
         try:
@@ -144,7 +163,6 @@ def raya_endpoint(request: Request, payload: RayaQuery):
 
 
 def _build_user_content(payload: RayaQuery):
-    """Construit le contenu utilisateur (texte seul ou texte + fichier)."""
     if not payload.file_data or not payload.file_type:
         return payload.query
     file_name_info = f" ({payload.file_name})" if payload.file_name else ""

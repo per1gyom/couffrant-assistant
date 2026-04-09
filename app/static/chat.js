@@ -25,6 +25,7 @@ async function init() {
   checkHealth();
   loadUserInfo();
   loadMailCount();
+  checkTokenStatus();  // vérifie si des tokens sont expirés
   document.getElementById('autoSpeakBtn').classList.add('active');
   messagesEl.addEventListener('scroll', onMessagesScroll);
 }
@@ -60,6 +61,47 @@ async function checkHealth() {
     const d = await r.json();
     dot.className = d.status === 'ok' ? 'logo-dot' : 'logo-dot off';
   } catch(e) { dot.className = 'logo-dot off'; }
+}
+
+// ─── TOKEN ALERT ───
+async function checkTokenStatus() {
+  try {
+    const r = await fetch('/token-status');
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.warnings && d.warnings.length > 0) {
+      window._tokenWarnings = d.warnings;
+      const btn = document.getElementById('tokenAlertBtn');
+      if (btn) btn.style.display = 'inline-flex';
+    }
+  } catch(e) {}
+}
+
+function renderTokenBanner() {
+  const banner = document.getElementById('tokenBanner');
+  const warnings = window._tokenWarnings || [];
+  banner.innerHTML = warnings.map(w => `
+    <div class="token-banner-item">
+      <span class="token-banner-msg">
+        <strong>${w.provider}</strong> — ${w.message}
+      </span>
+      ${w.action_url
+        ? `<a href="${w.action_url}" class="token-banner-link">${w.action}</a>`
+        : ''}
+    </div>
+  `).join('') + `<button class="token-banner-close" onclick="closeTokenBanner()" title="Fermer">✕</button>`;
+}
+
+function toggleTokenBanner() {
+  const banner = document.getElementById('tokenBanner');
+  if (!banner.classList.contains('visible')) {
+    renderTokenBanner();
+  }
+  banner.classList.toggle('visible');
+}
+
+function closeTokenBanner() {
+  document.getElementById('tokenBanner').classList.remove('visible');
 }
 
 // ─── TOASTS ───
