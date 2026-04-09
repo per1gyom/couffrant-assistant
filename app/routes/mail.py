@@ -7,7 +7,6 @@ from app.token_manager import get_valid_microsoft_token, get_valid_google_token
 from app.graph_client import graph_get
 from app.rule_engine import get_antispam_keywords
 from app.ai_client import analyze_single_mail_with_ai
-from app.assistant_analyzer import analyze_single_mail
 from app.feedback_store import get_global_instructions, add_global_instruction
 from app.dashboard_service import get_dashboard
 from app.routes.deps import require_user
@@ -165,10 +164,6 @@ def analyze_raw_mails(request: Request, limit: int = 50):
 
 @router.get("/ingest-gmail")
 def ingest_gmail(request: Request):
-    """
-    Ingestion Gmail — utilise oauth_tokens (provider='google'), avec fallback gmail_tokens.
-    Compatible tenants Microsoft et Google.
-    """
     username = require_user(request)
     if not username: return RedirectResponse("/login-app")
     from app.connectors.gmail_connector import gmail_get_messages, gmail_get_message
@@ -216,7 +211,6 @@ def assistant_dashboard(request: Request, days: int = 2):
 
 @router.post("/instruction")
 def add_instruction(request: Request, instruction: str = Form(...)):
-    """Consigne globale scopée au tenant de l'utilisateur."""
     tenant_id = request.session.get("tenant_id", "couffrant_solar")
     add_global_instruction(instruction, tenant_id=tenant_id)
     return RedirectResponse("/chat", status_code=303)
