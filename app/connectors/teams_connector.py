@@ -15,20 +15,90 @@ def _strip_html(text: str) -> str:
 
 # ─── LECTURE ───
 
-def list_teams(token: str) -> dict:
-    """Liste les équipes Teams dont l'utilisateur est membre."""
+def list_teams_with_channels(token: str) -> dict:
+    """
+    Option C : un seul appel Graph avec $expand=channels.
+    Retourne équipes + canaux en une seule requête réseau.
+    Fallback automatique si $expand non supporté.
+    """
     try:
-        r = requests.get(f"{GRAPH}/me/joinedTeams",
-                         headers=_headers(token), timeout=15)
+        # Tentative avec $expand (un seul appel)
+        r = requests.get(
+            f"{GRAPH}/me/joinedTeams",
+            headers=_headers(token),
+            params={"$expand": "channels($select=id,displayName,description)"},
+            timeout=15
+        )
+        if r.status_code == 200:
+            teams = []
+            for t in r.json().get("value", []):
+                channels = [
+                    {"id": c["id"], "name": c.get("displayName", ""),
+                     "description": c.get("description", "")}
+                    for c in t.get("channels", {}).get("value", [])
+                ]
+                teams.append({
+                    "id": t["id"],
+                    "name": t.get("displayName", ""),
+                    "description": t.get("description", ""),
+                    "channels": channels,
+                })
+            return {"status": "ok", "teams": teams, "count": len(teams)}
+
+        # Fallback : deux appels séparés si $expand non supporté
+        print(f"[Teams] $expand non supporté ({r.status_code}), fallback deux appels")
+        return _list_teams_fallback(token)
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:150]}
+
+
+def _list_teams_fallback(token: str) -> dict:
+    """Fallback : liste équipes puis canaux séparément."""
+    try:
+        r = requests.get(f"{GRAPH}/me/joinedTeams", headers=_headers(token), timeout=15)
         if r.status_code != 200:
             return {"status": "error", "message": f"Graph {r.status_code}: {r.text[:200]}"}
         teams = []
         for t in r.json().get("value", []):
-            teams.append({"id": t["id"], "name": t.get("displayName", ""),
-                          "description": t.get("description", "")})
+            channels = []
+            try:
+                rc = requests.get(
+                    f"{GRAPH}/teams/{t['id']}/channels",
+                    headers=_headers(token),
+                    params={"$select": "id,displayName,description"},
+                    timeout=10
+                )
+                if rc.status_code == 200:
+                    channels = [
+                        {"id": c["id"], "name": c.get("displayName", ""),
+                         "description": c.get("description", "")}
+                        for c in rc.json().get("value", [])
+                    ]
+            except Exception:
+                pass
+            teams.append({
+                "id": t["id"], "name": t.get("displayName", ""),
+                "description": t.get("description", ""),
+                "channels": channels,
+            })
         return {"status": "ok", "teams": teams, "count": len(teams)}
     except Exception as e:
         return {"status": "error", "message": str(e)[:150]}
+
+
+# Compat avec l'ancien code
+def list_teams(token: str) -> dict:
+    result = list_teams_with_channels(token)
+    if result.get("status") == "ok":
+        # Retourne le format attendu par l'ancien code
+        return {
+            "status": "ok",
+            "teams": [{"id": t["id"], "name": t["name"],
+                       "description": t["description"]} for t in result["teams"]],
+            "count": result["count"],
+        }
+    return result
 
 
 def list_channels(token: str, team_id: str) -> dict:
@@ -52,12 +122,12 @@ def list_channels(token: str, team_id: str) -> dict:
 
 
 def read_channel_messages(token: str, team_id: str, channel_id: str, top: int = 15) -> dict:
-    """Lit les derniers messages d'un canal. Pas de $orderby — non supporté par Graph."""
+    """Lit les derniers messages d'un canal."""
     try:
         r = requests.get(
             f"{GRAPH}/teams/{team_id}/channels/{channel_id}/messages",
             headers=_headers(token),
-            params={"$top": top},   # $orderby retiré — non supporté
+            params={"$top": top},
             timeout=15
         )
         if r.status_code != 200:
@@ -67,8 +137,7 @@ def read_channel_messages(token: str, team_id: str, channel_id: str, top: int = 
             content = _strip_html(m.get("body", {}).get("content", ""))
             sender = (m.get("from") or {}).get("user", {}).get("displayName", "Inconnu")
             messages.append({
-                "id": m["id"],
-                "sender": sender,
+                "id": m["id"], "sender": sender,
                 "content": content[:500],
                 "date": m.get("lastModifiedDateTime", ""),
             })
@@ -78,12 +147,12 @@ def read_channel_messages(token: str, team_id: str, channel_id: str, top: int = 
 
 
 def list_chats(token: str) -> dict:
-    """Liste les chats 1:1 et de groupe actifs. Pas de $orderby — non supporté par Graph."""
+    """Liste les chats 1:1 et de groupe actifs."""
     try:
         r = requests.get(
             f"{GRAPH}/me/chats",
             headers=_headers(token),
-            params={"$expand": "members", "$top": 20},  # $orderby retiré — non supporté
+            params={"$expand": "members", "$top": 20},
             timeout=15
         )
         if r.status_code != 200:
@@ -110,7 +179,6 @@ def list_chats(token: str) -> dict:
 def read_chat_messages(token: str, chat_id: str, top: int = 15) -> dict:
     """Lit les derniers messages d'un chat."""
     try:
-        # Endpoint correct : /chats/{id}/messages (pas /me/chats)
         r = requests.get(
             f"{GRAPH}/chats/{chat_id}/messages",
             headers=_headers(token),
@@ -124,8 +192,7 @@ def read_chat_messages(token: str, chat_id: str, top: int = 15) -> dict:
             content = _strip_html(m.get("body", {}).get("content", ""))
             sender = (m.get("from") or {}).get("user", {}).get("displayName", "Inconnu")
             messages.append({
-                "id": m["id"],
-                "sender": sender,
+                "id": m["id"], "sender": sender,
                 "content": content[:500],
                 "date": m.get("lastModifiedDateTime", ""),
             })
@@ -137,7 +204,6 @@ def read_chat_messages(token: str, chat_id: str, top: int = 15) -> dict:
 # ─── ÉCRITURE ───
 
 def send_channel_message(token: str, team_id: str, channel_id: str, text: str) -> dict:
-    """Envoie un message dans un canal Teams."""
     try:
         r = requests.post(
             f"{GRAPH}/teams/{team_id}/channels/{channel_id}/messages",
@@ -153,9 +219,7 @@ def send_channel_message(token: str, team_id: str, channel_id: str, text: str) -
 
 
 def send_chat_message(token: str, chat_id: str, text: str) -> dict:
-    """Envoie un message dans un chat existant."""
     try:
-        # Endpoint correct : /chats/{id}/messages (pas /me/chats)
         r = requests.post(
             f"{GRAPH}/chats/{chat_id}/messages",
             headers=_headers(token),
@@ -170,7 +234,6 @@ def send_chat_message(token: str, chat_id: str, text: str) -> dict:
 
 
 def _get_user_id_by_email(token: str, email: str) -> Optional[str]:
-    """Récupère l'ID Azure AD d'un utilisateur par son email."""
     try:
         r = requests.get(
             f"{GRAPH}/users/{email}",
@@ -186,11 +249,6 @@ def _get_user_id_by_email(token: str, email: str) -> Optional[str]:
 
 
 def find_or_create_chat_with_user(token: str, email: str) -> dict:
-    """
-    Trouve ou crée un chat 1:1 avec un utilisateur via son email.
-    Retourne le chat_id.
-    """
-    # 1. Cherche dans les chats existants
     chats_result = list_chats(token)
     if chats_result.get("status") == "ok":
         for chat in chats_result.get("chats", []):
@@ -199,12 +257,10 @@ def find_or_create_chat_with_user(token: str, email: str) -> dict:
                 if any(email.lower() in m for m in members_lower):
                     return {"status": "ok", "chat_id": chat["id"], "created": False}
 
-    # 2. Résout l'ID utilisateur
     user_id = _get_user_id_by_email(token, email)
     if not user_id:
         return {"status": "error", "message": f"Utilisateur '{email}' introuvable dans Azure AD."}
 
-    # 3. Récupère l'ID de l'utilisateur courant
     try:
         me_r = requests.get(f"{GRAPH}/me", headers=_headers(token),
                             params={"$select": "id"}, timeout=10)
@@ -215,7 +271,6 @@ def find_or_create_chat_with_user(token: str, email: str) -> dict:
     if not my_id:
         return {"status": "error", "message": "Impossible de récupérer l'identité de l'utilisateur courant."}
 
-    # 4. Crée le chat 1:1
     try:
         r = requests.post(
             f"{GRAPH}/chats",
@@ -235,22 +290,16 @@ def find_or_create_chat_with_user(token: str, email: str) -> dict:
         )
         if r.status_code not in (200, 201):
             return {"status": "error", "message": f"Création chat échouée: {r.text[:200]}"}
-        chat_id = r.json().get("id")
-        return {"status": "ok", "chat_id": chat_id, "created": True}
+        return {"status": "ok", "chat_id": r.json().get("id"), "created": True}
     except Exception as e:
         return {"status": "error", "message": str(e)[:150]}
 
 
 def send_message_to_user(token: str, email: str, text: str) -> dict:
-    """
-    Envoie un message Teams à un collègue par email.
-    Trouve ou crée le chat 1:1 automatiquement.
-    """
     result = find_or_create_chat_with_user(token, email)
     if result.get("status") != "ok":
         return result
-    chat_id = result["chat_id"]
-    send_result = send_chat_message(token, chat_id, text)
+    send_result = send_chat_message(token, result["chat_id"], text)
     if send_result.get("status") == "ok":
         action = "créé et message envoyé" if result.get("created") else "message envoyé"
         return {"status": "ok", "message": f"✅ Teams — {action} à {email}"}
@@ -258,9 +307,6 @@ def send_message_to_user(token: str, email: str, text: str) -> dict:
 
 
 def create_group_chat(token: str, emails: list, topic: str, first_message: str) -> dict:
-    """
-    Crée une conversation de groupe Teams avec plusieurs personnes et envoie le premier message.
-    """
     members_payload = []
     try:
         me_r = requests.get(f"{GRAPH}/me", headers=_headers(token),
@@ -288,7 +334,7 @@ def create_group_chat(token: str, emails: list, topic: str, first_message: str) 
             return {"status": "error", "message": f"Utilisateur '{email}' introuvable."}
 
     if len(members_payload) < 2:
-        return {"status": "error", "message": "Pas assez de membres valides pour créer le groupe."}
+        return {"status": "error", "message": "Pas assez de membres valides."}
 
     try:
         r = requests.post(
@@ -302,7 +348,8 @@ def create_group_chat(token: str, emails: list, topic: str, first_message: str) 
         chat_id = r.json().get("id")
         send_result = send_chat_message(token, chat_id, first_message)
         if send_result.get("status") == "ok":
-            return {"status": "ok", "message": f"✅ Groupe '{topic}' créé et message envoyé.", "chat_id": chat_id}
+            return {"status": "ok", "message": f"✅ Groupe '{topic}' créé et message envoyé.",
+                    "chat_id": chat_id}
         return send_result
     except Exception as e:
         return {"status": "error", "message": str(e)[:150]}

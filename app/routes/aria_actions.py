@@ -10,7 +10,7 @@ from app.connectors.outlook_connector import (
     search_aria_drive, create_drive_folder, copy_drive_item, move_drive_item,
 )
 from app.connectors.teams_connector import (
-    list_teams, list_channels, read_channel_messages,
+    list_teams_with_channels, list_channels, read_channel_messages,
     list_chats, read_chat_messages,
     send_channel_message, send_chat_message,
     send_message_to_user, create_group_chat,
@@ -34,10 +34,6 @@ def execute_actions(
     live_mails: list,
     tools: dict,
 ) -> list:
-    """
-    Exécute tous les [ACTION:...] trouvés dans la réponse de Raya.
-    Retourne la liste des messages de confirmation.
-    """
     confirmed = []
     drive_write = tools.get("drive_write", False)
     mail_can_delete = tools.get("mail_can_delete", False)
@@ -47,7 +43,7 @@ def execute_actions(
         confirmed += _handle_mail_actions(raya_response, outlook_token, mail_can_delete,
                                           mails_from_db, live_mails, username)
         confirmed += _handle_drive_actions(raya_response, outlook_token, drive_write)
-        confirmed += _handle_teams_actions(raya_response, outlook_token)
+        confirmed += _handle_teams_actions(raya_response, outlook_token, username)
 
     if MEMORY_OK:
         confirmed += _handle_memory_actions(raya_response, username, synth_threshold)
@@ -93,8 +89,7 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
                 except Exception: pass
                 try:
                     orig = next((m for m in live_mails if m.get('message_id') == msg_id), {})
-                    if not orig:
-                        orig = next((m for m in mails_from_db if m.get('message_id') == msg_id), {})
+                    if not orig: orig = next((m for m in mails_from_db if m.get('message_id') == msg_id), {})
                     save_reply_learning(
                         mail_subject=orig.get('subject', ''), mail_from=orig.get('from_email', ''),
                         mail_body_preview=orig.get('raw_body_preview', ''), category=orig.get('category', 'autre'),
@@ -204,18 +199,18 @@ def _handle_drive_actions(response, token, drive_write):
 
 # ─── TEAMS ───
 
-def _handle_teams_actions(response, token):
+def _handle_teams_actions(response, token, username):
     confirmed = []
 
+    # TEAMS_LIST : Option C — un seul appel avec équipes + canaux
     for _ in re.finditer(r'\[ACTION:TEAMS_LIST:\]', response):
         try:
-            res = list_teams(token)
+            res = list_teams_with_channels(token)
             if res.get("status") == "ok":
                 lines = []
                 for t in res.get("teams", []):
-                    ch = list_channels(token, t["id"])
-                    ch_names = ", ".join(c["name"] for c in ch.get("channels", [])[:5]) if ch.get("status") == "ok" else "—"
-                    lines.append(f"  🏢 {t['name']} [id:{t['id']}]\n     Canaux : {ch_names or '—'}")
+                    ch_names = ", ".join(c["name"] for c in t.get("channels", [])[:5]) or "—"
+                    lines.append(f"  🏢 {t['name']} [id:{t['id']}]\n     Canaux : {ch_names}")
                 confirmed.append(f"📋 Teams ({res['count']}) :\n" + "\n".join(lines))
             else: confirmed.append(f"❌ Teams : {res.get('message')}")
         except Exception as e: confirmed.append(f"❌ Teams : {str(e)[:80]}")
@@ -277,6 +272,54 @@ def _handle_teams_actions(response, token):
             res = create_group_chat(token, emails, topic, text)
             confirmed.append(res.get("message", "✅ Groupe Teams créé.") if res.get("status") == "ok" else f"❌ {res.get('message')}")
         except Exception as e: confirmed.append(f"❌ Teams groupe : {str(e)[:80]}")
+
+    # ─── ACTIONS MÉMOIRE TEAMS (Raya décide librement) ───
+
+    # TEAMS_MARK : Raya pose un curseur sur un chat/canal
+    for match in re.finditer(r'\[ACTION:TEAMS_MARK:([^|\]]+)\|([^|\]]+)\|?([^|\]]*)\|?([^\]]*)\]', response):
+        chat_id = match.group(1).strip()
+        message_id = match.group(2).strip()
+        label = match.group(3).strip() or ""
+        chat_type = match.group(4).strip() or "chat"
+        try:
+            from app.memory_teams import set_teams_marker
+            res = set_teams_marker(username, chat_id, message_id, label, chat_type)
+            confirmed.append(res.get("message", "✅ Curseur Teams posé."))
+        except Exception as e: confirmed.append(f"❌ Teams mark : {str(e)[:80]}")
+
+    # TEAMS_SYNC : ingère depuis le curseur + synthétise
+    for match in re.finditer(r'\[ACTION:TEAMS_SYNC:([^|\]]+)\|?([^|\]]*)\|?([^\]]*)\]', response):
+        chat_id = match.group(1).strip()
+        label = match.group(2).strip() or ""
+        chat_type = match.group(3).strip() or "chat"
+        try:
+            from app.memory_teams import ingest_and_synthesize, get_teams_markers
+            # Trouve le dernier message connu pour ce chat
+            markers = get_teams_markers(username)
+            marker = next((m for m in markers if m["chat_id"] == chat_id), None)
+            since = marker["last_message_id"] if marker else None
+            threading.Thread(
+                target=lambda: ingest_and_synthesize(
+                    token, username, chat_id, label, chat_type, since
+                ),
+                daemon=True
+            ).start()
+            confirmed.append(f"🔄 Sync Teams '{label or chat_id[:20]}' lancée en arrière-plan.")
+        except Exception as e: confirmed.append(f"❌ Teams sync : {str(e)[:80]}")
+
+    # TEAMS_HISTORY : explore l'historique complet (ignore le curseur)
+    for match in re.finditer(r'\[ACTION:TEAMS_HISTORY:([^|\]]+)\|?([^|\]]*)\|?([^\]]*)\]', response):
+        chat_id = match.group(1).strip()
+        label = match.group(2).strip() or ""
+        chat_type = match.group(3).strip() or "chat"
+        try:
+            from app.memory_teams import explore_history
+            threading.Thread(
+                target=lambda: explore_history(token, username, chat_id, label, chat_type),
+                daemon=True
+            ).start()
+            confirmed.append(f"🔍 Exploration historique Teams '{label or chat_id[:20]}' lancée.")
+        except Exception as e: confirmed.append(f"❌ Teams history : {str(e)[:80]}")
 
     return confirmed
 
