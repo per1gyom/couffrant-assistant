@@ -46,9 +46,26 @@ def save_style_example(situation: str, example_text: str, tags: str = "",
 
 
 def learn_from_correction(original: str, corrected: str,
-                          context: str = "", username: str = 'guillaume'):
+                          context: str = "", username: str = None):
+    """
+    Stocke un exemple de style UNIQUEMENT s'il y a eu une vraie correction
+    (Guillaume édite la réponse de Raya avant l'envoi).
+
+    Une réponse envoyée telle quelle n'est PAS une correction et ne doit pas être
+    stockée comme exemple — sinon le few-shot devient "ce qu'on a déjà envoyé"
+    au lieu de "ce qu'on a corrigé", et le coût Haiku est gaspillé à chaque envoi.
+    """
+    if not username:
+        raise ValueError("learn_from_correction : username obligatoire")
+    # Pas une vraie correction : original absent (envoi direct sans édition)
+    if not original or not original.strip():
+        return
     if not corrected or len(corrected) < 10:
         return
+    # Pas une vraie correction : texte identique
+    if original.strip() == corrected.strip():
+        return
+
     try:
         response = client.messages.create(
             model=ANTHROPIC_MODEL_FAST, max_tokens=20,

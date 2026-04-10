@@ -19,7 +19,7 @@ from app.connectors.teams_connector import (
 )
 from app.memory_loader import (
     MEMORY_OK, save_rule, save_insight, delete_rule,
-    synthesize_session, learn_from_correction, save_reply_learning,
+    synthesize_session, save_reply_learning,
 )
 from app.rule_engine import get_memoire_param
 
@@ -82,20 +82,27 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
         except Exception: pass
 
     for match in re.finditer(r'\[ACTION:REPLY:([^:\]]{20,}):(.+?)\]', response, re.DOTALL):
-        msg_id = match.group(1).strip(); reply_text = match.group(2).strip()
+        msg_id = match.group(1).strip()
+        reply_text = match.group(2).strip()
         if not is_valid_outlook_id(msg_id): continue
         try:
             r = perform_outlook_action("send_reply", {"message_id": msg_id, "reply_body": reply_text}, token)
             if r.get("status") == "ok":
-                try: learn_from_correction(original="", corrected=reply_text, context="réponse mail", username=username)
-                except Exception: pass
+                # learn_from_correction ne doit PAS être appelé ici.
+                # Cet envoi est direct (pas édité par Guillaume) — ce n'est pas une correction.
+                # On stocke uniquement comme exemple positif dans reply_learning_memory.
                 try:
                     orig = next((m for m in live_mails if m.get('message_id') == msg_id), {})
-                    if not orig: orig = next((m for m in mails_from_db if m.get('message_id') == msg_id), {})
+                    if not orig:
+                        orig = next((m for m in mails_from_db if m.get('message_id') == msg_id), {})
                     save_reply_learning(
-                        mail_subject=orig.get('subject', ''), mail_from=orig.get('from_email', ''),
-                        mail_body_preview=orig.get('raw_body_preview', ''), category=orig.get('category', 'autre'),
-                        ai_reply=reply_text, final_reply=reply_text, username=username
+                        mail_subject=orig.get('subject', ''),
+                        mail_from=orig.get('from_email', ''),
+                        mail_body_preview=orig.get('raw_body_preview', ''),
+                        category=orig.get('category', 'autre'),
+                        ai_reply=reply_text,
+                        final_reply=reply_text,  # identique — pas de correction
+                        username=username,
                     )
                 except Exception: pass
             confirmed.append("✅ Réponse envoyée" if r.get("status") == "ok" else f"❌ {r.get('message')}")
@@ -141,7 +148,11 @@ def _handle_drive_actions(response, token, drive_write):
                 for it in r.get("items", []):
                     icon = "📁" if it.get("type") == "dossier" else "📄"
                     size_str = f"  ({it.get('taille_ko','')} Ko)" if it.get("taille_ko") else ""
-                    lines.append(f"  {icon} \"{it['nom']}\"  [id:{it.get('id','')}]{size_str}")
+                    link = it.get('lien', '')
+                    if link:
+                        lines.append(f"  {icon} [**{it['nom']}**]({link}){size_str}")
+                    else:
+                        lines.append(f"  {icon} **{it['nom']}**  [id:{it.get('id','')}]{size_str}")
                 confirmed.append(f"📂 {r.get('dossier', '1_Photovoltaïque')} ({r['count']}) :\n" + "\n".join(lines))
             else: confirmed.append(f"❌ {r.get('message', 'Erreur Drive')}")
         except Exception as e: confirmed.append(f"❌ Drive : {str(e)[:80]}")
@@ -152,7 +163,9 @@ def _handle_drive_actions(response, token, drive_write):
             r = read_drive_file(token, file_ref)
             if r.get("status") == "ok":
                 if r.get("type") == "texte":
-                    confirmed.append(f"📄 {r['fichier']} :\n{r['contenu'][:2000]}")
+                    lien = r.get('lien', '')
+                    header = f"📄 [{r['fichier']}]({lien})" if lien else f"📄 {r['fichier']}"
+                    confirmed.append(f"{header} :\n{r['contenu'][:2000]}")
                 else:
                     confirmed.append(f"📄 {r.get('fichier', file_ref)} — {r.get('message', '')} {r.get('conseil', '')}")
             else: confirmed.append(f"❌ {r.get('message')}")
@@ -163,7 +176,14 @@ def _handle_drive_actions(response, token, drive_write):
         try:
             r = search_drive(token, q)
             if r.get("status") == "ok":
-                lines = [f"  {'📁' if it.get('type')=='dossier' else '📄'} \"{it['nom']}\"  [id:{it.get('id','')}]" for it in r.get("items", [])]
+                lines = []
+                for it in r.get("items", []):
+                    icon = "📁" if it.get('type') == 'dossier' else "📄"
+                    link = it.get('lien', '')
+                    if link:
+                        lines.append(f"  {icon} [**{it['nom']}**]({link})")
+                    else:
+                        lines.append(f"  {icon} **{it['nom']}**  [id:{it.get('id','')}]")
                 confirmed.append(f"🔍 '{q}' — {r['count']} résultat(s) :\n" + "\n".join(lines))
             else: confirmed.append(f"❌ {r.get('message')}")
         except Exception as e: confirmed.append(f"❌ {str(e)[:80]}")

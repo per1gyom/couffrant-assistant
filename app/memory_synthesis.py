@@ -2,7 +2,9 @@
 Mémoire : synthèse des sessions et résumé chaud.
 Vectorisation automatique des insights et conversations.
 
-Note : get_memoire_param vient de app.memory_rules avec signature (param, default, username).
+Signatures canoniques utilisées ici (depuis rule_engine) :
+  get_memoire_param(username, param, default)
+  get_rules_by_category(username, category)
 """
 import json
 import re
@@ -10,7 +12,9 @@ import re
 from app.database import get_pg_conn
 from app.ai_client import client
 from app.config import ANTHROPIC_MODEL_SMART, ANTHROPIC_MODEL_FAST
-from app.memory_rules import get_rules_by_category, get_memoire_param, save_rule
+# Imports depuis rule_engine (signatures canoniques) + save_rule depuis memory_rules
+from app.rule_engine import get_rules_by_category, get_memoire_param
+from app.memory_rules import save_rule
 
 DEFAULT_TENANT = 'couffrant_solar'
 
@@ -125,20 +129,31 @@ def get_aria_insights(limit: int = 8, username: str = 'guillaume') -> str:
 
 
 def save_insight(topic: str, insight: str, source: str = "conversation",
-                username: str = 'guillaume') -> int:
+                 username: str = None) -> int:
     """
     Sauvegarde un insight avec vectorisation automatique.
+    Déduplication par égalité exacte normalisée sur topic (plus de ILIKE %prefix%).
+    username obligatoire — plus de défaut 'guillaume'.
     """
-    embed_text = f"[{topic}] {insight}"
+    if not username:
+        raise ValueError("save_insight : username obligatoire")
+    if not topic or not insight:
+        raise ValueError("save_insight : topic et insight obligatoires")
+
+    topic_clean = topic.strip()
+    embed_text = f"[{topic_clean}] {insight}"
     vec = _vec_str(_embed(embed_text))
 
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
+        # Égalité exacte sur topic — empêche la fusion d'insights distincts
         c.execute("""
-            SELECT id FROM aria_insights WHERE username = %s AND topic ILIKE %s LIMIT 1
-        """, (username, f"%{topic[:30]}%"))
+            SELECT id FROM aria_insights
+            WHERE username = %s AND LOWER(TRIM(topic)) = LOWER(TRIM(%s))
+            LIMIT 1
+        """, (username, topic_clean))
         existing = c.fetchone()
         if existing:
             if vec:
@@ -154,20 +169,22 @@ def save_insight(topic: str, insight: str, source: str = "conversation",
                     WHERE id=%s
                 """, (insight, existing[0]))
             conn.commit()
+            print(f"[save_insight] RENFORCÉ id={existing[0]} [{topic_clean[:40]}]")
             return existing[0]
 
         if vec:
             c.execute("""
                 INSERT INTO aria_insights (username, topic, insight, source, embedding)
                 VALUES (%s, %s, %s, %s, %s::vector) RETURNING id
-            """, (username, topic, insight, source, vec))
+            """, (username, topic_clean, insight, source, vec))
         else:
             c.execute("""
                 INSERT INTO aria_insights (username, topic, insight, source)
                 VALUES (%s, %s, %s, %s) RETURNING id
-            """, (username, topic, insight, source))
+            """, (username, topic_clean, insight, source))
         insight_id = c.fetchone()[0]
         conn.commit()
+        print(f"[save_insight] CRÉÉ id={insight_id} [{topic_clean[:40]}]")
         return insight_id
     finally:
         if conn: conn.close()
@@ -188,8 +205,8 @@ def synthesize_session(n_conversations: int = 15, username: str = 'guillaume') -
     finally:
         if conn: conn.close()
 
-    # memory_rules.py : signature (param, default, username) — ordre correct
-    keep_recent = get_memoire_param('keep_recent', 5, username)
+    # Signature canonique : (username, param, default)
+    keep_recent = get_memoire_param(username, 'keep_recent', 5)
     if not conversations or total <= keep_recent:
         return {"status": "nothing_to_synthesize", "total": total}
 
@@ -312,8 +329,8 @@ def _vectorize_conversations_batch(conversations: list, username: str):
 
 def purge_old_mails(days: int = None, username: str = 'guillaume') -> int:
     if days is None:
-        # memory_rules.py : signature (param, default, username) — ordre correct
-        days = get_memoire_param('purge_days', 90, username)
+        # Signature canonique : (username, param, default)
+        days = get_memoire_param(username, 'purge_days', 90)
     conn = None
     try:
         conn = get_pg_conn()
