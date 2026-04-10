@@ -12,7 +12,7 @@ from app.graph_client import graph_get
 from app.database import get_pg_conn
 from app.token_manager import get_valid_microsoft_token
 from app.app_security import get_user_tools
-from app.memory_manager import get_contacts_keywords
+from app.rule_engine import get_contacts_keywords
 from app.connectors.outlook_connector import perform_outlook_action
 from app.memory_loader import (
     get_hot_summary, get_aria_rules, get_aria_insights,
@@ -143,8 +143,8 @@ def load_teams_context(username: str) -> str:
 
 def load_mail_filter_summary(username: str) -> str:
     try:
-        from app.memory_rules import get_rules_by_category
-        rules = get_rules_by_category('mail_filter', username)
+        from app.rule_engine import get_rules_by_category
+        rules = get_rules_by_category(username, 'mail_filter')
         if not rules:
             return ""
         whitelist = [r for r in rules if r.strip().lower().startswith('autoriser:')]
@@ -176,9 +176,10 @@ def build_system_prompt(
     display_name = username.capitalize()
     query_lower = query.lower()
 
+    # ── Lecture mémoire scopée par tenant_id ──
     hot_summary = get_hot_summary(username)
-    aria_rules = get_aria_rules(username)
-    aria_insights = get_aria_insights(limit=8, username=username)
+    aria_rules = get_aria_rules(username, tenant_id=tenant_id)
+    aria_insights = get_aria_insights(limit=8, username=username, tenant_id=tenant_id)
 
     if not teams_context:
         teams_context = load_teams_context(username)
@@ -186,7 +187,7 @@ def build_system_prompt(
         mail_filter_summary = load_mail_filter_summary(username)
 
     contact_card = ""
-    known_contacts = get_contacts_keywords(username=username)
+    known_contacts = get_contacts_keywords(username=username, tenant_id=tenant_id)
     for name in known_contacts:
         if name in query_lower:
             contact_card = get_contact_card(name, tenant_id=tenant_id)
