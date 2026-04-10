@@ -6,17 +6,17 @@ Raya pose ses questions comme des messages normaux.
 L'utilisateur répond en tapant OU au micro (le micro injecte déjà dans l'input).
 
 Flux :
-  POST /onboarding/start   → premier message d'accueil + question 1
-  POST /onboarding/answer  → enregistre la réponse, retourne question suivante ou done
-  POST /onboarding/skip    → interrompt l'onboarding
-  POST /onboarding/restart → remet à zéro
-  POST /onboarding/complete → génère règles + insights via Opus (appelé automatiquement)
+  POST /onboarding/start   -> premier message d'accueil + question 1
+  POST /onboarding/answer  -> enregistre la réponse, retourne question suivante ou done
+  POST /onboarding/skip    -> interrompt l'onboarding
+  POST /onboarding/restart -> remet à zéro
+  POST /onboarding/complete -> génère règles + insights via Opus (appelé automatiquement)
 """
 import json
 import threading
 from app.database import get_pg_conn
 
-# ─── MIGRATION AUTO ───
+# --- MIGRATION AUTO ---
 
 def _ensure_table():
     try:
@@ -46,22 +46,22 @@ def _ensure_table():
 _ensure_table()
 
 
-# ─── LISTE PLATE DES QUESTIONS (12 au total) ───
+# --- LISTE PLATE DES QUESTIONS (12 au total) ---
 # Format : (bloc_id, bloc_titre, question_text)
 
 ALL_QUESTIONS = [
-    (1, "Contexte professionnel",        "Quel est ton métier ou ton poste ?"),
+    (1, "Contexte professionnel",        "Quel est ton metier ou ton poste ?"),
     (1, "Contexte professionnel",        "Dans quel secteur travailles-tu ?"),
-    (1, "Contexte professionnel",        "Combien de personnes dans ton équipe directe ?"),
+    (1, "Contexte professionnel",        "Combien de personnes dans ton equipe directe ?"),
     (2, "Outils et habitudes",           "Quels outils utilises-tu au quotidien ? (Outlook, Teams, Drive, Odoo...)"),
-    (2, "Outils et habitudes",           "À quelle fréquence consultes-tu tes mails ?"),
-    (2, "Outils et habitudes",           "Y a-t-il des expéditeurs ou clients particulièrement prioritaires ?"),
-    (3, "Préférences de communication",  "Comment préfères-tu que je te réponde ? (court et factuel / détaillé / conversationnel)"),
-    (3, "Préférences de communication",  "Je dois tutoyer ou vouvoyer tes contacts par défaut ?"),
-    (3, "Préférences de communication",  "Y a-t-il un ton ou un style particulier à éviter ?"),
-    (4, "Contexte métier",               "Quels sont tes projets ou dossiers principaux en ce moment ?"),
-    (4, "Contexte métier",               "Quelles informations dois-je toujours avoir en tête ?"),
-    (4, "Contexte métier",               "Y a-t-il des règles métier ou process importants à connaître ?"),
+    (2, "Outils et habitudes",           "A quelle frequence consultes-tu tes mails ?"),
+    (2, "Outils et habitudes",           "Y a-t-il des expediteurs ou clients particulierement prioritaires ?"),
+    (3, "Preferences de communication",  "Comment preferes-tu que je te reponde ? (court et factuel / detaille / conversationnel)"),
+    (3, "Preferences de communication",  "Je dois tutoyer ou vouvoyer tes contacts par defaut ?"),
+    (3, "Preferences de communication",  "Y a-t-il un ton ou un style particulier a eviter ?"),
+    (4, "Contexte metier",               "Quels sont tes projets ou dossiers principaux en ce moment ?"),
+    (4, "Contexte metier",               "Quelles informations dois-je toujours avoir en tete ?"),
+    (4, "Contexte metier",               "Y a-t-il des regles metier ou process importants a connaitre ?"),
 ]
 
 TOTAL_QUESTIONS = len(ALL_QUESTIONS)  # 12
@@ -71,10 +71,10 @@ def _format_question(idx: int) -> str:
     """Formate le message d'une question pour l'affichage dans le chat."""
     _, bloc_titre, question = ALL_QUESTIONS[idx]
     num = idx + 1
-    return f"**Question {num} / {TOTAL_QUESTIONS} — {bloc_titre}**\n{question}"
+    return f"**Question {num} / {TOTAL_QUESTIONS} -- {bloc_titre}**\n{question}"
 
 
-# ─── API PUBLIQUE ───
+# --- API PUBLIQUE ---
 
 def get_onboarding_status(username: str) -> dict:
     """Retourne le statut d'onboarding (pending / in_progress / completed / skipped)."""
@@ -97,8 +97,8 @@ def get_onboarding_status(username: str) -> dict:
 
 def start_onboarding(username: str, tenant_id: str) -> str:
     """
-    Démarre l'onboarding et retourne le message d'accueil + question 1.
-    Utilisé par POST /onboarding/start depuis chat.js.
+    Demarre l'onboarding et retourne le message d'accueil + question 1.
+    Utilise par POST /onboarding/start depuis chat.js.
     """
     try:
         conn = get_pg_conn()
@@ -116,10 +116,10 @@ def start_onboarding(username: str, tenant_id: str) -> str:
         print(f"[Onboarding] start: {e}")
 
     welcome = (
-        "Bienvenue ! Je suis Raya, ton assistante personnelle. \ud83d\ude0a\n\n"
-        "Pour mieux te connaître et bien travailler avec toi, je vais te poser "
-        f"{TOTAL_QUESTIONS}\u00a0questions rapides en 4 thèmes.\n"
-        "Tu peux répondre **à l'écrit ou au micro** (bouton \ud83c\udfa4 en bas).\n\n"
+        "Bonjour ! Je suis Raya, ton assistante personnelle.\n\n"
+        "Pour mieux te connaitre et bien travailler avec toi, je vais te poser "
+        f"{TOTAL_QUESTIONS} questions rapides en 4 themes.\n"
+        "Tu peux repondre a l'ecrit ou au micro (bouton micro en bas).\n\n"
         "---\n\n"
     )
     return welcome + _format_question(0)
@@ -127,12 +127,12 @@ def start_onboarding(username: str, tenant_id: str) -> str:
 
 def record_answer_and_get_next(username: str, tenant_id: str, answer: str) -> dict:
     """
-    Enregistre la réponse à la question courante et retourne la suivante.
+    Enregistre la reponse a la question courante et retourne la suivante.
 
     Retourne :
         {next_message: str, done: bool, question_idx: int}
 
-    Quand done=True, complete_onboarding() est appelé en background.
+    Quand done=True, complete_onboarding() est appele en background.
     """
     try:
         conn = get_pg_conn()
@@ -150,12 +150,12 @@ def record_answer_and_get_next(username: str, tenant_id: str, answer: str) -> di
         current_idx = row[0]
         answers = row[1] or {}
 
-        # Enregistre la réponse
+        # Enregistre la reponse
         answers[f"q{current_idx}"] = answer.strip()
         next_idx = current_idx + 1
 
         if next_idx >= TOTAL_QUESTIONS:
-            # Toutes les questions répondues — on finalise en background
+            # Toutes les questions repondues
             conn = get_pg_conn()
             c = conn.cursor()
             c.execute("""
@@ -166,7 +166,6 @@ def record_answer_and_get_next(username: str, tenant_id: str, answer: str) -> di
             conn.commit()
             conn.close()
 
-            # Reconstruit le format bloc pour complete_onboarding
             bloc_answers = _flat_to_bloc_answers(answers)
             threading.Thread(
                 target=complete_onboarding,
@@ -175,13 +174,13 @@ def record_answer_and_get_next(username: str, tenant_id: str, answer: str) -> di
             ).start()
 
             done_msg = (
-                "Merci, j'ai tout ce qu'il me faut ! \u2728\n\n"
-                "Je construis ton profil... ça prend une dizaine de secondes.\n"
-                "_(Tu peux déjà commencer à utiliser le chat.)_"
+                "Merci, j'ai tout ce qu'il me faut !\n\n"
+                "Je construis ton profil... ca prend une dizaine de secondes.\n"
+                "_(Tu peux deja commencer a utiliser le chat.)_"
             )
             return {"next_message": done_msg, "done": True, "question_idx": next_idx}
 
-        # Met à jour l'index et les réponses
+        # Met a jour l'index et les reponses
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
@@ -204,7 +203,7 @@ def record_answer_and_get_next(username: str, tenant_id: str, answer: str) -> di
 
 
 def _flat_to_bloc_answers(flat: dict) -> dict:
-    """Convertit {q0: r0, q1: r1, ...} vers le format {bloc_id: {question: réponse}}."""
+    """Convertit {q0: r0, q1: r1, ...} vers le format {bloc_id: {question: reponse}}."""
     result = {}
     for i, (bloc_id, _, question) in enumerate(ALL_QUESTIONS):
         answer = flat.get(f"q{i}", "")
@@ -254,13 +253,17 @@ def restart_onboarding(username: str, tenant_id: str) -> bool:
 
 def complete_onboarding(username: str, tenant_id: str, answers: dict) -> dict:
     """
-    Appel Opus pour générer règles + insights + profil.
-    answers = {"1": {question: réponse, ...}, "2": {...}, ...}
+    Appel Opus pour generer regles + insights + profil.
+    answers = {"1": {question: reponse, ...}, "2": {...}, ...}
     """
     try:
         answers_text = ""
-        bloc_titres = {"1": "Contexte professionnel", "2": "Outils et habitudes",
-                       "3": "Préférences de communication", "4": "Contexte métier"}
+        bloc_titres = {
+            "1": "Contexte professionnel",
+            "2": "Outils et habitudes",
+            "3": "Preferences de communication",
+            "4": "Contexte metier",
+        }
         for bid, titre in bloc_titres.items():
             bloc_answers = answers.get(bid, {})
             if bloc_answers:
@@ -269,24 +272,24 @@ def complete_onboarding(username: str, tenant_id: str, answers: dict) -> dict:
                     if a and str(a).strip():
                         answers_text += f"  Q: {q}\n  R: {a}\n"
 
-        prompt = f"""Tu es Raya. L'utilisateur {username} vient de compléter son onboarding conversationnel.
-Voici ses réponses :
-{answers_text}
-
-Génère en JSON strict (sans backticks) :
-{{"profile_summary": "~100 mots, qui est cet utilisateur, comment travailler avec lui",
-  "rules": [{{"category": "comportement", "rule": "règle concrète"}}, ...],
-  "insights": [{{"topic": "sujet", "text": "observation"}}, ...]}}
-
-Règles : 5-10 règles sur style, priorités, outils, métier.
-Insights : 3-5 observations clés.
-Profile : factuel, pas de flatterie."""
+        prompt = (
+            f"Tu es Raya. L'utilisateur {username} vient de completer son onboarding conversationnel.\n"
+            f"Voici ses reponses :\n{answers_text}\n\n"
+            "Genere en JSON strict (sans backticks) :\n"
+            "{\"profile_summary\": \"~100 mots, qui est cet utilisateur, comment travailler avec lui\","
+            "\"rules\": [{\"category\": \"comportement\", \"rule\": \"regle concrete\"}, ...],"
+            "\"insights\": [{\"topic\": \"sujet\", \"text\": \"observation\"}, ...]}\n\n"
+            "Regles : 5-10 regles sur style, priorites, outils, metier.\n"
+            "Insights : 3-5 observations cles.\n"
+            "Profile : factuel, pas de flatterie."
+        )
 
         from app.llm_client import llm_complete, log_llm_usage
         import re
         result = llm_complete(
             messages=[{"role": "user", "content": prompt}],
-            model_tier="deep", max_tokens=1500,
+            model_tier="deep",
+            max_tokens=1500,
         )
         log_llm_usage(result, username=username, tenant_id=tenant_id,
                       purpose="onboarding_completion")
@@ -300,13 +303,15 @@ Profile : factuel, pas de flatterie."""
 
     if parsed.get("profile_summary"):
         try:
-            conn = get_pg_conn(); c = conn.cursor()
+            conn = get_pg_conn()
+            c = conn.cursor()
             c.execute("""
                 INSERT INTO aria_hot_summary (username, content, updated_at)
                 VALUES (%s, %s, NOW())
                 ON CONFLICT (username) DO UPDATE SET content=EXCLUDED.content, updated_at=NOW()
             """, (username, parsed["profile_summary"]))
-            conn.commit(); conn.close()
+            conn.commit()
+            conn.close()
         except Exception as e:
             print(f"[Onboarding] hot_summary: {e}")
 
@@ -318,7 +323,8 @@ Profile : factuel, pas de flatterie."""
                 save_rule(item.get("category", "comportement"), item["rule"],
                           "onboarding", 0.8, username, tenant_id)
                 rules_created += 1
-        except Exception: pass
+        except Exception:
+            pass
 
     insights_created = 0
     from app.memory_synthesis import save_insight
@@ -328,20 +334,26 @@ Profile : factuel, pas de flatterie."""
                 save_insight(item.get("topic", "profil"), item["text"],
                              "onboarding", username=username, tenant_id=tenant_id)
                 insights_created += 1
-        except Exception: pass
+        except Exception:
+            pass
 
     try:
-        conn = get_pg_conn(); c = conn.cursor()
+        conn = get_pg_conn()
+        c = conn.cursor()
         c.execute("""
             UPDATE aria_onboarding
             SET status='completed', answers_json=%s, completed_at=NOW(), updated_at=NOW()
             WHERE username=%s
         """, (json.dumps(answers), username))
-        conn.commit(); conn.close()
+        conn.commit()
+        conn.close()
     except Exception as e:
         print(f"[Onboarding] sauvegarde finale: {e}")
 
-    print(f"[Onboarding] {username} completé : {rules_created} règles, {insights_created} insights")
-    return {"status": "completed", "rules_created": rules_created,
-            "insights_created": insights_created,
-            "profile_summary": parsed.get("profile_summary", "")}
+    print(f"[Onboarding] {username} complete : {rules_created} regles, {insights_created} insights")
+    return {
+        "status": "completed",
+        "rules_created": rules_created,
+        "insights_created": insights_created,
+        "profile_summary": parsed.get("profile_summary", ""),
+    }
