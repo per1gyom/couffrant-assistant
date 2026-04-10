@@ -1,6 +1,6 @@
 """
-Raya — Assistant IA personnel
-Point d'entrée principal. Setup, middleware, startup, routes.
+Raya
+Point d'entree principal.
 """
 import os
 import threading
@@ -30,9 +30,8 @@ from app.routes.reset_password import router as reset_router
 from app.routes.webhook import router as webhook_router
 from app.routes.forced_reset import router as forced_reset_router
 from app.routes.onboarding import router as onboarding_router
+from app.routes.elicitation import router as elicitation_router
 
-
-# ─── MIDDLEWARE HEADERS DE SÉCURITÉ ───
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -53,7 +52,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
-app = FastAPI(title="Raya — Assistant IA")
+app = FastAPI(title="Raya")
 
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=30 * 24 * 3600)
@@ -69,6 +68,7 @@ app.include_router(reset_router)
 app.include_router(webhook_router)
 app.include_router(forced_reset_router)
 app.include_router(onboarding_router)
+app.include_router(elicitation_router)
 
 
 @app.get("/")
@@ -83,11 +83,6 @@ def health():
 
 @app.get("/sw.js")
 def service_worker():
-    """
-    Sert le service worker depuis la racine pour qu'il puisse contrôler
-    toutes les pages du site (scope ‘/’).
-    Le SW dans /static/sw.js ne peut contrôler que /static/ sans ce header.
-    """
     return FileResponse(
         "app/static/sw.js",
         media_type="application/javascript",
@@ -105,31 +100,28 @@ def startup_event():
     except Exception as e:
         print(f"[Raya] Erreur init_default_user: {e}")
 
-    # Seeding du tenant principal
     try:
         from app.seeding import seed_tenant, is_tenant_seeded
         admin_username = os.getenv("APP_USERNAME", "guillaume").strip()
         if not is_tenant_seeded(admin_username):
-            print(f"[Raya] Seeding initial pour {admin_username} (profil pv_french)")
+            print(f"[Raya] Seeding initial pour {admin_username}")
             counts = seed_tenant("couffrant_solar", admin_username, profile="pv_french")
-            print(f"[Raya] Seeding terminé : {counts}")
+            print(f"[Raya] Seeding termine : {counts}")
         else:
-            print(f"[Raya] {admin_username} déjà seedé, skip")
+            print(f"[Raya] {admin_username} deja seede, skip")
     except Exception as e:
         print(f"[Raya] Erreur seeding: {e}")
 
-    # Registre d'outils (Phase 3c)
     try:
         from app.tools_registry import seed_tools_registry
         seed_tools_registry()
     except Exception as e:
         print(f"[ToolsRegistry] Erreur seed: {e}")
 
-    # Scheduler de jobs périodiques (Phase 4)
     try:
         job_scheduler.start()
     except Exception as e:
-        print(f"[Scheduler] Erreur démarrage: {e}")
+        print(f"[Scheduler] Erreur demarrage: {e}")
 
     def setup_webhooks():
         time.sleep(30)
@@ -161,7 +153,7 @@ def startup_event():
                     try:
                         token = get_valid_microsoft_token(username)
                         if not token:
-                            print(f"[Token] ECHEC refresh {username} — alerte envoyée")
+                            print(f"[Token] ECHEC refresh {username}")
                             try:
                                 from app.connectors.microsoft_webhook import _send_revoked_alert
                                 _send_revoked_alert(username)
@@ -172,7 +164,7 @@ def startup_event():
                     except Exception as e:
                         print(f"[Token] Erreur {username}: {e}")
             except Exception as e:
-                print(f"[Token] Erreur générale: {e}")
+                print(f"[Token] Erreur generale: {e}")
             time.sleep(45 * 60)
 
     threading.Thread(target=token_refresh_loop, daemon=True).start()
@@ -180,8 +172,7 @@ def startup_event():
 
 @app.on_event("shutdown")
 def shutdown_event():
-    """Arrêt propre du scheduler avant que le processus se termine."""
     try:
         job_scheduler.stop()
     except Exception as e:
-        print(f"[Scheduler] Erreur arrêt: {e}")
+        print(f"[Scheduler] Erreur arret: {e}")
