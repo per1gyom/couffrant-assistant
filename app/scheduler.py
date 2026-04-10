@@ -4,17 +4,25 @@ Scheduler de jobs périodiques Raya — Phase 4.
 Utilise APScheduler (BackgroundScheduler) pour exécuter des tâches
 de maintenance sans bloquer le serveur FastAPI.
 
-Jobs enregistrés :
-  expire_pending     : toutes les heures          — expire les pending_actions trop vieilles
-  confidence_decay   : hebdomadaire lundi 02h00   — décroissance de confiance des règles inactives (B6)
-  opus_audit         : hebdomadaire dimanche 03h00 — audit de cohérence des règles par Opus (B5)
+Variables d'environnement pour désactiver un job individuellement
+(filet de sécurité — couper un job sans toucher au code) :
+  SCHEDULER_EXPIRE_ENABLED=false  → désactive expire_pending
+  SCHEDULER_DECAY_ENABLED=false   → désactive confidence_decay
+  SCHEDULER_AUDIT_ENABLED=false   → désactive opus_audit
 
-[à venir — commit séparé]
-  proactivity_scan   : toutes les 30 min          — alertes et rappels intelligents (B10)
+Valeur par défaut : true (tous les jobs actifs).
+Exemple Railway : ajouter SCHEDULER_AUDIT_ENABLED=false pour couper l'audit
+sans redéploiement.
 
-Démarrage : scheduler.start() dans main.py au startup FastAPI.
-Arrêt     : scheduler.stop()  dans main.py au shutdown FastAPI.
+Jobs :
+  expire_pending   : toutes les heures          — expire les pending_actions trop vieilles
+  confidence_decay : hebdomadaire lundi 02h00   — décroissance de confiance (B6)
+  opus_audit       : hebdomadaire dimanche 03h00 — audit de cohérence Opus (B5)
+
+[à venir]
+  proactivity_scan : toutes les 30 min          — alertes et rappels intelligents (B10)
 """
+import os
 import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -25,10 +33,13 @@ logger = logging.getLogger(__name__)
 _scheduler: BackgroundScheduler | None = None
 
 CONFIDENCE_MASK_THRESHOLD = 0.3
-CONFIDENCE_DECAY_STEP = 0.05
+CONFIDENCE_DECAY_STEP     = 0.05
+AUDIT_MIN_RULES           = 5
 
-# Nombre minimum de règles non-seed pour déclencher l'audit Opus
-AUDIT_MIN_RULES = 5
+
+def _job_enabled(env_var: str) -> bool:
+    """Retourne True si le job est activé (défaut : True)."""
+    return os.getenv(env_var, "true").lower() not in ("false", "0", "no", "off")
 
 
 def get_scheduler() -> BackgroundScheduler:
@@ -46,7 +57,7 @@ def get_scheduler() -> BackgroundScheduler:
 
 
 def start():
-    """Démarre le scheduler et enregistre tous les jobs. Idémpotent."""
+    """Démarre le scheduler et enregistre les jobs actifs. Idémpotent."""
     scheduler = get_scheduler()
     if scheduler.running:
         return
@@ -67,36 +78,46 @@ def stop():
 
 
 def _register_jobs(scheduler: BackgroundScheduler):
-    """Enregistre tous les jobs périodiques (replace_existing=True → idémpotent)."""
+    """
+    Enregistre les jobs activés (contrôlés par variables d'environnement).
+    Un job désactivé n'est simplement pas enregistré — pas d'erreur, pas de bruit.
+    """
 
-    # ─ Job 1 : expiration des pending_actions (toutes les heures) ─
-    scheduler.add_job(
-        func=_job_expire_pending,
-        trigger=IntervalTrigger(hours=1),
-        id="expire_pending",
-        name="Expiration des actions en attente",
-        replace_existing=True,
-    )
+    if _job_enabled("SCHEDULER_EXPIRE_ENABLED"):
+        scheduler.add_job(
+            func=_job_expire_pending,
+            trigger=IntervalTrigger(hours=1),
+            id="expire_pending",
+            name="Expiration des actions en attente",
+            replace_existing=True,
+        )
+        print("[Scheduler] Job enregistré : expire_pending (toutes les heures)")
+    else:
+        print("[Scheduler] Job DÉSACTIVÉ : expire_pending (SCHEDULER_EXPIRE_ENABLED=false)")
 
-    # ─ Job 2 : décroissance de confiance (lundi 02h00) ─
-    scheduler.add_job(
-        func=_job_confidence_decay,
-        trigger=CronTrigger(day_of_week="mon", hour=2, minute=0),
-        id="confidence_decay",
-        name="Décroissance de confiance des règles inactives",
-        replace_existing=True,
-    )
+    if _job_enabled("SCHEDULER_DECAY_ENABLED"):
+        scheduler.add_job(
+            func=_job_confidence_decay,
+            trigger=CronTrigger(day_of_week="mon", hour=2, minute=0),
+            id="confidence_decay",
+            name="Décroissance de confiance des règles inactives",
+            replace_existing=True,
+        )
+        print("[Scheduler] Job enregistré : confidence_decay (lundi 02h00)")
+    else:
+        print("[Scheduler] Job DÉSACTIVÉ : confidence_decay (SCHEDULER_DECAY_ENABLED=false)")
 
-    # ─ Job 3 : audit de cohérence Opus (dimanche 03h00) ─
-    scheduler.add_job(
-        func=_job_opus_audit,
-        trigger=CronTrigger(day_of_week="sun", hour=3, minute=0),
-        id="opus_audit",
-        name="Audit de cohérence des règles par Opus",
-        replace_existing=True,
-    )
-
-    # [Commit suivant] proactivity_scan — IntervalTrigger(minutes=30)
+    if _job_enabled("SCHEDULER_AUDIT_ENABLED"):
+        scheduler.add_job(
+            func=_job_opus_audit,
+            trigger=CronTrigger(day_of_week="sun", hour=3, minute=0),
+            id="opus_audit",
+            name="Audit de cohérence des règles par Opus",
+            replace_existing=True,
+        )
+        print("[Scheduler] Job enregistré : opus_audit (dimanche 03h00)")
+    else:
+        print("[Scheduler] Job DÉSACTIVÉ : opus_audit (SCHEDULER_AUDIT_ENABLED=false)")
 
 
 # ─── FONCTIONS JOB ───
@@ -159,13 +180,7 @@ def _job_confidence_decay():
 def _job_opus_audit():
     """
     Audit de cohérence des règles par Opus — hebdomadaire (B5).
-
-    Pour chaque tenant/utilisateur ayant au moins AUDIT_MIN_RULES règles non-seed :
-      1. Charge les règles actives
-      2. Appel Opus (model_tier="deep") → identifie contradictions, redondances, obsolètes
-      3. Stocke les suggestions dans aria_rule_audit (lecture seule — pas d'actions automatiques)
-
-    L'utilisateur peut consulter les suggestions via /admin/audit (à implémenter).
+    Résultats stockés dans aria_rule_audit (suggestions, pas actions auto).
     """
     try:
         _ensure_audit_table()
@@ -174,7 +189,6 @@ def _job_opus_audit():
         conn = get_pg_conn()
         c = conn.cursor()
 
-        # Tenants/users avec assez de règles non-seed pour un audit utile
         c.execute("""
             SELECT tenant_id, username, COUNT(*) as nb
             FROM aria_rules
@@ -209,14 +223,12 @@ def _audit_one(tenant_id: str, username: str, nb_rules: int):
     from app.database import get_pg_conn
     from app.llm_client import llm_complete, log_llm_usage
 
-    # Charge les règles
     conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
         SELECT id, category, rule, confidence, reinforcements, source
         FROM aria_rules
-        WHERE active = true
-          AND tenant_id = %s AND username = %s
+        WHERE active = true AND tenant_id = %s AND username = %s
         ORDER BY confidence DESC, reinforcements DESC
         LIMIT 80
     """, (tenant_id, username))
@@ -237,10 +249,10 @@ Voici les {len(rows)} règles actives de {username} :
 
 {rules_text}
 
-Identifie dans ce jeu de règles :
-1. Les CONTRADICTIONS : deux règles qui se contredisent
-2. Les REDONDANCES : règles qui disent la même chose différemment
-3. Les OBSOLÈTES : règles probablement dépassées ou trop spécifiques
+Identifie :
+1. CONTRADICTIONS : deux règles qui se contredisent
+2. REDONDANCES : règles qui disent la même chose différemment
+3. OBSOLÈTES : règles probablement dépassées
 
 Réponds en JSON strict (sans backticks) :
 {{
@@ -251,8 +263,8 @@ Réponds en JSON strict (sans backticks) :
   "resume": "résumé en 1-2 phrases"
 }}
 
-Si aucun problème : retourne des listes vides et score_coherence proche de 1.0.
-Ne suggère aucune action automatique. Ces résultats sont lus par l'utilisateur."""
+Si aucun problème : listes vides et score_coherence proche de 1.0.
+Ne suggère aucune action automatique."""
 
     result = llm_complete(
         messages=[{"role": "user", "content": prompt}],
@@ -265,7 +277,6 @@ Ne suggère aucune action automatique. Ces résultats sont lus par l'utilisateur
     raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
     parsed = json.loads(raw)
 
-    # Stocke dans aria_rule_audit
     conn = get_pg_conn()
     c = conn.cursor()
     c.execute("""
@@ -275,7 +286,7 @@ Ne suggère aucune action automatique. Ces résultats sont lus par l'utilisateur
     """, (
         tenant_id, username, len(rows),
         json.dumps(parsed, ensure_ascii=False),
-        parsed.get("score_coherence", None),
+        parsed.get("score_coherence"),
         parsed.get("resume", ""),
     ))
     conn.commit()
@@ -286,8 +297,8 @@ Ne suggère aucune action automatique. Ces résultats sont lus par l'utilisateur
         len(parsed.get("redondances", [])) +
         len(parsed.get("obsoletes", []))
     )
-    print(f"[Scheduler] opus_audit {username} : {nb_rules} règles, {nb_issues} problème(s), "
-          f"score={parsed.get('score_coherence', '?')}")
+    print(f"[Scheduler] opus_audit {username} : {nb_rules} règles, "
+          f"{nb_issues} problème(s), score={parsed.get('score_coherence', '?')}")
 
 
 def _ensure_audit_table():
