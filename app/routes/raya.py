@@ -6,6 +6,7 @@ sont exécutés en parallèle via ThreadPoolExecutor pour réduire
 la latence de 300–400ms par conversation.
 
 Auth : require_user via Depends — lève 401 si non authentifié.
+LLM  : llm_complete() via couche d'abstraction (app/llm_client.py)
 """
 import os
 import re
@@ -20,8 +21,7 @@ from fastapi import APIRouter, Request, Body, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from app.config import ANTHROPIC_MODEL_SMART
-from app.ai_client import client
+from app.llm_client import llm_complete, log_llm_usage
 from app.database import get_pg_conn
 from app.token_manager import get_valid_microsoft_token
 from app.memory_loader import MEMORY_OK, synthesize_session
@@ -150,17 +150,24 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         pending_actions=pending_list,
     )
 
-    # 5. Historique + appel Claude
+    # 5. Historique + appel LLM via couche d'abstraction
     messages = []
     for h in db_ctx["history"]:
-        messages.append({"role": "user", "content": h["user_input"]})
+        messages.append({"role": "user",      "content": h["user_input"]})
         messages.append({"role": "assistant", "content": h["aria_response"]})
     messages.append({"role": "user", "content": user_content_parts})
 
-    response = client.messages.create(
-        model=ANTHROPIC_MODEL_SMART, max_tokens=2048, system=system, messages=messages,
+    result = llm_complete(
+        messages=messages,
+        model_tier="smart",
+        max_tokens=2048,
+        system=system,
     )
-    raya_response = response.content[0].text
+    raya_response = result["text"]
+
+    # Logging des coûts LLM (non-bloquant)
+    log_llm_usage(result, username=username, tenant_id=tenant_id,
+                  purpose="raya_main_conversation")
 
     # 6. Exécution des actions (queue pour les sensibles)
     actions_confirmed = execute_actions(
