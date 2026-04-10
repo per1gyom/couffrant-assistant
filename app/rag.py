@@ -1,1 +1,133 @@
-"""\nRAG (Retrieval-Augmented Generation) pour Raya — Phase 3a.\n\nCe module remplace l'injection en bloc de toutes les règles dans le prompt\npar une recherche de similarité sémantique : on injecte uniquement les N\nrègles/insights/mails les plus pertinents pour la question posée.\n\nBénéfices :\n  - Prompt plus court → moins de tokens, moins cher\n  - Contexte plus ciblé → meilleures réponses\n  - Scalable : des centaines de règles sans surcoût\n\nDégradation gracieuse :\n  Si OPENAI_API_KEY est absent ou si l'embedding échoue, les fonctions\n  retournent le résultat de la recherche textuelle classique (injection en bloc).\n  L'expérience utilisateur ne change pas, seule la qualité du ciblage est moindre.\n\nUsage depuis aria_context.py :\n    from app.rag import retrieve_context\n    ctx = retrieve_context(query, username, tenant_id, db_ctx)\n    # ctx contient rules_text, insights_text, mails_text\n"""\nfrom app.embedding import search_similar, is_available\nfrom app.database import get_pg_conn\n\n# Nombre de résultats RAG par source\nRAG_RULES_LIMIT    = 10   # règles les plus pertinentes\nRAG_INSIGHTS_LIMIT = 6    # insights les plus pertinents\nRAG_MAILS_LIMIT    = 5    # mails les plus pertinents\nRAG_CONV_LIMIT     = 4    # conversations passées les plus pertinentes\n\n\ndef retrieve_rules(query: str, username: str, tenant_id: str = None,\n                   limit: int = RAG_RULES_LIMIT) -> str:\n    """\n    Retourne les règles les plus pertinentes pour la question posée.\n    Fallback : injection en bloc si embedding non disponible.\n    """\n    if not is_available():\n        # Fallback : injection en bloc (comportement Phase 0-2)\n        from app.memory_rules import get_aria_rules\n        return get_aria_rules(username, tenant_id=tenant_id)\n\n    rows = search_similar(\n        table="aria_rules",\n        username=username,\n        query_text=query,\n        limit=limit,\n        tenant_id=tenant_id,\n        extra_filter="active = true AND category != 'memoire'",\n    )\n    if not rows:\n        # Pas de vecteurs en base (avant le premier seeding vectorisé)\n        from app.memory_rules import get_aria_rules\n        return get_aria_rules(username, tenant_id=tenant_id)\n\n    lines = [f"[id:{r['id']}][{r['category']}] {r['rule']}" for r in rows]\n    return "\n".join(lines)\n\n\ndef retrieve_insights(query: str, username: str, tenant_id: str = None,\n                      limit: int = RAG_INSIGHTS_LIMIT) -> str:\n    """\n    Retourne les insights les plus pertinents pour la question posée.\n    Fallback : top N par reinforcements (comportement actuel).\n    """\n    if not is_available():\n        from app.memory_synthesis import get_aria_insights\n        return get_aria_insights(limit=8, username=username, tenant_id=tenant_id)\n\n    rows = search_similar(\n        table="aria_insights",\n        username=username,\n        query_text=query,\n        limit=limit,\n        tenant_id=tenant_id,\n    )\n    if not rows:\n        from app.memory_synthesis import get_aria_insights\n        return get_aria_insights(limit=8, username=username, tenant_id=tenant_id)\n\n    lines = [f"[{r['topic']}] {r['insight']}" for r in rows]\n    return "\n".join(lines)\n\n\ndef retrieve_relevant_mails(query: str, username: str, tenant_id: str = None,\n                             limit: int = RAG_MAILS_LIMIT) -> list:\n    """\n    Retourne les mails les plus sémantiquement proches de la question.\n    Fallback : liste vide (les mails live et db_ctx sont déjà dans le prompt).\n    """\n    if not is_available():\n        return []\n\n    rows = search_similar(\n        table="mail_memory",\n        username=username,\n        query_text=query,\n        limit=limit,\n        tenant_id=tenant_id,\n    )\n    return rows  # liste de dicts bruts\n\n\ndef retrieve_relevant_conversations(query: str, username: str,\n                                     tenant_id: str = None,\n                                     limit: int = RAG_CONV_LIMIT) -> str:\n    """\n    Retourne les échanges passés les plus pertinents pour la question.\n    Fallback : chaîne vide.\n    """\n    if not is_available():\n        return \"\"\n\n    rows = search_similar(\n        table="aria_memory",\n        username=username,\n        query_text=query,\n        limit=limit,\n        tenant_id=tenant_id,\n    )\n    if not rows:\n        return \"\"\n\n    lines = [\n        f"Q: {r.get('user_input', '')[:150]}\\nR: {r.get('aria_response', '')[:200]}"\n        for r in rows\n    ]\n    return \"\\n---\\n\".join(lines)\n\n\ndef retrieve_context(\n    query: str,\n    username: str,\n    tenant_id: str = None,\n) -> dict:\n    """\n    Point d'entrée principal : récupère tout le contexte RAG pour une question.\n\n    Retourne un dict avec :\n        rules_text     : str — règles pertinentes (formatées pour le prompt)\n        insights_text  : str — insights pertinents (formatées pour le prompt)\n        conv_text      : str — conversations passées pertinentes\n        relevant_mails : list — mails pertinents (bruts, pour enrichissement optionnel)\n        via_rag        : bool — True si embedding disponible, False si fallback\n    """\n    via_rag = is_available()\n\n    rules_text    = retrieve_rules(query, username, tenant_id)\n    insights_text = retrieve_insights(query, username, tenant_id)\n    conv_text     = retrieve_relevant_conversations(query, username, tenant_id)\n    relevant_mails = retrieve_relevant_mails(query, username, tenant_id)\n\n    return {\n        \"rules_text\":     rules_text,\n        \"insights_text\":  insights_text,\n        \"conv_text\":      conv_text,\n        \"relevant_mails\": relevant_mails,\n        \"via_rag\":        via_rag,\n    }\n
+"""
+RAG (Retrieval-Augmented Generation) pour Raya — Phase 3a.
+
+Phase 3b : retrieve_rules retourne maintenant {text, ids} pour que
+raya.py puisse stocker les rule_ids dans aria_response_metadata
+et les utiliser pour le feedback 👍👎.
+"""
+from app.embedding import search_similar, is_available
+from app.database import get_pg_conn
+
+RAG_RULES_LIMIT    = 10
+RAG_INSIGHTS_LIMIT = 6
+RAG_MAILS_LIMIT    = 5
+RAG_CONV_LIMIT     = 4
+
+
+def retrieve_rules(query: str, username: str, tenant_id: str = None,
+                   limit: int = RAG_RULES_LIMIT) -> dict:
+    """
+    Retourne {text: str, ids: list[int]} — règles les plus pertinentes.
+    Fallback (pas d'embedding) : text = injection en bloc, ids = [].
+    """
+    if not is_available():
+        from app.memory_rules import get_aria_rules
+        return {"text": get_aria_rules(username, tenant_id=tenant_id), "ids": []}
+
+    rows = search_similar(
+        table="aria_rules",
+        username=username,
+        query_text=query,
+        limit=limit,
+        tenant_id=tenant_id,
+        extra_filter="active = true AND category != 'memoire'",
+    )
+    if not rows:
+        from app.memory_rules import get_aria_rules
+        return {"text": get_aria_rules(username, tenant_id=tenant_id), "ids": []}
+
+    lines = [f"[id:{r['id']}][{r['category']}] {r['rule']}" for r in rows]
+    return {
+        "text": "\n".join(lines),
+        "ids":  [r["id"] for r in rows],
+    }
+
+
+def retrieve_insights(query: str, username: str, tenant_id: str = None,
+                      limit: int = RAG_INSIGHTS_LIMIT) -> str:
+    """Retourne les insights les plus pertinents. Fallback : top N par reinforcements."""
+    if not is_available():
+        from app.memory_synthesis import get_aria_insights
+        return get_aria_insights(limit=8, username=username, tenant_id=tenant_id)
+
+    rows = search_similar(
+        table="aria_insights",
+        username=username,
+        query_text=query,
+        limit=limit,
+        tenant_id=tenant_id,
+    )
+    if not rows:
+        from app.memory_synthesis import get_aria_insights
+        return get_aria_insights(limit=8, username=username, tenant_id=tenant_id)
+
+    return "\n".join([f"[{r['topic']}] {r['insight']}" for r in rows])
+
+
+def retrieve_relevant_mails(query: str, username: str, tenant_id: str = None,
+                             limit: int = RAG_MAILS_LIMIT) -> list:
+    """Retourne les mails sémantiquement proches. Fallback : liste vide."""
+    if not is_available():
+        return []
+    return search_similar(
+        table="mail_memory",
+        username=username,
+        query_text=query,
+        limit=limit,
+        tenant_id=tenant_id,
+    )
+
+
+def retrieve_relevant_conversations(query: str, username: str,
+                                     tenant_id: str = None,
+                                     limit: int = RAG_CONV_LIMIT) -> str:
+    """Retourne les échanges passés pertinents. Fallback : chaîne vide."""
+    if not is_available():
+        return ""
+    rows = search_similar(
+        table="aria_memory",
+        username=username,
+        query_text=query,
+        limit=limit,
+        tenant_id=tenant_id,
+    )
+    if not rows:
+        return ""
+    lines = [
+        f"Q: {r.get('user_input', '')[:150]}\nR: {r.get('aria_response', '')[:200]}"
+        for r in rows
+    ]
+    return "\n---\n".join(lines)
+
+
+def retrieve_context(
+    query: str,
+    username: str,
+    tenant_id: str = None,
+) -> dict:
+    """
+    Point d'entrée principal.
+
+    Retourne :
+        rules_text     : str  — règles pertinentes pour le prompt
+        rule_ids       : list — IDs des règles injectées (pour feedback)
+        insights_text  : str  — insights pertinents
+        conv_text      : str  — conversations passées pertinentes
+        relevant_mails : list — mails pertinents (bruts)
+        via_rag        : bool — True si embedding actif
+    """
+    via_rag = is_available()
+
+    rules_result   = retrieve_rules(query, username, tenant_id)
+    insights_text  = retrieve_insights(query, username, tenant_id)
+    conv_text      = retrieve_relevant_conversations(query, username, tenant_id)
+    relevant_mails = retrieve_relevant_mails(query, username, tenant_id)
+
+    return {
+        "rules_text":     rules_result["text"],
+        "rule_ids":       rules_result["ids"],
+        "insights_text":  insights_text,
+        "conv_text":      conv_text,
+        "relevant_mails": relevant_mails,
+        "via_rag":        via_rag,
+    }
