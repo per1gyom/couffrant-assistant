@@ -61,13 +61,6 @@ def _get_mail_filter_rules(username: str) -> tuple:
     """
     Charge les règles mail_filter que Raya a posées.
     Retourne (whitelist, blacklist).
-
-    Formats supportés :
-      autoriser: email@domaine.fr       → email exact
-      autoriser: @couffrant-solar.fr    → domaine entier
-      autoriser: sujet:devis chantier   → mot-clé dans le sujet
-      bloquer:   promo@fournisseur.fr   → bloquer cet expéditeur
-      bloquer:   sujet:pub              → bloquer ce mot-clé sujet
     """
     try:
         from app.memory_rules import get_rules_by_category
@@ -90,16 +83,13 @@ def _matches_filter(sender: str, subject: str, patterns: list) -> bool:
     subject_l = (subject or "").lower()
     for pattern in patterns:
         if pattern.startswith('@'):
-            # Domaine entier : @couffrant-solar.fr
             if sender_l.endswith(pattern):
                 return True
         elif pattern.startswith('sujet:'):
-            # Mot-clé dans le sujet
             kw = pattern[6:].strip()
             if kw and kw in subject_l:
                 return True
         else:
-            # Email exact ou fragment
             if pattern in sender_l:
                 return True
     return False
@@ -141,7 +131,8 @@ def _is_spam_by_rules(sender: str, subject: str, preview: str, username: str) ->
 # ─── WEBHOOK ENDPOINTS ───
 
 @router.get("/webhook/microsoft")
-async def webhook_validation(validationToken: str = ""):
+async def webhook_validation_get(validationToken: str = ""):
+    """Validation GET — Microsoft Graph envoie un GET lors du test de connectivité."""
     if validationToken:
         return Response(content=validationToken, media_type="text/plain", status_code=200)
     return Response(status_code=200)
@@ -149,6 +140,25 @@ async def webhook_validation(validationToken: str = ""):
 
 @router.post("/webhook/microsoft")
 async def webhook_notification(request: Request):
+    """
+    Endpoint principal.
+
+    Microsoft Graph envoie DEUX types de requêtes POST à cette URL :
+    1. Validation initiale : POST avec ?validationToken=xxx et body vide.
+       → Doit retourner 200 OK avec le token exact en text/plain.
+    2. Notifications réelles : POST avec body JSON contenant les changements.
+       → Doit retourner 202 Accepted.
+
+    Le bug précédent : on essayait de parser le JSON d'abord, ce qui échouait
+    sur la validation (body vide), et on retournait 202 au lieu de 200 + token.
+    Microsoft refusait alors de créer la subscription (ValidationError 400).
+    """
+    # ── Validation Microsoft Graph (priorité absolue) ──
+    validation_token = request.query_params.get("validationToken")
+    if validation_token:
+        return Response(content=validation_token, media_type="text/plain", status_code=200)
+
+    # ── Notifications normales ──
     try:
         body = await request.json()
     except Exception:
@@ -198,7 +208,8 @@ def _process_mail(username: str, message_id: str):
         from app.token_manager import get_valid_microsoft_token
         from app.graph_client import graph_get
         from app.mail_memory_store import mail_exists, insert_mail
-        from app.ai_client import analyze_single_mail_with_ai, client as ai_client
+        from app.ai_client import analyze_single_mail_with_ai
+        from app.llm_client import llm_complete
         from app.feedback_store import get_global_instructions
         from app.app_security import get_tenant_id
         from app.config import ANTHROPIC_MODEL_FAST
@@ -224,7 +235,7 @@ def _process_mail(username: str, message_id: str):
         # Charge les règles mail_filter de Raya
         whitelist, blacklist = _get_mail_filter_rules(username)
 
-        # 1a — Whitelist : Raya a explicitement autorisé cet expéditeur/sujet
+        # 1a — Whitelist
         whitelisted = _matches_filter(sender, subject, whitelist)
         if whitelisted:
             print(f"[Webhook][L1a-whitelist] Autorisé : '{subject[:50]}' de {sender}")
@@ -234,7 +245,7 @@ def _process_mail(username: str, message_id: str):
             print(f"[Webhook][L1b-heuristique] Ignoré : '{subject[:50]}' de {sender}")
             return
 
-        # 1c — Blacklist Raya (appliquée même si pas dans l'heuristique)
+        # 1c — Blacklist Raya
         if _matches_filter(sender, subject, blacklist):
             print(f"[Webhook][L1c-blacklist] Bloqué : '{subject[:50]}' de {sender}")
             return
@@ -244,24 +255,24 @@ def _process_mail(username: str, message_id: str):
             print(f"[Webhook][L2-règles] Ignoré : '{subject[:50]}' de {sender}")
             return
 
-        # 3 — Claude OUI/NON
+        # 3 — LLM OUI/NON (via couche d'abstraction)
         try:
-            response = ai_client.messages.create(
-                model=ANTHROPIC_MODEL_FAST,
-                max_tokens=5,
+            result = llm_complete(
                 messages=[{"role": "user", "content": (
                     f"Mail reçu :\nDe : {sender}\nSujet : {subject}\n"
                     f"Aperçu : {preview[:400]}\n\n"
                     f"Ce mail mérite-t-il d'être gardé en mémoire ? "
                     f"Réponds uniquement : OUI ou NON."
-                )}]
+                )}],
+                model_tier="fast",
+                max_tokens=5,
             )
-            should_store = "OUI" in response.content[0].text.strip().upper()
+            should_store = "OUI" in result["text"].strip().upper()
         except Exception:
             should_store = True
 
         if not should_store:
-            print(f"[Webhook][L3-Claude] Ignoré : '{subject[:50]}' de {sender}")
+            print(f"[Webhook][L3-LLM] Ignoré : '{subject[:50]}' de {sender}")
             return
 
         # 4 — Analyse complète
