@@ -1,9 +1,9 @@
 """
-RAG (Retrieval-Augmented Generation) pour Raya — Phase 3a.
+RAG (Retrieval-Augmented Generation) pour Raya — Phase 3a + 3b.
 
-Phase 3b : retrieve_rules retourne maintenant {text, ids} pour que
-raya.py puisse stocker les rule_ids dans aria_response_metadata
-et les utiliser pour le feedback 👍👎.
+Phase 3a : injection par similarité sémantique au lieu d'injection en bloc.
+Phase 3b : retrieve_rules retourne {text, ids} pour traçabilité feedback.
+           retrieve_theme_context enrichit le contexte si session thématique détectée (B8).
 """
 from app.embedding import search_similar, is_available
 from app.database import get_pg_conn
@@ -12,6 +12,11 @@ RAG_RULES_LIMIT    = 10
 RAG_INSIGHTS_LIMIT = 6
 RAG_MAILS_LIMIT    = 5
 RAG_CONV_LIMIT     = 4
+
+# Limites pour l'enrichissement thématique (en plus des résultats principaux)
+RAG_THEME_RULES_EXTRA    = 5
+RAG_THEME_INSIGHTS_EXTRA = 3
+RAG_THEME_MAILS_EXTRA    = 3
 
 
 def retrieve_rules(query: str, username: str, tenant_id: str = None,
@@ -98,6 +103,70 @@ def retrieve_relevant_conversations(query: str, username: str,
         for r in rows
     ]
     return "\n---\n".join(lines)
+
+
+def retrieve_theme_context(
+    theme: str,
+    username: str,
+    tenant_id: str = None,
+) -> dict:
+    """
+    Enrichit le contexte RAG avec tout ce qui concerne le thème de session détecté (B8).
+
+    Appelé par build_system_prompt quand detect_session_theme() a identifié
+    un sujet cohérent. Retourne des règles/insights/mails SUPPLÉMENTAIRES
+    (ceux qui correspondent au thème mais n'ont pas été remontés par la
+    recherche sur la question courante seule).
+
+    Retourne :
+        extra_rules    : str  — règles supplémentaires liées au thème
+        extra_insights : str  — insights supplémentaires liés au thème
+        extra_mails    : list — mails supplémentaires liés au thème (bruts)
+    """
+    if not is_available() or not theme:
+        return {"extra_rules": "", "extra_insights": "", "extra_mails": []}
+
+    # Règles supplémentaires liées au thème
+    extra_rules_rows = search_similar(
+        table="aria_rules",
+        username=username,
+        query_text=theme,
+        limit=RAG_THEME_RULES_EXTRA,
+        tenant_id=tenant_id,
+        extra_filter="active = true AND category != 'memoire'",
+    )
+    extra_rules = "\n".join([
+        f"[id:{r['id']}][{r['category']}] {r['rule']}"
+        for r in (extra_rules_rows or [])
+    ])
+
+    # Insights supplémentaires liés au thème
+    extra_insights_rows = search_similar(
+        table="aria_insights",
+        username=username,
+        query_text=theme,
+        limit=RAG_THEME_INSIGHTS_EXTRA,
+        tenant_id=tenant_id,
+    )
+    extra_insights = "\n".join([
+        f"[{r['topic']}] {r['insight']}"
+        for r in (extra_insights_rows or [])
+    ])
+
+    # Mails supplémentaires liés au thème
+    extra_mails = search_similar(
+        table="mail_memory",
+        username=username,
+        query_text=theme,
+        limit=RAG_THEME_MAILS_EXTRA,
+        tenant_id=tenant_id,
+    ) or []
+
+    return {
+        "extra_rules":    extra_rules,
+        "extra_insights": extra_insights,
+        "extra_mails":    extra_mails,
+    }
 
 
 def retrieve_context(

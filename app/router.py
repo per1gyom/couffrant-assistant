@@ -1,9 +1,10 @@
 """
-Module de routage Raya — Phase 3a.
+Module de routage Raya — Phase 3a + 3b.
 
 Centralise tous les micro-appels Haiku de classification :
-  - route_query_tier()  : SIMPLE → smart (Sonnet) / COMPLEXE → deep (Opus)
-  - route_mail_action() : IGNORER / STOCKER / ANALYSER (pour webhook)
+  - route_query_tier()      : SIMPLE → smart (Sonnet) / COMPLEXE → deep (Opus)
+  - route_mail_action()     : IGNORER / STOCKER / ANALYSER (pour webhook)
+  - detect_session_theme()  : détecte si les échanges portent sur un sujet cohérent (B8)
 
 Garde-fou économique :
   Le nombre d'appels Opus par user par jour est limité (configurable via
@@ -13,7 +14,6 @@ Garde-fou économique :
 Tous les futurs micro-appels de classification Haiku doivent passer par ce module.
 Pas de duplication d'appels Haiku ailleurs dans le code.
 """
-import os
 from app.llm_client import llm_complete
 
 # Prompt système partagé pour tous les routages — compact et déterministe
@@ -34,19 +34,9 @@ def route_query_tier(
 
     Heuristiques avant le micro-appel Haiku :
       - Question courte ou salutation  → smart directement (pas de Haiku)
-      - Fichier joint                  → deep (analyse document complexe)
-      - Quota Opus dépassé            → smart (garde-fou économique)
+      - Quota Opus dépassé             → smart (garde-fou économique)
 
     Sinon : micro-appel Haiku (max_tokens=3) retourne SIMPLE ou COMPLEXE.
-
-    Args:
-        query       : texte de la question
-        username    : utilisé pour le compteur quota
-        tenant_id   : utilisé pour le compteur quota
-        history_len : nombre d'échanges précédents (plus long → plus probablement complexe)
-
-    Returns:
-        'smart' ou 'deep'
     """
     query = (query or "").strip()
 
@@ -83,17 +73,63 @@ def route_query_tier(
         verdict = result["text"].strip().upper()
         return "deep" if "COMPLEXE" in verdict else "smart"
     except Exception:
-        # En cas d'échec du routage → Sonnet par défaut (sûr et rapide)
         return "smart"
+
+
+def detect_session_theme(history: list) -> str | None:
+    """
+    Détecte si les derniers échanges portent sur un sujet cohérent (B8).
+
+    Si oui → retourne le thème en 3-5 mots (ex: "chantier Dupont raccordement").
+    Sinon  → retourne None.
+
+    Le thème est ensuite utilisé par build_system_prompt pour enrichir le RAG
+    avec tout ce qui concerne ce sujet, pas seulement la dernière question.
+
+    Args:
+        history : liste de dicts {user_input, aria_response} (ordre chronologique)
+
+    Returns:
+        str  : sujet cohérent détecté (3-5 mots max)
+        None : échanges disparates ou trop peu d'échanges
+    """
+    # Pas assez d'échanges pour détecter un thème
+    if len(history) < 3:
+        return None
+
+    # Prend les 5 derniers échanges max pour le contexte
+    recent = history[-5:]
+    exchanges = "\n".join([
+        f"Q: {h.get('user_input', '')[:100]}\nR: {h.get('aria_response', '')[:60]}"
+        for h in recent
+    ])
+
+    try:
+        result = llm_complete(
+            messages=[{"role": "user", "content": (
+                f"Voici les derniers échanges :\n{exchanges}\n\n"
+                f"Ces échanges portent-ils TOUS sur un sujet cohérent et précis ?\n"
+                f"Si oui : nomme ce sujet en 3-5 mots maximum (ex: 'chantier Dupont raccordement').\n"
+                f"Si non (sujets variés ou conversation générale) : réponds AUCUN"
+            )}],
+            system=_ROUTER_SYSTEM,
+            model_tier="fast",
+            max_tokens=12,
+        )
+        verdict = result["text"].strip()
+        if not verdict or "AUCUN" in verdict.upper() or len(verdict) < 4:
+            return None
+        # Nettoie le résultat (supprime ponctuation parasite)
+        theme = verdict.strip('."\'')
+        return theme[:60] if len(theme) > 3 else None
+    except Exception:
+        return None
 
 
 def route_mail_action(sender: str, subject: str, preview: str) -> str:
     """
     Triage mail via Haiku : IGNORER / STOCKER_SIMPLE / ANALYSER.
-
-    Utilisé par webhook.py au niveau 3 du pipeline de filtrage.
-    Retourne une des trois valeurs ci-dessus.
-    (Réservé pour la Phase 3b — pas encore branché dans webhook.py)
+    Réservé pour la Phase 3b — pas encore branché dans webhook.py.
     """
     try:
         result = llm_complete(
@@ -116,17 +152,12 @@ def route_mail_action(sender: str, subject: str, preview: str) -> str:
             return "STOCKER_SIMPLE"
         return "ANALYSER"
     except Exception:
-        return "ANALYSER"  # fallback sûr
+        return "ANALYSER"
 
 
 # ─── GARDE-FOU ÉCONOMIQUE ───
 
 def _opus_daily_limit(username: str) -> int:
-    """
-    Lit la limite quotidienne d'appels Opus depuis les règles mémoire.
-    Clé : opus_daily_limit:N dans la catégorie 'memoire'.
-    Défaut : 20 appels/jour.
-    """
     try:
         from app.rule_engine import get_memoire_param
         return get_memoire_param(username, "opus_daily_limit", 20)
@@ -135,7 +166,6 @@ def _opus_daily_limit(username: str) -> int:
 
 
 def _opus_calls_today(username: str, tenant_id: str) -> int:
-    """Compte les appels Opus de la journée depuis llm_usage."""
     try:
         from app.database import get_pg_conn
         conn = get_pg_conn()
@@ -156,7 +186,6 @@ def _opus_calls_today(username: str, tenant_id: str) -> int:
 
 
 def _opus_quota_exceeded(username: str, tenant_id: str) -> bool:
-    """Retourne True si le quota journalier Opus est atteint."""
     limit = _opus_daily_limit(username)
     calls = _opus_calls_today(username, tenant_id)
     if calls >= limit:
@@ -166,10 +195,7 @@ def _opus_quota_exceeded(username: str, tenant_id: str) -> bool:
 
 
 def get_routing_stats(username: str, tenant_id: str) -> dict:
-    """
-    Retourne les stats de routage du jour pour le dashboard.
-    Utilisé par /admin/costs (Phase 3b).
-    """
+    """Stats de routage du jour pour /admin/costs (Phase 3b)."""
     try:
         from app.database import get_pg_conn
         conn = get_pg_conn()
@@ -187,7 +213,7 @@ def get_routing_stats(username: str, tenant_id: str) -> dict:
         rows = c.fetchall()
         conn.close()
         return {
-            "quota_limit": _opus_daily_limit(username),
+            "quota_limit":     _opus_daily_limit(username),
             "opus_calls_today": _opus_calls_today(username, tenant_id),
             "by_model": [{"model": r[0], "calls": r[1], "tokens": r[2]} for r in rows],
         }
