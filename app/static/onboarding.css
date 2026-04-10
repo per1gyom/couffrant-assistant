@@ -1,0 +1,159 @@
+/* ─── ONBOARDING OVERLAY — Phase 3c ─── */
+.onboarding-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 400;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  padding: 16px;
+}
+.onboarding-overlay.open { display: flex; animation: slideDown 0.25s ease; }
+
+.onboarding-modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  width: 100%;
+  max-width: 540px;
+  max-height: 90vh;
+  overflow-y: auto;
+  box-shadow: var(--shadow-md);
+  display: flex;
+  flex-direction: column;
+}
+
+.onb-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.onb-logo {
+  font-weight: 700;
+  font-size: 17px;
+  color: var(--accent);
+}
+.onb-skip {
+  background: none;
+  border: none;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: color 0.15s;
+}
+.onb-skip:hover { color: var(--text); }
+
+/* Contenu dynamique */
+#onboardingContent { padding: 20px; }
+
+.onb-progress {
+  height: 4px;
+  background: var(--surface2);
+  border-radius: 2px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.onb-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.onb-step-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 6px;
+}
+
+.onb-bloc-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 18px;
+}
+
+.onb-questions { display: flex; flex-direction: column; gap: 14px; }
+
+.onb-question { display: flex; flex-direction: column; gap: 6px; }
+
+.onb-q-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.onb-q-input {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text);
+  font-family: inherit;
+  resize: none;
+  outline: none;
+  line-height: 1.5;
+  transition: border-color 0.15s;
+}
+.onb-q-input:focus { border-color: var(--accent); }
+
+.onb-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 22px;
+  gap: 10px;
+}
+
+.onb-btn {
+  padding: 9px 20px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s;
+}
+.onb-btn-ghost {
+  background: var(--surface2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.onb-btn-ghost:hover { color: var(--text); }
+.onb-btn-primary {
+  background: var(--accent);
+  color: #fff;
+  margin-left: auto;
+}
+.onb-btn-primary:hover { background: var(--accent-hover); }
+
+/* Écran final de confirmation */
+.onb-done {
+  text-align: center;
+  padding: 20px 0 8px;
+}
+.onb-done-icon { font-size: 36px; margin-bottom: 12px; }
+.onb-done h3 { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+.onb-done p { font-size: 14px; color: var(--text-muted); line-height: 1.5; }
+
+/* Spinner attente Opus */
+.onb-spinner {
+  width: 28px; height: 28px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin: 16px auto 0;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
