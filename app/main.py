@@ -7,7 +7,7 @@ import threading
 import time
 
 from fastapi import FastAPI, Request
-from fastapi.responses import Response, RedirectResponse
+from fastapi.responses import Response, RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -79,6 +79,20 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok", "app": "Raya", "memory_module": MEMORY_OK}
+
+
+@app.get("/sw.js")
+def service_worker():
+    """
+    Sert le service worker depuis la racine pour qu'il puisse contrôler
+    toutes les pages du site (scope ‘/’).
+    Le SW dans /static/sw.js ne peut contrôler que /static/ sans ce header.
+    """
+    return FileResponse(
+        "app/static/sw.js",
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/"},
+    )
 
 
 @app.on_event("startup")
