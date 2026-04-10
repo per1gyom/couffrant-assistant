@@ -33,7 +33,7 @@ _PROVIDER_MODELS = {
     "anthropic": {
         "fast":  os.getenv("LLM_MODEL_FAST",  ANTHROPIC_MODEL_FAST),
         "smart": os.getenv("LLM_MODEL_SMART", ANTHROPIC_MODEL_SMART),
-        "deep":  os.getenv("LLM_MODEL_DEEP",  "claude-opus-4-6-20260401"),
+        "deep":  os.getenv("LLM_MODEL_DEEP",  "claude-opus-4-6"),
     },
     # Futurs providers à brancher ici :
     # "openai":  {"fast": "gpt-5-mini", "smart": "gpt-5", "deep": "gpt-5"},
