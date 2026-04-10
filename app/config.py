@@ -53,3 +53,6 @@ ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
 # Définir APP_USERNAME et APP_PASSWORD dans Railway pour sécuriser l'accès
 APP_USERNAME = os.getenv("APP_USERNAME", "guillaume").strip()
 APP_PASSWORD = os.getenv("APP_PASSWORD", "couffrant2026").strip()
+
+# Email de support affiché sur la page "Mot de passe oublié ?"
+SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "guillaume@couffrant-solar.fr").strip()
