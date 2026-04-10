@@ -1,14 +1,33 @@
 {
   "name": "Raya",
   "short_name": "Raya",
-  "description": "Assistante IA personnelle",
+  "description": "Assistante IA personnelle — Raya par Couffrant Solar",
   "start_url": "/chat",
   "display": "standalone",
   "background_color": "#f5f7fa",
   "theme_color": "#6366f1",
   "orientation": "portrait-primary",
   "icons": [
-    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Mails urgents",
+      "short_name": "Mails",
+      "description": "Voir les mails urgents",
+      "url": "/chat?q=mails+urgents",
+      "icons": [{"src": "/static/icons/icon-192.png", "sizes": "192x192"}]
+    }
   ]
 }
