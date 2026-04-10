@@ -3,16 +3,14 @@ Mémoire : synthèse des sessions et résumé chaud.
 Vectorisation automatique des insights et conversations.
 
 Signatures canoniques utilisées ici (depuis rule_engine) :
-  get_memoire_param(username, param, default)
-  get_rules_by_category(username, category)
+  get_memoire_param(username, param, default, tenant_id=None)
+  get_rules_by_category(username, category, tenant_id=None)
 """
 import json
 import re
 
 from app.database import get_pg_conn
-from app.ai_client import client
-from app.config import ANTHROPIC_MODEL_SMART, ANTHROPIC_MODEL_FAST
-# Imports depuis rule_engine (signatures canoniques) + save_rule depuis memory_rules
+from app.llm_client import llm_complete
 from app.rule_engine import get_rules_by_category, get_memoire_param
 from app.memory_rules import save_rule
 
@@ -46,13 +44,15 @@ def get_hot_summary(username: str = 'guillaume') -> str:
         if conn: conn.close()
 
 
-def rebuild_hot_summary(username: str = 'guillaume', tenant_id: str = DEFAULT_TENANT) -> str:
+def rebuild_hot_summary(username: str = 'guillaume',
+                        tenant_id: str = DEFAULT_TENANT) -> str:
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
-            SELECT from_email, display_title, category, priority, short_summary, received_at, mailbox_source
+            SELECT from_email, display_title, category, priority, short_summary,
+                   received_at, mailbox_source
             FROM mail_memory WHERE username = %s
             ORDER BY received_at DESC NULLS LAST LIMIT 30
         """, (username,))
@@ -90,11 +90,12 @@ Génère un résumé opérationnel compact (~350 mots) :
 
 Factuel, direct, sans blabla."""
 
-    response = client.messages.create(
-        model=ANTHROPIC_MODEL_SMART, max_tokens=800,
-        messages=[{"role": "user", "content": prompt}]
+    result = llm_complete(
+        messages=[{"role": "user", "content": prompt}],
+        model_tier="smart",
+        max_tokens=800,
     )
-    summary = response.content[0].text
+    summary = result["text"]
 
     conn = None
     try:
@@ -111,16 +112,24 @@ Factuel, direct, sans blabla."""
     return summary
 
 
-def get_aria_insights(limit: int = 8, username: str = 'guillaume') -> str:
+def get_aria_insights(limit: int = 8, username: str = 'guillaume',
+                      tenant_id: str = None) -> str:
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("""
-            SELECT topic, insight, reinforcements FROM aria_insights
-            WHERE username = %s
-            ORDER BY reinforcements DESC, updated_at DESC LIMIT %s
-        """, (username, limit))
+        if tenant_id:
+            c.execute("""
+                SELECT topic, insight, reinforcements FROM aria_insights
+                WHERE username = %s AND (tenant_id = %s OR tenant_id IS NULL)
+                ORDER BY reinforcements DESC, updated_at DESC LIMIT %s
+            """, (username, tenant_id, limit))
+        else:
+            c.execute("""
+                SELECT topic, insight, reinforcements FROM aria_insights
+                WHERE username = %s
+                ORDER BY reinforcements DESC, updated_at DESC LIMIT %s
+            """, (username, limit))
         rows = c.fetchall()
         if not rows: return ""
         return "\n".join([f"[{r[0]}] {r[1]}" for r in rows])
@@ -129,11 +138,11 @@ def get_aria_insights(limit: int = 8, username: str = 'guillaume') -> str:
 
 
 def save_insight(topic: str, insight: str, source: str = "conversation",
-                 username: str = None) -> int:
+                 username: str = None, tenant_id: str = None) -> int:
     """
     Sauvegarde un insight avec vectorisation automatique.
-    Déduplication par égalité exacte normalisée sur topic (plus de ILIKE %prefix%).
-    username obligatoire — plus de défaut 'guillaume'.
+    Déduplication par égalité exacte normalisée sur topic.
+    username obligatoire. tenant_id optionnel (défaut couffrant_solar).
     """
     if not username:
         raise ValueError("save_insight : username obligatoire")
@@ -141,6 +150,7 @@ def save_insight(topic: str, insight: str, source: str = "conversation",
         raise ValueError("save_insight : topic et insight obligatoires")
 
     topic_clean = topic.strip()
+    effective_tenant = tenant_id or DEFAULT_TENANT
     embed_text = f"[{topic_clean}] {insight}"
     vec = _vec_str(_embed(embed_text))
 
@@ -148,7 +158,6 @@ def save_insight(topic: str, insight: str, source: str = "conversation",
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        # Égalité exacte sur topic — empêche la fusion d'insights distincts
         c.execute("""
             SELECT id FROM aria_insights
             WHERE username = %s AND LOWER(TRIM(topic)) = LOWER(TRIM(%s))
@@ -169,28 +178,28 @@ def save_insight(topic: str, insight: str, source: str = "conversation",
                     WHERE id=%s
                 """, (insight, existing[0]))
             conn.commit()
-            print(f"[save_insight] RENFORCÉ id={existing[0]} [{topic_clean[:40]}]")
             return existing[0]
 
         if vec:
             c.execute("""
-                INSERT INTO aria_insights (username, topic, insight, source, embedding)
-                VALUES (%s, %s, %s, %s, %s::vector) RETURNING id
-            """, (username, topic_clean, insight, source, vec))
+                INSERT INTO aria_insights (username, tenant_id, topic, insight, source, embedding)
+                VALUES (%s, %s, %s, %s, %s, %s::vector) RETURNING id
+            """, (username, effective_tenant, topic_clean, insight, source, vec))
         else:
             c.execute("""
-                INSERT INTO aria_insights (username, topic, insight, source)
-                VALUES (%s, %s, %s, %s) RETURNING id
-            """, (username, topic_clean, insight, source))
+                INSERT INTO aria_insights (username, tenant_id, topic, insight, source)
+                VALUES (%s, %s, %s, %s, %s) RETURNING id
+            """, (username, effective_tenant, topic_clean, insight, source))
         insight_id = c.fetchone()[0]
         conn.commit()
-        print(f"[save_insight] CRÉÉ id={insight_id} [{topic_clean[:40]}]")
         return insight_id
     finally:
         if conn: conn.close()
 
 
-def synthesize_session(n_conversations: int = 15, username: str = 'guillaume') -> dict:
+def synthesize_session(n_conversations: int = 15, username: str = 'guillaume',
+                       tenant_id: str = None) -> dict:
+    effective_tenant = tenant_id or DEFAULT_TENANT
     conn = None
     try:
         conn = get_pg_conn()
@@ -205,7 +214,6 @@ def synthesize_session(n_conversations: int = 15, username: str = 'guillaume') -
     finally:
         if conn: conn.close()
 
-    # Signature canonique : (username, param, default)
     keep_recent = get_memoire_param(username, 'keep_recent', 5)
     if not conversations or total <= keep_recent:
         return {"status": "nothing_to_synthesize", "total": total}
@@ -224,27 +232,25 @@ Voici {len(conversations)} conversations récentes.
 Synthétise en JSON strict (sans backticks) :
 {{"summary": "~150 mots", "rules_learned": ["règle"], "insights": [{{"topic": "x", "text": "y"}}], "topics": ["sujet"]}}"""
 
-    # Niveau 1 : modèle rapide
     parsed = None
     try:
-        response = client.messages.create(
-            model=ANTHROPIC_MODEL_FAST, max_tokens=1000,
-            messages=[{"role": "user", "content": prompt}]
+        result = llm_complete(
+            messages=[{"role": "user", "content": prompt}],
+            model_tier="fast", max_tokens=1000,
         )
-        raw = re.sub(r'^```(?:json)?\s*', '', response.content[0].text.strip(), flags=re.MULTILINE)
+        raw = re.sub(r'^```(?:json)?\s*', '', result["text"].strip(), flags=re.MULTILINE)
         raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
         parsed = json.loads(raw)
     except Exception:
         pass
 
-    # Niveau 2 : fallback modèle smart si JSON invalide
     if parsed is None:
         try:
-            response = client.messages.create(
-                model=ANTHROPIC_MODEL_SMART, max_tokens=1000,
-                messages=[{"role": "user", "content": prompt}]
+            result = llm_complete(
+                messages=[{"role": "user", "content": prompt}],
+                model_tier="smart", max_tokens=1000,
             )
-            raw = re.sub(r'^```(?:json)?\s*', '', response.content[0].text.strip(), flags=re.MULTILINE)
+            raw = re.sub(r'^```(?:json)?\s*', '', result["text"].strip(), flags=re.MULTILINE)
             raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
             parsed = json.loads(raw)
         except Exception as e:
@@ -269,13 +275,16 @@ Synthétise en JSON strict (sans backticks) :
 
     for rule_text in parsed.get("rules_learned", []):
         if rule_text and len(rule_text) > 10:
-            save_rule("auto", rule_text, "synthesis", 0.6, username)
+            save_rule("auto", rule_text, "synthesis", 0.6, username,
+                      tenant_id=effective_tenant)
 
     for item in parsed.get("insights", []):
         if isinstance(item, dict):
-            save_insight(item.get("topic", "général"), item.get("text", str(item)), username=username)
+            save_insight(item.get("topic", "général"), item.get("text", str(item)),
+                         username=username, tenant_id=effective_tenant)
         elif isinstance(item, str) and len(item) > 10:
-            save_insight("général", item, username=username)
+            save_insight("général", item, username=username,
+                         tenant_id=effective_tenant)
 
     _vectorize_conversations_batch(conversations, username)
 
@@ -329,7 +338,6 @@ def _vectorize_conversations_batch(conversations: list, username: str):
 
 def purge_old_mails(days: int = None, username: str = 'guillaume') -> int:
     if days is None:
-        # Signature canonique : (username, param, default)
         days = get_memoire_param(username, 'purge_days', 90)
     conn = None
     try:
