@@ -1,2 +1,154 @@
-"""\nRaya — Assistant IA personnel\nPoint d'entrée principal. Setup, middleware, startup, routes.\n"""
-import os\nimport threading\nimport time\n\nfrom fastapi import FastAPI, Request\nfrom fastapi.responses import Response, RedirectResponse\nfrom fastapi.staticfiles import StaticFiles\nfrom starlette.middleware.sessions import SessionMiddleware\nfrom starlette.middleware.base import BaseHTTPMiddleware\n\nfrom app.config import SESSION_SECRET\nfrom app.database import init_postgres\nfrom app.feedback_store import init_db\nfrom app.mail_memory_store import init_mail_db\nfrom app.token_manager import get_valid_microsoft_token, get_all_users_with_tokens\nfrom app.app_security import init_default_user\nfrom app.memory_loader import MEMORY_OK\n\nfrom app.routes.auth import router as auth_router\nfrom app.routes.admin import router as admin_router\nfrom app.routes.raya import router as raya_router\nfrom app.routes.memory import router as memory_router\nfrom app.routes.mail import router as mail_router\nfrom app.routes.reset_password import router as reset_router\nfrom app.routes.webhook import router as webhook_router\nfrom app.routes.forced_reset import router as forced_reset_router\n\n\n# ─── MIDDLEWARE HEADERS DE SÉCURITÉ ───\n\nclass SecurityHeadersMiddleware(BaseHTTPMiddleware):\n    """\n    Ajoute les headers HTTP de sécurité sur toutes les réponses.\n    script-src inclut cdn.jsdelivr.net pour marked.js et DOMPurify.\n    """\n    async def dispatch(self, request: Request, call_next):\n        response = await call_next(request)\n        response.headers["X-Content-Type-Options"] = "nosniff"\n        response.headers["X-Frame-Options"] = "DENY"\n        response.headers["X-XSS-Protection"] = "1; mode=block"\n        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"\n        response.headers["Content-Security-Policy"] = (\n            "default-src 'self'; "\n            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "\n            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "\n            "font-src 'self' https://fonts.gstatic.com; "\n            "img-src 'self' data: https://couffrant-solar.fr; "\n            "connect-src 'self' https://api.anthropic.com; "\n            "media-src 'self' blob:"\n        )\n        return response\n\n\napp = FastAPI(title="Raya — Assistant IA")\n\napp.add_middleware(SecurityHeadersMiddleware)\napp.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=30 * 24 * 3600)\n\napp.mount("/static", StaticFiles(directory="app/static"), name="static")\n\napp.include_router(auth_router)\napp.include_router(admin_router)\napp.include_router(raya_router)\napp.include_router(memory_router)\napp.include_router(mail_router)\napp.include_router(reset_router)\napp.include_router(webhook_router)\napp.include_router(forced_reset_router)\n\n\n@app.get("/")\ndef root():\n    return RedirectResponse("/chat")\n\n\n@app.get("/health")\ndef health():\n    return {"status": "ok", "app": "Raya", "memory_module": MEMORY_OK}\n\n\n@app.on_event("startup")\ndef startup_event():\n    init_postgres()\n    init_db()\n    init_mail_db()\n    try:\n        init_default_user()\n    except Exception as e:\n        print(f"[Raya] Erreur init_default_user: {e}")\n\n    # Seeding du tenant principal si pas encore fait\n    try:\n        from app.seeding import seed_tenant, is_tenant_seeded\n        admin_username = os.getenv("APP_USERNAME", "guillaume").strip()\n        if not is_tenant_seeded(admin_username):\n            print(f"[Raya] Seeding initial pour {admin_username} (profil pv_french)")\n            counts = seed_tenant("couffrant_solar", admin_username, profile="pv_french")\n            print(f"[Raya] Seeding terminé : {counts}")\n        else:\n            print(f"[Raya] {admin_username} déjà seedé, skip")\n    except Exception as e:\n        print(f"[Raya] Erreur seeding: {e}")\n\n    def setup_webhooks():\n        time.sleep(30)\n        try:\n            from app.connectors.microsoft_webhook import ensure_all_subscriptions\n            ensure_all_subscriptions()\n        except Exception as e:\n            print(f"[Webhook] Erreur setup initial: {e}")\n\n    threading.Thread(target=setup_webhooks, daemon=True).start()\n\n    def webhook_renewal_loop():\n        time.sleep(60)\n        while True:\n            try:\n                time.sleep(6 * 3600)\n                from app.connectors.microsoft_webhook import ensure_all_subscriptions\n                ensure_all_subscriptions()\n            except Exception as e:\n                print(f"[Webhook] Erreur renouvellement: {e}")\n\n    threading.Thread(target=webhook_renewal_loop, daemon=True).start()\n\n    def token_refresh_loop():\n        time.sleep(120)\n        while True:\n            try:\n                for username in get_all_users_with_tokens():\n                    try:\n                        token = get_valid_microsoft_token(username)\n                        if not token:\n                            print(f"[Token] ECHEC refresh {username} — alerte envoyée")\n                            try:\n                                from app.connectors.microsoft_webhook import _send_revoked_alert\n                                _send_revoked_alert(username)\n                            except Exception:\n                                pass\n                        else:\n                            print(f"[Token] Refresh {username}: OK")\n                    except Exception as e:\n                        print(f"[Token] Erreur {username}: {e}")\n            except Exception as e:\n                print(f"[Token] Erreur générale: {e}")\n            time.sleep(45 * 60)\n\n    threading.Thread(target=token_refresh_loop, daemon=True).start()\n
+"""
+Raya — Assistant IA personnel
+Point d'entrée principal. Setup, middleware, startup, routes.
+"""
+import os
+import threading
+import time
+
+from fastapi import FastAPI, Request
+from fastapi.responses import Response, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from app.config import SESSION_SECRET
+from app.database import init_postgres
+from app.feedback_store import init_db
+from app.mail_memory_store import init_mail_db
+from app.token_manager import get_valid_microsoft_token, get_all_users_with_tokens
+from app.app_security import init_default_user
+from app.memory_loader import MEMORY_OK
+
+from app.routes.auth import router as auth_router
+from app.routes.admin import router as admin_router
+from app.routes.raya import router as raya_router
+from app.routes.memory import router as memory_router
+from app.routes.mail import router as mail_router
+from app.routes.reset_password import router as reset_router
+from app.routes.webhook import router as webhook_router
+from app.routes.forced_reset import router as forced_reset_router
+
+
+# ─── MIDDLEWARE HEADERS DE SÉCURITÉ ───
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """
+    Ajoute les headers HTTP de sécurité sur toutes les réponses.
+    script-src inclut cdn.jsdelivr.net pour marked.js et DOMPurify.
+    """
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+            "font-src 'self' https://fonts.gstatic.com; "
+            "img-src 'self' data: https://couffrant-solar.fr; "
+            "connect-src 'self' https://api.anthropic.com; "
+            "media-src 'self' blob:"
+        )
+        return response
+
+
+app = FastAPI(title="Raya — Assistant IA")
+
+# Ordre important : SecurityHeaders avant SessionMiddleware
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=30 * 24 * 3600)
+
+# Fichiers statiques (CSS, JS)
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+app.include_router(auth_router)
+app.include_router(admin_router)
+app.include_router(raya_router)
+app.include_router(memory_router)
+app.include_router(mail_router)
+app.include_router(reset_router)
+app.include_router(webhook_router)
+app.include_router(forced_reset_router)
+
+
+@app.get("/")
+def root():
+    return RedirectResponse("/chat")
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "app": "Raya", "memory_module": MEMORY_OK}
+
+
+@app.on_event("startup")
+def startup_event():
+    init_postgres()
+    init_db()
+    init_mail_db()
+    try:
+        init_default_user()
+    except Exception as e:
+        print(f"[Raya] Erreur init_default_user: {e}")
+
+    # Seeding du tenant principal si pas encore fait
+    try:
+        from app.seeding import seed_tenant, is_tenant_seeded
+        admin_username = os.getenv("APP_USERNAME", "guillaume").strip()
+        if not is_tenant_seeded(admin_username):
+            print(f"[Raya] Seeding initial pour {admin_username} (profil pv_french)")
+            counts = seed_tenant("couffrant_solar", admin_username, profile="pv_french")
+            print(f"[Raya] Seeding terminé : {counts}")
+        else:
+            print(f"[Raya] {admin_username} déjà seedé, skip")
+    except Exception as e:
+        print(f"[Raya] Erreur seeding: {e}")
+
+    def setup_webhooks():
+        time.sleep(30)
+        try:
+            from app.connectors.microsoft_webhook import ensure_all_subscriptions
+            ensure_all_subscriptions()
+        except Exception as e:
+            print(f"[Webhook] Erreur setup initial: {e}")
+
+    threading.Thread(target=setup_webhooks, daemon=True).start()
+
+    def webhook_renewal_loop():
+        time.sleep(60)
+        while True:
+            try:
+                time.sleep(6 * 3600)
+                from app.connectors.microsoft_webhook import ensure_all_subscriptions
+                ensure_all_subscriptions()
+            except Exception as e:
+                print(f"[Webhook] Erreur renouvellement: {e}")
+
+    threading.Thread(target=webhook_renewal_loop, daemon=True).start()
+
+    def token_refresh_loop():
+        time.sleep(120)
+        while True:
+            try:
+                for username in get_all_users_with_tokens():
+                    try:
+                        token = get_valid_microsoft_token(username)
+                        if not token:
+                            print(f"[Token] ECHEC refresh {username} — alerte envoyée")
+                            try:
+                                from app.connectors.microsoft_webhook import _send_revoked_alert
+                                _send_revoked_alert(username)
+                            except Exception:
+                                pass
+                        else:
+                            print(f"[Token] Refresh {username}: OK")
+                    except Exception as e:
+                        print(f"[Token] Erreur {username}: {e}")
+            except Exception as e:
+                print(f"[Token] Erreur générale: {e}")
+            time.sleep(45 * 60)
+
+    threading.Thread(target=token_refresh_loop, daemon=True).start()
