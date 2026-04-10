@@ -204,3 +204,104 @@ textarea#input.interim { color: var(--text-muted); font-style: italic; }
 .d-confirm-yes:hover { background: rgba(239,68,68,.3); }
 .d-confirm-no { flex: 1; padding: 6px; border-radius: 6px; font-size: 12px; font-weight: 600; background: #111820; color: #4a6080; border: 1px solid #1e2a38; cursor: pointer; }
 .d-confirm-no:hover { color: #c9d1d9; }
+
+/* ─── RENDU MARKDOWN DANS LES BULLES RAYA ─── */
+.bubble .markdown-content { line-height: 1.6; }
+.bubble .markdown-content p { margin: 0.5em 0; }
+.bubble .markdown-content p:first-child { margin-top: 0; }
+.bubble .markdown-content p:last-child { margin-bottom: 0; }
+.bubble .markdown-content h1,
+.bubble .markdown-content h2,
+.bubble .markdown-content h3 { margin: 0.8em 0 0.4em; font-weight: 600; }
+.bubble .markdown-content h1 { font-size: 1.2em; }
+.bubble .markdown-content h2 { font-size: 1.1em; }
+.bubble .markdown-content h3 { font-size: 1.05em; }
+.bubble .markdown-content ul,
+.bubble .markdown-content ol { margin: 0.5em 0; padding-left: 1.5em; }
+.bubble .markdown-content li { margin: 0.2em 0; }
+.bubble .markdown-content code {
+  background: rgba(0,0,0,0.06);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.92em;
+}
+.bubble .markdown-content pre {
+  background: rgba(0,0,0,0.05);
+  padding: 0.6em;
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.bubble .markdown-content pre code { background: none; padding: 0; }
+.bubble .markdown-content table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+  font-size: 0.92em;
+  width: 100%;
+}
+.bubble .markdown-content th,
+.bubble .markdown-content td {
+  border: 1px solid rgba(0,0,0,0.15);
+  padding: 0.3em 0.6em;
+  text-align: left;
+}
+.bubble .markdown-content th { background: rgba(0,0,0,0.04); font-weight: 600; }
+.bubble .markdown-content a { color: #2563eb; text-decoration: underline; text-underline-offset: 2px; }
+.bubble .markdown-content a:hover { color: #1d4ed8; }
+.bubble .markdown-content strong { font-weight: 600; }
+.bubble .markdown-content blockquote {
+  border-left: 3px solid rgba(0,0,0,0.2);
+  padding-left: 0.8em;
+  margin: 0.5em 0;
+  color: var(--text-muted);
+}
+
+/* ─── ZONE ACTIONS EN ATTENTE DE CONFIRMATION ─── */
+.pending-actions-zone {
+  margin: 0 16px 8px;
+  padding: 12px;
+  background: rgba(251,191,36,0.08);
+  border: 1px solid rgba(251,191,36,0.3);
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+.pending-title {
+  font-weight: 600;
+  font-size: 0.92em;
+  margin-bottom: 8px;
+  color: #92400e;
+}
+.pending-card {
+  background: white;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid rgba(0,0,0,0.08);
+}
+.pending-card:last-child { margin-bottom: 0; }
+.pending-label { font-weight: 500; font-size: 0.92em; margin-bottom: 6px; }
+.pending-preview {
+  font-size: 0.85em;
+  color: var(--text-muted);
+  background: rgba(0,0,0,0.03);
+  padding: 6px 8px;
+  border-radius: 5px;
+  margin-bottom: 8px;
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+}
+.pending-btns { display: flex; gap: 8px; }
+.pending-btn {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: none;
+  font-weight: 500;
+  cursor: pointer;
+  font-size: 0.88em;
+  transition: opacity 0.15s;
+}
+.pending-btn.confirm { background: #16a34a; color: white; }
+.pending-btn.cancel  { background: #dc2626; color: white; }
+.pending-btn:hover   { opacity: 0.85; }
