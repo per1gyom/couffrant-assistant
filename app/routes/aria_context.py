@@ -21,11 +21,15 @@ from app.memory_loader import (
 from app.feedback_store import get_global_instructions
 
 
-GUARDRAILS = """GARDE-FOUS DE SÉCURITÉ (absolus — non négociables) :
-• Ne jamais supprimer définitivement un mail, fichier ou donnée sans confirmation explicite
-• Ne jamais envoyer un mail ou un message Teams sans approbation explicite ("vas-y", "envoie", "confirme")
-• Ne jamais exécuter une action irréversible sans accord clair et explicite
-• En cas de doute sur une action : demander, ne pas agir"""
+GUARDRAILS = """GARDE-FOUS DE SÉCURITÉ (absolus, en code, non négociables) :
+• Toute action sensible (envoi mail/Teams, suppression, déplacement Drive, RDV avec participants)
+  est mise en QUEUE automatiquement par le système. Tu n'as PAS à demander confirmation avant
+  de générer l'action — le code s'en charge. Tu génères normalement, le système met en attente.
+• Quand Guillaume dit "vas-y", "envoie", "confirme", "valide" en réponse à une action en attente,
+  tu génères [ACTION:CONFIRM:<id>] avec l'id de l'action concernée.
+• Quand Guillaume dit "annule", "non", "laisse tomber", tu génères [ACTION:CANCEL:<id>].
+• Si plusieurs actions sont en attente, tu peux confirmer/annuler chacune indépendamment.
+• Tu NE confirmes JAMAIS une action que Guillaume ne t'a pas explicitement validée."""
 
 
 def load_user_tools(username: str) -> dict:
@@ -58,13 +62,11 @@ def load_db_context(username: str) -> dict:
         """, (username,))
         columns = [desc[0] for desc in c.description]
         mails_from_db = [dict(zip(columns, row)) for row in c.fetchall()]
-
         c.execute("SELECT user_input, aria_response FROM aria_memory WHERE username = %s ORDER BY id DESC LIMIT 6",
                   (username,))
         columns = [desc[0] for desc in c.description]
         history = [dict(zip(columns, row)) for row in c.fetchall()]
         history.reverse()
-
         c.execute("SELECT COUNT(*) FROM aria_memory WHERE username = %s", (username,))
         conv_count = c.fetchone()[0]
         return {"mails_from_db": mails_from_db, "history": history, "conv_count": conv_count}
@@ -111,16 +113,11 @@ def load_agenda(outlook_token: str) -> list:
 
 
 def load_teams_context(username: str) -> str:
-    """
-    Charge le contexte Teams : marqueurs actifs + insights récents.
-    Appelé en parallèle avec load_live_mails et load_agenda depuis raya_endpoint.
-    """
     try:
         from app.memory_teams import get_teams_context_summary
         markers_summary = get_teams_context_summary(username)
     except Exception:
         markers_summary = ""
-
     teams_insights = ""
     conn = None
     try:
@@ -139,13 +136,11 @@ def load_teams_context(username: str) -> str:
         pass
     finally:
         if conn: conn.close()
-
     parts = [p for p in [markers_summary, teams_insights] if p]
     return "\n".join(parts) if parts else ""
 
 
 def load_mail_filter_summary(username: str) -> str:
-    """Charge le résumé des règles mail_filter actives pour le contexte."""
     try:
         from app.memory_rules import get_rules_by_category
         rules = get_rules_by_category('mail_filter', username)
@@ -175,6 +170,7 @@ def build_system_prompt(
     instructions: list,
     teams_context: str = "",
     mail_filter_summary: str = "",
+    pending_actions: list = None,
 ) -> str:
     display_name = username.capitalize()
     query_lower = query.lower()
@@ -189,7 +185,6 @@ def build_system_prompt(
         mail_filter_summary = load_mail_filter_summary(username)
 
     contact_card = ""
-    # BUGFIX : get_contacts_keywords n'accepte que username (pas tenant_id)
     known_contacts = get_contacts_keywords(username=username)
     for name in known_contacts:
         if name in query_lower:
@@ -218,6 +213,16 @@ def build_system_prompt(
     teams_context_block = f"\n\n=== TEAMS ==={chr(10)}{teams_context}" if teams_context else ""
     mail_filter_block = f"\n\n=== FILTRE MAILS ==={chr(10)}{mail_filter_summary}" if mail_filter_summary else ""
 
+    # Bloc actions en attente de confirmation
+    pending_block = ""
+    if pending_actions:
+        lines = [f"  #{a['id']} [{a['action_type']}] {a['label']}" for a in pending_actions]
+        pending_block = (
+            f"\n\n=== ACTIONS EN ATTENTE DE CONFIRMATION ===\n"
+            + "\n".join(lines)
+            + "\nSi Guillaume valide : [ACTION:CONFIRM:id] — S'il annule : [ACTION:CANCEL:id]"
+        )
+
     return f"""Tu es Raya — l'assistante personnelle et évolutive de {display_name}.
 Tu es Claude avec une mémoire persistante. Tu n'as pas de comportement imposé de l'extérieur.
 Tu observes, tu apprends, tu t'organises librement. Tu parles au féminin.
@@ -228,7 +233,7 @@ Tu observes, tu apprends, tu t'organises librement. Tu parles au féminin.
 
 {f"=== TA MÉMOIRE ==={chr(10)}{aria_rules}" if aria_rules else "Ta mémoire est vide. Tu peux commencer à construire via [ACTION:LEARN]."}
 
-{f"=== TES OBSERVATIONS SUR {display_name.upper()} ==={chr(10)}{aria_insights}" if aria_insights else ""}{teams_context_block}{mail_filter_block}
+{f"=== TES OBSERVATIONS SUR {display_name.upper()} ==={chr(10)}{aria_insights}" if aria_insights else ""}{teams_context_block}{mail_filter_block}{pending_block}
 
 {f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}
 
@@ -242,34 +247,32 @@ Mémoire mails : {json.dumps(db_ctx['mails_from_db'], ensure_ascii=False, defaul
 Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
 
 === ACTIONS DISPONIBLES ===
+Confirmation :
+  [ACTION:CONFIRM:id]  → exécute une action sensible mise en queue
+  [ACTION:CANCEL:id]   → annule une action sensible mise en queue
 Mails :
   [ACTION:ARCHIVE:id] [ACTION:READ:id] [ACTION:READBODY:id]
   [ACTION:REPLY:id:texte] [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
   [ACTION:CREATE_TASK:titre]{delete_line}
 Drive (1_Photovoltaïque) — format : 📁 "Nom" [id:ID] :
   [ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:id] [ACTION:READDRIVE:id] [ACTION:SEARCHDRIVE:mot]{drive_write_lines}
-Teams — lecture/écriture (ne jamais envoyer sans confirmation) :
+Teams — lecture/écriture (actions d'envoi mises en queue) :
   [ACTION:TEAMS_LIST:]                                       → équipes + canaux en un appel
   [ACTION:TEAMS_CHANNEL:team_id|channel_id]                  → lit un canal
   [ACTION:TEAMS_CHATS:]                                      → liste les chats actifs
   [ACTION:TEAMS_READCHAT:chat_id]                            → lit un chat
-  [ACTION:TEAMS_MSG:email|texte]                             → message 1:1
-  [ACTION:TEAMS_REPLYCHAT:chat_id|texte]                     → répond dans un chat
-  [ACTION:TEAMS_SENDCHANNEL:team_id|channel_id|texte]        → envoie dans un canal
-  [ACTION:TEAMS_GROUPE:email1,email2|sujet|texte]            → crée un groupe
-Teams — mémoire (tu décides librement quand les utiliser) :
-  [ACTION:TEAMS_SYNC:chat_id|label?|type?]                   → ingère + synthétise depuis ton curseur
-  [ACTION:TEAMS_HISTORY:chat_id|label?|type?]                → explore l'historique complet
-  [ACTION:TEAMS_MARK:chat_id|message_id|label?|type?]        → pose un curseur
-  Astuce : mémorise tes habitudes via [ACTION:LEARN:teams_ingestion|ta_règle]
-Filtre mails — tu peux ajuster ce qui est retenu ou ignoré :
-  [ACTION:LEARN:mail_filter|autoriser: email@domaine.fr]     → forcer la réception même si noreply
-  [ACTION:LEARN:mail_filter|autoriser: @couffrant-solar.fr]  → autoriser tout un domaine
-  [ACTION:LEARN:mail_filter|autoriser: sujet:devis chantier] → autoriser par mot-clé sujet
-  [ACTION:LEARN:mail_filter|bloquer: promo@xyz.fr]           → bloquer un expéditeur
-  [ACTION:LEARN:mail_filter|bloquer: sujet:pub]              → bloquer par mot-clé sujet
-  Si un mail important a été manqué : dis-le moi et j'ajuste mes règles.
-Mémoire — tu choisis librement tes catégories :
+  [ACTION:TEAMS_MSG:email|texte]                             → message 1:1 (queue)
+  [ACTION:TEAMS_REPLYCHAT:chat_id|texte]                     → répond dans un chat (queue)
+  [ACTION:TEAMS_SENDCHANNEL:team_id|channel_id|texte]        → envoie dans un canal (queue)
+  [ACTION:TEAMS_GROUPE:email1,email2|sujet|texte]            → crée un groupe (queue)
+Teams — mémoire :
+  [ACTION:TEAMS_SYNC:chat_id|label?|type?]
+  [ACTION:TEAMS_HISTORY:chat_id|label?|type?]
+  [ACTION:TEAMS_MARK:chat_id|message_id|label?|type?]
+Filtre mails :
+  [ACTION:LEARN:mail_filter|autoriser: email@domaine.fr]
+  [ACTION:LEARN:mail_filter|bloquer: sujet:pub]
+Mémoire :
   [ACTION:LEARN:ta_catégorie|ta_règle]
   [ACTION:INSIGHT:sujet|observation]
   [ACTION:FORGET:id]

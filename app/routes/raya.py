@@ -28,6 +28,7 @@ from app.token_manager import get_valid_microsoft_token
 from app.memory_loader import MEMORY_OK, synthesize_session
 from app.rule_engine import get_memoire_param
 from app.feedback_store import get_global_instructions
+from app.pending_actions import get_pending
 
 from app.routes.raya_context import (
     load_user_tools, load_db_context, load_live_mails,
@@ -49,7 +50,6 @@ class RayaQuery(BaseModel):
 
 @router.get("/token-status")
 def token_status(request: Request, user: dict = Depends(require_user)):
-    """État des tokens OAuth de l'utilisateur connecté."""
     username = user["username"]
     warnings = []
     try:
@@ -100,32 +100,29 @@ def raya_endpoint(
     payload: RayaQuery,
     user: dict = Depends(require_user),
 ):
-    """Endpoint principal de conversation Raya."""
     username = user["username"]
     tenant_id = user["tenant_id"]
-
     try:
         return _raya_core(request, payload, username, tenant_id)
     except Exception as e:
         tb = traceback.format_exc()
         print(f"[Raya] ERREUR ENDPOINT pour {username}:\n{tb}")
-        # On ne leak pas le détail de l'erreur au client
         return {
             "answer": "⚠️ Une erreur interne est survenue. L'incident a été loggé.",
             "actions": [],
+            "pending_actions": [],
         }
 
 
 def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: str) -> dict:
-    """Logique principale — séparée pour le try/except de diagnostic."""
-
-    # 1. Chargement contexte DB (synchrone, rapide)
+    # 1. Contexte DB + actions en attente
     tools = load_user_tools(username)
     db_ctx = load_db_context(username)
     instructions = get_global_instructions(tenant_id=tenant_id)
     outlook_token = get_valid_microsoft_token(username)
+    pending_actions = get_pending(username=username, tenant_id=tenant_id, limit=10)
 
-    # 2. Appels réseau en PARALLÈLE — gain ~300–400ms
+    # 2. Appels réseau en PARALLÈLE
     live_mails, agenda, teams_ctx, mail_filter = [], [], "", ""
     with ThreadPoolExecutor(max_workers=4) as pool:
         f_mails  = pool.submit(load_live_mails, outlook_token, username)
@@ -141,13 +138,14 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         try: mail_filter = f_filter.result(timeout=3)
         except Exception: pass
 
-    # 3. Construction du prompt système
+    # 3. Prompt système (inclut les actions en attente)
     user_content_parts = _build_user_content(payload)
     system = build_system_prompt(
         username=username, tenant_id=tenant_id, query=payload.query or "",
         tools=tools, db_ctx=db_ctx, outlook_token=outlook_token,
         live_mails=live_mails, agenda=agenda, instructions=instructions,
         teams_context=teams_ctx, mail_filter_summary=mail_filter,
+        pending_actions=pending_actions,
     )
 
     # 4. Historique + appel Claude
@@ -162,7 +160,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     )
     raya_response = response.content[0].text
 
-    # 5. Exécution des actions
+    # 5. Exécution des actions (queue pour les sensibles)
     actions_confirmed = execute_actions(
         raya_response=raya_response,
         username=username,
@@ -170,6 +168,8 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         mails_from_db=db_ctx["mails_from_db"],
         live_mails=live_mails,
         tools=tools,
+        tenant_id=tenant_id,
+        conversation_id=None,
     )
 
     # 6. Réponse propre
@@ -201,7 +201,14 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         except Exception:
             pass
 
-    return {"answer": clean_response, "actions": actions_confirmed}
+    # 9. Actions en attente actualisées (après exécution)
+    updated_pending = get_pending(username=username, tenant_id=tenant_id, limit=10)
+
+    return {
+        "answer": clean_response,
+        "actions": actions_confirmed,
+        "pending_actions": updated_pending,
+    }
 
 
 def _build_user_content(payload: RayaQuery):
