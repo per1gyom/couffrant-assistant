@@ -310,7 +310,10 @@ Filtre mails :
 Mémoire (immédiat) :
   [ACTION:LEARN:ta_catégorie|ta_règle]
   [ACTION:INSIGHT:sujet|observation]
-  [ACTION:FORGET:id]
+  [ACTION:FORGET:id]  ← UNIQUEMENT si l'utilisateur demande EXPLICITEMENT d'oublier une règle.
+                        JAMAIS lors d'une correction de fait ou d'une mise à jour d'information.
+                        Corriger une information = [ACTION:LEARN] avec la nouvelle valeur.
+                        Une correction n'est PAS une demande d'oubli.
   [ACTION:SYNTH:]
 Onboarding :
   [ACTION:RESTART_ONBOARDING:] → relance le questionnaire de configuration initiale
