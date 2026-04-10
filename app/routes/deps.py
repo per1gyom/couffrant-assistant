@@ -1,23 +1,65 @@
-from fastapi import Request
-from app.app_security import SCOPE_ADMIN, SCOPE_TENANT_ADMIN, SCOPE_CS, SCOPE_USER
+from fastapi import Request, HTTPException, status, Depends
+from app.app_security import (
+    SCOPE_ADMIN, SCOPE_TENANT_ADMIN, SCOPE_CS, SCOPE_USER,
+    get_tenant_id,
+)
 
 
-def require_user(request: Request) -> str | None:
-    """Retourne username si connecté, sinon None."""
-    return request.session.get("user")
-
-
-def require_admin(request: Request) -> bool:
-    """Super-admin système uniquement."""
-    return request.session.get("scope") == SCOPE_ADMIN
-
-
-def require_tenant_admin(request: Request) -> bool:
+def require_user(request: Request) -> dict:
     """
-    Vrai si l'utilisateur peut administrer son tenant.
-    Inclut le super-admin et le tenant_admin.
+    Dépendance FastAPI — retourne {username, tenant_id, scope} si connecté.
+    Lève HTTPException 401 sinon.
+
+    Usage :
+        @router.post("/endpoint")
+        def mon_endpoint(user: dict = Depends(require_user)):
+            username = user["username"]
+            tenant_id = user["tenant_id"]
     """
-    return request.session.get("scope") in (SCOPE_ADMIN, SCOPE_TENANT_ADMIN)
+    username = request.session.get("user")
+    if not username:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentification requise",
+        )
+    tenant_id = request.session.get("tenant_id")
+    if not tenant_id:
+        try:
+            tenant_id = get_tenant_id(username)
+        except Exception:
+            tenant_id = None
+        if not tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Tenant introuvable pour cet utilisateur",
+            )
+    return {
+        "username": username,
+        "tenant_id": tenant_id,
+        "scope": request.session.get("scope", SCOPE_USER),
+    }
+
+
+def require_admin(request: Request) -> dict:
+    """Super-admin système uniquement. Lève 403 si pas admin."""
+    user = require_user(request)
+    if user["scope"] != SCOPE_ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Privilèges super-administrateur requis",
+        )
+    return user
+
+
+def require_tenant_admin(request: Request) -> dict:
+    """Admin du tenant ou super-admin. Lève 403 sinon."""
+    user = require_user(request)
+    if user["scope"] not in (SCOPE_ADMIN, SCOPE_TENANT_ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Privilèges administrateur tenant requis",
+        )
+    return user
 
 
 def get_session_tenant_id(request: Request) -> str:
@@ -25,18 +67,17 @@ def get_session_tenant_id(request: Request) -> str:
     return request.session.get("tenant_id", "couffrant_solar")
 
 
-def assert_same_tenant(request: Request, target_username: str) -> tuple[bool, str]:
+def assert_same_tenant(request: Request, target_username: str) -> None:
     """
     Vérifie qu'un tenant_admin ne manipule que des users de son propre tenant.
-    Retourne (ok, error_message).
-    Super-admin passe toujours.
+    Lève HTTPException 403 si violation. Super-admin passe toujours.
     """
-    scope = request.session.get("scope")
-    if scope == SCOPE_ADMIN:
-        return True, ""
-    from app.app_security import get_tenant_id
-    session_tenant = get_session_tenant_id(request)
+    user = require_user(request)
+    if user["scope"] == SCOPE_ADMIN:
+        return
     target_tenant = get_tenant_id(target_username)
-    if session_tenant != target_tenant:
-        return False, f"L'utilisateur '{target_username}' n'appartient pas à votre tenant."
-    return True, ""
+    if user["tenant_id"] != target_tenant:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"L'utilisateur '{target_username}' n'appartient pas à votre tenant",
+        )

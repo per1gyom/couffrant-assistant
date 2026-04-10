@@ -4,6 +4,9 @@ Endpoints Raya : /speak, /raya, /token-status.
 Les appels réseau (mails live, agenda, contexte Teams, filtre mails)
 sont exécutés en parallèle via ThreadPoolExecutor pour réduire
 la latence de 300–400ms par conversation.
+
+Auth : require_user via Depends — lève 401 si non authentifié.
+Plus de fallback 'guillaume' possible.
 """
 import os
 import re
@@ -14,7 +17,7 @@ import requests as http_requests
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
-from fastapi import APIRouter, Request, Body
+from fastapi import APIRouter, Request, Body, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -45,10 +48,9 @@ class RayaQuery(BaseModel):
 
 
 @router.get("/token-status")
-def token_status(request: Request):
-    username = request.session.get("user")
-    if not username:
-        return {"warnings": [], "ok": True}
+def token_status(request: Request, user: dict = Depends(require_user)):
+    """État des tokens OAuth de l'utilisateur connecté."""
+    username = user["username"]
     warnings = []
     try:
         token = get_valid_microsoft_token(username)
@@ -58,7 +60,7 @@ def token_status(request: Request):
                 "message": "Token expiré — mails, Teams et agenda inaccessibles.",
                 "action": "Se reconnecter",
                 "action_url": "/login",
-                "severity": "error"
+                "severity": "error",
             })
     except Exception:
         pass
@@ -93,18 +95,25 @@ def speak_text(payload: dict = Body(...)):
 
 
 @router.post("/raya")
-def raya_endpoint(request: Request, payload: RayaQuery):
-    username = request.session.get("user", "guillaume")
-    tenant_id = request.session.get("tenant_id", "couffrant_solar")
+def raya_endpoint(
+    request: Request,
+    payload: RayaQuery,
+    user: dict = Depends(require_user),
+):
+    """Endpoint principal de conversation Raya."""
+    username = user["username"]
+    tenant_id = user["tenant_id"]
 
     try:
         return _raya_core(request, payload, username, tenant_id)
     except Exception as e:
         tb = traceback.format_exc()
         print(f"[Raya] ERREUR ENDPOINT pour {username}:\n{tb}")
-        # Retourne l'erreur dans le chat pour diagnostic
-        return {"answer": f"⚠️ Erreur interne Raya : {str(e)[:200]}\n\nVoir les logs Railway pour le détail.",
-                "actions": []}
+        # On ne leak pas le détail de l'erreur au client
+        return {
+            "answer": "⚠️ Une erreur interne est survenue. L'incident a été loggé.",
+            "actions": [],
+        }
 
 
 def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: str) -> dict:
@@ -216,5 +225,5 @@ def _build_user_content(payload: RayaQuery):
                       if payload.query else f"[PDF joint{file_name_info}] Analyse ce document."})
     else:
         parts.append({"type": "text",
-                      "text": f"[Fichier joint{file_name_info}]\n{payload.query}"}),
+                      "text": f"[Fichier joint{file_name_info}]\n{payload.query}"})
     return parts
