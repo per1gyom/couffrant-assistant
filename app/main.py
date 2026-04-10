@@ -5,7 +5,6 @@ Point d'entrée principal. Setup, middleware, startup, routes.
 import os
 import threading
 import time
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import Response, RedirectResponse
@@ -20,6 +19,7 @@ from app.mail_memory_store import init_mail_db
 from app.token_manager import get_valid_microsoft_token, get_all_users_with_tokens
 from app.app_security import init_default_user
 from app.memory_loader import MEMORY_OK
+import app.scheduler as job_scheduler
 
 from app.routes.auth import router as auth_router
 from app.routes.admin import router as admin_router
@@ -31,6 +31,8 @@ from app.routes.webhook import router as webhook_router
 from app.routes.forced_reset import router as forced_reset_router
 from app.routes.onboarding import router as onboarding_router
 
+
+# ─── MIDDLEWARE HEADERS DE SÉCURITÉ ───
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -79,23 +81,6 @@ def health():
     return {"status": "ok", "app": "Raya", "memory_module": MEMORY_OK}
 
 
-# ── PWA : manifest + service worker accessibles à la racine ──
-@app.get("/manifest.json")
-def pwa_manifest():
-    p = Path("app/static/manifest.json")
-    if p.exists():
-        return Response(content=p.read_text(), media_type="application/manifest+json")
-    return Response(status_code=404)
-
-
-@app.get("/sw.js")
-def pwa_sw():
-    p = Path("app/static/sw.js")
-    if p.exists():
-        return Response(content=p.read_text(), media_type="application/javascript")
-    return Response(status_code=404)
-
-
 @app.on_event("startup")
 def startup_event():
     init_postgres()
@@ -126,12 +111,11 @@ def startup_event():
     except Exception as e:
         print(f"[ToolsRegistry] Erreur seed: {e}")
 
-    # ── Jobs périodiques (Phase 4) ──
+    # Scheduler de jobs périodiques (Phase 4)
     try:
-        from app.scheduler import start_all_jobs
-        start_all_jobs()
+        job_scheduler.start()
     except Exception as e:
-        print(f"[Scheduler] Erreur démarrage : {e}")
+        print(f"[Scheduler] Erreur démarrage: {e}")
 
     def setup_webhooks():
         time.sleep(30)
@@ -178,3 +162,12 @@ def startup_event():
             time.sleep(45 * 60)
 
     threading.Thread(target=token_refresh_loop, daemon=True).start()
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    """Arrêt propre du scheduler avant que le processus se termine."""
+    try:
+        job_scheduler.stop()
+    except Exception as e:
+        print(f"[Scheduler] Erreur arrêt: {e}")

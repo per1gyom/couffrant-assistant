@@ -1,94 +1,99 @@
 """
-Scheduler central Raya — Phase 4.
+Scheduler de jobs périodiques Raya — Phase 4.
 
-Centralise tous les jobs périodiques en threads daemon.
-Pas de dépendance externe (Celery, APScheduler) — cohérent
-avec le pattern threading existant de main.py.
+Utilise APScheduler (BackgroundScheduler) pour exécuter des tâches
+de maintenance sans bloquer le serveur FastAPI.
 
-Jobs déclarés :
-  pending_expiry    : toutes les heures
-                      Expire les pending_actions dépassées
-  confidence_decay  : 1er du mois à 3h00 UTC
-                      Décroissance de confiance des règles inactives (B6)
-  opus_audit        : dimanche à 2h00 UTC
-                      Audit Opus hebdomadaire de cohérence des règles (B5)
+Jobs enregistrés :
+  expire_pending     : toutes les heures   — expire les pending_actions trop vieilles
 
-Démarré via start_all_jobs() depuis main.py au startup.
+[à venir — commits séparés]
+  confidence_decay   : hebdomadaire lundi 02h00   — décroissance de confiance des règles inactives (B6)
+  opus_audit         : hebdomadaire dimanche 03h00 — audit de cohérence Opus (B5)
+  proactivity_scan   : toutes les 30 min          — alertes et rappels (B10)
+
+Démarrage : scheduler.start() dans main.py au startup FastAPI.
+Arrêt     : scheduler.stop()  dans main.py au shutdown FastAPI.
 """
-import threading
-import time
-from datetime import datetime, timezone
+import logging
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
+
+logger = logging.getLogger(__name__)
+
+_scheduler: BackgroundScheduler | None = None
 
 
-def _is_first_of_month_at(hour: int = 3) -> bool:
-    now = datetime.now(timezone.utc)
-    return now.day == 1 and now.hour == hour
+def get_scheduler() -> BackgroundScheduler:
+    global _scheduler
+    if _scheduler is None:
+        _scheduler = BackgroundScheduler(
+            job_defaults={
+                "coalesce": True,           # Plusieurs exécutions ratées → une seule rattrapante
+                "max_instances": 1,         # Pas de chevauchement pour le même job
+                "misfire_grace_time": 300,  # 5 min de tolérance si le serveur était down
+            },
+            timezone="Europe/Paris",
+        )
+    return _scheduler
 
 
-def _is_sunday_at(hour: int = 2) -> bool:
-    now = datetime.now(timezone.utc)
-    return now.weekday() == 6 and now.hour == hour  # 6 = dimanche
-
-
-def _loop_pending_expiry():
-    """Toutes les heures, expire les pending_actions dépassées."""
-    time.sleep(60)  # Attente initiale
-    while True:
-        try:
-            from app.jobs.pending_expiry import run
-            run()
-        except Exception as e:
-            print(f"[Scheduler] pending_expiry exception : {e}")
-        time.sleep(3600)
-
-
-def _loop_confidence_decay():
-    """Vérifie 1x/heure si c'est le moment de lancer la décroissance (1er du mois à 3h)."""
-    time.sleep(300)
-    _ran_today = False
-    while True:
-        try:
-            now = datetime.now(timezone.utc)
-            if _is_first_of_month_at(hour=3) and not _ran_today:
-                from app.jobs.confidence_decay import run
-                run()
-                _ran_today = True
-            elif now.hour == 4:
-                _ran_today = False  # Reset pour le lendemain
-        except Exception as e:
-            print(f"[Scheduler] confidence_decay exception : {e}")
-        time.sleep(3600)
-
-
-def _loop_opus_audit():
-    """Vérifie 1x/heure si c'est le moment de lancer l'audit Opus (dimanche 2h)."""
-    time.sleep(600)
-    _ran_this_week = False
-    while True:
-        try:
-            now = datetime.now(timezone.utc)
-            if _is_sunday_at(hour=2) and not _ran_this_week:
-                from app.jobs.opus_audit import run_all_tenants
-                run_all_tenants()
-                _ran_this_week = True
-            elif now.weekday() == 0:  # Lundi → reset
-                _ran_this_week = False
-        except Exception as e:
-            print(f"[Scheduler] opus_audit exception : {e}")
-        time.sleep(3600)
-
-
-def start_all_jobs():
+def start():
     """
-    Lance tous les jobs en threads daemon.
-    Appelé depuis main.py au startup.
+    Démarre le scheduler et enregistre tous les jobs.
+    Idémpotent : appels multiples sans effet si déjà actif.
     """
-    jobs = [
-        ("pending_expiry",   _loop_pending_expiry),
-        ("confidence_decay", _loop_confidence_decay),
-        ("opus_audit",       _loop_opus_audit),
-    ]
-    for name, target in jobs:
-        t = threading.Thread(target=target, name=f"raya-job-{name}", daemon=True)
-        t.start()
-        print(f"[Scheduler] Job '{name}' démarré")
+    scheduler = get_scheduler()
+    if scheduler.running:
+        return
+
+    _register_jobs(scheduler)
+    scheduler.start()
+    jobs = scheduler.get_jobs()
+    print(f"[Scheduler] Démarré — {len(jobs)} job(s) : {[j.id for j in jobs]}")
+
+
+def stop():
+    """Arrête proprement le scheduler (shutdown FastAPI)."""
+    global _scheduler
+    if _scheduler and _scheduler.running:
+        _scheduler.shutdown(wait=False)
+        print("[Scheduler] Arrêté")
+    _scheduler = None
+
+
+def _register_jobs(scheduler: BackgroundScheduler):
+    """
+    Enregistre tous les jobs périodiques.
+    Chaque job est ajouté avec replace_existing=True (idémpotent au redémarrage).
+    """
+
+    # ─ Job 1 : expiration des pending_actions (toutes les heures) ─
+    scheduler.add_job(
+        func=_job_expire_pending,
+        trigger=IntervalTrigger(hours=1),
+        id="expire_pending",
+        name="Expiration des actions en attente",
+        replace_existing=True,
+    )
+
+    # Les commits suivants ajouteront :
+    # scheduler.add_job(_job_confidence_decay, CronTrigger(day_of_week='mon', hour=2), id='confidence_decay', ...)
+    # scheduler.add_job(_job_opus_audit,       CronTrigger(day_of_week='sun', hour=3), id='opus_audit', ...)
+    # scheduler.add_job(_job_proactivity_scan, IntervalTrigger(minutes=30),             id='proactivity_scan', ...)
+
+
+# ─── FONCTIONS JOB ───
+
+def _job_expire_pending():
+    """
+    Expire les pending_actions dont expires_at est dépassé.
+    Appelle expire_old_pending() qui existe déjà dans pending_actions.py.
+    """
+    try:
+        from app.pending_actions import expire_old_pending
+        n = expire_old_pending()
+        if n:
+            print(f"[Scheduler] expire_pending : {n} action(s) expirée(s)")
+    except Exception as e:
+        print(f"[Scheduler] ERREUR expire_pending : {e}")
