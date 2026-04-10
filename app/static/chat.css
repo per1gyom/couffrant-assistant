@@ -30,7 +30,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .h-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
 .h-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
 
-/* TOKEN ALERT — discret, visible seulement si problème */
+/* TOKEN ALERT */
 .token-alert-btn {
   border-color: rgba(239,68,68,0.4) !important;
   color: #f87171 !important;
@@ -86,7 +86,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .bubble { max-width: 76%; border-radius: 16px; padding: 11px 15px; font-size: 14.5px; line-height: 1.65; word-break: break-word; }
 .message-row.raya .bubble { background: var(--raya-bg); border: 1px solid var(--border); border-radius: 4px 16px 16px 16px; box-shadow: var(--shadow); }
 .message-row.user .bubble { background: var(--user-bg); border: 1px solid #c4b5fd; border-radius: 16px 4px 16px 16px; color: var(--user-text); }
-.bubble-actions { display: flex; gap: 7px; margin-top: 8px; }
+.bubble-actions { display: flex; gap: 7px; margin-top: 8px; align-items: center; }
 .speak-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: 20px; padding: 3px 10px; font-size: 12px; cursor: pointer; transition: all 0.15s; }
 .speak-btn:hover { border-color: var(--accent); color: var(--accent); }
 .speak-btn.playing { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
@@ -205,7 +205,7 @@ textarea#input.interim { color: var(--text-muted); font-style: italic; }
 .d-confirm-no { flex: 1; padding: 6px; border-radius: 6px; font-size: 12px; font-weight: 600; background: #111820; color: #4a6080; border: 1px solid #1e2a38; cursor: pointer; }
 .d-confirm-no:hover { color: #c9d1d9; }
 
-/* ─── RENDU MARKDOWN DANS LES BULLES RAYA ─── */
+/* ─── RENDU MARKDOWN ─── */
 .bubble .markdown-content { line-height: 1.6; }
 .bubble .markdown-content p { margin: 0.5em 0; }
 .bubble .markdown-content p:first-child { margin-top: 0; }
@@ -256,7 +256,7 @@ textarea#input.interim { color: var(--text-muted); font-style: italic; }
   color: var(--text-muted);
 }
 
-/* ─── ZONE ACTIONS EN ATTENTE DE CONFIRMATION ─── */
+/* ─── ZONE ACTIONS EN ATTENTE ─── */
 .pending-actions-zone {
   margin: 0 16px 8px;
   padding: 12px;
@@ -305,3 +305,127 @@ textarea#input.interim { color: var(--text-muted); font-style: italic; }
 .pending-btn.confirm { background: #16a34a; color: white; }
 .pending-btn.cancel  { background: #dc2626; color: white; }
 .pending-btn:hover   { opacity: 0.85; }
+
+/* ─── FEEDBACK 👍👎 + POURQUOI ? — Phase 3b ─── */
+.bubble-actions-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--border);
+  margin: 0 2px;
+  flex-shrink: 0;
+}
+.feedback-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  opacity: 0.35;
+  transition: opacity 0.15s, transform 0.1s;
+  line-height: 1;
+}
+.feedback-btn:hover { opacity: 1; transform: scale(1.2); }
+.feedback-btn:disabled { opacity: 0.2; cursor: default; transform: none; }
+.feedback-btn.why-btn { font-size: 13px; }
+
+/* Dialog inline feedback négatif */
+.feedback-dialog {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 4px 0 4px 40px;
+  max-width: 420px;
+  box-shadow: var(--shadow-md);
+}
+.feedback-dialog-label {
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+.feedback-dialog-input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 13px;
+  color: var(--text);
+  resize: none;
+  outline: none;
+  font-family: inherit;
+}
+.feedback-dialog-input:focus { border-color: var(--accent); }
+.feedback-dialog-btns { display: flex; gap: 8px; margin-top: 8px; }
+.feedback-dialog-send {
+  flex: 1;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 7px;
+  padding: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.feedback-dialog-send:hover { background: var(--accent-hover); }
+.feedback-dialog-cancel {
+  background: var(--surface2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 6px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.feedback-dialog-cancel:hover { color: var(--text); }
+
+/* Panel "Pourquoi ?" */
+.why-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin: 4px 0 4px 40px;
+  max-width: 480px;
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+}
+.why-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.why-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: color 0.15s;
+}
+.why-close:hover { color: var(--text); }
+.why-row { color: var(--text-muted); margin-bottom: 4px; }
+.why-row strong { color: var(--text); }
+.why-rules-title { font-weight: 500; margin: 8px 0 4px; }
+.why-rule {
+  background: var(--surface2);
+  border-radius: 5px;
+  padding: 4px 8px;
+  margin-bottom: 3px;
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.why-cat { color: var(--accent); font-weight: 500; margin-right: 4px; }
+.why-conf { color: var(--success); font-size: 11px; margin-left: 4px; }
+.why-empty { color: var(--text-muted); font-style: italic; font-size: 12px; }
