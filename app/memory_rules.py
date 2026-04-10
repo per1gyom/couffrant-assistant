@@ -1,33 +1,44 @@
 """
 Mémoire : règles et paramètres (aria_rules).
-Isolation par username.
+Isolation par username + tenant_id.
 
 Fonctions canoniques à utiliser :
-  app.rule_engine.get_rules_by_category(username, category)
-  app.rule_engine.get_memoire_param(username, param, default)
-  app.memory_rules.save_rule(category, rule, source, confidence, username)  ← username OBLIGATOIRE
-
-Les fonctions get_rules_by_category et get_memoire_param de ce module sont dépréciées.
-Elles existent uniquement pour la compat ascendante et délèguent vers rule_engine.
+  app.rule_engine.get_rules_by_category(username, category, tenant_id=None)
+  app.rule_engine.get_memoire_param(username, param, default, tenant_id=None)
+  app.memory_rules.save_rule(category, rule, source, confidence, username, tenant_id=None)
 """
 import warnings
 from app.database import get_pg_conn
 
+DEFAULT_TENANT = 'couffrant_solar'
+
 
 # ─── FONCTIONS ACTIVES ───
 
-def get_aria_rules(username: str = 'guillaume') -> str:
+def get_aria_rules(username: str = 'guillaume', tenant_id: str = None) -> str:
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("""
-            SELECT id, category, rule, confidence, reinforcements
-            FROM aria_rules
-            WHERE active = true AND username = %s AND category != 'memoire'
-            ORDER BY confidence DESC, reinforcements DESC, created_at DESC
-            LIMIT 60
-        """, (username,))
+        if tenant_id:
+            c.execute("""
+                SELECT id, category, rule, confidence, reinforcements
+                FROM aria_rules
+                WHERE active = true
+                  AND username = %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
+                  AND category != 'memoire'
+                ORDER BY confidence DESC, reinforcements DESC, created_at DESC
+                LIMIT 60
+            """, (username, tenant_id))
+        else:
+            c.execute("""
+                SELECT id, category, rule, confidence, reinforcements
+                FROM aria_rules
+                WHERE active = true AND username = %s AND category != 'memoire'
+                ORDER BY confidence DESC, reinforcements DESC, created_at DESC
+                LIMIT 60
+            """, (username,))
         rows = c.fetchall()
         if not rows: return ""
         return "\n".join([f"[id:{r[0]}][{r[1]}] {r[2]}" for r in rows])
@@ -36,18 +47,21 @@ def get_aria_rules(username: str = 'guillaume') -> str:
 
 
 def save_rule(category: str, rule: str, source: str = "auto",
-              confidence: float = 0.7, username: str = None) -> int:
+              confidence: float = 0.7, username: str = None,
+              tenant_id: str = None) -> int:
     """
     Sauvegarde une règle apprise par Raya.
-    Déduplication par égalité exacte normalisée (LOWER+TRIM) — plus de ILIKE %prefix%.
-    username obligatoire — plus de défaut 'guillaume'.
+    Déduplication par égalité exacte normalisée (LOWER+TRIM).
+    username obligatoire.
+    tenant_id optionnel — défaut 'couffrant_solar' si non fourni.
     """
     if not username:
-        raise ValueError("save_rule : username obligatoire (plus de défaut 'guillaume')")
+        raise ValueError("save_rule : username obligatoire")
     if not rule or not rule.strip():
         raise ValueError("save_rule : règle vide refusée")
 
     rule_clean = rule.strip()
+    effective_tenant = tenant_id or DEFAULT_TENANT
 
     conn = None
     try:
@@ -73,16 +87,14 @@ def save_rule(category: str, rule: str, source: str = "auto",
                 WHERE id = %s
             """, (existing[0],))
             conn.commit()
-            print(f"[save_rule] RENFORCÉ id={existing[0]} [{category}] '{rule_clean[:50]}'")
             return existing[0]
 
         c.execute("""
-            INSERT INTO aria_rules (username, category, rule, source, confidence)
-            VALUES (%s, %s, %s, %s, %s) RETURNING id
-        """, (username, category, rule_clean, source, confidence))
+            INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence)
+            VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+        """, (username, effective_tenant, category, rule_clean, source, confidence))
         rule_id = c.fetchone()[0]
         conn.commit()
-        print(f"[save_rule] CRÉÉ id={rule_id} [{category}] '{rule_clean[:50]}'")
         return rule_id
     finally:
         if conn: conn.close()
@@ -121,8 +133,6 @@ def seed_default_rules(username: str = 'guillaume'):
 
 
 # ─── WRAPPERS DÉPRÉCIÉS (compat ascendante) ───
-# Étapez 2 — B4 : les fonctions canoniques vivent dans app.rule_engine.
-# Ces wrappers détectent l'ordre des arguments et délèguent proprement.
 
 _KNOWN_CATEGORIES = {
     'tri_mails', 'urgence', 'anti_spam', 'style_reponse', 'regroupement',
@@ -134,7 +144,6 @@ _KNOWN_CATEGORIES = {
 def get_rules_by_category(username_or_category=None, category_or_username='guillaume') -> list:
     """
     DÉPRÉCIÉ — Utiliser app.rule_engine.get_rules_by_category(username, category).
-    Détecte l'ordre des arguments et délègue à la fonction canonique.
     """
     warnings.warn(
         "app.memory_rules.get_rules_by_category est déprécié. "
@@ -143,11 +152,9 @@ def get_rules_by_category(username_or_category=None, category_or_username='guill
         stacklevel=2,
     )
     if username_or_category in _KNOWN_CATEGORIES:
-        # Ancien ordre détecté : (category, username)
         category = username_or_category
         username = category_or_username
     else:
-        # Nouvel ordre : (username, category)
         username = username_or_category
         category = category_or_username
     from app.rule_engine import get_rules_by_category as canonical
@@ -157,7 +164,6 @@ def get_rules_by_category(username_or_category=None, category_or_username='guill
 def get_memoire_param(username_or_param=None, param_or_default=None, default_or_username=None):
     """
     DÉPRÉCIÉ — Utiliser app.rule_engine.get_memoire_param(username, param, default).
-    Lève TypeError si l'ancien ordre (param, default, username) est détecté.
     """
     warnings.warn(
         "app.memory_rules.get_memoire_param est déprécié. "
@@ -165,7 +171,6 @@ def get_memoire_param(username_or_param=None, param_or_default=None, default_or_
         DeprecationWarning,
         stacklevel=2,
     )
-    # Détection de l'ancien ordre : si le premier arg a _ et est court, c'est un nom de param
     if isinstance(username_or_param, str) and "_" in username_or_param and len(username_or_param) < 30:
         raise TypeError(
             f"Appel ambigu à get_memoire_param : '{username_or_param}' ressemble à un nom de paramètre, "
