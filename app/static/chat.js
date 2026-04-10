@@ -25,7 +25,7 @@ async function init() {
   checkHealth();
   loadUserInfo();
   loadMailCount();
-  checkTokenStatus();  // vérifie si des tokens sont expirés
+  checkTokenStatus();
   document.getElementById('autoSpeakBtn').classList.add('active');
   messagesEl.addEventListener('scroll', onMessagesScroll);
 }
@@ -94,9 +94,7 @@ function renderTokenBanner() {
 
 function toggleTokenBanner() {
   const banner = document.getElementById('tokenBanner');
-  if (!banner.classList.contains('visible')) {
-    renderTokenBanner();
-  }
+  if (!banner.classList.contains('visible')) { renderTokenBanner(); }
   banner.classList.toggle('visible');
 }
 
@@ -211,6 +209,8 @@ function onMessagesScroll() {
 // ─── MESSAGES ───
 function autoResize(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,120)+'px'; }
 function handleKey(e) { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
+
+// cleanText reste utilisé par la synthèse vocale (bouton Écouter)
 function cleanText(t) {
   return t.replace(/#{1,6}\s+/g,'').replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1')
     .replace(/`(.*?)`/g,'$1').replace(/---+/g,'').replace(/\|.*?\|/g,'')
@@ -232,8 +232,32 @@ function addMessage(text, type, fileInfo) {
     const badge = document.createElement('div'); badge.style = 'font-size:12px;color:var(--text-muted);margin-bottom:4px';
     badge.textContent = '📎 ' + fileInfo.name; bubble.appendChild(badge);
   }
-  const content = document.createElement('div'); content.style.whiteSpace = 'pre-wrap';
-  content.textContent = type === 'raya' ? cleanText(text) : text; bubble.appendChild(content);
+
+  const content = document.createElement('div');
+  if (type === 'raya') {
+    // Rendu markdown sécurisé via marked.js + DOMPurify
+    // cleanText() n'est PAS utilisé ici (synthèse vocale seulement)
+    try {
+      const rawHtml = marked.parse(text || '');
+      const cleanHtml = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target', 'rel'] });
+      content.innerHTML = cleanHtml;
+      content.classList.add('markdown-content');
+      // Ouvrir les liens dans un nouvel onglet
+      content.querySelectorAll('a').forEach(a => {
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener noreferrer');
+      });
+    } catch(e) {
+      // Fallback si marked non disponible
+      content.style.whiteSpace = 'pre-wrap';
+      content.textContent = text;
+    }
+  } else {
+    content.style.whiteSpace = 'pre-wrap';
+    content.textContent = text;
+  }
+  bubble.appendChild(content);
+
   if (type === 'raya') {
     const actions = document.createElement('div'); actions.className = 'bubble-actions';
     const speakBtn = document.createElement('button'); speakBtn.className = 'speak-btn'; speakBtn.textContent = '🔊 Écouter';
@@ -244,12 +268,77 @@ function addMessage(text, type, fileInfo) {
   if (messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 200) scrollToBottom();
   return row;
 }
+
 function addLoading() {
   const row = document.createElement('div'); row.className = 'message-row raya';
   const avatar = document.createElement('div'); avatar.className = 'avatar raya-avatar'; avatar.textContent = '✦';
   const bubble = document.createElement('div'); bubble.className = 'bubble loading-bubble';
   bubble.innerHTML = '<div class="dot-anim"></div><div class="dot-anim"></div><div class="dot-anim"></div>';
   row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row); scrollToBottom(); return row;
+}
+
+// ─── ACTIONS EN ATTENTE ───
+function renderPendingActions(pendingList) {
+  // Supprimer la zone précédente
+  const existing = document.getElementById('pending-actions-zone');
+  if (existing) existing.remove();
+  if (!pendingList || pendingList.length === 0) return;
+
+  const zone = document.createElement('div');
+  zone.id = 'pending-actions-zone';
+  zone.className = 'pending-actions-zone';
+
+  const title = document.createElement('div');
+  title.className = 'pending-title';
+  title.textContent = `⏸️ ${pendingList.length} action(s) en attente de confirmation`;
+  zone.appendChild(title);
+
+  pendingList.forEach(action => {
+    const card = document.createElement('div');
+    card.className = 'pending-card';
+
+    const label = document.createElement('div');
+    label.className = 'pending-label';
+    label.textContent = action.label || `${action.action_type} #${action.id}`;
+    card.appendChild(label);
+
+    // Prévisualisation du texte si c'est une réponse mail
+    if (action.payload && action.payload.reply_text) {
+      const preview = document.createElement('div');
+      preview.className = 'pending-preview';
+      preview.textContent = action.payload.reply_text.substring(0, 300);
+      card.appendChild(preview);
+    }
+
+    const btns = document.createElement('div');
+    btns.className = 'pending-btns';
+
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'pending-btn confirm';
+    confirmBtn.textContent = '✓ Confirmer';
+    confirmBtn.onclick = () => {
+      // Injecte la phrase dans l'input et envoie — Raya génère [ACTION:CONFIRM:id]
+      inputEl.value = `Confirme l'action ${action.id}`;
+      sendMessage();
+    };
+    btns.appendChild(confirmBtn);
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'pending-btn cancel';
+    cancelBtn.textContent = '✕ Annuler';
+    cancelBtn.onclick = () => {
+      inputEl.value = `Annule l'action ${action.id}`;
+      sendMessage();
+    };
+    btns.appendChild(cancelBtn);
+
+    card.appendChild(btns);
+    zone.appendChild(card);
+  });
+
+  // Insérer au-dessus de la zone d'input
+  const inputZone = document.querySelector('.input-zone');
+  inputZone.parentNode.insertBefore(zone, inputZone);
 }
 
 async function sendMessage() {
@@ -266,11 +355,24 @@ async function sendMessage() {
     const data = await response.json(); loading.remove();
     const msgRow = addMessage(data.answer, 'raya');
     if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'));
+
+    // Toasts pour les actions exécutées
     if (data.actions && data.actions.length > 0) {
       const ok = data.actions.filter(a => a.startsWith('✅'));
       const err = data.actions.filter(a => a.startsWith('❌'));
+      const pend = data.actions.filter(a => a.startsWith('⏸️'));
       if (ok.length) showToast(ok[0].replace('✅','').trim(), 'ok', 3000);
       if (err.length) showToast(err[0].replace('❌','').trim(), 'err', 4000);
+      if (pend.length) showToast(`${pend.length} action(s) en attente`, 'info', 4000);
+    }
+
+    // Affichage des actions en attente avec boutons Confirmer/Annuler
+    if (data.pending_actions && data.pending_actions.length > 0) {
+      renderPendingActions(data.pending_actions);
+    } else {
+      // Plus d'actions en attente — nettoyer la zone
+      const zone = document.getElementById('pending-actions-zone');
+      if (zone) zone.remove();
     }
   } catch(e) {
     loading.remove(); addMessage('Erreur de connexion à Raya. Réessayez.', 'raya');
