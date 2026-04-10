@@ -70,7 +70,6 @@ def execute_actions(
         )
 
     if MEMORY_OK:
-        # tenant_id transmis pour permettre RESTART_ONBOARDING et futures actions tenant-aware
         confirmed += _handle_memory_actions(raya_response, username, synth_threshold, tenant_id)
 
     return confirmed
@@ -183,7 +182,6 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
                          username, tenant_id, conversation_id):
     confirmed = []
 
-    # DELETE → queue (sensible)
     if mail_can_delete:
         for msg_id in re.findall(r'\[ACTION:DELETE:([^\]]+)\]', response):
             msg_id = msg_id.strip()
@@ -200,7 +198,6 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
                 f"   Pour confirmer : dites \"confirme action {action_id}\" · Pour annuler : \"annule action {action_id}\""
             )
 
-    # ARCHIVE → immédiat (réversible)
     for msg_id in re.findall(r'\[ACTION:ARCHIVE:([^\]]+)\]', response):
         msg_id = msg_id.strip()
         if not is_valid_outlook_id(msg_id): continue
@@ -209,14 +206,12 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
             confirmed.append("✅ Archivé" if r.get("status") == "ok" else f"❌ {r.get('message')}")
         except Exception as e: confirmed.append(f"❌ {str(e)[:80]}")
 
-    # READ → immédiat (anodin)
     for msg_id in re.findall(r'\[ACTION:READ:([^\]]+)\]', response):
         msg_id = msg_id.strip()
         if not is_valid_outlook_id(msg_id): continue
         try: perform_outlook_action("mark_as_read", {"message_id": msg_id}, token)
         except Exception: pass
 
-    # REPLY → queue (sensible)
     for match in re.finditer(r'\[ACTION:REPLY:([^:\]]{20,}):(.+?)\]', response, re.DOTALL):
         msg_id = match.group(1).strip()
         reply_text = match.group(2).strip()
@@ -240,7 +235,6 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
             f"   Pour envoyer : dites \"confirme action {action_id}\" · Pour annuler : \"annule action {action_id}\""
         )
 
-    # READBODY → immédiat (lecture)
     for msg_id in re.findall(r'\[ACTION:READBODY:([^\]]+)\]', response):
         msg_id = msg_id.strip()
         if not is_valid_outlook_id(msg_id): continue
@@ -250,7 +244,6 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
                 confirmed.append(f"📧 Corps du mail :\n{r.get('body_text', '')[:800]}")
         except Exception: pass
 
-    # CREATEEVENT → queue
     for match in re.finditer(r'\[ACTION:CREATEEVENT:([^\]]+)\]', response):
         parts = match.group(1).split('|')
         if len(parts) >= 3:
@@ -267,7 +260,6 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
                 f"   Pour confirmer : dites \"confirme action {action_id}\""
             )
 
-    # CREATE_TASK → immédiat
     for title in re.findall(r'\[ACTION:CREATE_TASK:([^\]]+)\]', response):
         try: perform_outlook_action("create_todo_task", {"title": title.strip()}, token)
         except Exception: pass
@@ -379,7 +371,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             else: confirmed.append(f"❌ Teams : {res.get('message')}")
         except Exception as e: confirmed.append(f"❌ Teams : {str(e)[:80]}")
 
-    for match in re.finditer(r'\[ACTION:TEAMS_CHANNEL:([^|\]]+)\|([^\]]+)\]', response):
+    for match in re.finditer(r'\[ACTION:TEAMS_CHANNEL:([^|^\]]+)\|([^\]]+)\]', response):
         team_id = match.group(1).strip(); channel_id = match.group(2).strip()
         try:
             res = read_channel_messages(token, team_id, channel_id)
@@ -408,7 +400,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             else: confirmed.append(f"❌ Chat : {res.get('message')}")
         except Exception as e: confirmed.append(f"❌ Chat : {str(e)[:80]}")
 
-    for match in re.finditer(r'\[ACTION:TEAMS_MSG:([^|\]]+)\|(.+?)\]', response, re.DOTALL):
+    for match in re.finditer(r'\[ACTION:TEAMS_MSG:([^|^\]]+)\|(.+?)\]', response, re.DOTALL):
         email = match.group(1).strip(); text = match.group(2).strip()
         label = f"Message Teams à {email}"
         action_id = queue_action(
@@ -418,7 +410,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
         preview = text[:200] + ("..." if len(text) > 200 else "")
         confirmed.append(f"⏸️ Action #{action_id} en attente : {label}\n   Message : {preview}\n   Pour envoyer : dites \"confirme action {action_id}\"")
 
-    for match in re.finditer(r'\[ACTION:TEAMS_REPLYCHAT:([^|\]]+)\|(.+?)\]', response, re.DOTALL):
+    for match in re.finditer(r'\[ACTION:TEAMS_REPLYCHAT:([^|^\]]+)\|(.+?)\]', response, re.DOTALL):
         chat_id = match.group(1).strip(); text = match.group(2).strip()
         action_id = queue_action(
             tenant_id=tenant_id, username=username, action_type="TEAMS_REPLYCHAT",
@@ -427,7 +419,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
         )
         confirmed.append(f"⏸️ Action #{action_id} en attente : Répondre dans le chat Teams\n   Pour envoyer : dites \"confirme action {action_id}\"")
 
-    for match in re.finditer(r'\[ACTION:TEAMS_SENDCHANNEL:([^|\]]+)\|([^|\]]+)\|(.+?)\]', response, re.DOTALL):
+    for match in re.finditer(r'\[ACTION:TEAMS_SENDCHANNEL:([^|^\]]+)\|([^|^\]]+)\|(.+?)\]', response, re.DOTALL):
         team_id = match.group(1).strip(); channel_id = match.group(2).strip(); text = match.group(3).strip()
         action_id = queue_action(
             tenant_id=tenant_id, username=username, action_type="TEAMS_SENDCHANNEL",
@@ -436,7 +428,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
         )
         confirmed.append(f"⏸️ Action #{action_id} en attente : Message dans canal Teams\n   Pour envoyer : dites \"confirme action {action_id}\"")
 
-    for match in re.finditer(r'\[ACTION:TEAMS_GROUPE:([^|\]]+)\|([^|\]]+)\|(.+?)\]', response, re.DOTALL):
+    for match in re.finditer(r'\[ACTION:TEAMS_GROUPE:([^|^\]]+)\|([^|^\]]+)\|(.+?)\]', response, re.DOTALL):
         emails_raw = match.group(1).strip(); topic = match.group(2).strip(); text = match.group(3).strip()
         emails = [e.strip() for e in emails_raw.split(',') if e.strip()]
         label = f"Créer groupe Teams : {topic}"
@@ -447,7 +439,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
         )
         confirmed.append(f"⏸️ Action #{action_id} en attente : {label}\n   Pour créer : dites \"confirme action {action_id}\"")
 
-    for match in re.finditer(r'\[ACTION:TEAMS_MARK:([^|\]]+)\|([^|\]]+)\|?([^|\]]*)\|?([^\]]*)\]', response):
+    for match in re.finditer(r'\[ACTION:TEAMS_MARK:([^|^\]]+)\|([^|^\]]+)\|?([^|^\]]*)\|?([^\]]*)\]', response):
         chat_id = match.group(1).strip(); message_id = match.group(2).strip()
         label = match.group(3).strip(); chat_type = match.group(4).strip() or "chat"
         try:
@@ -456,7 +448,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             confirmed.append(res.get("message", "✅ Curseur Teams posé."))
         except Exception as e: confirmed.append(f"❌ Teams mark : {str(e)[:80]}")
 
-    for match in re.finditer(r'\[ACTION:TEAMS_SYNC:([^|\]]+)\|?([^|\]]*)\|?([^\]]*)\]', response):
+    for match in re.finditer(r'\[ACTION:TEAMS_SYNC:([^|^\]]+)\|?([^|^\]]*)\|?([^\]]*)\]', response):
         chat_id = match.group(1).strip(); label = match.group(2).strip(); chat_type = match.group(3).strip() or "chat"
         try:
             from app.memory_teams import ingest_and_synthesize, get_teams_markers
@@ -470,7 +462,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             confirmed.append(f"🔄 Sync Teams '{label or chat_id[:20]}' lancée en arrière-plan.")
         except Exception as e: confirmed.append(f"❌ Teams sync : {str(e)[:80]}")
 
-    for match in re.finditer(r'\[ACTION:TEAMS_HISTORY:([^|\]]+)\|?([^|\]]*)\|?([^\]]*)\]', response):
+    for match in re.finditer(r'\[ACTION:TEAMS_HISTORY:([^|^\]]+)\|?([^|^\]]*)\|?([^\]]*)\]', response):
         chat_id = match.group(1).strip(); label = match.group(2).strip(); chat_type = match.group(3).strip() or "chat"
         try:
             from app.memory_teams import explore_history
@@ -494,14 +486,15 @@ def _handle_memory_actions(response: str, username: str, synth_threshold: int,
         category = match.group(1).strip(); rule = match.group(2).strip()
         try:
             save_rule(category, rule, "auto", 0.7, username)
-            confirmed.append(f"🧠 Mémorisé [{category}] : {rule[:60]}")
+            # Affiche la règle complète (pas de troncature arbitraire qui casse le sens)
+            confirmed.append(f"🧠 Mémorisé [{category}] : {rule[:120]}{'…' if len(rule) > 120 else ''}")
         except Exception as e: print(f"[LEARN] Erreur: {e}")
 
     for match in re.finditer(r'\[ACTION:INSIGHT:([^|^\]]+)\|([^\]]+)\]', response):
         topic = match.group(1).strip(); insight = match.group(2).strip()
         try:
             save_insight(topic, insight, "auto", username)
-            confirmed.append(f"💡 Observé [{topic}] : {insight[:60]}")
+            confirmed.append(f"💡 Observé [{topic}] : {insight[:120]}{'…' if len(insight) > 120 else ''}")
         except Exception as e: print(f"[INSIGHT] Erreur: {e}")
 
     for match in re.finditer(r'\[ACTION:FORGET:(\d+)\]', response):
@@ -523,7 +516,6 @@ def _handle_memory_actions(response: str, username: str, synth_threshold: int,
             confirmed.append("🔄 Synthèse lancée en arrière-plan.")
         except Exception as e: print(f"[SYNTH] Erreur: {e}")
 
-    # ── RESTART_ONBOARDING ── (ajouté Phase 3c correctif)
     for _ in re.finditer(r'\[ACTION:RESTART_ONBOARDING:\]', response):
         try:
             from app.onboarding import restart_onboarding
