@@ -99,6 +99,21 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .welcome h2 { font-size: 20px; font-weight: 700; color: var(--text); margin-bottom: 8px; }
 .welcome p { font-size: 14px; max-width: 380px; margin: 0 auto; line-height: 1.6; }
 
+/* ─── ONBOARDING CONVERSATIONNEL — lien "Passer" discret ─── */
+.onb-chat-skip {
+  text-align: center;
+  font-size: 12px;
+  margin-top: -10px;
+  margin-bottom: 4px;
+  padding: 4px 0;
+}
+.onb-chat-skip a {
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.onb-chat-skip a:hover { color: var(--accent); text-decoration: underline; }
+
 /* TRIAGE */
 .triage-bar { display: none; gap: 8px; padding: 10px 16px; background: var(--surface); border-top: 1px solid var(--border); justify-content: center; flex-shrink: 0; }
 .triage-bar.visible { display: flex; }
@@ -306,7 +321,7 @@ textarea#input.interim { color: var(--text-muted); font-style: italic; }
 .pending-btn.cancel  { background: #dc2626; color: white; }
 .pending-btn:hover   { opacity: 0.85; }
 
-/* ─── FEEDBACK 👍👎 + POURQUOI ? — Phase 3b ─── */
+/* ─── FEEDBACK 👍👎 + POURQUOI ? ─── */
 .bubble-actions-sep {
   width: 1px;
   height: 14px;
@@ -328,8 +343,6 @@ textarea#input.interim { color: var(--text-muted); font-style: italic; }
 .feedback-btn:hover { opacity: 1; transform: scale(1.2); }
 .feedback-btn:disabled { opacity: 0.2; cursor: default; transform: none; }
 .feedback-btn.why-btn { font-size: 13px; }
-
-/* Dialog inline feedback négatif */
 .feedback-dialog {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -339,93 +352,29 @@ textarea#input.interim { color: var(--text-muted); font-style: italic; }
   max-width: 420px;
   box-shadow: var(--shadow-md);
 }
-.feedback-dialog-label {
-  font-size: 13px;
-  font-weight: 500;
-  margin-bottom: 8px;
-  color: var(--text);
-}
+.feedback-dialog-label { font-size: 13px; font-weight: 500; margin-bottom: 8px; color: var(--text); }
 .feedback-dialog-input {
-  width: 100%;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 7px 10px;
-  font-size: 13px;
-  color: var(--text);
-  resize: none;
-  outline: none;
-  font-family: inherit;
+  width: 100%; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 10px; font-size: 13px; color: var(--text);
+  resize: none; outline: none; font-family: inherit;
 }
 .feedback-dialog-input:focus { border-color: var(--accent); }
 .feedback-dialog-btns { display: flex; gap: 8px; margin-top: 8px; }
-.feedback-dialog-send {
-  flex: 1;
-  background: var(--accent);
-  color: white;
-  border: none;
-  border-radius: 7px;
-  padding: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s;
-}
+.feedback-dialog-send { flex: 1; background: var(--accent); color: white; border: none; border-radius: 7px; padding: 6px; font-size: 12px; font-weight: 600; cursor: pointer; }
 .feedback-dialog-send:hover { background: var(--accent-hover); }
-.feedback-dialog-cancel {
-  background: var(--surface2);
-  color: var(--text-muted);
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 6px 12px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: color 0.15s;
-}
-.feedback-dialog-cancel:hover { color: var(--text); }
-
-/* Panel "Pourquoi ?" */
+.feedback-dialog-cancel { background: var(--surface2); color: var(--text-muted); border: 1px solid var(--border); border-radius: 7px; padding: 6px 12px; font-size: 12px; cursor: pointer; }
 .why-panel {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  margin: 4px 0 4px 40px;
-  max-width: 480px;
-  box-shadow: var(--shadow-md);
-  font-size: 13px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 12px 14px; margin: 4px 0 4px 40px; max-width: 480px;
+  box-shadow: var(--shadow-md); font-size: 13px;
 }
-.why-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  font-weight: 600;
-  margin-bottom: 8px;
-}
-.why-close {
-  background: none;
-  border: none;
-  cursor: pointer;
-  color: var(--text-muted);
-  font-size: 16px;
-  line-height: 1;
-  padding: 2px 4px;
-  border-radius: 4px;
-  transition: color 0.15s;
-}
+.why-header { display: flex; justify-content: space-between; align-items: center; font-weight: 600; margin-bottom: 8px; }
+.why-close { background: none; border: none; cursor: pointer; color: var(--text-muted); font-size: 16px; line-height: 1; padding: 2px 4px; border-radius: 4px; }
 .why-close:hover { color: var(--text); }
 .why-row { color: var(--text-muted); margin-bottom: 4px; }
 .why-row strong { color: var(--text); }
 .why-rules-title { font-weight: 500; margin: 8px 0 4px; }
-.why-rule {
-  background: var(--surface2);
-  border-radius: 5px;
-  padding: 4px 8px;
-  margin-bottom: 3px;
-  font-size: 12px;
-  color: var(--text-muted);
-  line-height: 1.4;
-}
+.why-rule { background: var(--surface2); border-radius: 5px; padding: 4px 8px; margin-bottom: 3px; font-size: 12px; color: var(--text-muted); line-height: 1.4; }
 .why-cat { color: var(--accent); font-weight: 500; margin-right: 4px; }
 .why-conf { color: var(--success); font-size: 11px; margin-left: 4px; }
 .why-empty { color: var(--text-muted); font-style: italic; font-size: 12px; }
