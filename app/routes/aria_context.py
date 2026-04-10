@@ -177,14 +177,6 @@ def build_system_prompt(
     pending_actions: list = None,
     session_theme: str | None = None,
 ) -> str:
-    """
-    Construit le prompt système complet.
-
-    Phase 3b (B8) : si session_theme est fourni, le contexte RAG est enrichi
-    avec tout ce qui concerne ce sujet (règles + insights + mails additionnels).
-    Cela permet à Raya d'avoir une vue complète sur le sujet en cours
-    et pas seulement les règles pertinentes pour la dernière question.
-    """
     display_name = username.capitalize()
     query_lower = query.lower()
 
@@ -206,8 +198,6 @@ def build_system_prompt(
         via_rag       = False
 
     # ── Enrichissement thématique (B8) ──
-    # Si Haiku a détecté un sujet cohérent, on injecte du contexte supplémentaire
-    # lié à ce thème pour que Raya ait une vue complète sur le sujet en cours.
     theme_context_block = ""
     if session_theme:
         try:
@@ -242,7 +232,7 @@ def build_system_prompt(
         username=username
     )
 
-    delete_line = "\n  [ACTION:DELETE:id] \u2192 corbeille récupérable" if tools["mail_can_delete"] else ""
+    delete_line = "\n  [ACTION:DELETE:id] → corbeille récupérable" if tools["mail_can_delete"] else ""
     drive_write_lines = ""
     if tools["drive_write"]:
         drive_write_lines = "\n  [ACTION:CREATEFOLDER:parent|nom] [ACTION:MOVEDRIVE:item|dest|nom] [ACTION:COPYFILE:source|dest|nom]"
@@ -255,9 +245,9 @@ def build_system_prompt(
             odoo_line = f"\nOdoo (lecture seule{shared})."
     mailboxes_line = f"\nBoîtes supplémentaires : {', '.join(tools['mail_extra_boxes'])}" if tools["mail_extra_boxes"] else ""
 
-    teams_context_block = f"\n\n=== TEAMS ==={chr(10)}{teams_context}" if teams_context else ""
-    mail_filter_block = f"\n\n=== FILTRE MAILS ==={chr(10)}{mail_filter_summary}" if mail_filter_summary else ""
-    conv_context_block = f"\n\n=== ÉCHANGES PASSÉS PERTINENTS ==={chr(10)}{conv_context}" if conv_context else ""
+    teams_context_block = f"\n\n=== TEAMS ===\n{teams_context}" if teams_context else ""
+    mail_filter_block = f"\n\n=== FILTRE MAILS ===\n{mail_filter_summary}" if mail_filter_summary else ""
+    conv_context_block = f"\n\n=== ÉCHANGES PASSÉS PERTINENTS ===\n{conv_context}" if conv_context else ""
 
     pending_block = ""
     if pending_actions:
@@ -322,4 +312,6 @@ Mémoire (immédiat) :
   [ACTION:INSIGHT:sujet|observation]
   [ACTION:FORGET:id]
   [ACTION:SYNTH:]
+Onboarding :
+  [ACTION:RESTART_ONBOARDING:] → relance le questionnaire de configuration initiale
 """

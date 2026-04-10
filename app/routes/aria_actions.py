@@ -7,6 +7,7 @@ Logique de queue (B2) :
 - Actions immédiates (ARCHIVE, READ, LISTDRIVE, SEARCHDRIVE, LEARN...) → exécutées directement
 - [ACTION:CONFIRM:id] → exécute l'action en queue
 - [ACTION:CANCEL:id] → annule l'action en queue
+- [ACTION:RESTART_ONBOARDING:] → relance le questionnaire de configuration initiale
 """
 import re
 import threading
@@ -69,7 +70,8 @@ def execute_actions(
         )
 
     if MEMORY_OK:
-        confirmed += _handle_memory_actions(raya_response, username, synth_threshold)
+        # tenant_id transmis pour permettre RESTART_ONBOARDING et futures actions tenant-aware
+        confirmed += _handle_memory_actions(raya_response, username, synth_threshold, tenant_id)
 
     return confirmed
 
@@ -97,7 +99,7 @@ def _handle_confirmations(response, username, tenant_id, outlook_token, tools):
         action_id = int(match.group(1))
         ok = cancel_action(action_id, username, tenant_id, reason="Annulé par l'utilisateur")
         confirmed.append(
-            f"?ude47 Action #{action_id} annulée." if ok
+            f"⏹️ Action #{action_id} annulée." if ok
             else f"❌ Action #{action_id} introuvable."
         )
 
@@ -231,7 +233,7 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
         )
         preview = reply_text[:300] + ("..." if len(reply_text) > 300 else "")
         confirmed.append(
-            f"⏸️ Action #{action_id} en attente \u2014 Réponse à envoyer :\n"
+            f"⏸️ Action #{action_id} en attente — Réponse à envoyer :\n"
             f"   À : {orig.get('from_email', '?')}\n"
             f"   Sujet : {orig.get('subject', '?')}\n"
             f"   Message : {preview}\n"
@@ -248,7 +250,7 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
                 confirmed.append(f"📧 Corps du mail :\n{r.get('body_text', '')[:800]}")
         except Exception: pass
 
-    # CREATEEVENT → queue (envoi à des participants)
+    # CREATEEVENT → queue
     for match in re.finditer(r'\[ACTION:CREATEEVENT:([^\]]+)\]', response):
         parts = match.group(1).split('|')
         if len(parts) >= 3:
@@ -265,7 +267,7 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
                 f"   Pour confirmer : dites \"confirme action {action_id}\""
             )
 
-    # CREATE_TASK → immédiat (anodin, dans son propre Todo)
+    # CREATE_TASK → immédiat
     for title in re.findall(r'\[ACTION:CREATE_TASK:([^\]]+)\]', response):
         try: perform_outlook_action("create_todo_task", {"title": title.strip()}, token)
         except Exception: pass
@@ -278,7 +280,6 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
 def _handle_drive_actions(response, token, drive_write, username, tenant_id, conversation_id):
     confirmed = []
 
-    # LISTDRIVE → immédiat (lecture)
     for match in re.finditer(r'\[ACTION:LISTDRIVE:([^\]]*)\]', response):
         subfolder = match.group(1).strip()
         try:
@@ -290,15 +291,11 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
                     size_str = f"  ({it.get('taille_ko','')} Ko)" if it.get("taille_ko") else ""
                     link = it.get("lien", "")
                     name = it['nom']
-                    if link:
-                        lines.append(f"  {icon} [**{name}**]({link}){size_str}")
-                    else:
-                        lines.append(f"  {icon} **{name}**{size_str}")
+                    lines.append(f"  {icon} [**{name}**]({link}){size_str}" if link else f"  {icon} **{name}**{size_str}")
                 confirmed.append(f"🗂️ {r.get('dossier', '1_Photovoltaïque')} ({r['count']}) :\n" + "\n".join(lines))
             else: confirmed.append(f"❌ {r.get('message', 'Erreur Drive')}")
         except Exception as e: confirmed.append(f"❌ Drive : {str(e)[:80]}")
 
-    # READDRIVE → immédiat (lecture)
     for match in re.finditer(r'\[ACTION:READDRIVE:([^\]]+)\]', response):
         file_ref = match.group(1).strip()
         try:
@@ -309,14 +306,13 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
                 else:
                     link = r.get("lien", "")
                     name = r.get('fichier', file_ref)
-                    if link:
-                        confirmed.append(f"📄 [{name}]({link}) — {r.get('message', '')} {r.get('conseil', '')}")
-                    else:
-                        confirmed.append(f"📄 {name} — {r.get('message', '')} {r.get('conseil', '')}")
+                    confirmed.append(
+                        f"📄 [{name}]({link}) — {r.get('message', '')} {r.get('conseil', '')}" if link
+                        else f"📄 {name} — {r.get('message', '')} {r.get('conseil', '')}"
+                    )
             else: confirmed.append(f"❌ {r.get('message')}")
         except Exception as e: confirmed.append(f"❌ {str(e)[:80]}")
 
-    # SEARCHDRIVE → immédiat (lecture) — lien cliquable si disponible
     for match in re.finditer(r'\[ACTION:SEARCHDRIVE:([^\]]+)\]', response):
         q = match.group(1).strip()
         try:
@@ -327,28 +323,20 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
                     icon = "📁" if it.get('type') == 'dossier' else "📄"
                     link = it.get("lien", "")
                     name = it['nom']
-                    if link:
-                        lines.append(f"  {icon} [**{name}**]({link})")
-                    else:
-                        lines.append(f"  {icon} **{name}**")
+                    lines.append(f"  {icon} [**{name}**]({link})" if link else f"  {icon} **{name}**")
                 confirmed.append(f"🔍 '{q}' — {r['count']} résultat(s) :\n" + "\n".join(lines))
             else: confirmed.append(f"❌ {r.get('message')}")
         except Exception as e: confirmed.append(f"❌ {str(e)[:80]}")
 
     if drive_write:
-        # CREATEFOLDER → immédiat (réversible)
         for match in re.finditer(r'\[ACTION:CREATEFOLDER:([^|^\]]+)\|([^\]]+)\]', response):
             parent_id = match.group(1).strip(); folder_name = match.group(2).strip()
             try:
                 _, drive_id, _ = _find_sharepoint_site_and_drive(token)
                 r = create_folder(token, parent_id, folder_name, drive_id)
-                confirmed.append(
-                    f"✅ Dossier '{folder_name}' créé" if r.get("status") == "ok"
-                    else f"❌ {r.get('message')}"
-                )
+                confirmed.append(f"✅ Dossier '{folder_name}' créé" if r.get("status") == "ok" else f"❌ {r.get('message')}")
             except Exception as e: confirmed.append(f"❌ {str(e)[:80]}")
 
-        # MOVEDRIVE → queue (sensible)
         for match in re.finditer(r'\[ACTION:MOVEDRIVE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', response):
             item_id = match.group(1).strip(); dest_id = match.group(2).strip()
             new_name = match.group(3).strip() or None
@@ -358,12 +346,8 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
                 payload={"item_id": item_id, "dest_id": dest_id, "new_name": new_name},
                 label=label, conversation_id=conversation_id,
             )
-            confirmed.append(
-                f"⏸️ Action #{action_id} en attente : {label}\n"
-                f"   Pour confirmer : dites \"confirme action {action_id}\""
-            )
+            confirmed.append(f"⏸️ Action #{action_id} en attente : {label}\n   Pour confirmer : dites \"confirme action {action_id}\"")
 
-        # COPYFILE → queue (sensible)
         for match in re.finditer(r'\[ACTION:COPYFILE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', response):
             source_id = match.group(1).strip(); dest_id = match.group(2).strip()
             new_name = match.group(3).strip() or None
@@ -373,10 +357,7 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
                 payload={"source_id": source_id, "dest_id": dest_id, "new_name": new_name},
                 label=label, conversation_id=conversation_id,
             )
-            confirmed.append(
-                f"⏸️ Action #{action_id} en attente : {label}\n"
-                f"   Pour confirmer : dites \"confirme action {action_id}\""
-            )
+            confirmed.append(f"⏸️ Action #{action_id} en attente : {label}\n   Pour confirmer : dites \"confirme action {action_id}\"")
 
     return confirmed
 
@@ -386,7 +367,6 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
 def _handle_teams_actions(response, token, username, tenant_id, conversation_id):
     confirmed = []
 
-    # TEAMS_LIST → immédiat
     for _ in re.finditer(r'\[ACTION:TEAMS_LIST:\]', response):
         try:
             res = list_teams_with_channels(token)
@@ -413,7 +393,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
         try:
             res = list_chats(token)
             if res.get("status") == "ok":
-                lines = [f"  {'\ud83d\udc64' if c['type']=='oneOnOne' else '\ud83d\udc65'} {c['topic']} [id:{c['id'][:20]}...]" for c in res.get("chats", [])]
+                lines = [f"  {'👤' if c['type']=='oneOnOne' else '👥'} {c['topic']} [id:{c['id'][:20]}...]" for c in res.get("chats", [])]
                 confirmed.append(f"💬 Chats Teams ({res['count']}) :\n" + "\n".join(lines))
             else: confirmed.append(f"❌ Chats : {res.get('message')}")
         except Exception as e: confirmed.append(f"❌ Chats : {str(e)[:80]}")
@@ -428,7 +408,6 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             else: confirmed.append(f"❌ Chat : {res.get('message')}")
         except Exception as e: confirmed.append(f"❌ Chat : {str(e)[:80]}")
 
-    # TEAMS_MSG → queue (sensible)
     for match in re.finditer(r'\[ACTION:TEAMS_MSG:([^|\]]+)\|(.+?)\]', response, re.DOTALL):
         email = match.group(1).strip(); text = match.group(2).strip()
         label = f"Message Teams à {email}"
@@ -437,40 +416,26 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             payload={"email": email, "text": text}, label=label, conversation_id=conversation_id,
         )
         preview = text[:200] + ("..." if len(text) > 200 else "")
-        confirmed.append(
-            f"⏸️ Action #{action_id} en attente : {label}\n"
-            f"   Message : {preview}\n"
-            f"   Pour envoyer : dites \"confirme action {action_id}\""
-        )
+        confirmed.append(f"⏸️ Action #{action_id} en attente : {label}\n   Message : {preview}\n   Pour envoyer : dites \"confirme action {action_id}\"")
 
-    # TEAMS_REPLYCHAT → queue (sensible)
     for match in re.finditer(r'\[ACTION:TEAMS_REPLYCHAT:([^|\]]+)\|(.+?)\]', response, re.DOTALL):
         chat_id = match.group(1).strip(); text = match.group(2).strip()
-        label = f"Répondre dans le chat Teams"
         action_id = queue_action(
             tenant_id=tenant_id, username=username, action_type="TEAMS_REPLYCHAT",
-            payload={"chat_id": chat_id, "text": text}, label=label, conversation_id=conversation_id,
+            payload={"chat_id": chat_id, "text": text},
+            label="Répondre dans le chat Teams", conversation_id=conversation_id,
         )
-        confirmed.append(
-            f"⏸️ Action #{action_id} en attente : {label}\n"
-            f"   Pour envoyer : dites \"confirme action {action_id}\""
-        )
+        confirmed.append(f"⏸️ Action #{action_id} en attente : Répondre dans le chat Teams\n   Pour envoyer : dites \"confirme action {action_id}\"")
 
-    # TEAMS_SENDCHANNEL → queue (sensible)
     for match in re.finditer(r'\[ACTION:TEAMS_SENDCHANNEL:([^|\]]+)\|([^|\]]+)\|(.+?)\]', response, re.DOTALL):
         team_id = match.group(1).strip(); channel_id = match.group(2).strip(); text = match.group(3).strip()
-        label = f"Message dans canal Teams"
         action_id = queue_action(
             tenant_id=tenant_id, username=username, action_type="TEAMS_SENDCHANNEL",
             payload={"team_id": team_id, "channel_id": channel_id, "text": text},
-            label=label, conversation_id=conversation_id,
+            label="Message dans canal Teams", conversation_id=conversation_id,
         )
-        confirmed.append(
-            f"⏸️ Action #{action_id} en attente : {label}\n"
-            f"   Pour envoyer : dites \"confirme action {action_id}\""
-        )
+        confirmed.append(f"⏸️ Action #{action_id} en attente : Message dans canal Teams\n   Pour envoyer : dites \"confirme action {action_id}\"")
 
-    # TEAMS_GROUPE → queue (sensible)
     for match in re.finditer(r'\[ACTION:TEAMS_GROUPE:([^|\]]+)\|([^|\]]+)\|(.+?)\]', response, re.DOTALL):
         emails_raw = match.group(1).strip(); topic = match.group(2).strip(); text = match.group(3).strip()
         emails = [e.strip() for e in emails_raw.split(',') if e.strip()]
@@ -480,12 +445,8 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             payload={"emails": emails, "topic": topic, "text": text},
             label=label, conversation_id=conversation_id,
         )
-        confirmed.append(
-            f"⏸️ Action #{action_id} en attente : {label}\n"
-            f"   Pour créer : dites \"confirme action {action_id}\""
-        )
+        confirmed.append(f"⏸️ Action #{action_id} en attente : {label}\n   Pour créer : dites \"confirme action {action_id}\"")
 
-    # Mémoire Teams → immédiat (interne)
     for match in re.finditer(r'\[ACTION:TEAMS_MARK:([^|\]]+)\|([^|\]]+)\|?([^|\]]*)\|?([^\]]*)\]', response):
         chat_id = match.group(1).strip(); message_id = match.group(2).strip()
         label = match.group(3).strip(); chat_type = match.group(4).strip() or "chat"
@@ -525,7 +486,8 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
 
 # ─── MÉMOIRE ───
 
-def _handle_memory_actions(response, username, synth_threshold):
+def _handle_memory_actions(response: str, username: str, synth_threshold: int,
+                           tenant_id: str = 'couffrant_solar') -> list:
     confirmed = []
 
     for match in re.finditer(r'\[ACTION:LEARN:([^|^\]]+)\|([^\]]+)\]', response):
@@ -560,5 +522,20 @@ def _handle_memory_actions(response, username, synth_threshold):
             ).start()
             confirmed.append("🔄 Synthèse lancée en arrière-plan.")
         except Exception as e: print(f"[SYNTH] Erreur: {e}")
+
+    # ── RESTART_ONBOARDING ── (ajouté Phase 3c correctif)
+    for _ in re.finditer(r'\[ACTION:RESTART_ONBOARDING:\]', response):
+        try:
+            from app.onboarding import restart_onboarding
+            ok = restart_onboarding(username, tenant_id)
+            if ok:
+                confirmed.append(
+                    "🔄 Questionnaire relancé ! Recharge la page (F5) pour démarrer la configuration."
+                )
+            else:
+                confirmed.append("❌ Impossible de relancer le questionnaire.")
+        except Exception as e:
+            print(f"[RESTART_ONBOARDING] Erreur: {e}")
+            confirmed.append("❌ Erreur lors du redémarrage du questionnaire.")
 
     return confirmed
