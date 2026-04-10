@@ -28,15 +28,12 @@ from app.routes.mail import router as mail_router
 from app.routes.reset_password import router as reset_router
 from app.routes.webhook import router as webhook_router
 from app.routes.forced_reset import router as forced_reset_router
+from app.routes.onboarding import router as onboarding_router
 
 
 # ─── MIDDLEWARE HEADERS DE SÉCURITÉ ───
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """
-    Ajoute les headers HTTP de sécurité sur toutes les réponses.
-    script-src inclut cdn.jsdelivr.net pour marked.js et DOMPurify.
-    """
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -57,11 +54,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 app = FastAPI(title="Raya — Assistant IA")
 
-# Ordre important : SecurityHeaders avant SessionMiddleware
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=30 * 24 * 3600)
 
-# Fichiers statiques (CSS, JS)
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 app.include_router(auth_router)
@@ -72,6 +67,7 @@ app.include_router(mail_router)
 app.include_router(reset_router)
 app.include_router(webhook_router)
 app.include_router(forced_reset_router)
+app.include_router(onboarding_router)
 
 
 @app.get("/")
@@ -94,7 +90,7 @@ def startup_event():
     except Exception as e:
         print(f"[Raya] Erreur init_default_user: {e}")
 
-    # Seeding du tenant principal si pas encore fait
+    # Seeding du tenant principal
     try:
         from app.seeding import seed_tenant, is_tenant_seeded
         admin_username = os.getenv("APP_USERNAME", "guillaume").strip()
@@ -106,6 +102,13 @@ def startup_event():
             print(f"[Raya] {admin_username} déjà seedé, skip")
     except Exception as e:
         print(f"[Raya] Erreur seeding: {e}")
+
+    # Registre d'outils (Phase 3c)
+    try:
+        from app.tools_registry import seed_tools_registry
+        seed_tools_registry()
+    except Exception as e:
+        print(f"[ToolsRegistry] Erreur seed: {e}")
 
     def setup_webhooks():
         time.sleep(30)

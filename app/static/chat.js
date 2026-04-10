@@ -26,6 +26,7 @@ async function init() {
   loadUserInfo();
   loadMailCount();
   checkTokenStatus();
+  checkOnboarding();
   document.getElementById('autoSpeakBtn').classList.add('active');
   messagesEl.addEventListener('scroll', onMessagesScroll);
 }
@@ -50,6 +51,136 @@ async function checkHealth() {
   const dot = document.getElementById('msStatus');
   try { const d = await (await fetch('/health')).json(); dot.className = d.status === 'ok' ? 'logo-dot' : 'logo-dot off'; }
   catch(e) { dot.className = 'logo-dot off'; }
+}
+
+// ─── ONBOARDING ───
+async function checkOnboarding() {
+  try {
+    const r = await fetch('/onboarding/status');
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.status === 'pending' || d.status === 'in_progress') {
+      showOnboardingOverlay(d);
+    }
+  } catch(e) {}
+}
+
+function showOnboardingOverlay(data) {
+  const overlay = document.getElementById('onboardingOverlay');
+  if (!overlay) return;
+  overlay.classList.add('open');
+  renderOnboardingStep(0, data.blocs || []);
+}
+
+let _onboardingBlocs = [];
+let _onboardingAnswers = {};
+let _onboardingCurrentBloc = 0;
+
+function renderOnboardingStep(blocIdx, blocs) {
+  _onboardingBlocs = blocs;
+  _onboardingCurrentBloc = blocIdx;
+  const container = document.getElementById('onboardingContent');
+  if (!container) return;
+
+  if (blocIdx >= blocs.length) {
+    // Tous les blocs completés — écran de confirmation
+    container.innerHTML = `
+      <div class="onb-done">
+        <div class="onb-done-icon">✨</div>
+        <h3>Tout est prêt !</h3>
+        <p>Raya analyse vos réponses et configure votre profil...</p>
+        <div class="onb-spinner"></div>
+      </div>
+    `;
+    submitOnboarding();
+    return;
+  }
+
+  const bloc = blocs[blocIdx];
+  const progress = Math.round((blocIdx / blocs.length) * 100);
+  const savedAnswers = _onboardingAnswers[String(bloc.id)] || {};
+
+  container.innerHTML = `
+    <div class="onb-progress"><div class="onb-progress-bar" style="width:${progress}%"></div></div>
+    <div class="onb-step-label">Bloc ${blocIdx + 1} / ${blocs.length}</div>
+    <h3 class="onb-bloc-title">${bloc.titre}</h3>
+    <div class="onb-questions">
+      ${bloc.questions.map((q, qi) => `
+        <div class="onb-question">
+          <label class="onb-q-label">${q}</label>
+          <textarea class="onb-q-input" data-q="${qi}" data-question="${q.replace(/"/g, '&quot;')}" placeholder="Votre réponse..." rows="2">${savedAnswers[q] || ''}</textarea>
+        </div>
+      `).join('')}
+    </div>
+    <div class="onb-footer">
+      ${blocIdx > 0 ? '<button class="onb-btn onb-btn-ghost" onclick="onboardingPrev()">← Retour</button>' : '<button class="onb-btn onb-btn-ghost" onclick="skipOnboarding()">Étude plus tard</button>'}
+      <button class="onb-btn onb-btn-primary" onclick="onboardingNext()">${blocIdx < blocs.length - 1 ? 'Suivant →' : 'Terminer ✨'}</button>
+    </div>
+  `;
+}
+
+function collectCurrentAnswers() {
+  const bloc = _onboardingBlocs[_onboardingCurrentBloc];
+  if (!bloc) return;
+  const inputs = document.querySelectorAll('.onb-q-input');
+  const blocAnswers = {};
+  inputs.forEach(input => {
+    const q = input.dataset.question;
+    const v = input.value.trim();
+    if (q && v) blocAnswers[q] = v;
+  });
+  if (Object.keys(blocAnswers).length > 0) {
+    _onboardingAnswers[String(bloc.id)] = blocAnswers;
+  }
+}
+
+function onboardingNext() {
+  collectCurrentAnswers();
+  renderOnboardingStep(_onboardingCurrentBloc + 1, _onboardingBlocs);
+}
+
+function onboardingPrev() {
+  collectCurrentAnswers();
+  renderOnboardingStep(_onboardingCurrentBloc - 1, _onboardingBlocs);
+}
+
+async function skipOnboarding() {
+  try { await fetch('/onboarding/skip', {method: 'POST'}); } catch(e) {}
+  closeOnboarding();
+}
+
+function closeOnboarding() {
+  const overlay = document.getElementById('onboardingOverlay');
+  if (overlay) overlay.classList.remove('open');
+}
+
+async function submitOnboarding() {
+  try {
+    const r = await fetch('/onboarding/complete', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({answers: _onboardingAnswers})
+    });
+    const d = await r.json();
+    const container = document.getElementById('onboardingContent');
+    if (container) {
+      container.innerHTML = `
+        <div class="onb-done">
+          <div class="onb-done-icon">✨</div>
+          <h3>Raya est prête !</h3>
+          <p>${d.rules_created || 0} règles créées — ${d.insights_created || 0} observations enregistrées.</p>
+          <p style="font-size:13px;color:var(--text-muted);margin-top:8px">Vous pouvez relancer l'onboarding à tout moment depuis les paramètres.</p>
+          <button class="onb-btn onb-btn-primary" style="margin-top:16px" onclick="closeOnboarding()">Commencer →</button>
+        </div>
+      `;
+    }
+    showToast(`Profil configuré : ${d.rules_created || 0} règles créées`, 'ok', 4000);
+  } catch(e) {
+    const container = document.getElementById('onboardingContent');
+    if (container) {
+      container.innerHTML = `<div class="onb-done"><p>Une erreur est survenue. Raya reste fonctionnelle.</p><button class="onb-btn onb-btn-primary" onclick="closeOnboarding()">Continuer</button></div>`;
+    }
+  }
 }
 
 // ─── TOKEN ALERT ───
@@ -146,7 +277,7 @@ function openShortcuts() { pendingShortcuts = [...getShortcuts()]; renderShortcu
 function closeShortcuts() { document.getElementById('modalShortcuts').classList.remove('open'); }
 function renderShortcutList() {
   document.getElementById('shortcutList').innerHTML = pendingShortcuts.map((s,i) =>
-    `<div class="shortcut-item"><span>${s.icon||''} ${s.label}</span><button class="shortcut-del" onclick="removePendingShortcut(${i})">✕</button></div>`
+    `<div class="shortcut-item"><span>${s.icon||''} ${s.label}</span><button class="shortcut-del" onclick="removePendingShortcut(${i})">\u2715</button></div>`
   ).join('');
 }
 function removePendingShortcut(i) { pendingShortcuts.splice(i,1); renderShortcutList(); }
@@ -181,7 +312,7 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
   if (welcome) welcome.remove();
   const row = document.createElement('div'); row.className = 'message-row ' + type;
   const avatar = document.createElement('div'); avatar.className = 'avatar ' + type + '-avatar';
-  avatar.textContent = type === 'raya' ? '✦' : (currentUser ? currentUser[0].toUpperCase() : 'G');
+  avatar.textContent = type === 'raya' ? '❆' : (currentUser ? currentUser[0].toUpperCase() : 'G');
   const bubble = document.createElement('div'); bubble.className = 'bubble';
   if (fileInfo && fileInfo.type && fileInfo.type.startsWith('image/')) {
     const img = document.createElement('img'); img.className = 'attached-image';
@@ -209,32 +340,24 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
 
   if (type === 'raya') {
     const actions = document.createElement('div'); actions.className = 'bubble-actions';
-
-    // Bouton 🔊 Écouter
     const speakBtn = document.createElement('button'); speakBtn.className = 'speak-btn'; speakBtn.textContent = '🔊 Écouter';
     speakBtn.onclick = () => { if (speakBtn.classList.contains('playing')) stopSpeech(); else speak(text, speakBtn); };
     actions.appendChild(speakBtn);
-
-    // Boutons feedback 👍👎 + Pourquoi ? (discrets, apparaissent au hover)
     if (ariaMemoryId) {
       const sep = document.createElement('span'); sep.className = 'bubble-actions-sep'; actions.appendChild(sep);
-
       const thumbUp = document.createElement('button'); thumbUp.className = 'feedback-btn'; thumbUp.title = 'Bonne réponse';
       thumbUp.textContent = '👍';
       thumbUp.onclick = () => sendFeedback(ariaMemoryId, 'positive', thumbUp);
       actions.appendChild(thumbUp);
-
       const thumbDown = document.createElement('button'); thumbDown.className = 'feedback-btn'; thumbDown.title = 'À améliorer';
       thumbDown.textContent = '👎';
       thumbDown.onclick = () => openFeedbackDialog(ariaMemoryId, thumbDown);
       actions.appendChild(thumbDown);
-
       const whyBtn = document.createElement('button'); whyBtn.className = 'feedback-btn why-btn'; whyBtn.title = 'Pourquoi cette réponse ?';
       whyBtn.textContent = '💡';
       whyBtn.onclick = () => showWhy(ariaMemoryId, whyBtn);
       actions.appendChild(whyBtn);
     }
-
     bubble.appendChild(actions);
   }
   row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row);
@@ -244,40 +367,31 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
 
 function addLoading() {
   const row = document.createElement('div'); row.className = 'message-row raya';
-  const avatar = document.createElement('div'); avatar.className = 'avatar raya-avatar'; avatar.textContent = '✦';
+  const avatar = document.createElement('div'); avatar.className = 'avatar raya-avatar'; avatar.textContent = '❆';
   const bubble = document.createElement('div'); bubble.className = 'bubble loading-bubble';
   bubble.innerHTML = '<div class="dot-anim"></div><div class="dot-anim"></div><div class="dot-anim"></div>';
   row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row); scrollToBottom(); return row;
 }
 
 // ─── FEEDBACK 👍👎 ───
-
 async function sendFeedback(ariaMemoryId, type, btn) {
   if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
   try {
     const r = await fetch('/raya/feedback', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ aria_memory_id: ariaMemoryId, feedback_type: type, comment: '' })
     });
     const d = await r.json();
-    if (d.ok) {
-      if (btn) { btn.textContent = type === 'positive' ? '👍✅' : '👎✅'; }
+    if (d.ok || d.status === 'ok') {
+      if (btn) btn.textContent = type === 'positive' ? '👍✅' : '👎✅';
       if (type === 'positive') showToast('Merci ! Les règles utilisées ont été renforcées.', 'ok', 3000);
-      if (type === 'negative' && d.corrective_rule) showToast('Règle corrective créée ✔', 'ok', 3000);
-    } else {
-      if (btn) { btn.disabled = false; btn.style.opacity = ''; }
-    }
-  } catch(e) {
-    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
-  }
+    } else { if (btn) { btn.disabled = false; btn.style.opacity = ''; } }
+  } catch(e) { if (btn) { btn.disabled = false; btn.style.opacity = ''; } }
 }
 
 function openFeedbackDialog(ariaMemoryId, btn) {
-  // Mini-dialog inline pour le commentaire négatif
   const existing = document.getElementById('feedback-dialog-' + ariaMemoryId);
   if (existing) { existing.remove(); return; }
-
   const dialog = document.createElement('div');
   dialog.id = 'feedback-dialog-' + ariaMemoryId;
   dialog.className = 'feedback-dialog';
@@ -289,45 +403,37 @@ function openFeedbackDialog(ariaMemoryId, btn) {
       <button class="feedback-dialog-cancel">✕ Annuler</button>
     </div>
   `;
-
   dialog.querySelector('.feedback-dialog-send').onclick = async () => {
     const comment = dialog.querySelector('.feedback-dialog-input').value.trim();
     dialog.remove();
     const r = await fetch('/raya/feedback', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ aria_memory_id: ariaMemoryId, feedback_type: 'negative', comment })
     });
     const d = await r.json();
-    if (d.ok) {
+    if (d.ok || d.status === 'ok') {
       if (btn) { btn.textContent = '👎✅'; btn.disabled = true; btn.style.opacity = '0.5'; }
-      showToast(d.corrective_rule ? 'Règle corrective créée par Opus ✔' : 'Feedback enregistré', 'ok', 3000);
+      showToast(d.rule_text ? 'Règle corrective créée par Opus ✔' : 'Feedback enregistré', 'ok', 3000);
     }
   };
   dialog.querySelector('.feedback-dialog-cancel').onclick = () => dialog.remove();
-
-  // Insérer juste après la bulle Raya
   btn.closest('.message-row').after(dialog);
 }
 
 async function showWhy(ariaMemoryId, btn) {
   const existing = document.getElementById('why-panel-' + ariaMemoryId);
   if (existing) { existing.remove(); return; }
-
   try {
     const d = await (await fetch('/raya/why/' + ariaMemoryId)).json();
     if (!d.ok) return;
-
     const panel = document.createElement('div');
     panel.id = 'why-panel-' + ariaMemoryId;
     panel.className = 'why-panel';
-
     const tierLabel = d.model_tier === 'deep' ? '🧠 Opus (analyse complexe)' : '⚡ Sonnet (réponse rapide)';
-    const ragLabel = d.via_rag ? `RAG actif — ${d.rules_count} règle(s) ciblée(s)` : 'Injection en bloc (RAG non actif)';
-    const rulesHtml = d.rules && d.rules.length > 0
-      ? d.rules.map(r => `<div class="why-rule"><span class="why-cat">[${r.category}]</span> ${r.rule.substring(0,80)}${r.rule.length>80?'...':''} <span class="why-conf">${(r.confidence*100).toFixed(0)}%</span></div>`).join('')
+    const ragLabel = d.via_rag ? `RAG actif — ${(d.rule_ids||[]).length} règle(s) ciblée(s)` : 'Injection en bloc (RAG non actif)';
+    const rulesHtml = d.rules_detail && d.rules_detail.length > 0
+      ? d.rules_detail.map(r => `<div class="why-rule"><span class="why-cat">[${r.category}]</span> ${r.rule.substring(0,80)}${r.rule.length>80?'...':''} <span class="why-conf">${(r.confidence*100).toFixed(0)}%</span></div>`).join('')
       : '<div class="why-empty">Aucune règle injectée</div>';
-
     panel.innerHTML = `
       <div class="why-header"><span>💡 Pourquoi cette réponse ?</span><button class="why-close" onclick="this.closest('.why-panel').remove()">✕</button></div>
       <div class="why-row">🤖 Modèle : <strong>${tierLabel}</strong></div>
@@ -476,7 +582,7 @@ async function startTriage() {
 function nextTriage() {
   if (triageQueue.length===0) { triageBar.classList.remove('visible'); const row=addMessage('Triage terminé !','raya'); if(autoSpeak) speak('Triage terminé !',row.querySelector('.speak-btn')); triageCurrent=null; return; }
   triageCurrent = triageQueue.shift();
-  const msg='De : '+(triageCurrent.from_email||'Inconnu')+'\nSujet : '+(triageCurrent.subject||'(Sans objet)')+'\n\n'+(triageCurrent.raw_body_preview||'').slice(0,200)+'\n\n— Que je fasse ? ('+triageQueue.length+' restants)';
+  const msg='De : '+(triageCurrent.from_email||'Inconnu')+'\nSujet : '+(triageCurrent.subject||'(Sans objet)')+'\n\n'+(triageCurrent.raw_body_preview||'').slice(0,200)+'\n\n— Que je fasse ? ('+(triageQueue.length+' restants)');
   const row=addMessage(msg,'raya'); if(autoSpeak) speak(msg,row.querySelector('.speak-btn'));
   triageBar.classList.add('visible');
 }
@@ -552,7 +658,11 @@ function formatDrawerResult(d) {
 
 // ─── KEYBOARD ───
 document.addEventListener('keydown', e => {
-  if (e.key==='Escape') { closeDrawer(); document.getElementById('modalShortcuts').classList.remove('open'); }
+  if (e.key==='Escape') {
+    closeDrawer();
+    document.getElementById('modalShortcuts').classList.remove('open');
+    closeOnboarding();
+  }
 });
 document.getElementById('modalShortcuts').addEventListener('click', e => { if(e.target===document.getElementById('modalShortcuts')) closeShortcuts(); });
 
