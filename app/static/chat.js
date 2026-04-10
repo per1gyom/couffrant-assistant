@@ -56,9 +56,8 @@ async function checkHealth() {
   catch(e) { dot.className = 'logo-dot off'; }
 }
 
-// ─── ONBOARDING CONVERSATIONNEL ───
-// Raya pose ses questions comme des messages normaux dans le chat.
-// Le micro fonctionne immédiatement — il injecte dans l'input normal.
+// ─── ONBOARDING CONVERSATIONNEL v2 ───
+// Moteur d'elicitation dynamique : questions open ou choice (boutons).
 // sendMessage() intercepte _onboardingActive et route vers /onboarding/answer.
 
 async function checkOnboarding() {
@@ -73,16 +72,21 @@ async function checkOnboarding() {
 }
 
 async function _startOnboardingChat() {
+  const loading = addLoading();
   try {
     const r = await fetch('/onboarding/start', { method: 'POST' });
-    if (!r.ok) return;
+    if (!r.ok) { loading.remove(); return; }
     const d = await r.json();
+    loading.remove();
     _onboardingActive = true;
 
-    // Affiche le message d'accueil + question 1 dans le chat normal
-    addMessage(d.message, 'raya');
+    // Message d'intro (séparé de la question)
+    if (d.intro) addMessage(d.intro, 'raya');
 
-    // Petit lien "Passer" discret sous le message
+    // Rend la première question selon son type
+    _renderOnboardingStep(d);
+
+    // Lien Passer discret
     const skipBar = document.createElement('div');
     skipBar.id = 'onb-skip-bar';
     skipBar.className = 'onb-chat-skip';
@@ -91,11 +95,63 @@ async function _startOnboardingChat() {
 
     inputEl.placeholder = 'Réponds ici ou utilise le 🎤 micro…';
     scrollToBottom();
-  } catch(e) {}
+  } catch(e) { loading.remove(); }
+}
+
+function _renderOnboardingStep(step) {
+  // Retire les anciens boutons s'il y en avait
+  document.querySelectorAll('.onb-choices').forEach(el => el.remove());
+
+  if (step.type === 'done' || step.done) {
+    _onboardingDone(step);
+    return;
+  }
+
+  // Affiche la question dans le chat
+  const question = step.question || step.next_message;
+  if (question) addMessage(question, 'raya');
+
+  // Si type choice : affiche les boutons cliquables
+  if (step.type === 'choice' && step.options && step.options.length > 0) {
+    const container = document.createElement('div');
+    container.className = 'onb-choices';
+    step.options.forEach(opt => {
+      const btn = document.createElement('button');
+      btn.className = 'onb-choice-btn';
+      btn.textContent = opt;
+      btn.onclick = () => {
+        container.querySelectorAll('button').forEach(b => b.disabled = true);
+        container.style.opacity = '0.5';
+        _sendOnboardingAnswer(opt);
+      };
+      container.appendChild(btn);
+    });
+    const skipBtn = document.createElement('button');
+    skipBtn.className = 'onb-choice-skip';
+    skipBtn.textContent = 'Passer →';
+    skipBtn.onclick = () => { container.remove(); _sendOnboardingAnswer('(passe)'); };
+    container.appendChild(skipBtn);
+    messagesEl.appendChild(container);
+  }
+  scrollToBottom();
+}
+
+function _onboardingDone(step) {
+  _onboardingActive = false;
+  document.getElementById('onb-skip-bar')?.remove();
+  document.querySelectorAll('.onb-choices').forEach(el => el.remove());
+  inputEl.placeholder = 'Envoie un message à Raya…';
+  const msg = step.next_message || step.summary || 'Parfait, je construis ton profil en arrière-plan.';
+  addMessage(msg, 'raya');
+  _pollOnboardingCompletion();
 }
 
 async function _sendOnboardingAnswer(text) {
   addMessage(text, 'user');
+  inputEl.value = '';
+  inputEl.style.height = 'auto';
+  document.querySelectorAll('.onb-choices').forEach(el => el.remove());
+
   const loading = addLoading();
   try {
     const r = await fetch('/onboarding/answer', {
@@ -105,13 +161,7 @@ async function _sendOnboardingAnswer(text) {
     });
     const d = await r.json();
     loading.remove();
-    if (d.next_message) { addMessage(d.next_message, 'raya'); scrollToBottom(); }
-    if (d.done) {
-      _onboardingActive = false;
-      document.getElementById('onb-skip-bar')?.remove();
-      inputEl.placeholder = 'Envoie un message à Raya…';
-      _pollOnboardingCompletion();
-    }
+    _renderOnboardingStep(d);
   } catch(e) {
     loading.remove();
     _onboardingActive = false;
@@ -127,7 +177,10 @@ function _pollOnboardingCompletion() {
     try {
       const r = await fetch('/onboarding/status');
       const d = await r.json();
-      if (d.status === 'completed') { clearInterval(iv); showToast('✨ Profil configuré par Raya !', 'ok', 4000); }
+      if (d.status === 'done' || d.status === 'completed') {
+        clearInterval(iv);
+        showToast('✨ Profil configuré par Raya !', 'ok', 4000);
+      }
     } catch(e) { clearInterval(iv); }
   }, 3000);
 }
@@ -136,6 +189,7 @@ async function skipOnboarding() {
   try { await fetch('/onboarding/skip', { method: 'POST' }); } catch(e) {}
   _onboardingActive = false;
   document.getElementById('onb-skip-bar')?.remove();
+  document.querySelectorAll('.onb-choices').forEach(el => el.remove());
   inputEl.placeholder = 'Envoie un message à Raya…';
   addMessage('Pas de problème — tu pourras relancer la configuration depuis le menu ⚙️ Admin.', 'raya');
 }
@@ -425,8 +479,7 @@ function renderPendingActions(pendingList) {
 async function sendMessage() {
   const text = inputEl.value.trim(); if (!text && !currentFile) return;
 
-  // ── Interception onboarding : le micro fonctionne naturellement ──
-  // Le bouton 🎤 injecte déjà le texte dans inputEl → ce bloc l'intercepte
+  // Interception onboarding
   if (_onboardingActive && text && !currentFile) {
     inputEl.value = ''; inputEl.style.height = 'auto';
     await _sendOnboardingAnswer(text);
