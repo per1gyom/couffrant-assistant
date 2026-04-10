@@ -190,7 +190,8 @@ def get_internal_domains(username: str, tenant_id: str = None) -> list:
             continue
         parts = re.findall(r"[\w.-]+\.[a-z]{2,}", rule_l)
         domains.extend([p for p in parts if '.' in p and len(p) > 4])
-    return domains if domains else ["couffrant-solar.fr"]
+    # Pas de fallback hardcodé — les domaines internes viennent des règles seedées.
+    return domains
 
 
 def parse_business_priority(category: str, title: str, username: str,
@@ -237,11 +238,5 @@ def parse_business_priority(category: str, title: str, username: str,
             if "traiter" in outcome or "normale" in outcome or "moyen" in outcome:
                 return "a_traiter"
 
-    # Défauts si aucune règle ne s'applique
-    if cat_l in ("raccordement", "consuel"):
-        return "urgent"
-    if cat_l == "financier":
-        return "urgent" if "relance" in title_l or "retard" in title_l else "a_traiter"
-    if cat_l == "notification":
-        return "faible"
+    # Pas de fallback métier hardcodé. Défaut neutre.
     return "a_traiter"
