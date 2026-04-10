@@ -11,3 +11,6 @@ starlette
 anthropic
 psycopg2-binary
 jinja2
+pytest>=8.0
+pytest-mock>=3.12
+httpx>=0.27
