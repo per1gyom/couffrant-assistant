@@ -1,13 +1,10 @@
 """
-Endpoints Raya : /speak, /raya, /token-status.
-
-Les appels réseau (mails live, agenda, contexte Teams, filtre mails)
-sont exécutés en parallèle via ThreadPoolExecutor pour réduire
-la latence de 300–400ms par conversation.
+Endpoints Raya : /speak, /raya, /token-status, /raya/feedback, /raya/why.
 
 Auth  : require_user via Depends — lève 401 si non authentifié.
 LLM   : llm_complete() via couche d'abstraction (app/llm_client.py)
 Tier  : route_query_tier() via app/router.py (Haiku → Sonnet ou Opus)
+Meta  : aria_response_metadata — raisonnement + feedback 👍👎 stockés
 """
 import os
 import re
@@ -24,6 +21,10 @@ from pydantic import BaseModel
 
 from app.llm_client import llm_complete, log_llm_usage
 from app.router import route_query_tier
+from app.feedback import (
+    save_response_metadata, get_response_metadata,
+    process_positive_feedback, process_negative_feedback,
+)
 from app.database import get_pg_conn
 from app.token_manager import get_valid_microsoft_token
 from app.memory_loader import MEMORY_OK, synthesize_session
@@ -47,6 +48,12 @@ class RayaQuery(BaseModel):
     file_data: Optional[str] = None
     file_type: Optional[str] = None
     file_name: Optional[str] = None
+
+
+class FeedbackPayload(BaseModel):
+    aria_memory_id: int
+    feedback_type: str   # "positive" | "negative"
+    comment: Optional[str] = ""
 
 
 @router.get("/token-status")
@@ -115,6 +122,72 @@ def raya_endpoint(
         }
 
 
+@router.post("/raya/feedback")
+def raya_feedback(
+    payload: FeedbackPayload,
+    user: dict = Depends(require_user),
+):
+    """
+    👍 / 👎 — Feedback sur une réponse Raya.
+    - Positif : renforce les règles injectées (+0.05 confidence)
+    - Négatif : Opus formule une règle corrective dans aria_rules
+    """
+    username  = user["username"]
+    tenant_id = user["tenant_id"]
+
+    if payload.feedback_type == "positive":
+        return process_positive_feedback(payload.aria_memory_id, username, tenant_id)
+    elif payload.feedback_type == "negative":
+        return process_negative_feedback(
+            payload.aria_memory_id, username, tenant_id,
+            comment=payload.comment or "",
+        )
+    return {"ok": False, "error": "feedback_type doit être 'positive' ou 'negative'"}
+
+
+@router.get("/raya/why/{aria_memory_id}")
+def raya_why(
+    aria_memory_id: int,
+    user: dict = Depends(require_user),
+):
+    """
+    Bouton 'Pourquoi ?' — retourne les métadonnées de raisonnement d'une réponse :
+    modèle utilisé, via RAG ou non, règles injectées.
+    """
+    username = user["username"]
+    meta = get_response_metadata(aria_memory_id, username)
+    if not meta:
+        return {"ok": False, "error": "Métadonnées introuvables"}
+
+    rule_ids = meta.get("rule_ids") or []
+    rules_detail = []
+    if rule_ids:
+        try:
+            conn = get_pg_conn()
+            c = conn.cursor()
+            c.execute(
+                "SELECT id, category, rule, confidence FROM aria_rules WHERE id = ANY(%s)",
+                (rule_ids,)
+            )
+            rules_detail = [
+                {"id": r[0], "category": r[1], "rule": r[2], "confidence": r[3]}
+                for r in c.fetchall()
+            ]
+            conn.close()
+        except Exception:
+            pass
+
+    return {
+        "ok":           True,
+        "model_tier":   meta["model_tier"],
+        "model_name":   meta["model_name"],
+        "via_rag":      meta["via_rag"],
+        "rules_count":  len(rule_ids),
+        "rules":        rules_detail,
+        "feedback_type": meta.get("feedback_type"),
+    }
+
+
 def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: str) -> dict:
 
     # 1. Contexte DB + tokens
@@ -139,12 +212,10 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         try: mail_filter = f_filter.result(timeout=3)
         except Exception: pass
 
-    # 3. Actions en attente (injecte dans le prompt)
+    # 3. Actions en attente
     pending_list = get_pending(username=username, tenant_id=tenant_id, limit=10)
 
-    # 4. Routage de tier LLM via Haiku (Phase 3a)
-    # Haiku classifie la question en SIMPLE (Sonnet) ou COMPLEXE (Opus)
-    # Garde-fou économique : quota journalier Opus configurable
+    # 4. Routage de tier LLM via Haiku
     model_tier = route_query_tier(
         query=payload.query or "",
         username=username,
@@ -152,7 +223,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         history_len=len(db_ctx["history"]),
     )
 
-    # 5. Construction du prompt système
+    # 5. Construction du prompt système (RAG injecte règles pertinentes)
     user_content_parts = _build_user_content(payload)
     system = build_system_prompt(
         username=username, tenant_id=tenant_id, query=payload.query or "",
@@ -162,7 +233,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         pending_actions=pending_list,
     )
 
-    # 6. Historique + appel LLM via couche d'abstraction
+    # 6. Historique + appel LLM
     messages = []
     for h in db_ctx["history"]:
         messages.append({"role": "user",      "content": h["user_input"]})
@@ -176,12 +247,10 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         system=system,
     )
     raya_response = result["text"]
-
-    # Logging des coûts LLM (non-bloquant)
     log_llm_usage(result, username=username, tenant_id=tenant_id,
                   purpose="raya_main_conversation")
 
-    # 7. Exécution des actions (queue pour les sensibles)
+    # 7. Exécution des actions
     actions_confirmed = execute_actions(
         raya_response=raya_response,
         username=username,
@@ -198,20 +267,40 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     if actions_confirmed:
         clean_response += "\n\n" + "\n".join(actions_confirmed)
 
-    # 9. Sauvegarde
+    # 9. Sauvegarde + récupère l'ID pour les métadonnées
+    aria_memory_id = None
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute(
-            "INSERT INTO aria_memory (username, user_input, aria_response) VALUES (%s, %s, %s)",
+            "INSERT INTO aria_memory (username, user_input, aria_response) VALUES (%s, %s, %s) RETURNING id",
             (username, payload.query, clean_response)
         )
+        aria_memory_id = c.fetchone()[0]
         conn.commit()
     finally:
         if conn: conn.close()
 
-    # 10. Synthèse auto si seuil atteint
+    # 10. Stockage des métadonnées de raisonnement (thread background, non-bloquant)
+    rule_ids, via_rag = [], False
+    try:
+        from app.rag import retrieve_context as _rag
+        _ctx = _rag(payload.query or "", username, tenant_id)
+        rule_ids = _ctx.get("rule_ids", [])
+        via_rag  = _ctx.get("via_rag", False)
+    except Exception:
+        pass
+
+    if aria_memory_id:
+        threading.Thread(
+            target=save_response_metadata,
+            args=(aria_memory_id, username, tenant_id,
+                  model_tier, result.get("model", ""), via_rag, rule_ids),
+            daemon=True,
+        ).start()
+
+    # 11. Synthèse auto si seuil atteint
     synth_threshold = get_memoire_param(username, "synth_threshold", 15)
     if MEMORY_OK and db_ctx["conv_count"] > 0 and db_ctx["conv_count"] % synth_threshold == 0:
         try:
@@ -224,13 +313,15 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         except Exception:
             pass
 
-    # 11. Actions en attente mises à jour (après exécution)
+    # 12. Actions en attente mises à jour
     updated_pending = get_pending(username=username, tenant_id=tenant_id, limit=10)
 
     return {
-        "answer": clean_response,
-        "actions": actions_confirmed,
+        "answer":         clean_response,
+        "actions":        actions_confirmed,
         "pending_actions": updated_pending,
+        "aria_memory_id": aria_memory_id,  # pour 👍👎 et Pourquoi ?
+        "model_tier":     model_tier,       # indicateur discret côté frontend
     }
 
 
