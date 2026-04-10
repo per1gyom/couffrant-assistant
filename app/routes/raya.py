@@ -5,8 +5,9 @@ Les appels réseau (mails live, agenda, contexte Teams, filtre mails)
 sont exécutés en parallèle via ThreadPoolExecutor pour réduire
 la latence de 300–400ms par conversation.
 
-Auth : require_user via Depends — lève 401 si non authentifié.
-LLM  : llm_complete() via couche d'abstraction (app/llm_client.py)
+Auth  : require_user via Depends — lève 401 si non authentifié.
+LLM   : llm_complete() via couche d'abstraction (app/llm_client.py)
+Tier  : route_query_tier() via app/router.py (Haiku → Sonnet ou Opus)
 """
 import os
 import re
@@ -22,6 +23,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.llm_client import llm_complete, log_llm_usage
+from app.router import route_query_tier
 from app.database import get_pg_conn
 from app.token_manager import get_valid_microsoft_token
 from app.memory_loader import MEMORY_OK, synthesize_session
@@ -140,7 +142,17 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     # 3. Actions en attente (injecte dans le prompt)
     pending_list = get_pending(username=username, tenant_id=tenant_id, limit=10)
 
-    # 4. Construction du prompt système
+    # 4. Routage de tier LLM via Haiku (Phase 3a)
+    # Haiku classifie la question en SIMPLE (Sonnet) ou COMPLEXE (Opus)
+    # Garde-fou économique : quota journalier Opus configurable
+    model_tier = route_query_tier(
+        query=payload.query or "",
+        username=username,
+        tenant_id=tenant_id,
+        history_len=len(db_ctx["history"]),
+    )
+
+    # 5. Construction du prompt système
     user_content_parts = _build_user_content(payload)
     system = build_system_prompt(
         username=username, tenant_id=tenant_id, query=payload.query or "",
@@ -150,7 +162,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         pending_actions=pending_list,
     )
 
-    # 5. Historique + appel LLM via couche d'abstraction
+    # 6. Historique + appel LLM via couche d'abstraction
     messages = []
     for h in db_ctx["history"]:
         messages.append({"role": "user",      "content": h["user_input"]})
@@ -159,7 +171,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
 
     result = llm_complete(
         messages=messages,
-        model_tier="smart",
+        model_tier=model_tier,
         max_tokens=2048,
         system=system,
     )
@@ -169,7 +181,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     log_llm_usage(result, username=username, tenant_id=tenant_id,
                   purpose="raya_main_conversation")
 
-    # 6. Exécution des actions (queue pour les sensibles)
+    # 7. Exécution des actions (queue pour les sensibles)
     actions_confirmed = execute_actions(
         raya_response=raya_response,
         username=username,
@@ -181,12 +193,12 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         conversation_id=None,
     )
 
-    # 7. Réponse propre
+    # 8. Réponse propre
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', raya_response).strip()
     if actions_confirmed:
         clean_response += "\n\n" + "\n".join(actions_confirmed)
 
-    # 8. Sauvegarde
+    # 9. Sauvegarde
     conn = None
     try:
         conn = get_pg_conn()
@@ -199,18 +211,20 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     finally:
         if conn: conn.close()
 
-    # 9. Synthèse auto si seuil atteint
+    # 10. Synthèse auto si seuil atteint
     synth_threshold = get_memoire_param(username, "synth_threshold", 15)
     if MEMORY_OK and db_ctx["conv_count"] > 0 and db_ctx["conv_count"] % synth_threshold == 0:
         try:
             threading.Thread(
-                target=lambda u=username: synthesize_session(synth_threshold, u),
+                target=lambda u=username, t=tenant_id: synthesize_session(
+                    synth_threshold, u, tenant_id=t
+                ),
                 daemon=True
             ).start()
         except Exception:
             pass
 
-    # 10. Actions en attente mises à jour (après exécution)
+    # 11. Actions en attente mises à jour (après exécution)
     updated_pending = get_pending(username=username, tenant_id=tenant_id, limit=10)
 
     return {
