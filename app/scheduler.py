@@ -7,10 +7,10 @@ de maintenance sans bloquer le serveur FastAPI.
 Jobs enregistrés :
   expire_pending     : toutes les heures          — expire les pending_actions trop vieilles
   confidence_decay   : hebdomadaire lundi 02h00   — décroissance de confiance des règles inactives (B6)
+  opus_audit         : hebdomadaire dimanche 03h00 — audit de cohérence des règles par Opus (B5)
 
-[à venir — commits séparés]
-  opus_audit         : hebdomadaire dimanche 03h00 — audit de cohérence Opus (B5)
-  proactivity_scan   : toutes les 30 min          — alertes et rappels (B10)
+[à venir — commit séparé]
+  proactivity_scan   : toutes les 30 min          — alertes et rappels intelligents (B10)
 
 Démarrage : scheduler.start() dans main.py au startup FastAPI.
 Arrêt     : scheduler.stop()  dans main.py au shutdown FastAPI.
@@ -24,10 +24,11 @@ logger = logging.getLogger(__name__)
 
 _scheduler: BackgroundScheduler | None = None
 
-# Seuil de confiance en dessous duquel une règle est masquée du RAG (B6)
 CONFIDENCE_MASK_THRESHOLD = 0.3
-# Décroissance mensuelle appliquée aux règles non renforcées
 CONFIDENCE_DECAY_STEP = 0.05
+
+# Nombre minimum de règles non-seed pour déclencher l'audit Opus
+AUDIT_MIN_RULES = 5
 
 
 def get_scheduler() -> BackgroundScheduler:
@@ -86,9 +87,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
         replace_existing=True,
     )
 
-    # Les commits suivants ajouteront :
-    # scheduler.add_job(_job_opus_audit,       CronTrigger(day_of_week='sun', hour=3), id='opus_audit', ...)
-    # scheduler.add_job(_job_proactivity_scan, IntervalTrigger(minutes=30),            id='proactivity_scan', ...)
+    # ─ Job 3 : audit de cohérence Opus (dimanche 03h00) ─
+    scheduler.add_job(
+        func=_job_opus_audit,
+        trigger=CronTrigger(day_of_week="sun", hour=3, minute=0),
+        id="opus_audit",
+        name="Audit de cohérence des règles par Opus",
+        replace_existing=True,
+    )
+
+    # [Commit suivant] proactivity_scan — IntervalTrigger(minutes=30)
 
 
 # ─── FONCTIONS JOB ───
@@ -107,35 +115,25 @@ def _job_expire_pending():
 def _job_confidence_decay():
     """
     Décroissance de confiance des règles inactives (B6).
-
-    Logique :
-      1. Toutes les règles actives non touchées depuis > 30 jours
-         (hors règles de seeding) perdent CONFIDENCE_DECAY_STEP = 0.05.
-      2. Les règles dont la confiance tombe sous CONFIDENCE_MASK_THRESHOLD = 0.3
-         sont masquées (active = false) mais PAS supprimées.
-         Elles restent en base, récupérables via reinforcement ou feedback 👍.
-
-    Règles protégées :
-      - source = 'seed'     : règles de base du profil tenant, jamais dégradées
-      - source = 'onboarding' : règles générées au premier login, protégées 90j
+    - Règles non touchées depuis > 30j : confidence -= 0.05
+    - Confidence < 0.3 → masquées (active=false), pas supprimées
+    - Règles seed et onboarding sont protégées
     """
     try:
         from app.database import get_pg_conn
         conn = get_pg_conn()
         c = conn.cursor()
 
-        # Étape 1 : décrémenter les règles inactives depuis > 30 jours
         c.execute("""
             UPDATE aria_rules
-            SET confidence  = GREATEST(0.0, confidence - %s),
-                updated_at  = NOW()
+            SET confidence = GREATEST(0.0, confidence - %s),
+                updated_at = NOW()
             WHERE active = true
               AND source NOT IN ('seed', 'onboarding')
               AND updated_at < NOW() - INTERVAL '30 days'
         """, (CONFIDENCE_DECAY_STEP,))
         decayed = c.rowcount
 
-        # Étape 2 : masquer les règles sous le seuil (active → false)
         c.execute("""
             UPDATE aria_rules
             SET active     = false,
@@ -149,13 +147,170 @@ def _job_confidence_decay():
         conn.commit()
         conn.close()
 
-        msg_parts = []
-        if decayed: msg_parts.append(f"{decayed} décrémentée(s)")
-        if masked:  msg_parts.append(f"{masked} masquée(s) (conf < {CONFIDENCE_MASK_THRESHOLD})")
-        if msg_parts:
-            print(f"[Scheduler] confidence_decay : {', '.join(msg_parts)}")
-        else:
-            print("[Scheduler] confidence_decay : aucune règle concernée")
+        parts = []
+        if decayed: parts.append(f"{decayed} décrémentée(s)")
+        if masked:  parts.append(f"{masked} masquée(s) (conf < {CONFIDENCE_MASK_THRESHOLD})")
+        print(f"[Scheduler] confidence_decay : {', '.join(parts) if parts else 'aucune règle concernée'}")
 
     except Exception as e:
         print(f"[Scheduler] ERREUR confidence_decay : {e}")
+
+
+def _job_opus_audit():
+    """
+    Audit de cohérence des règles par Opus — hebdomadaire (B5).
+
+    Pour chaque tenant/utilisateur ayant au moins AUDIT_MIN_RULES règles non-seed :
+      1. Charge les règles actives
+      2. Appel Opus (model_tier="deep") → identifie contradictions, redondances, obsolètes
+      3. Stocke les suggestions dans aria_rule_audit (lecture seule — pas d'actions automatiques)
+
+    L'utilisateur peut consulter les suggestions via /admin/audit (à implémenter).
+    """
+    try:
+        _ensure_audit_table()
+
+        from app.database import get_pg_conn
+        conn = get_pg_conn()
+        c = conn.cursor()
+
+        # Tenants/users avec assez de règles non-seed pour un audit utile
+        c.execute("""
+            SELECT tenant_id, username, COUNT(*) as nb
+            FROM aria_rules
+            WHERE active = true AND source NOT IN ('seed')
+            GROUP BY tenant_id, username
+            HAVING COUNT(*) >= %s
+        """, (AUDIT_MIN_RULES,))
+        targets = c.fetchall()
+        conn.close()
+
+        if not targets:
+            print("[Scheduler] opus_audit : aucun tenant à auditer")
+            return
+
+        audited = 0
+        for tenant_id, username, nb_rules in targets:
+            try:
+                _audit_one(tenant_id, username, nb_rules)
+                audited += 1
+            except Exception as e:
+                print(f"[Scheduler] ERREUR opus_audit {username}: {e}")
+
+        print(f"[Scheduler] opus_audit : {audited} tenant(s) audité(s)")
+
+    except Exception as e:
+        print(f"[Scheduler] ERREUR opus_audit : {e}")
+
+
+def _audit_one(tenant_id: str, username: str, nb_rules: int):
+    """Audite les règles d'un utilisateur via Opus et stocke les suggestions."""
+    import json, re
+    from app.database import get_pg_conn
+    from app.llm_client import llm_complete, log_llm_usage
+
+    # Charge les règles
+    conn = get_pg_conn()
+    c = conn.cursor()
+    c.execute("""
+        SELECT id, category, rule, confidence, reinforcements, source
+        FROM aria_rules
+        WHERE active = true
+          AND tenant_id = %s AND username = %s
+        ORDER BY confidence DESC, reinforcements DESC
+        LIMIT 80
+    """, (tenant_id, username))
+    rows = c.fetchall()
+    conn.close()
+
+    if not rows:
+        return
+
+    rules_text = "\n".join([
+        f"[id:{r[0]}][{r[1]}] {r[2]}  (conf={r[3]:.2f}, renf={r[4]}, src={r[5]})"
+        for r in rows
+    ])
+
+    prompt = f"""Tu es Raya, en mode audit interne.
+
+Voici les {len(rows)} règles actives de {username} :
+
+{rules_text}
+
+Identifie dans ce jeu de règles :
+1. Les CONTRADICTIONS : deux règles qui se contredisent
+2. Les REDONDANCES : règles qui disent la même chose différemment
+3. Les OBSOLÈTES : règles probablement dépassées ou trop spécifiques
+
+Réponds en JSON strict (sans backticks) :
+{{
+  "contradictions": [{{"ids": [id1, id2], "explication": "..."}}],
+  "redondances":    [{{"ids": [id1, id2], "explication": "..."}}],
+  "obsoletes":      [{{"id": id, "explication": "..."}}],
+  "score_coherence": 0.0,
+  "resume": "résumé en 1-2 phrases"
+}}
+
+Si aucun problème : retourne des listes vides et score_coherence proche de 1.0.
+Ne suggère aucune action automatique. Ces résultats sont lus par l'utilisateur."""
+
+    result = llm_complete(
+        messages=[{"role": "user", "content": prompt}],
+        model_tier="deep",
+        max_tokens=1200,
+    )
+    log_llm_usage(result, username=username, tenant_id=tenant_id, purpose="opus_audit")
+
+    raw = re.sub(r'^```(?:json)?\s*', '', result["text"].strip(), flags=re.MULTILINE)
+    raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
+    parsed = json.loads(raw)
+
+    # Stocke dans aria_rule_audit
+    conn = get_pg_conn()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO aria_rule_audit
+          (tenant_id, username, rules_analyzed, suggestions_json, score_coherence, resume)
+        VALUES (%s, %s, %s, %s::jsonb, %s, %s)
+    """, (
+        tenant_id, username, len(rows),
+        json.dumps(parsed, ensure_ascii=False),
+        parsed.get("score_coherence", None),
+        parsed.get("resume", ""),
+    ))
+    conn.commit()
+    conn.close()
+
+    nb_issues = (
+        len(parsed.get("contradictions", [])) +
+        len(parsed.get("redondances", [])) +
+        len(parsed.get("obsoletes", []))
+    )
+    print(f"[Scheduler] opus_audit {username} : {nb_rules} règles, {nb_issues} problème(s), "
+          f"score={parsed.get('score_coherence', '?')}")
+
+
+def _ensure_audit_table():
+    """Crée la table aria_rule_audit si elle n'existe pas encore."""
+    try:
+        from app.database import get_pg_conn
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            CREATE TABLE IF NOT EXISTS aria_rule_audit (
+                id               SERIAL PRIMARY KEY,
+                tenant_id        TEXT NOT NULL,
+                username         TEXT NOT NULL,
+                audit_date       DATE DEFAULT CURRENT_DATE,
+                rules_analyzed   INTEGER,
+                suggestions_json JSONB DEFAULT '{}',
+                score_coherence  REAL,
+                resume           TEXT,
+                created_at       TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        c.execute("CREATE INDEX IF NOT EXISTS idx_rule_audit_user ON aria_rule_audit (tenant_id, username, audit_date DESC)")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[Scheduler] ERREUR _ensure_audit_table : {e}")
