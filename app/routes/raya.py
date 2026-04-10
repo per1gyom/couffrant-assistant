@@ -1,19 +1,9 @@
 """
 Endpoints Raya : /speak, /raya, /token-status, /raya/feedback, /raya/why/{id}.
 
-Les appels réseau (mails live, agenda, contexte Teams, filtre mails)
-sont exécutés en parallèle via ThreadPoolExecutor pour réduire
-la latence de 300–400ms par conversation.
-
-Auth  : require_user via Depends — lève 401 si non authentifié.
-LLM   : llm_complete() via couche d'abstraction (app/llm_client.py)
-Tier  : route_query_tier() via app/router.py (Haiku → Sonnet ou Opus)
-
-Phase 3b :
-  - /raya retourne aria_memory_id + model_tier dans la réponse
-  - Métadonnées de raisonnement stockées en background (thread)
-  - POST /raya/feedback  → process_positive_feedback ou process_negative_feedback
-  - GET  /raya/why/{id}  → métadonnées + règles détaillées pour le bouton "Pourquoi ?"
+Phase 3b (B8) : détection de session thématique via detect_session_theme().
+Si les derniers échanges portent sur un sujet cohérent, le contexte RAG
+est enrichi avec tout ce qui concerne ce sujet.
 """
 import os
 import re
@@ -29,7 +19,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.llm_client import llm_complete, log_llm_usage
-from app.router import route_query_tier
+from app.router import route_query_tier, detect_session_theme
 from app.database import get_pg_conn
 from app.token_manager import get_valid_microsoft_token
 from app.memory_loader import MEMORY_OK, synthesize_session
@@ -61,7 +51,7 @@ class RayaQuery(BaseModel):
 
 class FeedbackPayload(BaseModel):
     aria_memory_id: int
-    feedback_type: str        # 'positive' | 'negative'
+    feedback_type: str
     comment: Optional[str] = None
 
 
@@ -123,15 +113,13 @@ def raya_endpoint(
     tenant_id = user["tenant_id"]
     try:
         return _raya_core(request, payload, username, tenant_id)
-    except Exception as e:
+    except Exception:
         tb = traceback.format_exc()
         print(f"[Raya] ERREUR ENDPOINT pour {username}:\n{tb}")
         return {
             "answer": "⚠️ Une erreur interne est survenue. L'incident a été loggé.",
-            "actions": [],
-            "pending_actions": [],
-            "aria_memory_id": None,
-            "model_tier": "smart",
+            "actions": [], "pending_actions": [],
+            "aria_memory_id": None, "model_tier": "smart",
         }
 
 
@@ -140,15 +128,8 @@ def raya_feedback(
     payload: FeedbackPayload,
     user: dict = Depends(require_user),
 ):
-    """
-    Reçoit le feedback 👍👎 du frontend.
-    👍 → renforce les règles injectées
-    👎 → appel Opus → règle corrective
-    Exécuté en background pour ne pas bloquer le frontend.
-    """
     username = user["username"]
     tenant_id = user["tenant_id"]
-
     if payload.feedback_type == "positive":
         threading.Thread(
             target=process_positive_feedback,
@@ -156,17 +137,12 @@ def raya_feedback(
             daemon=True,
         ).start()
         return {"status": "ok", "action": "rules_reinforced"}
-
     if payload.feedback_type == "negative":
-        # Traitement synchrone pour retourner la règle corrective créée
-        result = process_negative_feedback(
+        return process_negative_feedback(
             aria_memory_id=payload.aria_memory_id,
-            username=username,
-            tenant_id=tenant_id,
+            username=username, tenant_id=tenant_id,
             comment=payload.comment or "",
         )
-        return result
-
     return {"status": "error", "message": "feedback_type doit être 'positive' ou 'negative'"}
 
 
@@ -175,10 +151,6 @@ def raya_why(
     aria_memory_id: int,
     user: dict = Depends(require_user),
 ):
-    """
-    Retourne les métadonnées de raisonnement d'une réponse.
-    Utilisé par le bouton "Pourquoi ?" 💡 du frontend.
-    """
     username = user["username"]
     meta = get_response_metadata(aria_memory_id, username)
     if not meta:
@@ -215,13 +187,21 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     # 3. Actions en attente
     pending_list = get_pending(username=username, tenant_id=tenant_id, limit=10)
 
-    # 4. Routage de tier LLM via Haiku
-    model_tier = route_query_tier(
-        query=payload.query or "",
-        username=username,
-        tenant_id=tenant_id,
-        history_len=len(db_ctx["history"]),
-    )
+    # 4. Routage de tier + détection de session thématique (Phase 3b B8)
+    # Les deux micro-appels Haiku tournent en parallèle pour ne pas ajouter de latence.
+    model_tier    = "smart"
+    session_theme = None
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        f_tier  = pool.submit(route_query_tier, payload.query or "",
+                              username, tenant_id, len(db_ctx["history"]))
+        f_theme = pool.submit(detect_session_theme, db_ctx["history"])
+        try: model_tier    = f_tier.result(timeout=4)
+        except Exception: pass
+        try: session_theme = f_theme.result(timeout=3)
+        except Exception: pass
+
+    if session_theme:
+        print(f"[Raya] Session thématique détectée pour {username} : '{session_theme}'")
 
     # 5. Construction du prompt système
     user_content_parts = _build_user_content(payload)
@@ -231,6 +211,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         live_mails=live_mails, agenda=agenda, instructions=instructions,
         teams_context=teams_ctx, mail_filter_summary=mail_filter,
         pending_actions=pending_list,
+        session_theme=session_theme,
     )
 
     # 6. Appel LLM
@@ -241,27 +222,19 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     messages.append({"role": "user", "content": user_content_parts})
 
     result = llm_complete(
-        messages=messages,
-        model_tier=model_tier,
-        max_tokens=2048,
-        system=system,
+        messages=messages, model_tier=model_tier,
+        max_tokens=2048, system=system,
     )
     raya_response = result["text"]
     model_name    = result["model"]
-
     log_llm_usage(result, username=username, tenant_id=tenant_id,
                   purpose="raya_main_conversation")
 
     # 7. Exécution des actions
     actions_confirmed = execute_actions(
-        raya_response=raya_response,
-        username=username,
-        tenant_id=tenant_id,
-        outlook_token=outlook_token,
-        mails_from_db=db_ctx["mails_from_db"],
-        live_mails=live_mails,
-        tools=tools,
-        conversation_id=None,
+        raya_response=raya_response, username=username, tenant_id=tenant_id,
+        outlook_token=outlook_token, mails_from_db=db_ctx["mails_from_db"],
+        live_mails=live_mails, tools=tools, conversation_id=None,
     )
 
     # 8. Réponse propre
@@ -269,7 +242,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     if actions_confirmed:
         clean_response += "\n\n" + "\n".join(actions_confirmed)
 
-    # 9. Sauvegarde en base — récupère l'ID pour les métadonnées
+    # 9. Sauvegarde
     aria_memory_id = None
     conn = None
     try:
@@ -284,32 +257,25 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     finally:
         if conn: conn.close()
 
-    # 10. Stockage des métadonnées en background (Phase 3b)
+    # 10. Métadonnées en background
     if aria_memory_id:
-        # Récupère les rule_ids depuis le RAG context (déjà calculé dans build_system_prompt)
-        # On les récupère via un appel léger au RAG pour avoir les IDs
         try:
             from app.rag import retrieve_rules
-            rule_result = retrieve_rules(payload.query or "", username, tenant_id)
-            rule_ids = rule_result.get("ids", [])
+            rule_ids = retrieve_rules(payload.query or "", username, tenant_id).get("ids", [])
         except Exception:
             rule_ids = []
-
         threading.Thread(
             target=save_response_metadata,
-            args=(aria_memory_id, username, tenant_id, model_tier, model_name,
-                  True, rule_ids),  # via_rag=True par défaut (fallback ignoré ici)
+            args=(aria_memory_id, username, tenant_id, model_tier, model_name, True, rule_ids),
             daemon=True,
         ).start()
 
-    # 11. Synthèse auto si seuil atteint
+    # 11. Synthèse auto
     synth_threshold = get_memoire_param(username, "synth_threshold", 15)
     if MEMORY_OK and db_ctx["conv_count"] > 0 and db_ctx["conv_count"] % synth_threshold == 0:
         try:
             threading.Thread(
-                target=lambda u=username, t=tenant_id: synthesize_session(
-                    synth_threshold, u, tenant_id=t
-                ),
+                target=lambda u=username, t=tenant_id: synthesize_session(synth_threshold, u, tenant_id=t),
                 daemon=True
             ).start()
         except Exception:

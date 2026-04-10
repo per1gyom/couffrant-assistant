@@ -2,11 +2,12 @@
 Construction du contexte pour Raya.
 Isole la lecture DB, les mails live, l'agenda et la construction du prompt système.
 
-Phase 3a : mémoire injectée via RAG (recherche sémantique) au lieu d'injection en bloc.
-Fallback automatique si OPENAI_API_KEY absent — comportement identique à Phase 0-2.
+Phase 3a : mémoire injectée via RAG (recherche sémantique).
+Phase 3b : session_theme (B8) — si un sujet cohérent est détecté,
+           le contexte RAG est enrichi avec tout ce qui concerne ce sujet.
+Fallback automatique si OPENAI_API_KEY absent.
 
-Les appels réseau (mails live, agenda, contexte Teams) sont lancés
-en parallèle depuis raya_endpoint() pour réduire la latence.
+Les appels réseau sont lancés en parallèle depuis raya_endpoint().
 """
 import json
 from datetime import datetime, timezone
@@ -174,29 +175,54 @@ def build_system_prompt(
     teams_context: str = "",
     mail_filter_summary: str = "",
     pending_actions: list = None,
+    session_theme: str | None = None,
 ) -> str:
+    """
+    Construit le prompt système complet.
+
+    Phase 3b (B8) : si session_theme est fourni, le contexte RAG est enrichi
+    avec tout ce qui concerne ce sujet (règles + insights + mails additionnels).
+    Cela permet à Raya d'avoir une vue complète sur le sujet en cours
+    et pas seulement les règles pertinentes pour la dernière question.
+    """
     display_name = username.capitalize()
     query_lower = query.lower()
 
-    # ── Mémoire via RAG (Phase 3a) ──
-    # retrieve_context fait la recherche sémantique si OPENAI_API_KEY est présent,
-    # ou tombe en fallback injection en bloc sinon. Transparent pour le reste du code.
+    # ── Mémoire via RAG ──
     hot_summary = get_hot_summary(username)
     try:
         from app.rag import retrieve_context
         rag_ctx = retrieve_context(query, username, tenant_id)
         aria_rules    = rag_ctx["rules_text"]
         aria_insights = rag_ctx["insights_text"]
-        conv_context  = rag_ctx["conv_text"]   # conversations passées pertinentes (nouveau)
+        conv_context  = rag_ctx["conv_text"]
         via_rag       = rag_ctx["via_rag"]
     except Exception:
-        # Fallback si app/rag.py non disponible (ne devrait pas arriver)
         from app.memory_rules import get_aria_rules
         from app.memory_synthesis import get_aria_insights
         aria_rules    = get_aria_rules(username, tenant_id=tenant_id)
         aria_insights = get_aria_insights(limit=8, username=username, tenant_id=tenant_id)
         conv_context  = ""
         via_rag       = False
+
+    # ── Enrichissement thématique (B8) ──
+    # Si Haiku a détecté un sujet cohérent, on injecte du contexte supplémentaire
+    # lié à ce thème pour que Raya ait une vue complète sur le sujet en cours.
+    theme_context_block = ""
+    if session_theme:
+        try:
+            from app.rag import retrieve_theme_context
+            theme_ctx = retrieve_theme_context(session_theme, username, tenant_id)
+            extra_rules    = theme_ctx.get("extra_rules", "")
+            extra_insights = theme_ctx.get("extra_insights", "")
+            theme_parts = [p for p in [extra_rules, extra_insights] if p]
+            if theme_parts:
+                theme_context_block = (
+                    f"\n\n=== SESSION EN COURS : {session_theme.upper()} ===\n"
+                    + "\n".join(theme_parts)
+                )
+        except Exception:
+            pass
 
     if not teams_context:
         teams_context = load_teams_context(username)
@@ -233,7 +259,6 @@ def build_system_prompt(
     mail_filter_block = f"\n\n=== FILTRE MAILS ==={chr(10)}{mail_filter_summary}" if mail_filter_summary else ""
     conv_context_block = f"\n\n=== ÉCHANGES PASSÉS PERTINENTS ==={chr(10)}{conv_context}" if conv_context else ""
 
-    # Bloc actions en attente
     pending_block = ""
     if pending_actions:
         lines = [f"  #{a['id']} [{a['action_type']}] {a['label'] or ''}" for a in pending_actions]
@@ -254,7 +279,7 @@ Tu observes, tu apprends, tu t'organises librement. Tu parles au féminin.
 
 {f"=== TA MÉMOIRE (pertinente pour cette question) ==={chr(10)}{aria_rules}" if aria_rules else "Ta mémoire est vide. Tu peux commencer à construire via [ACTION:LEARN]."}
 
-{f"=== TES OBSERVATIONS SUR {display_name.upper()} ==={chr(10)}{aria_insights}" if aria_insights else ""}{conv_context_block}{teams_context_block}{mail_filter_block}{pending_block}
+{f"=== TES OBSERVATIONS SUR {display_name.upper()} ==={chr(10)}{aria_insights}" if aria_insights else ""}{theme_context_block}{conv_context_block}{teams_context_block}{mail_filter_block}{pending_block}
 
 {f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}
 
