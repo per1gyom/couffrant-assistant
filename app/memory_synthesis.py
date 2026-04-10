@@ -2,6 +2,12 @@
 Mémoire : synthèse des sessions et résumé chaud.
 Vectorisation automatique des insights et conversations.
 
+Phase 3a :
+  - rebuild_hot_summary    → model_tier="deep" (Opus)
+  - synthesize_session     → model_tier="deep" (Opus) + prompt enrichi des règles existantes
+    Opus compare les nouvelles règles candidates avec celles déjà en base
+    pour éviter les doublons sémantiques.
+
 Signatures canoniques utilisées ici (depuis rule_engine) :
   get_memoire_param(username, param, default, tenant_id=None)
   get_rules_by_category(username, category, tenant_id=None)
@@ -10,7 +16,7 @@ import json
 import re
 
 from app.database import get_pg_conn
-from app.llm_client import llm_complete
+from app.llm_client import llm_complete, log_llm_usage
 from app.rule_engine import get_rules_by_category, get_memoire_param
 from app.memory_rules import save_rule
 
@@ -46,6 +52,10 @@ def get_hot_summary(username: str = 'guillaume') -> str:
 
 def rebuild_hot_summary(username: str = 'guillaume',
                         tenant_id: str = DEFAULT_TENANT) -> str:
+    """
+    Reconstruit le résumé opérationnel chaud (hot_summary).
+    Phase 3a : utilise model_tier="deep" (Opus) pour une meilleure synthèse.
+    """
     conn = None
     try:
         conn = get_pg_conn()
@@ -92,10 +102,12 @@ Factuel, direct, sans blabla."""
 
     result = llm_complete(
         messages=[{"role": "user", "content": prompt}],
-        model_tier="smart",
+        model_tier="deep",   # Opus — meilleure synthèse contextuelle
         max_tokens=800,
     )
     summary = result["text"]
+    log_llm_usage(result, username=username, tenant_id=tenant_id,
+                  purpose="rebuild_hot_summary")
 
     conn = None
     try:
@@ -197,8 +209,45 @@ def save_insight(topic: str, insight: str, source: str = "conversation",
         if conn: conn.close()
 
 
+def _load_existing_rules_summary(username: str, tenant_id: str) -> str:
+    """
+    Charge un résumé compact des règles existantes pour le prompt de synthèse.
+    Opus peut ainsi éviter de générer des règles redondantes.
+    Limité aux 40 règles les plus confiantes (hors catégorie memoire).
+    """
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT category, rule FROM aria_rules
+            WHERE active = true
+              AND username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND category != 'memoire'
+            ORDER BY confidence DESC, reinforcements DESC
+            LIMIT 40
+        """, (username, tenant_id))
+        rows = c.fetchall()
+        if not rows:
+            return ""
+        return "\n".join([f"[{r[0]}] {r[1]}" for r in rows])
+    except Exception:
+        return ""
+    finally:
+        if conn: conn.close()
+
+
 def synthesize_session(n_conversations: int = 15, username: str = 'guillaume',
                        tenant_id: str = None) -> dict:
+    """
+    Synthèse des conversations récentes par Opus (model_tier="deep").
+
+    Phase 3a :
+      - Tier migré de "fast" vers "deep" pour une meilleure extraction de règles
+      - Prompt enrichi des règles existantes → Opus évite les doublons sémantiques
+      - log_llm_usage() pour suivi des coûts
+    """
     effective_tenant = tenant_id or DEFAULT_TENANT
     conn = None
     try:
@@ -224,37 +273,49 @@ def synthesize_session(n_conversations: int = 15, username: str = 'guillaume',
         for r in reversed(conversations)
     ])
 
-    prompt = f"""Tu es Raya, assistante de {display_name}.
-Voici {len(conversations)} conversations récentes.
+    # Charge les règles existantes pour qu'Opus évite les doublons sémantiques
+    existing_rules = _load_existing_rules_summary(username, effective_tenant)
+    existing_rules_section = f"""
+Règles déjà en mémoire (ne pas dupliquer) :
+{existing_rules}
+""" if existing_rules else ""
 
+    prompt = f"""Tu es Raya, assistante de {display_name}.
+Voici {len(conversations)} conversations récentes à synthétiser.
+{existing_rules_section}
+CONVERSATIONS :
 {conv_text}
 
-Synthétise en JSON strict (sans backticks) :
-{{"summary": "~150 mots", "rules_learned": ["règle"], "insights": [{{"topic": "x", "text": "y"}}], "topics": ["sujet"]}}"""
+Synthétise en JSON strict (sans backticks ni markdown) :
+{{"summary": "résumé opérationnel ~150 mots", "rules_learned": ["règle nouvelle ou enrichissante, PAS déjà en mémoire"], "insights": [{{"topic": "x", "text": "y"}}], "topics": ["sujet principal"]}}
+
+Pour rules_learned : ne propose que des règles NOUVELLES ou significativement différentes de celles déjà en mémoire. Préfère la qualité à la quantité."""
 
     parsed = None
     try:
         result = llm_complete(
             messages=[{"role": "user", "content": prompt}],
-            model_tier="fast", max_tokens=1000,
+            model_tier="deep",   # Opus — extraction de règles de qualité
+            max_tokens=1200,
         )
+        log_llm_usage(result, username=username, tenant_id=effective_tenant,
+                      purpose="synthesize_session")
         raw = re.sub(r'^```(?:json)?\s*', '', result["text"].strip(), flags=re.MULTILINE)
         raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
         parsed = json.loads(raw)
-    except Exception:
-        pass
-
-    if parsed is None:
+    except Exception as e:
+        print(f"[synthesize_session] Erreur Opus: {e} — fallback smart")
+        # Fallback Sonnet si Opus échoue (rate limit, JSON malformé...)
         try:
             result = llm_complete(
                 messages=[{"role": "user", "content": prompt}],
-                model_tier="smart", max_tokens=1000,
+                model_tier="smart", max_tokens=1200,
             )
             raw = re.sub(r'^```(?:json)?\s*', '', result["text"].strip(), flags=re.MULTILINE)
             raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
             parsed = json.loads(raw)
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
+        except Exception as e2:
+            return {"status": "error", "message": str(e2)}
 
     conn = None
     try:
