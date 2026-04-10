@@ -1,248 +1,128 @@
 """
-Onboarding conversationnel Raya — Phase 3c (correctif voix).
+Onboarding Raya — wrapper mince sur le moteur d'elicitation.
 
-L'onboarding passe par le flux de conversation normal du chat.
-Raya pose ses questions comme des messages normaux.
-L'utilisateur répond en tapant OU au micro (le micro injecte déjà dans l'input).
+Premier consommateur du moteur generique (app/elicitation.py).
+Ce module expose l'API attendue par routes/onboarding.py.
+Toute la logique conversationnelle est dans elicitation.py.
 
-Flux :
-  POST /onboarding/start   -> premier message d'accueil + question 1
-  POST /onboarding/answer  -> enregistre la réponse, retourne question suivante ou done
-  POST /onboarding/skip    -> interrompt l'onboarding
-  POST /onboarding/restart -> remet à zéro
-  POST /onboarding/complete -> génère règles + insights via Opus (appelé automatiquement)
+session_id fixe par utilisateur : "onboarding:{username}"
 """
 import json
+import re
 import threading
 from app.database import get_pg_conn
+from app.elicitation import (
+    start_elicitation,
+    submit_answer as _elicitation_submit,
+    get_session,
+    skip_session,
+)
 
-# --- MIGRATION AUTO ---
+ONBOARDING_OBJECTIVE = (
+    "Comprendre l'utilisateur pour personnaliser Raya, son assistante IA. "
+    "Decouvrir son metier, ses outils quotidiens, comment il prefere communiquer, "
+    "et ses projets en cours."
+)
 
-def _ensure_table():
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("""
-            CREATE TABLE IF NOT EXISTS aria_onboarding (
-                id           SERIAL PRIMARY KEY,
-                username     TEXT NOT NULL UNIQUE,
-                tenant_id    TEXT NOT NULL DEFAULT 'couffrant_solar',
-                status       TEXT NOT NULL DEFAULT 'pending',
-                current_block INTEGER DEFAULT 0,
-                answers_json JSONB DEFAULT '{}',
-                completed_at TIMESTAMP,
-                created_at   TIMESTAMP DEFAULT NOW(),
-                updated_at   TIMESTAMP DEFAULT NOW(),
-                CONSTRAINT onboarding_status_check CHECK (
-                    status IN ('pending','in_progress','completed','skipped')
-                )
-            )
-        """)
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"[Onboarding] Migration table: {e}")
-
-_ensure_table()
-
-
-# --- LISTE PLATE DES QUESTIONS (12 au total) ---
-# Format : (bloc_id, bloc_titre, question_text)
-
-ALL_QUESTIONS = [
-    (1, "Contexte professionnel",        "Quel est ton metier ou ton poste ?"),
-    (1, "Contexte professionnel",        "Dans quel secteur travailles-tu ?"),
-    (1, "Contexte professionnel",        "Combien de personnes dans ton equipe directe ?"),
-    (2, "Outils et habitudes",           "Quels outils utilises-tu au quotidien ? (Outlook, Teams, Drive, Odoo...)"),
-    (2, "Outils et habitudes",           "A quelle frequence consultes-tu tes mails ?"),
-    (2, "Outils et habitudes",           "Y a-t-il des expediteurs ou clients particulierement prioritaires ?"),
-    (3, "Preferences de communication",  "Comment preferes-tu que je te reponde ? (court et factuel / detaille / conversationnel)"),
-    (3, "Preferences de communication",  "Je dois tutoyer ou vouvoyer tes contacts par defaut ?"),
-    (3, "Preferences de communication",  "Y a-t-il un ton ou un style particulier a eviter ?"),
-    (4, "Contexte metier",               "Quels sont tes projets ou dossiers principaux en ce moment ?"),
-    (4, "Contexte metier",               "Quelles informations dois-je toujours avoir en tete ?"),
-    (4, "Contexte metier",               "Y a-t-il des regles metier ou process importants a connaitre ?"),
+ONBOARDING_TOPICS = [
+    "identite_professionnelle",
+    "outils_et_habitudes",
+    "style_de_communication",
+    "contexte_metier_et_projets",
 ]
 
-TOTAL_QUESTIONS = len(ALL_QUESTIONS)  # 12
+MAX_TURNS = 8
 
 
-def _format_question(idx: int) -> str:
-    """Formate le message d'une question pour l'affichage dans le chat."""
-    _, bloc_titre, question = ALL_QUESTIONS[idx]
-    num = idx + 1
-    return f"**Question {num} / {TOTAL_QUESTIONS} -- {bloc_titre}**\n{question}"
+def _sid(username: str) -> str:
+    return f"onboarding:{username}"
 
-
-# --- API PUBLIQUE ---
 
 def get_onboarding_status(username: str) -> dict:
-    """Retourne le statut d'onboarding (pending / in_progress / completed / skipped)."""
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute(
-            "SELECT status, current_block FROM aria_onboarding WHERE username = %s",
-            (username,)
-        )
-        row = c.fetchone()
-        conn.close()
-        if not row:
-            return {"status": "pending", "current_question": 0, "total": TOTAL_QUESTIONS}
-        return {"status": row[0], "current_question": row[1], "total": TOTAL_QUESTIONS}
-    except Exception as e:
-        print(f"[Onboarding] get_status: {e}")
-        return {"status": "pending", "current_question": 0, "total": TOTAL_QUESTIONS}
+    session = get_session(_sid(username), username)
+    if "error" in session:
+        return {"status": "pending", "exchange_count": 0}
+    raw = session.get("status", "active")
+    # active -> in_progress pour compat chat.js
+    status = "in_progress" if raw == "active" else raw
+    return {"status": status, "exchange_count": session.get("turn_count", 0)}
 
 
-def start_onboarding(username: str, tenant_id: str) -> str:
+def start_onboarding(username: str, tenant_id: str) -> dict:
     """
-    Demarre l'onboarding et retourne le message d'accueil + question 1.
-    Utilise par POST /onboarding/start depuis chat.js.
+    Demarre l'onboarding via le moteur d'elicitation.
+    Retourne {message, intro, type, question, options} — compatible chat.js.
     """
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("""
-            INSERT INTO aria_onboarding (username, tenant_id, status, current_block, answers_json)
-            VALUES (%s, %s, 'in_progress', 0, '{}')
-            ON CONFLICT (username) DO UPDATE
-              SET status='in_progress', current_block=0, answers_json='{}',
-                  completed_at=NULL, updated_at=NOW()
-        """, (username, tenant_id))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"[Onboarding] start: {e}")
-
-    welcome = (
-        "Bonjour ! Je suis Raya, ton assistante personnelle.\n\n"
-        "Pour mieux te connaitre et bien travailler avec toi, je vais te poser "
-        f"{TOTAL_QUESTIONS} questions rapides en 4 themes.\n"
-        "Tu peux repondre a l'ecrit ou au micro (bouton micro en bas).\n\n"
-        "---\n\n"
+    result = start_elicitation(
+        objective=ONBOARDING_OBJECTIVE,
+        topics=ONBOARDING_TOPICS,
+        username=username,
+        tenant_id=tenant_id,
+        session_id=_sid(username),
+        max_turns=MAX_TURNS,
     )
-    return welcome + _format_question(0)
+    intro = (
+        "Bonjour ! Je suis Raya.\n\n"
+        "Pour personnaliser ton experience, je vais te poser quelques questions "
+        f"(max {MAX_TURNS} echanges, tout est skippable).\n\n"
+    )
+    question = result.get("question", "")
+    return {
+        "message": intro + question,   # compat ancien chat.js
+        "intro": intro,
+        "type": result["type"],
+        "question": question,
+        "options": result.get("options", []),
+        "session_id": result["session_id"],
+    }
 
 
 def record_answer_and_get_next(username: str, tenant_id: str, answer: str) -> dict:
     """
-    Enregistre la reponse a la question courante et retourne la suivante.
-
-    Retourne :
-        {next_message: str, done: bool, question_idx: int}
-
-    Quand done=True, complete_onboarding() est appele en background.
+    Soumet une reponse au moteur.
+    Retourne {next_message, done, type, options?} — compatible chat.js.
     """
+    result = _elicitation_submit(
+        session_id=_sid(username),
+        answer=answer,
+        username=username,
+    )
+    if result["type"] == "done":
+        threading.Thread(
+            target=_generate_profile,
+            args=(username, tenant_id),
+            daemon=True,
+        ).start()
+        return {
+            "type": "done",
+            "done": True,
+            "next_message": (
+                "Merci ! Je construis ton profil en arriere-plan.\n"
+                "_(Tu peux deja utiliser le chat.)_"
+            ),
+        }
+    return {
+        "type": result["type"],
+        "done": False,
+        "next_message": result.get("question", ""),
+        "question": result.get("question", ""),
+        "options": result.get("options", []),
+    }
+
+
+def skip_onboarding(username: str, tenant_id: str) -> bool:
+    return skip_session(_sid(username), username)
+
+
+def restart_onboarding(username: str, tenant_id: str) -> bool:
+    """Remet l'onboarding a zero en supprimant la session."""
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute(
-            "SELECT current_block, answers_json FROM aria_onboarding WHERE username = %s",
-            (username,)
+            "DELETE FROM elicitation_sessions WHERE id = %s AND username = %s",
+            (_sid(username), username)
         )
-        row = c.fetchone()
-        conn.close()
-
-        if not row:
-            return {"next_message": "", "done": True, "question_idx": 0}
-
-        current_idx = row[0]
-        answers = row[1] or {}
-
-        # Enregistre la reponse
-        answers[f"q{current_idx}"] = answer.strip()
-        next_idx = current_idx + 1
-
-        if next_idx >= TOTAL_QUESTIONS:
-            # Toutes les questions repondues
-            conn = get_pg_conn()
-            c = conn.cursor()
-            c.execute("""
-                UPDATE aria_onboarding
-                SET current_block=%s, answers_json=%s, updated_at=NOW()
-                WHERE username=%s
-            """, (next_idx, json.dumps(answers), username))
-            conn.commit()
-            conn.close()
-
-            bloc_answers = _flat_to_bloc_answers(answers)
-            threading.Thread(
-                target=complete_onboarding,
-                args=(username, tenant_id, bloc_answers),
-                daemon=True,
-            ).start()
-
-            done_msg = (
-                "Merci, j'ai tout ce qu'il me faut !\n\n"
-                "Je construis ton profil... ca prend une dizaine de secondes.\n"
-                "_(Tu peux deja commencer a utiliser le chat.)_"
-            )
-            return {"next_message": done_msg, "done": True, "question_idx": next_idx}
-
-        # Met a jour l'index et les reponses
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("""
-            UPDATE aria_onboarding
-            SET current_block=%s, answers_json=%s, updated_at=NOW()
-            WHERE username=%s
-        """, (next_idx, json.dumps(answers), username))
-        conn.commit()
-        conn.close()
-
-        return {
-            "next_message": _format_question(next_idx),
-            "done": False,
-            "question_idx": next_idx,
-        }
-
-    except Exception as e:
-        print(f"[Onboarding] record_answer: {e}")
-        return {"next_message": "", "done": True, "question_idx": 0}
-
-
-def _flat_to_bloc_answers(flat: dict) -> dict:
-    """Convertit {q0: r0, q1: r1, ...} vers le format {bloc_id: {question: reponse}}."""
-    result = {}
-    for i, (bloc_id, _, question) in enumerate(ALL_QUESTIONS):
-        answer = flat.get(f"q{i}", "")
-        if answer:
-            bid = str(bloc_id)
-            if bid not in result:
-                result[bid] = {}
-            result[bid][question] = answer
-    return result
-
-
-def skip_onboarding(username: str, tenant_id: str) -> bool:
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("""
-            INSERT INTO aria_onboarding (username, tenant_id, status, updated_at)
-            VALUES (%s, %s, 'skipped', NOW())
-            ON CONFLICT (username) DO UPDATE SET status='skipped', updated_at=NOW()
-        """, (username, tenant_id))
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        print(f"[Onboarding] skip: {e}")
-        return False
-
-
-def restart_onboarding(username: str, tenant_id: str) -> bool:
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("""
-            INSERT INTO aria_onboarding (username, tenant_id, status, current_block, answers_json, updated_at)
-            VALUES (%s, %s, 'pending', 0, '{}', NOW())
-            ON CONFLICT (username) DO UPDATE
-              SET status='pending', current_block=0, answers_json='{}',
-                  completed_at=NULL, updated_at=NOW()
-        """, (username, tenant_id))
         conn.commit()
         conn.close()
         return True
@@ -251,55 +131,53 @@ def restart_onboarding(username: str, tenant_id: str) -> bool:
         return False
 
 
-def complete_onboarding(username: str, tenant_id: str, answers: dict) -> dict:
+def _generate_profile(username: str, tenant_id: str):
     """
-    Appel Opus pour generer regles + insights + profil.
-    answers = {"1": {question: reponse, ...}, "2": {...}, ...}
+    Genere regles + insights + hot_summary a partir de l'historique de session.
+    Execute en background apres conclusion de l'onboarding.
     """
+    session = get_session(_sid(username), username)
+    if "error" in session:
+        return
+
+    history = session.get("history", [])
+    conv_text = ""
+    for entry in history:
+        if entry.get("role") == "assistant":
+            conv_text += f"Raya: {entry.get('question', '')}\n"
+        elif entry.get("role") == "user":
+            conv_text += f"Utilisateur: {entry.get('answer', '')}\n"
+
+    if not conv_text.strip():
+        return
+
+    prompt = (
+        f"Tu es Raya. Voici la conversation d'onboarding avec {username} :\n\n"
+        f"{conv_text}\n\n"
+        "Genere en JSON strict (sans backticks) :\n"
+        "{\"profile_summary\": \"resume ~100 mots\","
+        "\"rules\": [{\"category\": \"comportement\", \"rule\": \"regle concrete\"}],"
+        "\"insights\": [{\"topic\": \"sujet\", \"text\": \"observation\"}]}\n\n"
+        "rules : 5-10 regles concretes sur style, priorites, outils, metier.\n"
+        "insights : 3-5 observations cles.\n"
+        "profile_summary : factuel, 100 mots max."
+    )
+
     try:
-        answers_text = ""
-        bloc_titres = {
-            "1": "Contexte professionnel",
-            "2": "Outils et habitudes",
-            "3": "Preferences de communication",
-            "4": "Contexte metier",
-        }
-        for bid, titre in bloc_titres.items():
-            bloc_answers = answers.get(bid, {})
-            if bloc_answers:
-                answers_text += f"\n=== {titre} ===\n"
-                for q, a in bloc_answers.items():
-                    if a and str(a).strip():
-                        answers_text += f"  Q: {q}\n  R: {a}\n"
-
-        prompt = (
-            f"Tu es Raya. L'utilisateur {username} vient de completer son onboarding conversationnel.\n"
-            f"Voici ses reponses :\n{answers_text}\n\n"
-            "Genere en JSON strict (sans backticks) :\n"
-            "{\"profile_summary\": \"~100 mots, qui est cet utilisateur, comment travailler avec lui\","
-            "\"rules\": [{\"category\": \"comportement\", \"rule\": \"regle concrete\"}, ...],"
-            "\"insights\": [{\"topic\": \"sujet\", \"text\": \"observation\"}, ...]}\n\n"
-            "Regles : 5-10 regles sur style, priorites, outils, metier.\n"
-            "Insights : 3-5 observations cles.\n"
-            "Profile : factuel, pas de flatterie."
-        )
-
         from app.llm_client import llm_complete, log_llm_usage
-        import re
         result = llm_complete(
             messages=[{"role": "user", "content": prompt}],
-            model_tier="deep",
+            model_tier="smart",
             max_tokens=1500,
         )
         log_llm_usage(result, username=username, tenant_id=tenant_id,
-                      purpose="onboarding_completion")
-
+                      purpose="onboarding_profile")
         raw = re.sub(r'^```(?:json)?\s*', '', result["text"].strip(), flags=re.MULTILINE)
         raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
         parsed = json.loads(raw)
     except Exception as e:
-        print(f"[Onboarding] Erreur Opus: {e}")
-        parsed = {"profile_summary": "", "rules": [], "insights": []}
+        print(f"[Onboarding] generate_profile error: {e}")
+        return
 
     if parsed.get("profile_summary"):
         try:
@@ -308,52 +186,34 @@ def complete_onboarding(username: str, tenant_id: str, answers: dict) -> dict:
             c.execute("""
                 INSERT INTO aria_hot_summary (username, content, updated_at)
                 VALUES (%s, %s, NOW())
-                ON CONFLICT (username) DO UPDATE SET content=EXCLUDED.content, updated_at=NOW()
+                ON CONFLICT (username) DO UPDATE
+                  SET content=EXCLUDED.content, updated_at=NOW()
             """, (username, parsed["profile_summary"]))
             conn.commit()
             conn.close()
         except Exception as e:
             print(f"[Onboarding] hot_summary: {e}")
 
-    rules_created = 0
     from app.memory_rules import save_rule
+    rules_ok = 0
     for item in parsed.get("rules", []):
         try:
             if item.get("rule") and len(item["rule"]) > 5:
                 save_rule(item.get("category", "comportement"), item["rule"],
                           "onboarding", 0.8, username, tenant_id)
-                rules_created += 1
+                rules_ok += 1
         except Exception:
             pass
 
-    insights_created = 0
     from app.memory_synthesis import save_insight
+    insights_ok = 0
     for item in parsed.get("insights", []):
         try:
             if item.get("text") and len(item["text"]) > 5:
                 save_insight(item.get("topic", "profil"), item["text"],
                              "onboarding", username=username, tenant_id=tenant_id)
-                insights_created += 1
+                insights_ok += 1
         except Exception:
             pass
 
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("""
-            UPDATE aria_onboarding
-            SET status='completed', answers_json=%s, completed_at=NOW(), updated_at=NOW()
-            WHERE username=%s
-        """, (json.dumps(answers), username))
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        print(f"[Onboarding] sauvegarde finale: {e}")
-
-    print(f"[Onboarding] {username} complete : {rules_created} regles, {insights_created} insights")
-    return {
-        "status": "completed",
-        "rules_created": rules_created,
-        "insights_created": insights_created,
-        "profile_summary": parsed.get("profile_summary", ""),
-    }
+    print(f"[Onboarding] {username} profile genere : {rules_ok} regles, {insights_ok} insights")
