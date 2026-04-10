@@ -33,10 +33,7 @@ async function init() {
 async function loadUserInfo() {
   try {
     const r = await fetch('/admin/users');
-    if (r.ok) {
-      isAdmin = true;
-      document.getElementById('adminPanelBtn').style.display = 'inline-flex';
-    }
+    if (r.ok) { isAdmin = true; document.getElementById('adminPanelBtn').style.display = 'inline-flex'; }
   } catch(e) {}
 }
 
@@ -44,23 +41,15 @@ async function loadMailCount() {
   try {
     const r = await fetch('/memory-status');
     const d = await r.json();
-    const n2 = d.niveau_2 || {};
-    const count = n2.mail_memory || 0;
-    if (count > 0) {
-      const el = document.getElementById('mailCount');
-      el.textContent = count > 99 ? '99+' : count;
-      el.classList.add('visible');
-    }
+    const count = (d.niveau_2 || {}).mail_memory || 0;
+    if (count > 0) { const el = document.getElementById('mailCount'); el.textContent = count > 99 ? '99+' : count; el.classList.add('visible'); }
   } catch(e) {}
 }
 
 async function checkHealth() {
   const dot = document.getElementById('msStatus');
-  try {
-    const r = await fetch('/health');
-    const d = await r.json();
-    dot.className = d.status === 'ok' ? 'logo-dot' : 'logo-dot off';
-  } catch(e) { dot.className = 'logo-dot off'; }
+  try { const d = await (await fetch('/health')).json(); dot.className = d.status === 'ok' ? 'logo-dot' : 'logo-dot off'; }
+  catch(e) { dot.className = 'logo-dot off'; }
 }
 
 // ─── TOKEN ALERT ───
@@ -82,25 +71,19 @@ function renderTokenBanner() {
   const warnings = window._tokenWarnings || [];
   banner.innerHTML = warnings.map(w => `
     <div class="token-banner-item">
-      <span class="token-banner-msg">
-        <strong>${w.provider}</strong> — ${w.message}
-      </span>
-      ${w.action_url
-        ? `<a href="${w.action_url}" class="token-banner-link">${w.action}</a>`
-        : ''}
+      <span class="token-banner-msg"><strong>${w.provider}</strong> — ${w.message}</span>
+      ${w.action_url ? `<a href="${w.action_url}" class="token-banner-link">${w.action}</a>` : ''}
     </div>
   `).join('') + `<button class="token-banner-close" onclick="closeTokenBanner()" title="Fermer">✕</button>`;
 }
 
 function toggleTokenBanner() {
   const banner = document.getElementById('tokenBanner');
-  if (!banner.classList.contains('visible')) { renderTokenBanner(); }
+  if (!banner.classList.contains('visible')) renderTokenBanner();
   banner.classList.toggle('visible');
 }
 
-function closeTokenBanner() {
-  document.getElementById('tokenBanner').classList.remove('visible');
-}
+function closeTokenBanner() { document.getElementById('tokenBanner').classList.remove('visible'); }
 
 // ─── TOASTS ───
 function showToast(msg, type='ok', duration=3000) {
@@ -110,10 +93,7 @@ function showToast(msg, type='ok', duration=3000) {
   const icons = { ok: '✓', err: '✕', info: 'ℹ' };
   toast.innerHTML = `<span>${icons[type]||'ℹ'}</span> <span>${msg}</span>`;
   container.appendChild(toast);
-  setTimeout(() => {
-    toast.style.animation = 'toastOut 0.3s ease forwards';
-    setTimeout(() => toast.remove(), 300);
-  }, duration);
+  setTimeout(() => { toast.style.animation = 'toastOut 0.3s ease forwards'; setTimeout(() => toast.remove(), 300); }, duration);
 }
 
 // ─── AUTO SPEAK ───
@@ -152,34 +132,17 @@ function renderQuickActions() {
     else { btn.onclick = () => s.query === '__TRIAGE__' ? startTriage() : quickAsk(s.query); }
     row.appendChild(btn);
   });
-  const addBtn = document.createElement('button');
-  addBtn.className = 'quick-add-btn';
-  addBtn.textContent = '+ Ajouter';
-  addBtn.style.display = shortcutsEditMode ? 'inline-flex' : 'none';
-  addBtn.onclick = openShortcuts;
-  row.appendChild(addBtn);
-  const editBtn = document.createElement('button');
-  editBtn.className = 'quick-edit-btn';
+  const addBtn = document.createElement('button'); addBtn.className = 'quick-add-btn'; addBtn.textContent = '+ Ajouter';
+  addBtn.style.display = shortcutsEditMode ? 'inline-flex' : 'none'; addBtn.onclick = openShortcuts; row.appendChild(addBtn);
+  const editBtn = document.createElement('button'); editBtn.className = 'quick-edit-btn';
   editBtn.textContent = shortcutsEditMode ? '✓ Terminer' : '✏️';
   editBtn.title = shortcutsEditMode ? "Terminer l'édition" : 'Personnaliser les raccourcis';
-  editBtn.onclick = toggleShortcutsEdit;
-  row.appendChild(editBtn);
+  editBtn.onclick = toggleShortcutsEdit; row.appendChild(editBtn);
 }
 
-function toggleShortcutsEdit() {
-  shortcutsEditMode = !shortcutsEditMode;
-  renderQuickActions();
-  if (shortcutsEditMode) showToast('Cliquez sur un raccourci pour le supprimer', 'info', 2500);
-}
-function removeShortcutDirect(index) {
-  const s = getShortcuts(); const removed = s[index]; s.splice(index,1);
-  saveShortcutsToStorage(s); renderQuickActions();
-  showToast(`"${removed.label}" supprimé`, 'ok', 2000);
-}
-function openShortcuts() {
-  pendingShortcuts = [...getShortcuts()]; renderShortcutList();
-  document.getElementById('modalShortcuts').classList.add('open');
-}
+function toggleShortcutsEdit() { shortcutsEditMode = !shortcutsEditMode; renderQuickActions(); if (shortcutsEditMode) showToast('Cliquez sur un raccourci pour le supprimer', 'info', 2500); }
+function removeShortcutDirect(index) { const s = getShortcuts(); const removed = s[index]; s.splice(index,1); saveShortcutsToStorage(s); renderQuickActions(); showToast(`"${removed.label}" supprimé`, 'ok', 2000); }
+function openShortcuts() { pendingShortcuts = [...getShortcuts()]; renderShortcutList(); document.getElementById('modalShortcuts').classList.add('open'); }
 function closeShortcuts() { document.getElementById('modalShortcuts').classList.remove('open'); }
 function renderShortcutList() {
   document.getElementById('shortcutList').innerHTML = pendingShortcuts.map((s,i) =>
@@ -188,16 +151,12 @@ function renderShortcutList() {
 }
 function removePendingShortcut(i) { pendingShortcuts.splice(i,1); renderShortcutList(); }
 function addShortcut() {
-  const input = document.getElementById('newShortcutText');
-  const text = input.value.trim(); if (!text) return;
+  const input = document.getElementById('newShortcutText'); const text = input.value.trim(); if (!text) return;
   const emojis = ['💬','🔧','📌','🗂','📝','🎯','💡','🔍'];
   pendingShortcuts.push({ icon: emojis[pendingShortcuts.length % emojis.length], label: text, query: text });
   renderShortcutList(); input.value = ''; input.focus();
 }
-function saveShortcuts() {
-  saveShortcutsToStorage(pendingShortcuts); renderQuickActions();
-  closeShortcuts(); showToast('Raccourcis enregistrés ✓', 'ok');
-}
+function saveShortcuts() { saveShortcutsToStorage(pendingShortcuts); renderQuickActions(); closeShortcuts(); showToast('Raccourcis enregistrés ✓', 'ok'); }
 
 // ─── SCROLL ───
 function scrollToBottom(smooth=true) { messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: smooth ? 'smooth' : 'instant' }); }
@@ -210,7 +169,6 @@ function onMessagesScroll() {
 function autoResize(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,120)+'px'; }
 function handleKey(e) { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
 
-// cleanText reste utilisé par la synthèse vocale (bouton Écouter)
 function cleanText(t) {
   return t.replace(/#{1,6}\s+/g,'').replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1')
     .replace(/`(.*?)`/g,'$1').replace(/---+/g,'').replace(/\|.*?\|/g,'')
@@ -218,14 +176,14 @@ function cleanText(t) {
     .replace(/\n{3,}/g,'\n\n').trim();
 }
 
-function addMessage(text, type, fileInfo) {
+function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
   const welcome = messagesEl.querySelector('.welcome');
   if (welcome) welcome.remove();
   const row = document.createElement('div'); row.className = 'message-row ' + type;
   const avatar = document.createElement('div'); avatar.className = 'avatar ' + type + '-avatar';
   avatar.textContent = type === 'raya' ? '✦' : (currentUser ? currentUser[0].toUpperCase() : 'G');
   const bubble = document.createElement('div'); bubble.className = 'bubble';
-  if (fileInfo && fileInfo.type.startsWith('image/')) {
+  if (fileInfo && fileInfo.type && fileInfo.type.startsWith('image/')) {
     const img = document.createElement('img'); img.className = 'attached-image';
     img.src = 'data:' + fileInfo.type + ';base64,' + fileInfo.data; bubble.appendChild(img);
   } else if (fileInfo) {
@@ -235,34 +193,49 @@ function addMessage(text, type, fileInfo) {
 
   const content = document.createElement('div');
   if (type === 'raya') {
-    // Rendu markdown sécurisé via marked.js + DOMPurify
-    // cleanText() n'est PAS utilisé ici (synthèse vocale seulement)
     try {
       const rawHtml = marked.parse(text || '');
       const cleanHtml = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target', 'rel'] });
       content.innerHTML = cleanHtml;
       content.classList.add('markdown-content');
-      // Ouvrir les liens dans un nouvel onglet
-      content.querySelectorAll('a').forEach(a => {
-        a.setAttribute('target', '_blank');
-        a.setAttribute('rel', 'noopener noreferrer');
-      });
+      content.querySelectorAll('a').forEach(a => { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer'); });
     } catch(e) {
-      // Fallback si marked non disponible
-      content.style.whiteSpace = 'pre-wrap';
-      content.textContent = text;
+      content.style.whiteSpace = 'pre-wrap'; content.textContent = text;
     }
   } else {
-    content.style.whiteSpace = 'pre-wrap';
-    content.textContent = text;
+    content.style.whiteSpace = 'pre-wrap'; content.textContent = text;
   }
   bubble.appendChild(content);
 
   if (type === 'raya') {
     const actions = document.createElement('div'); actions.className = 'bubble-actions';
+
+    // Bouton 🔊 Écouter
     const speakBtn = document.createElement('button'); speakBtn.className = 'speak-btn'; speakBtn.textContent = '🔊 Écouter';
     speakBtn.onclick = () => { if (speakBtn.classList.contains('playing')) stopSpeech(); else speak(text, speakBtn); };
-    actions.appendChild(speakBtn); bubble.appendChild(actions);
+    actions.appendChild(speakBtn);
+
+    // Boutons feedback 👍👎 + Pourquoi ? (discrets, apparaissent au hover)
+    if (ariaMemoryId) {
+      const sep = document.createElement('span'); sep.className = 'bubble-actions-sep'; actions.appendChild(sep);
+
+      const thumbUp = document.createElement('button'); thumbUp.className = 'feedback-btn'; thumbUp.title = 'Bonne réponse';
+      thumbUp.textContent = '👍';
+      thumbUp.onclick = () => sendFeedback(ariaMemoryId, 'positive', thumbUp);
+      actions.appendChild(thumbUp);
+
+      const thumbDown = document.createElement('button'); thumbDown.className = 'feedback-btn'; thumbDown.title = 'À améliorer';
+      thumbDown.textContent = '👎';
+      thumbDown.onclick = () => openFeedbackDialog(ariaMemoryId, thumbDown);
+      actions.appendChild(thumbDown);
+
+      const whyBtn = document.createElement('button'); whyBtn.className = 'feedback-btn why-btn'; whyBtn.title = 'Pourquoi cette réponse ?';
+      whyBtn.textContent = '💡';
+      whyBtn.onclick = () => showWhy(ariaMemoryId, whyBtn);
+      actions.appendChild(whyBtn);
+    }
+
+    bubble.appendChild(actions);
   }
   row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row);
   if (messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 200) scrollToBottom();
@@ -277,66 +250,117 @@ function addLoading() {
   row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row); scrollToBottom(); return row;
 }
 
+// ─── FEEDBACK 👍👎 ───
+
+async function sendFeedback(ariaMemoryId, type, btn) {
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
+  try {
+    const r = await fetch('/raya/feedback', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ aria_memory_id: ariaMemoryId, feedback_type: type, comment: '' })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      if (btn) { btn.textContent = type === 'positive' ? '👍✅' : '👎✅'; }
+      if (type === 'positive') showToast('Merci ! Les règles utilisées ont été renforcées.', 'ok', 3000);
+      if (type === 'negative' && d.corrective_rule) showToast('Règle corrective créée ✔', 'ok', 3000);
+    } else {
+      if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+    }
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+  }
+}
+
+function openFeedbackDialog(ariaMemoryId, btn) {
+  // Mini-dialog inline pour le commentaire négatif
+  const existing = document.getElementById('feedback-dialog-' + ariaMemoryId);
+  if (existing) { existing.remove(); return; }
+
+  const dialog = document.createElement('div');
+  dialog.id = 'feedback-dialog-' + ariaMemoryId;
+  dialog.className = 'feedback-dialog';
+  dialog.innerHTML = `
+    <div class="feedback-dialog-label">Qu'est-ce qui n'était pas satisfaisant ?</div>
+    <textarea class="feedback-dialog-input" placeholder="(optionnel) Décris le problème..." rows="2"></textarea>
+    <div class="feedback-dialog-btns">
+      <button class="feedback-dialog-send">👎 Envoyer</button>
+      <button class="feedback-dialog-cancel">✕ Annuler</button>
+    </div>
+  `;
+
+  dialog.querySelector('.feedback-dialog-send').onclick = async () => {
+    const comment = dialog.querySelector('.feedback-dialog-input').value.trim();
+    dialog.remove();
+    const r = await fetch('/raya/feedback', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ aria_memory_id: ariaMemoryId, feedback_type: 'negative', comment })
+    });
+    const d = await r.json();
+    if (d.ok) {
+      if (btn) { btn.textContent = '👎✅'; btn.disabled = true; btn.style.opacity = '0.5'; }
+      showToast(d.corrective_rule ? 'Règle corrective créée par Opus ✔' : 'Feedback enregistré', 'ok', 3000);
+    }
+  };
+  dialog.querySelector('.feedback-dialog-cancel').onclick = () => dialog.remove();
+
+  // Insérer juste après la bulle Raya
+  btn.closest('.message-row').after(dialog);
+}
+
+async function showWhy(ariaMemoryId, btn) {
+  const existing = document.getElementById('why-panel-' + ariaMemoryId);
+  if (existing) { existing.remove(); return; }
+
+  try {
+    const d = await (await fetch('/raya/why/' + ariaMemoryId)).json();
+    if (!d.ok) return;
+
+    const panel = document.createElement('div');
+    panel.id = 'why-panel-' + ariaMemoryId;
+    panel.className = 'why-panel';
+
+    const tierLabel = d.model_tier === 'deep' ? '🧠 Opus (analyse complexe)' : '⚡ Sonnet (réponse rapide)';
+    const ragLabel = d.via_rag ? `RAG actif — ${d.rules_count} règle(s) ciblée(s)` : 'Injection en bloc (RAG non actif)';
+    const rulesHtml = d.rules && d.rules.length > 0
+      ? d.rules.map(r => `<div class="why-rule"><span class="why-cat">[${r.category}]</span> ${r.rule.substring(0,80)}${r.rule.length>80?'...':''} <span class="why-conf">${(r.confidence*100).toFixed(0)}%</span></div>`).join('')
+      : '<div class="why-empty">Aucune règle injectée</div>';
+
+    panel.innerHTML = `
+      <div class="why-header"><span>💡 Pourquoi cette réponse ?</span><button class="why-close" onclick="this.closest('.why-panel').remove()">✕</button></div>
+      <div class="why-row">🤖 Modèle : <strong>${tierLabel}</strong></div>
+      <div class="why-row">🔍 Mémoire : <strong>${ragLabel}</strong></div>
+      <div class="why-rules-title">Règles utilisées :</div>
+      ${rulesHtml}
+    `;
+    btn.closest('.message-row').after(panel);
+  } catch(e) {}
+}
+
 // ─── ACTIONS EN ATTENTE ───
 function renderPendingActions(pendingList) {
-  // Supprimer la zone précédente
-  const existing = document.getElementById('pending-actions-zone');
-  if (existing) existing.remove();
+  const existing = document.getElementById('pending-actions-zone'); if (existing) existing.remove();
   if (!pendingList || pendingList.length === 0) return;
-
-  const zone = document.createElement('div');
-  zone.id = 'pending-actions-zone';
-  zone.className = 'pending-actions-zone';
-
-  const title = document.createElement('div');
-  title.className = 'pending-title';
-  title.textContent = `⏸️ ${pendingList.length} action(s) en attente de confirmation`;
-  zone.appendChild(title);
-
+  const zone = document.createElement('div'); zone.id = 'pending-actions-zone'; zone.className = 'pending-actions-zone';
+  const title = document.createElement('div'); title.className = 'pending-title';
+  title.textContent = `⏸️ ${pendingList.length} action(s) en attente de confirmation`; zone.appendChild(title);
   pendingList.forEach(action => {
-    const card = document.createElement('div');
-    card.className = 'pending-card';
-
-    const label = document.createElement('div');
-    label.className = 'pending-label';
-    label.textContent = action.label || `${action.action_type} #${action.id}`;
-    card.appendChild(label);
-
-    // Prévisualisation du texte si c'est une réponse mail
+    const card = document.createElement('div'); card.className = 'pending-card';
+    const label = document.createElement('div'); label.className = 'pending-label';
+    label.textContent = action.label || `${action.action_type} #${action.id}`; card.appendChild(label);
     if (action.payload && action.payload.reply_text) {
-      const preview = document.createElement('div');
-      preview.className = 'pending-preview';
-      preview.textContent = action.payload.reply_text.substring(0, 300);
-      card.appendChild(preview);
+      const preview = document.createElement('div'); preview.className = 'pending-preview';
+      preview.textContent = action.payload.reply_text.substring(0, 300); card.appendChild(preview);
     }
-
-    const btns = document.createElement('div');
-    btns.className = 'pending-btns';
-
-    const confirmBtn = document.createElement('button');
-    confirmBtn.className = 'pending-btn confirm';
-    confirmBtn.textContent = '✓ Confirmer';
-    confirmBtn.onclick = () => {
-      // Injecte la phrase dans l'input et envoie — Raya génère [ACTION:CONFIRM:id]
-      inputEl.value = `Confirme l'action ${action.id}`;
-      sendMessage();
-    };
-    btns.appendChild(confirmBtn);
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.className = 'pending-btn cancel';
-    cancelBtn.textContent = '✕ Annuler';
-    cancelBtn.onclick = () => {
-      inputEl.value = `Annule l'action ${action.id}`;
-      sendMessage();
-    };
-    btns.appendChild(cancelBtn);
-
-    card.appendChild(btns);
-    zone.appendChild(card);
+    const btns = document.createElement('div'); btns.className = 'pending-btns';
+    const confirmBtn = document.createElement('button'); confirmBtn.className = 'pending-btn confirm'; confirmBtn.textContent = '✓ Confirmer';
+    confirmBtn.onclick = () => { inputEl.value = `Confirme l'action ${action.id}`; sendMessage(); }; btns.appendChild(confirmBtn);
+    const cancelBtn = document.createElement('button'); cancelBtn.className = 'pending-btn cancel'; cancelBtn.textContent = '✕ Annuler';
+    cancelBtn.onclick = () => { inputEl.value = `Annule l'action ${action.id}`; sendMessage(); }; btns.appendChild(cancelBtn);
+    card.appendChild(btns); zone.appendChild(card);
   });
-
-  // Insérer au-dessus de la zone d'input
   const inputZone = document.querySelector('.input-zone');
   inputZone.parentNode.insertBefore(zone, inputZone);
 }
@@ -353,27 +377,16 @@ async function sendMessage() {
     if (fileSnapshot) { body.file_data=fileSnapshot.data; body.file_type=fileSnapshot.type; body.file_name=fileSnapshot.name; }
     const response = await fetch('/raya', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const data = await response.json(); loading.remove();
-    const msgRow = addMessage(data.answer, 'raya');
+    const msgRow = addMessage(data.answer, 'raya', null, data.aria_memory_id || null);
     if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'));
-
-    // Toasts pour les actions exécutées
     if (data.actions && data.actions.length > 0) {
-      const ok = data.actions.filter(a => a.startsWith('✅'));
-      const err = data.actions.filter(a => a.startsWith('❌'));
-      const pend = data.actions.filter(a => a.startsWith('⏸️'));
+      const ok = data.actions.filter(a => a.startsWith('✅')); const err = data.actions.filter(a => a.startsWith('❌')); const pend = data.actions.filter(a => a.startsWith('⏸️'));
       if (ok.length) showToast(ok[0].replace('✅','').trim(), 'ok', 3000);
       if (err.length) showToast(err[0].replace('❌','').trim(), 'err', 4000);
       if (pend.length) showToast(`${pend.length} action(s) en attente`, 'info', 4000);
     }
-
-    // Affichage des actions en attente avec boutons Confirmer/Annuler
-    if (data.pending_actions && data.pending_actions.length > 0) {
-      renderPendingActions(data.pending_actions);
-    } else {
-      // Plus d'actions en attente — nettoyer la zone
-      const zone = document.getElementById('pending-actions-zone');
-      if (zone) zone.remove();
-    }
+    if (data.pending_actions && data.pending_actions.length > 0) renderPendingActions(data.pending_actions);
+    else { const zone = document.getElementById('pending-actions-zone'); if (zone) zone.remove(); }
   } catch(e) {
     loading.remove(); addMessage('Erreur de connexion à Raya. Réessayez.', 'raya');
     showToast('Erreur de connexion', 'err');
@@ -414,13 +427,8 @@ function speak(text, btn) {
       if (!speakAborted) currentAudio.play().catch(resetSpeakUI);
     }).catch(resetSpeakUI);
 }
-function resetSpeakUI() {
-  if (currentSpeakBtn) { currentSpeakBtn.textContent='🔊 Écouter'; currentSpeakBtn.classList.remove('playing'); currentSpeakBtn=null; }
-}
-function stopSpeech() {
-  speakAborted = true; if (currentAudio) { currentAudio.pause(); currentAudio=null; }
-  window.speechSynthesis && window.speechSynthesis.cancel(); resetSpeakUI();
-}
+function resetSpeakUI() { if (currentSpeakBtn) { currentSpeakBtn.textContent='🔊 Écouter'; currentSpeakBtn.classList.remove('playing'); currentSpeakBtn=null; } }
+function stopSpeech() { speakAborted = true; if (currentAudio) { currentAudio.pause(); currentAudio=null; } window.speechSynthesis && window.speechSynthesis.cancel(); resetSpeakUI(); }
 
 // ─── MICRO ───
 function toggleMic() {
@@ -436,8 +444,7 @@ function startListening() {
   rec.onresult = (e) => {
     clearSilenceTimer(); let interim='', final='';
     for (let i=e.resultIndex; i<e.results.length; i++) {
-      if (e.results[i].isFinal) final+=e.results[i][0].transcript+' ';
-      else interim+=e.results[i][0].transcript;
+      if (e.results[i].isFinal) final+=e.results[i][0].transcript+' '; else interim+=e.results[i][0].transcript;
     }
     if (interim) { inputEl.value=(finalTextBase+' '+interim).trim(); inputEl.classList.add('interim'); autoResize(inputEl); }
     if (final) { finalTextBase=(finalTextBase+' '+final).trim(); inputEl.value=finalTextBase; inputEl.classList.remove('interim'); autoResize(inputEl); }
@@ -496,8 +503,7 @@ async function drawerAction(btn, url, id) {
   el.className='d-btn-result loading'; el.textContent='⏳ En cours…'; btn.disabled=true;
   try {
     const d=await (await fetch(url)).json(); const txt=formatDrawerResult(d);
-    el.className='d-btn-result ok'; el.textContent=txt;
-    showToast(txt.split('\n')[0].substring(0,60),'ok');
+    el.className='d-btn-result ok'; el.textContent=txt; showToast(txt.split('\n')[0].substring(0,60),'ok');
   } catch(e) { el.className='d-btn-result err'; el.textContent='❌ Erreur: '+e.message; showToast("Erreur lors de l'action",'err'); }
   btn.disabled=false;
 }
@@ -506,8 +512,7 @@ function drawerShowConfirm(id) { document.getElementById(id).classList.add('visi
 function drawerHideConfirm(e, id) { e.stopPropagation(); document.getElementById(id).classList.remove('visible'); }
 
 async function drawerMemoryStatus(btn) {
-  const el=document.getElementById('result-status');
-  el.className='d-btn-result loading'; el.textContent='⏳ Chargement…'; btn.disabled=true;
+  const el=document.getElementById('result-status'); el.className='d-btn-result loading'; el.textContent='⏳ Chargement…'; btn.disabled=true;
   try {
     const d=await (await fetch('/memory-status')).json(); const n1=d.niveau_1||{}, n2=d.niveau_2||{};
     el.className='d-btn-result info';
@@ -516,8 +521,7 @@ async function drawerMemoryStatus(btn) {
   btn.disabled=false;
 }
 async function drawerRules(btn) {
-  const el=document.getElementById('result-rules');
-  el.className='d-btn-result loading'; el.textContent='⏳ Chargement…'; btn.disabled=true;
+  const el=document.getElementById('result-rules'); el.className='d-btn-result loading'; el.textContent='⏳ Chargement…'; btn.disabled=true;
   try {
     const rules=await (await fetch('/rules')).json(); const active=rules.filter(r=>r.active);
     if (!active.length) { el.className='d-btn-result info'; el.textContent='Aucune règle active.'; }
