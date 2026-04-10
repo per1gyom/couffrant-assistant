@@ -254,6 +254,31 @@ def init_postgres():
             notes TEXT, UNIQUE(username, chat_id)
         )
     """)
+    # Queue de confirmation pour les actions sensibles (B2)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS pending_actions (
+            id SERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL DEFAULT 'couffrant_solar',
+            username TEXT NOT NULL,
+            conversation_id INTEGER,
+            action_type TEXT NOT NULL,
+            action_label TEXT,
+            payload_json JSONB NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            result_json JSONB,
+            error_message TEXT,
+            created_at TIMESTAMP DEFAULT NOW(),
+            confirmed_at TIMESTAMP,
+            executed_at TIMESTAMP,
+            cancelled_at TIMESTAMP,
+            expires_at TIMESTAMP DEFAULT (NOW() + INTERVAL '24 hours'),
+            CONSTRAINT pending_actions_status_check CHECK (
+                status IN ('pending', 'confirmed', 'executing', 'executed', 'failed', 'cancelled', 'expired')
+            )
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_pending_actions_user_status ON pending_actions (username, status, created_at DESC)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_pending_actions_tenant ON pending_actions (tenant_id, status)")
 
     conn.commit()
     conn.close()
@@ -309,7 +334,6 @@ def init_postgres():
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_attempts_count INT DEFAULT 0",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_attempts_round INT DEFAULT 0",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS login_locked_until TIMESTAMP",
-        # Migration gmail_tokens → oauth_tokens (consolidation tokens Google)
         """INSERT INTO oauth_tokens (provider, username, access_token, refresh_token, expires_at)
            SELECT 'google', g.username, g.access_token, g.refresh_token,
                   NOW() + INTERVAL '1 hour'
