@@ -5,6 +5,7 @@ Point d'entrée principal. Setup, middleware, startup, routes.
 import os
 import threading
 import time
+from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import Response, RedirectResponse
@@ -30,8 +31,6 @@ from app.routes.webhook import router as webhook_router
 from app.routes.forced_reset import router as forced_reset_router
 from app.routes.onboarding import router as onboarding_router
 
-
-# ─── MIDDLEWARE HEADERS DE SÉCURITÉ ───
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -80,6 +79,23 @@ def health():
     return {"status": "ok", "app": "Raya", "memory_module": MEMORY_OK}
 
 
+# ── PWA : manifest + service worker accessibles à la racine ──
+@app.get("/manifest.json")
+def pwa_manifest():
+    p = Path("app/static/manifest.json")
+    if p.exists():
+        return Response(content=p.read_text(), media_type="application/manifest+json")
+    return Response(status_code=404)
+
+
+@app.get("/sw.js")
+def pwa_sw():
+    p = Path("app/static/sw.js")
+    if p.exists():
+        return Response(content=p.read_text(), media_type="application/javascript")
+    return Response(status_code=404)
+
+
 @app.on_event("startup")
 def startup_event():
     init_postgres()
@@ -109,6 +125,13 @@ def startup_event():
         seed_tools_registry()
     except Exception as e:
         print(f"[ToolsRegistry] Erreur seed: {e}")
+
+    # ── Jobs périodiques (Phase 4) ──
+    try:
+        from app.scheduler import start_all_jobs
+        start_all_jobs()
+    except Exception as e:
+        print(f"[Scheduler] Erreur démarrage : {e}")
 
     def setup_webhooks():
         time.sleep(30)
