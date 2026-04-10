@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from app.app_security import validate_reset_token, consume_reset_token
+from app.config import SUPPORT_EMAIL
 
 router = APIRouter(tags=["reset"])
 
@@ -32,19 +33,80 @@ button{{width:100%;padding:14px;background:#1565c0;color:white;border:none;borde
 </div></body></html>
 """
 
+FORGOT_HTML = """<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raya — Mot de passe oublié</title>
+<style>
+*, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+:root {{
+  --bg: #f5f7fa; --surface: #ffffff; --border: #dde2ec;
+  --text: #111827; --text-muted: #6b7280;
+  --accent: #6366f1; --accent-hover: #5558e8;
+  --shadow: 0 4px 24px rgba(0,0,0,0.08);
+}}
+html, body {{ height: 100%; background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 15px; }}
+.page {{ min-height: 100vh; display: flex; align-items: center;
+  justify-content: center; padding: 24px; }}
+.card {{ background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 40px; width: 100%; max-width: 400px;
+  box-shadow: var(--shadow); text-align: center; }}
+.logo {{ font-size: 28px; font-weight: 800; letter-spacing: -0.5px;
+  margin-bottom: 6px; }}
+.logo span {{ color: var(--accent); }}
+.subtitle {{ font-size: 13px; color: var(--text-muted); margin-bottom: 32px; }}
+.icon {{ font-size: 40px; margin-bottom: 16px; }}
+h2 {{ font-size: 20px; font-weight: 700; margin-bottom: 12px; }}
+.message {{ font-size: 14px; color: var(--text-muted); line-height: 1.6;
+  margin-bottom: 8px; }}
+.email-link {{ color: var(--accent); font-weight: 600; text-decoration: none; }}
+.email-link:hover {{ text-decoration: underline; }}
+.back-btn {{ display: inline-block; margin-top: 28px; background: var(--accent);
+  color: #fff; border: none; border-radius: 10px; padding: 12px 24px;
+  font-size: 14px; font-weight: 600; text-decoration: none;
+  transition: background 0.15s; cursor: pointer; }}
+.back-btn:hover {{ background: var(--accent-hover); }}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="card">
+    <div class="logo">⚡ Ra<span>ya</span></div>
+    <p class="subtitle">Couffrant Solar — Assistant IA</p>
+    <div class="icon">🔑</div>
+    <h2>Mot de passe oublié ?</h2>
+    <p class="message">
+      Pour réinitialiser votre mot de passe, contactez votre administrateur :
+    </p>
+    <p class="message" style="margin-top: 10px;">
+      <a href="mailto:{support_email}" class="email-link">{support_email}</a>
+    </p>
+    <p class="message" style="margin-top: 16px; font-size: 13px;">
+      Il vous générera un nouveau mot de passe temporaire.
+    </p>
+    <a href="/login-app" class="back-btn">Retour au login</a>
+  </div>
+</div>
+</body>
+</html>"""
+
 
 @router.get("/forgot-password", response_class=HTMLResponse)
 def forgot_password_page():
-    return HTMLResponse(RESET_HTML.format(
-        sub="Contactez votre administrateur pour réinitialiser votre mot de passe.",
-        msg_block="", form_block=""))
+    return HTMLResponse(FORGOT_HTML.format(support_email=SUPPORT_EMAIL))
 
 
 @router.get("/reset-password", response_class=HTMLResponse)
 def reset_password_page(token: str = ""):
     if not token:
         return HTMLResponse(RESET_HTML.format(
-            sub="Lien invalide.", msg_block='<div class="msg err">Lien manquant ou mal formé.</div>', form_block=""))
+            sub="Lien invalide.",
+            msg_block='<div class="msg err">Lien manquant ou mal formé.</div>',
+            form_block=""))
     info = validate_reset_token(token)
     if not info:
         return HTMLResponse(RESET_HTML.format(
@@ -71,7 +133,7 @@ async def reset_password_submit(
     request: Request,
     token: str = Form(...),
     password: str = Form(...),
-    confirm: str = Form(...)
+    confirm: str = Form(...),
 ):
     if password != confirm:
         return HTMLResponse(RESET_HTML.format(
