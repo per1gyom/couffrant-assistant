@@ -320,6 +320,49 @@ def admin_reset_password(
     return generate_reset_token(target)
 
 
+@router.post("/admin/users/{username}/reset-password")
+def admin_users_reset_password(
+    request: Request,
+    username: str,
+    _: dict = Depends(require_admin),
+):
+    """
+    Génère un mot de passe temporaire aléatoire de 12 caractères pour l'utilisateur.
+    Hash et stocke immédiatement. Force le changement à la prochaine connexion.
+    Retourne le mot de passe en clair — à communiquer à l'utilisateur directement.
+    """
+    import secrets
+    import string
+    alphabet = string.ascii_letters + string.digits
+    temp_password = "".join(secrets.choice(alphabet) for _ in range(12))
+
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("SELECT username FROM users WHERE username = %s", (username,))
+        if not c.fetchone():
+            raise HTTPException(status_code=404, detail=f"Utilisateur '{username}' introuvable")
+        c.execute(
+            "UPDATE users SET password_hash = %s, must_reset_password = true WHERE username = %s",
+            (hash_password(temp_password), username),
+        )
+        conn.commit()
+        return {
+            "status": "ok",
+            "username": username,
+            "temp_password": temp_password,
+            "message": f"Mot de passe temporaire généré. L'utilisateur devra en choisir un nouveau à la connexion.",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn:
+            conn.close()
+
+
 # ─── TENANT ADMIN ───
 
 @router.get("/tenant/users")
