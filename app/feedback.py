@@ -1,27 +1,17 @@
 """
-Module de feedback pour Raya — Phase 3b.
+Module de feedback Raya — Phase 3b.
 
-Gère les boutons 👍👎 sous chaque réponse.
+Gère la boucle de correction par feedback 👍👎 (décision Opus B7) :
+  - save_response_metadata() : stocke tier, règles injectées, via_rag à chaque réponse
+  - get_response_metadata()  : retrouve ces infos pour le bouton "Pourquoi ?"
+  - process_positive_feedback() : renforce les règles injectées (+0.05 confiance)
+  - process_negative_feedback() : appel Opus → formule une règle corrective
 
-👍 Feedback positif :
-  Renforce silencieusement les règles qui étaient dans le contexte de la réponse.
-  (+0.05 de confidence sur chaque règle injectée, plafonné à 1.0)
-
-👎 Feedback négatif :
-  Ouvre un mini-dialogue côté frontend pour recueillir le problème.
-  Appel Opus pour formuler une règle corrective.
-  La règle corrective est insérée dans aria_rules avec confidence 0.8.
-
-Table aria_response_metadata : stocke pour chaque réponse :
-  - model_tier, model_name, via_rag
-  - rule_ids_injected (pour le renforcement/correction ciblé)
-  - feedback_type et feedback_comment (remplis après le retour utilisateur)
+Tout est non-bloquant : les erreurs ne doivent jamais interrompre la conversation.
 """
 import json
 from app.database import get_pg_conn
 
-
-# ─── STOCKAGE DES MÉTADONNÉES ───
 
 def save_response_metadata(
     aria_memory_id: int,
@@ -31,104 +21,134 @@ def save_response_metadata(
     model_name: str,
     via_rag: bool,
     rule_ids: list,
-) -> int | None:
+) -> None:
     """
-    Stocke les métadonnées de raisonnement d'une réponse.
-    Retourne l'ID de la ligne insérée, ou None si échec.
-    Non-bloquant : échec ignoré silencieusement.
+    Stocke les métadonnées de raisonnement d'une réponse Raya.
+    Appelé en background thread depuis raya.py — les erreurs sont avalées.
     """
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
             INSERT INTO aria_response_metadata
-              (aria_memory_id, username, tenant_id, model_tier, model_name,
-               via_rag, rule_ids_injected)
-            VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb)
-            RETURNING id
+              (aria_memory_id, username, tenant_id, model_tier, model_name, via_rag, rule_ids_injected)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (
             aria_memory_id, username, tenant_id,
             model_tier, model_name, via_rag,
             json.dumps(rule_ids or []),
         ))
-        meta_id = c.fetchone()[0]
         conn.commit()
         conn.close()
-        return meta_id
     except Exception as e:
-        print(f"[feedback] save_response_metadata échoué : {e}")
-        return None
+        print(f"[Feedback] save_response_metadata échoué (non bloquant) : {e}")
 
 
 def get_response_metadata(aria_memory_id: int, username: str) -> dict | None:
-    """Récupère les métadonnées d'une réponse. Utilisé par le bouton Pourquoi ?."""
+    """
+    Retourne les métadonnées + détails des règles injectées pour le bouton "Pourquoi ?".
+    """
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
             SELECT id, model_tier, model_name, via_rag, rule_ids_injected,
-                   feedback_type, feedback_comment, created_at
+                   feedback_type, feedback_comment, corrective_rule_id, created_at
             FROM aria_response_metadata
             WHERE aria_memory_id = %s AND username = %s
             LIMIT 1
         """, (aria_memory_id, username))
         row = c.fetchone()
-        conn.close()
         if not row:
+            conn.close()
             return None
+
+        meta_id, tier, model, via_rag, rule_ids_json, fb_type, fb_comment, corr_id, created = row
+        rule_ids = json.loads(rule_ids_json) if rule_ids_json else []
+
+        # Charge le détail des règles injectées
+        rules_detail = []
+        if rule_ids:
+            c.execute("""
+                SELECT id, category, rule, confidence, reinforcements
+                FROM aria_rules WHERE id = ANY(%s) AND username = %s
+            """, (rule_ids, username))
+            rules_detail = [
+                {"id": r[0], "category": r[1], "rule": r[2],
+                 "confidence": r[3], "reinforcements": r[4]}
+                for r in c.fetchall()
+            ]
+        conn.close()
+
         return {
-            "id":              row[0],
-            "model_tier":      row[1],
-            "model_name":      row[2],
-            "via_rag":         row[3],
-            "rule_ids":        row[4] or [],
-            "feedback_type":   row[5],
-            "feedback_comment": row[6],
-            "created_at":      row[7].isoformat() if row[7] else None,
+            "meta_id":        meta_id,
+            "aria_memory_id": aria_memory_id,
+            "model_tier":     tier,
+            "model_name":     model,
+            "via_rag":        via_rag,
+            "rule_ids":       rule_ids,
+            "rules_detail":   rules_detail,
+            "feedback_type":  fb_type,
+            "feedback_comment": fb_comment,
+            "corrective_rule_id": corr_id,
+            "created_at":     str(created),
         }
-    except Exception:
+    except Exception as e:
+        print(f"[Feedback] get_response_metadata échoué : {e}")
         return None
 
-
-# ─── TRAITEMENT DU FEEDBACK ───
 
 def process_positive_feedback(
     aria_memory_id: int,
     username: str,
     tenant_id: str,
-) -> dict:
+) -> bool:
     """
-    👍 Feedback positif : renforce les règles injectées dans cette réponse.
-    +0.05 de confidence (plafond 1.0) sur chaque règle utilisée.
+    👍 Renforce les règles qui étaient injectées dans ce contexte (+0.05 confiance).
+    Retourne True si au moins une règle a été renforcée.
     """
-    meta = get_response_metadata(aria_memory_id, username)
-    if not meta:
-        return {"ok": False, "error": "Métadonnées introuvables"}
-
-    rule_ids = meta.get("rule_ids") or []
-    if not rule_ids:
-        _save_feedback(aria_memory_id, username, "positive", "")
-        return {"ok": True, "rules_reinforced": 0}
-
     try:
         conn = get_pg_conn()
         c = conn.cursor()
+
+        # Récupère les rule_ids
+        c.execute("""
+            SELECT rule_ids_injected FROM aria_response_metadata
+            WHERE aria_memory_id = %s AND username = %s LIMIT 1
+        """, (aria_memory_id, username))
+        row = c.fetchone()
+        if not row:
+            conn.close()
+            return False
+
+        rule_ids = json.loads(row[0]) if row[0] else []
+        if not rule_ids:
+            conn.close()
+            return False
+
+        # Renforce chaque règle
         c.execute("""
             UPDATE aria_rules
-            SET reinforcements = reinforcements + 1,
-                confidence = LEAST(1.0, confidence + 0.05),
-                updated_at = NOW()
+            SET confidence     = LEAST(1.0, confidence + 0.05),
+                reinforcements = reinforcements + 1,
+                updated_at     = NOW()
             WHERE id = ANY(%s) AND username = %s
         """, (rule_ids, username))
-        count = c.rowcount
+
+        # Met à jour le feedback dans les métadonnées
+        c.execute("""
+            UPDATE aria_response_metadata
+            SET feedback_type = 'positive'
+            WHERE aria_memory_id = %s AND username = %s
+        """, (aria_memory_id, username))
+
         conn.commit()
         conn.close()
+        print(f"[Feedback] 👍 {len(rule_ids)} règles renforcées pour {username}")
+        return True
     except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-    _save_feedback(aria_memory_id, username, "positive", "")
-    print(f"[feedback] 👍 {username} — {count} règles renforcées (ids: {rule_ids})")
-    return {"ok": True, "rules_reinforced": count}
+        print(f"[Feedback] process_positive_feedback échoué : {e}")
+        return False
 
 
 def process_negative_feedback(
@@ -138,127 +158,114 @@ def process_negative_feedback(
     comment: str = "",
 ) -> dict:
     """
-    👎 Feedback négatif : Opus formule une règle corrective.
+    👎 Appel Opus pour formuler une règle corrective à partir du feedback négatif.
 
-    Récupère la conversation originale + les règles injectées,
-    demande à Opus d'identifier le problème et de formuler une règle corrective,
-    puis insère cette règle dans aria_rules avec confidence 0.8.
+    Workflow :
+      1. Récupère la conversation originale (user_input + aria_response)
+      2. Récupère les règles qui étaient injectées
+      3. Appel Opus avec le contexte → formule une règle corrective
+      4. Stocke la règle corrective dans aria_rules (confidence 0.8)
+      5. Met à jour aria_response_metadata avec le feedback et l'id de la règle corrective
+
+    Retourne : {status, rule_id, rule_text, category}
     """
-    meta = get_response_metadata(aria_memory_id, username)
-    if not meta:
-        return {"ok": False, "error": "Métadonnées introuvables"}
-
-    # Récupérer la conversation originale
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute(
-            "SELECT user_input, aria_response FROM aria_memory WHERE id = %s AND username = %s",
-            (aria_memory_id, username)
-        )
-        row = c.fetchone()
-        conn.close()
-        if not row:
-            return {"ok": False, "error": "Conversation introuvable"}
-        user_input, aria_response = row
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
 
-    # Récupérer les règles qui étaient injectées
-    rule_ids = meta.get("rule_ids") or []
-    injected_rules_text = ""
-    if rule_ids:
-        try:
-            conn = get_pg_conn()
-            c = conn.cursor()
-            c.execute(
-                "SELECT category, rule FROM aria_rules WHERE id = ANY(%s)",
-                (rule_ids,)
-            )
-            injected_rules_text = "\n".join(
-                f"[{r[0]}] {r[1]}" for r in c.fetchall()
-            )
+        # Conversation originale
+        c.execute("""
+            SELECT user_input, aria_response FROM aria_memory
+            WHERE id = %s AND username = %s
+        """, (aria_memory_id, username))
+        conv = c.fetchone()
+        if not conv:
             conn.close()
-        except Exception:
-            pass
+            return {"status": "error", "message": "Conversation introuvable"}
+        user_input, aria_response = conv
 
-    # Appel Opus pour formuler la règle corrective
-    try:
+        # Règles injectées
+        c.execute("""
+            SELECT rule_ids_injected FROM aria_response_metadata
+            WHERE aria_memory_id = %s AND username = %s LIMIT 1
+        """, (aria_memory_id, username))
+        meta_row = c.fetchone()
+        rule_ids = json.loads(meta_row[0]) if meta_row and meta_row[0] else []
+
+        rules_context = ""
+        if rule_ids:
+            c.execute("""
+                SELECT category, rule FROM aria_rules
+                WHERE id = ANY(%s) AND username = %s
+            """, (rule_ids, username))
+            rules_rows = c.fetchall()
+            if rules_rows:
+                rules_context = "\n".join([f"[{r[0]}] {r[1]}" for r in rules_rows])
+        conn.close()
+
+        # Prompt Opus pour la règle corrective
+        rules_section = f"\nRègles qui étaient actives :\n{rules_context}" if rules_context else ""
+        comment_section = f"\nCommentaire de l'utilisateur : {comment}" if comment else ""
+        prompt = f"""L'utilisateur a marqué cette réponse de Raya comme incorrecte ou insatisfaisante.
+
+Question de l'utilisateur : {user_input[:300]}
+Réponse de Raya : {aria_response[:500]}{rules_section}{comment_section}
+
+Formule UNE règle corrective précise que Raya devrait apprendre pour mieux répondre à ce type de situation.
+Format JSON strict (sans backticks) :
+{{"category": "catégorie_parmi_comportement_tri_mails_style_reponse_contacts_cles_ou_autre", "rule": "La règle apprise"}}"""
+
         from app.llm_client import llm_complete, log_llm_usage
-        prompt = f"""L'utilisateur a indiqué que cette réponse de Raya était insatisfaisante.
-
-Question de l'utilisateur : {user_input[:400]}
-Réponse de Raya : {aria_response[:600]}
-Commentaire de l'utilisateur : {comment or '(aucun)'}
-
-Règles qui étaient actives lors de cette réponse :
-{injected_rules_text or '(aucune règle injectée)'}
-
-Formule UNE seule règle corrective courte (max 150 caractères) qui améliorera
-les prochaines réponses similaires. La règle doit être concrète et actionnable.
-Réponds UNIQUEMENT avec le texte de la règle, sans explication."""
-
+        import re
         result = llm_complete(
             messages=[{"role": "user", "content": prompt}],
             model_tier="deep",
-            max_tokens=60,
+            max_tokens=300,
         )
         log_llm_usage(result, username=username, tenant_id=tenant_id,
-                      purpose="feedback_corrective_rule")
-        corrective_rule = result["text"].strip().strip('"').strip()
-    except Exception as e:
-        _save_feedback(aria_memory_id, username, "negative", comment)
-        return {"ok": False, "error": f"Opus indisponible : {str(e)[:100]}"}
+                      purpose="negative_feedback_correction")
 
-    if not corrective_rule or len(corrective_rule) < 10:
-        _save_feedback(aria_memory_id, username, "negative", comment)
-        return {"ok": True, "corrective_rule": None, "message": "Règle trop courte — feedback enregistré"}
+        raw = re.sub(r'^```(?:json)?\s*', '', result["text"].strip(), flags=re.MULTILINE)
+        raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
+        parsed = json.loads(raw)
 
-    # Insérer la règle corrective
-    try:
+        category = parsed.get("category", "comportement")
+        rule_text = parsed.get("rule", "")
+        if not rule_text:
+            return {"status": "error", "message": "Opus n'a pas pu formuler de règle"}
+
+        # Stocke la règle corrective (confiance 0.8 — plus haute car correction explicite)
         from app.memory_rules import save_rule
         rule_id = save_rule(
-            category="comportement",
-            rule=corrective_rule,
-            source="feedback_negatif",
+            category=category,
+            rule=rule_text,
+            source="feedback_negative",
             confidence=0.8,
             username=username,
             tenant_id=tenant_id,
         )
-    except Exception as e:
-        _save_feedback(aria_memory_id, username, "negative", comment)
-        return {"ok": False, "error": f"Insertion règle échouée : {str(e)[:100]}"}
 
-    _save_feedback(aria_memory_id, username, "negative", comment,
-                   corrective_rule_id=rule_id)
-    print(f"[feedback] 👎 {username} — règle corrective créée id={rule_id}: {corrective_rule[:60]}")
-    return {
-        "ok": True,
-        "corrective_rule": corrective_rule,
-        "corrective_rule_id": rule_id,
-    }
-
-
-def _save_feedback(
-    aria_memory_id: int,
-    username: str,
-    feedback_type: str,
-    comment: str,
-    corrective_rule_id: int = None,
-):
-    """Met à jour la ligne metadata avec le feedback reçu."""
-    try:
+        # Met à jour les métadonnées
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
             UPDATE aria_response_metadata
-            SET feedback_type = %s,
-                feedback_comment = %s,
+            SET feedback_type      = 'negative',
+                feedback_comment   = %s,
                 corrective_rule_id = %s
             WHERE aria_memory_id = %s AND username = %s
-        """, (feedback_type, comment or None, corrective_rule_id,
-               aria_memory_id, username))
+        """, (comment or None, rule_id, aria_memory_id, username))
         conn.commit()
         conn.close()
+
+        print(f"[Feedback] 👎 Règle corrective créée pour {username}: [{category}] {rule_text[:60]}")
+        return {
+            "status":    "ok",
+            "rule_id":   rule_id,
+            "rule_text": rule_text,
+            "category":  category,
+        }
+
     except Exception as e:
-        print(f"[feedback] _save_feedback échoué : {e}")
+        print(f"[Feedback] process_negative_feedback échoué : {e}")
+        return {"status": "error", "message": str(e)}
