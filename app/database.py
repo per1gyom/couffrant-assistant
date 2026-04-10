@@ -238,7 +238,6 @@ def init_postgres():
             instruction TEXT, created_at TIMESTAMP DEFAULT NOW()
         )
     """)
-    # gmail_tokens conservé pour lecture compat ascendante — plus alimenté
     c.execute("""
         CREATE TABLE IF NOT EXISTS gmail_tokens (
             id SERIAL PRIMARY KEY, username TEXT DEFAULT 'guillaume',
@@ -254,7 +253,6 @@ def init_postgres():
             notes TEXT, UNIQUE(username, chat_id)
         )
     """)
-    # Queue de confirmation pour les actions sensibles (B2 — Phase 0)
     c.execute("""
         CREATE TABLE IF NOT EXISTS pending_actions (
             id SERIAL PRIMARY KEY,
@@ -280,7 +278,6 @@ def init_postgres():
     c.execute("CREATE INDEX IF NOT EXISTS idx_pending_actions_user_status ON pending_actions (username, status, created_at DESC)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_pending_actions_tenant ON pending_actions (tenant_id, status)")
 
-    # Suivi des coûts LLM par tenant (Phase 2 — couche d'abstraction LLM)
     c.execute("""
         CREATE TABLE IF NOT EXISTS llm_usage (
             id SERIAL PRIMARY KEY,
@@ -362,7 +359,7 @@ def init_postgres():
                SELECT 1 FROM oauth_tokens o
                WHERE o.provider='google' AND o.username=g.username
              )""",
-        # ── Phase 2 : tenant_id sur toutes les tables (idempotent) ──
+        # ── Phase 2 : tenant_id sur toutes les tables ──
         "ALTER TABLE aria_rules           ADD COLUMN IF NOT EXISTS tenant_id TEXT",
         "ALTER TABLE aria_insights        ADD COLUMN IF NOT EXISTS tenant_id TEXT",
         "ALTER TABLE aria_memory          ADD COLUMN IF NOT EXISTS tenant_id TEXT",
@@ -375,7 +372,6 @@ def init_postgres():
         "ALTER TABLE reply_learning_memory ADD COLUMN IF NOT EXISTS tenant_id TEXT",
         "ALTER TABLE sent_mail_memory     ADD COLUMN IF NOT EXISTS tenant_id TEXT",
         "ALTER TABLE teams_sync_state     ADD COLUMN IF NOT EXISTS tenant_id TEXT",
-        # Backfill depuis users
         "UPDATE aria_rules           a SET tenant_id = u.tenant_id FROM users u WHERE a.username = u.username AND a.tenant_id IS NULL",
         "UPDATE aria_insights        a SET tenant_id = u.tenant_id FROM users u WHERE a.username = u.username AND a.tenant_id IS NULL",
         "UPDATE aria_memory          a SET tenant_id = u.tenant_id FROM users u WHERE a.username = u.username AND a.tenant_id IS NULL",
@@ -388,7 +384,6 @@ def init_postgres():
         "UPDATE reply_learning_memory a SET tenant_id = u.tenant_id FROM users u WHERE a.username = u.username AND a.tenant_id IS NULL",
         "UPDATE sent_mail_memory     a SET tenant_id = u.tenant_id FROM users u WHERE a.username = u.username AND a.tenant_id IS NULL",
         "UPDATE teams_sync_state     a SET tenant_id = u.tenant_id FROM users u WHERE a.username = u.username AND a.tenant_id IS NULL",
-        # Fallback pour les lignes sans correspondance users
         "UPDATE aria_rules            SET tenant_id = 'couffrant_solar' WHERE tenant_id IS NULL",
         "UPDATE aria_insights         SET tenant_id = 'couffrant_solar' WHERE tenant_id IS NULL",
         "UPDATE aria_memory           SET tenant_id = 'couffrant_solar' WHERE tenant_id IS NULL",
@@ -401,7 +396,6 @@ def init_postgres():
         "UPDATE reply_learning_memory SET tenant_id = 'couffrant_solar' WHERE tenant_id IS NULL",
         "UPDATE sent_mail_memory      SET tenant_id = 'couffrant_solar' WHERE tenant_id IS NULL",
         "UPDATE teams_sync_state      SET tenant_id = 'couffrant_solar' WHERE tenant_id IS NULL",
-        # Index composites tenant_id + username
         "CREATE INDEX IF NOT EXISTS idx_aria_rules_tenant_user       ON aria_rules (tenant_id, username)",
         "CREATE INDEX IF NOT EXISTS idx_aria_insights_tenant_user    ON aria_insights (tenant_id, username)",
         "CREATE INDEX IF NOT EXISTS idx_aria_memory_tenant_user      ON aria_memory (tenant_id, username)",
@@ -410,6 +404,9 @@ def init_postgres():
         "CREATE INDEX IF NOT EXISTS idx_oauth_tokens_tenant_user     ON oauth_tokens (tenant_id, username)",
         "CREATE INDEX IF NOT EXISTS idx_reply_learning_tenant_user   ON reply_learning_memory (tenant_id, username)",
         "CREATE INDEX IF NOT EXISTS idx_sent_mail_tenant_user        ON sent_mail_memory (tenant_id, username)",
+        # ── Phase 3a : vectorisation des règles pour RAG ──
+        "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS embedding vector(1536)",
+        "CREATE INDEX IF NOT EXISTS idx_rules_embedding ON aria_rules USING hnsw (embedding vector_cosine_ops)",
     ]
     for m in migrations:
         try:
