@@ -295,6 +295,29 @@ def init_postgres():
     c.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_tenant_date ON llm_usage (tenant_id, created_at DESC)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_username_date ON llm_usage (username, created_at DESC)")
 
+    # Métadonnées de raisonnement + feedback 👍👎 (Phase 3b)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS aria_response_metadata (
+            id SERIAL PRIMARY KEY,
+            aria_memory_id INTEGER NOT NULL,
+            username TEXT NOT NULL,
+            tenant_id TEXT NOT NULL DEFAULT 'couffrant_solar',
+            model_tier TEXT NOT NULL,
+            model_name TEXT NOT NULL,
+            via_rag BOOLEAN DEFAULT false,
+            rule_ids_injected JSONB DEFAULT '[]',
+            feedback_type TEXT,
+            feedback_comment TEXT,
+            corrective_rule_id INTEGER,
+            created_at TIMESTAMP DEFAULT NOW(),
+            CONSTRAINT feedback_type_check CHECK (
+                feedback_type IS NULL OR feedback_type IN ('positive', 'negative')
+            )
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_response_meta_memory ON aria_response_metadata (aria_memory_id, username)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_response_meta_feedback ON aria_response_metadata (username, feedback_type, created_at DESC)")
+
     conn.commit()
     conn.close()
 
