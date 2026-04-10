@@ -55,4 +55,4 @@ APP_USERNAME = os.getenv("APP_USERNAME", "guillaume").strip()
 APP_PASSWORD = os.getenv("APP_PASSWORD", "couffrant2026").strip()
 
 # Email de support affiché sur la page "Mot de passe oublié ?"
-SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "guillaume@couffrant-solar.fr").strip()
+SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL", "admin@raya-ia.fr").strip()
