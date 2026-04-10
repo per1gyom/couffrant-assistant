@@ -5,38 +5,47 @@ Module autonome : n'importe que database.py.
 Toutes les règles métier viennent de aria_rules en base.
 Seuls les garde-fous de sécurité restent dans le code.
 
-Catégories de règles :
-  tri_mails        — classification des mails entrants
-  urgence          — critères de priorité haute
-  anti_spam        — mots-clés/domaines à filtrer
-  style_reponse    — style des réponses suggérées
-  regroupement     — logique de groupement du dashboard
-  contacts_cles    — contacts à surveiller
-  categories_mail  — catégories de mail (Raya les évole)
-  memoire          — paramètres numériques
-  comportement     — comportement général de Raya
+Signatures canoniques :
+  get_rules_by_category(username, category, tenant_id=None)
+  get_memoire_param(username, param, default, tenant_id=None)
+
+Le paramètre tenant_id est optionnel pour la compat ascendante.
+Quand fourni, il est ajouté au filtre SQL pour l'isolation stricte.
 """
 
 import re
 from app.database import get_pg_conn
 
+DEFAULT_TENANT = 'couffrant_solar'
+
 
 # ─── CHARGEMENT DES RÈGLES ───
 
-def get_rules_by_category(username: str, category: str) -> list[str]:
+def get_rules_by_category(username: str, category: str,
+                          tenant_id: str = None) -> list:
     """
     Retourne les règles actives d'un utilisateur pour une catégorie.
-    Retourne une liste vide si aucune règle n'existe.
+    Si tenant_id est fourni, filtre sur le tenant pour une isolation stricte.
     """
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("""
-            SELECT rule FROM aria_rules
-            WHERE active = true AND username = %s AND category = %s
-            ORDER BY confidence DESC, reinforcements DESC, created_at ASC
-        """, (username, category))
+        if tenant_id:
+            c.execute("""
+                SELECT rule FROM aria_rules
+                WHERE active = true
+                  AND username = %s
+                  AND category = %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
+                ORDER BY confidence DESC, reinforcements DESC, created_at ASC
+            """, (username, category, tenant_id))
+        else:
+            c.execute("""
+                SELECT rule FROM aria_rules
+                WHERE active = true AND username = %s AND category = %s
+                ORDER BY confidence DESC, reinforcements DESC, created_at ASC
+            """, (username, category))
         return [r[0] for r in c.fetchall()]
     except Exception:
         return []
@@ -44,25 +53,25 @@ def get_rules_by_category(username: str, category: str) -> list[str]:
         if conn: conn.close()
 
 
-def get_rules_as_text(username: str, categories: list[str]) -> str:
+def get_rules_as_text(username: str, categories: list,
+                      tenant_id: str = None) -> str:
     """
-    Retourne les règles formatées pour injection dans un prompt Claude.
+    Retourne les règles formatées pour injection dans un prompt.
     Format : "[catégorie] règle" par ligne.
     """
     lines = []
     for cat in categories:
-        rules = get_rules_by_category(username, cat)
+        rules = get_rules_by_category(username, cat, tenant_id)
         for rule in rules:
             lines.append(f"[{cat}] {rule}")
     return "\n".join(lines)
 
 
-def get_antispam_keywords(username: str) -> list[str]:
+def get_antispam_keywords(username: str, tenant_id: str = None) -> list:
     """
     Extrait les mots-clés anti-spam depuis les règles Aria.
-    Raya ajoute un domaine via [ACTION:LEARN:anti_spam|nouveau.domaine.com].
     """
-    rules = get_rules_by_category(username, "anti_spam")
+    rules = get_rules_by_category(username, "anti_spam", tenant_id)
     keywords = []
     for rule in rules:
         parts = [p.strip().lower() for p in rule.replace("'", "").split(',')]
@@ -74,21 +83,25 @@ def get_antispam_keywords(username: str) -> list[str]:
     return list(dict.fromkeys(keywords))
 
 
-def get_contacts_keywords(username: str) -> list[str]:
+def get_contacts_keywords(username: str, tenant_id: str = None) -> list:
     """
     Retourne les noms/entités à détecter dans les conversations.
     Source 1 : aria_contacts (noms et parties locales des emails)
     Source 2 : règles contacts_cles de Raya
-
-    Aucun nom n'est codé en dur. Raya construit cette liste
-    elle-même à partir des contacts et de ses règles apprises.
     """
     keywords = []
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT name, email FROM aria_contacts ORDER BY last_seen DESC LIMIT 50")
+        if tenant_id:
+            c.execute("""
+                SELECT name, email FROM aria_contacts
+                WHERE tenant_id = %s
+                ORDER BY last_seen DESC LIMIT 50
+            """, (tenant_id,))
+        else:
+            c.execute("SELECT name, email FROM aria_contacts ORDER BY last_seen DESC LIMIT 50")
         for name, email in c.fetchall():
             if name:
                 for part in name.split():
@@ -104,20 +117,20 @@ def get_contacts_keywords(username: str) -> list[str]:
     finally:
         if conn: conn.close()
 
-    for rule in get_rules_by_category(username, "contacts_cles"):
+    for rule in get_rules_by_category(username, "contacts_cles", tenant_id):
         parts = [p.strip().lower() for p in rule.replace("'", "").split(',')]
         keywords.extend([p for p in parts if len(p) > 2])
 
     return list(dict.fromkeys(keywords))
 
 
-def get_memoire_param(username: str, param: str, default):
+def get_memoire_param(username: str, param: str, default,
+                      tenant_id: str = None):
     """
     Lit un paramètre numérique depuis les règles memoire.
     Format : "nom_param:valeur" ex: "synth_threshold:15"
-    Raya modifie ces valeurs via [ACTION:LEARN:memoire|synth_threshold:20]
     """
-    rules = get_rules_by_category(username, "memoire")
+    rules = get_rules_by_category(username, "memoire", tenant_id)
     for rule in rules:
         if rule.strip().lower().startswith(f"{param.lower()}:"):
             try:
@@ -128,11 +141,12 @@ def get_memoire_param(username: str, param: str, default):
     return default
 
 
-def extract_category_keywords(username: str, target_category: str) -> list[str]:
+def extract_category_keywords(username: str, target_category: str,
+                               tenant_id: str = None) -> list:
     """
     Extrait les mots-clés liés à une catégorie depuis les règles tri_mails.
     """
-    rules = get_rules_by_category(username, "tri_mails")
+    rules = get_rules_by_category(username, "tri_mails", tenant_id)
     keywords = []
     for rule in rules:
         rule_l = rule.lower()
@@ -149,8 +163,8 @@ def extract_category_keywords(username: str, target_category: str) -> list[str]:
     return list(dict.fromkeys(keywords))
 
 
-def get_urgency_keywords(username: str) -> list[str]:
-    rules = get_rules_by_category(username, "urgence")
+def get_urgency_keywords(username: str, tenant_id: str = None) -> list:
+    rules = get_rules_by_category(username, "urgence", tenant_id)
     keywords = []
     for rule in rules:
         rule_l = rule.lower()
@@ -167,8 +181,8 @@ def get_urgency_keywords(username: str) -> list[str]:
     return list(dict.fromkeys(keywords))
 
 
-def get_internal_domains(username: str) -> list[str]:
-    rules = get_rules_by_category(username, "tri_mails")
+def get_internal_domains(username: str, tenant_id: str = None) -> list:
+    rules = get_rules_by_category(username, "tri_mails", tenant_id)
     domains = []
     for rule in rules:
         rule_l = rule.lower()
@@ -179,12 +193,13 @@ def get_internal_domains(username: str) -> list[str]:
     return domains if domains else ["couffrant-solar.fr"]
 
 
-def parse_business_priority(category: str, title: str, username: str) -> str:
+def parse_business_priority(category: str, title: str, username: str,
+                             tenant_id: str = None) -> str:
     """
     Détermine la priorité business d'un groupe de mails depuis les règles.
     Retourne : 'urgent', 'a_traiter', 'faible'
     """
-    rules = get_rules_by_category(username, "regroupement")
+    rules = get_rules_by_category(username, "regroupement", tenant_id)
     cat_l = (category or "").lower()
     title_l = (title or "").lower()
     combined = f"{cat_l} {title_l}"
@@ -200,8 +215,8 @@ def parse_business_priority(category: str, title: str, username: str) -> str:
         condition, outcome = parts[0].strip(), parts[1].strip()
 
         match = False
-        if "cat\u00e9gorie" in condition or "category" in condition:
-            cat_ref = re.sub(r"cat[e\u00e9]gorie\s*", "", condition).strip().strip("'\",")
+        if "catégorie" in condition or "category" in condition:
+            cat_ref = re.sub(r"cat[eé]gorie\s*", "", condition).strip().strip("'\",")
             if cat_ref and cat_ref in cat_l:
                 match = True
         elif "contenant" in condition:
