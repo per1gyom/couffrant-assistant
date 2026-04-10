@@ -1,1 +1,227 @@
-"""\nMémoire : règles et paramètres (aria_rules).\nIsolation par username + tenant_id.\n\nFonctions canoniques à utiliser :\n  app.rule_engine.get_rules_by_category(username, category, tenant_id=None)\n  app.rule_engine.get_memoire_param(username, param, default, tenant_id=None)\n  app.memory_rules.save_rule(category, rule, source, confidence, username, tenant_id=None)\n\nPhase 3a : save_rule vectorise la règle à la création (si OPENAI_API_KEY présent).\nDégradation gracieuse si clé absente — la règle est insérée sans vecteur.\n"""\nimport warnings\nfrom app.database import get_pg_conn\n\nDEFAULT_TENANT = 'couffrant_solar'\n\n\n# ─── HELPERS EMBEDDING ───\n\ndef _embed_rule(rule_text: str, category: str) -> str | None:\n    """Vectorise une règle pour la recherche RAG. Retourne la chaîne vecteur ou None."""\n    try:\n        from app.embedding import embed\n        vec = embed(f"[{category}] {rule_text}")\n        if vec is None:\n            return None\n        return "[" + ",".join(str(x) for x in vec) + "]"\n    except Exception:\n        return None\n\n\n# ─── FONCTIONS ACTIVES ───\n\ndef get_aria_rules(username: str = 'guillaume', tenant_id: str = None) -> str:\n    conn = None\n    try:\n        conn = get_pg_conn()\n        c = conn.cursor()\n        if tenant_id:\n            c.execute(\"\"\"\n                SELECT id, category, rule, confidence, reinforcements\n                FROM aria_rules\n                WHERE active = true\n                  AND username = %s\n                  AND (tenant_id = %s OR tenant_id IS NULL)\n                  AND category != 'memoire'\n                ORDER BY confidence DESC, reinforcements DESC, created_at DESC\n                LIMIT 60\n            \"\"\", (username, tenant_id))\n        else:\n            c.execute(\"\"\"\n                SELECT id, category, rule, confidence, reinforcements\n                FROM aria_rules\n                WHERE active = true AND username = %s AND category != 'memoire'\n                ORDER BY confidence DESC, reinforcements DESC, created_at DESC\n                LIMIT 60\n            \"\"\", (username,))\n        rows = c.fetchall()\n        if not rows: return \"\"\n        return \"\\n\".join([f\"[id:{r[0]}][{r[1]}] {r[2]}\" for r in rows])\n    finally:\n        if conn: conn.close()\n\n\ndef save_rule(category: str, rule: str, source: str = \"auto\",\n              confidence: float = 0.7, username: str = None,\n              tenant_id: str = None) -> int:\n    \"\"\"\n    Sauvegarde une règle apprise par Raya.\n    Déduplication par égalité exacte normalisée (LOWER+TRIM).\n    Phase 3a : vectorise la règle à la création pour le RAG.\n    \"\"\"\n    if not username:\n        raise ValueError(\"save_rule : username obligatoire\")\n    if not rule or not rule.strip():\n        raise ValueError(\"save_rule : règle vide refusée\")\n\n    rule_clean = rule.strip()\n    effective_tenant = tenant_id or DEFAULT_TENANT\n\n    conn = None\n    try:\n        conn = get_pg_conn()\n        c = conn.cursor()\n        c.execute(\"\"\"\n            SELECT id FROM aria_rules\n            WHERE active = true\n              AND username = %s\n              AND category = %s\n              AND LOWER(TRIM(rule)) = LOWER(TRIM(%s))\n            LIMIT 1\n        \"\"\", (username, category, rule_clean))\n        existing = c.fetchone()\n\n        if existing:\n            c.execute(\"\"\"\n                UPDATE aria_rules\n                SET reinforcements = reinforcements + 1,\n                    confidence = LEAST(1.0, confidence + 0.1),\n                    updated_at = NOW()\n                WHERE id = %s\n            \"\"\", (existing[0],))\n            conn.commit()\n            return existing[0]\n\n        # Vectorisation de la règle (dégradation gracieuse si pas de clé OpenAI)\n        vec = _embed_rule(rule_clean, category)\n\n        if vec:\n            c.execute(\"\"\"\n                INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence, embedding)\n                VALUES (%s, %s, %s, %s, %s, %s, %s::vector) RETURNING id\n            \"\"\", (username, effective_tenant, category, rule_clean, source, confidence, vec))\n        else:\n            c.execute(\"\"\"\n                INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence)\n                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id\n            \"\"\", (username, effective_tenant, category, rule_clean, source, confidence))\n\n        rule_id = c.fetchone()[0]\n        conn.commit()\n        return rule_id\n    finally:\n        if conn: conn.close()\n\n\ndef delete_rule(rule_id: int, username: str = 'guillaume') -> bool:\n    conn = None\n    try:\n        conn = get_pg_conn()\n        c = conn.cursor()\n        c.execute(\n            \"UPDATE aria_rules SET active = false, updated_at = NOW() WHERE id = %s AND username = %s\",\n            (rule_id, username)\n        )\n        conn.commit()\n        return c.rowcount > 0\n    finally:\n        if conn: conn.close()\n\n\ndef extract_keywords_from_rule(rule: str) -> list:\n    import re\n    keywords = re.findall(r\"'([^']+)'\", rule.lower())\n    if keywords:\n        return [k.strip() for k in keywords if len(k.strip()) > 2]\n    match = re.search(r\"(?:contenant|de)\\s+(.+?)(?:\\s*=|\\s*\\u2192|\\s*$)\", rule.lower())\n    if match:\n        parts = [p.strip() for p in match.group(1).split(',')]\n        return [p for p in parts if len(p) > 2]\n    return []\n\n\ndef seed_default_rules(username: str = 'guillaume'):\n    \"\"\"Raya apprend d'elle-même. Aucune règle par défaut.\"\"\"\n    pass\n\n\n# ─── WRAPPERS DÉPRÉCIÉS (compat ascendante) ───\n\n_KNOWN_CATEGORIES = {\n    'tri_mails', 'urgence', 'anti_spam', 'style_reponse', 'regroupement',\n    'contacts_cles', 'categories_mail', 'memoire', 'mail_filter',\n    'comportement', 'drive_pv', 'affichage', 'teams_ingestion',\n}\n\n\ndef get_rules_by_category(username_or_category=None, category_or_username='guillaume') -> list:\n    \"\"\"DÉPRÉCIÉ — Utiliser app.rule_engine.get_rules_by_category(username, category).\"\"\"\n    warnings.warn(\n        \"app.memory_rules.get_rules_by_category est déprécié. \"\n        \"Utiliser app.rule_engine.get_rules_by_category(username, category).\",\n        DeprecationWarning,\n        stacklevel=2,\n    )\n    if username_or_category in _KNOWN_CATEGORIES:\n        category = username_or_category\n        username = category_or_username\n    else:\n        username = username_or_category\n        category = category_or_username\n    from app.rule_engine import get_rules_by_category as canonical\n    return canonical(username, category)\n\n\ndef get_memoire_param(username_or_param=None, param_or_default=None, default_or_username=None):\n    \"\"\"DÉPRÉCIÉ — Utiliser app.rule_engine.get_memoire_param(username, param, default).\"\"\"\n    warnings.warn(\n        \"app.memory_rules.get_memoire_param est déprécié. \"\n        \"Utiliser app.rule_engine.get_memoire_param(username, param, default).\",\n        DeprecationWarning,\n        stacklevel=2,\n    )\n    if isinstance(username_or_param, str) and \"_\" in username_or_param and len(username_or_param) < 30:\n        raise TypeError(\n            f\"Appel ambigu à get_memoire_param : '{username_or_param}' ressemble à un nom de paramètre, \"\n            f\"pas à un username. Utiliser l'ordre canonique : (username, param, default).\"\n        )\n    from app.rule_engine import get_memoire_param as canonical\n    return canonical(username_or_param, param_or_default, default_or_username)\n\n\ndef get_rules_as_text(categories: list, username: str = 'guillaume') -> str:\n    \"\"\"Wrapper pour compat — délègue à rule_engine.\"\"\"\n    from app.rule_engine import get_rules_by_category as canonical\n    all_rules = []\n    for cat in categories:\n        for r in canonical(username, cat):\n            all_rules.append(f\"[{cat}] {r}\")\n    return \"\\n\".join(all_rules) if all_rules else \"\"\n\n\ndef get_antispam_keywords(username: str = 'guillaume') -> list:\n    from app.rule_engine import get_rules_by_category as canonical\n    rules = canonical(username, 'anti_spam')\n    keywords = []\n    for rule in rules:\n        parts = [p.strip().lower() for p in rule.replace(\"'\", \"\").split(',')]\n        keywords.extend([p for p in parts if len(p) > 2])\n    for kw in ['mailer-daemon', 'noreply@', 'no-reply@']:\n        if kw not in keywords:\n            keywords.append(kw)\n    return list(dict.fromkeys(keywords))\n
+"""
+Mémoire : règles et paramètres (aria_rules).
+Isolation par username + tenant_id.
+
+Fonctions canoniques à utiliser :
+  app.rule_engine.get_rules_by_category(username, category, tenant_id=None)
+  app.rule_engine.get_memoire_param(username, param, default, tenant_id=None)
+  app.memory_rules.save_rule(category, rule, source, confidence, username, tenant_id=None)
+
+Phase 3a : save_rule vectorise la règle à la création (si OPENAI_API_KEY présent).
+Dégradation gracieuse si clé absente — la règle est insérée sans vecteur.
+"""
+import warnings
+from app.database import get_pg_conn
+
+DEFAULT_TENANT = 'couffrant_solar'
+
+
+# ─── HELPERS EMBEDDING ───
+
+def _embed_rule(rule_text: str, category: str):
+    """Vectorise une règle pour la recherche RAG. Retourne la chaîne vecteur ou None."""
+    try:
+        from app.embedding import embed
+        vec = embed(f"[{category}] {rule_text}")
+        if vec is None:
+            return None
+        return "[" + ",".join(str(x) for x in vec) + "]"
+    except Exception:
+        return None
+
+
+# ─── FONCTIONS ACTIVES ───
+
+def get_aria_rules(username: str = 'guillaume', tenant_id: str = None) -> str:
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        if tenant_id:
+            c.execute("""
+                SELECT id, category, rule, confidence, reinforcements
+                FROM aria_rules
+                WHERE active = true
+                  AND username = %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
+                  AND category != 'memoire'
+                ORDER BY confidence DESC, reinforcements DESC, created_at DESC
+                LIMIT 60
+            """, (username, tenant_id))
+        else:
+            c.execute("""
+                SELECT id, category, rule, confidence, reinforcements
+                FROM aria_rules
+                WHERE active = true AND username = %s AND category != 'memoire'
+                ORDER BY confidence DESC, reinforcements DESC, created_at DESC
+                LIMIT 60
+            """, (username,))
+        rows = c.fetchall()
+        if not rows:
+            return ""
+        return "\n".join([f"[id:{r[0]}][{r[1]}] {r[2]}" for r in rows])
+    finally:
+        if conn:
+            conn.close()
+
+
+def save_rule(category: str, rule: str, source: str = "auto",
+              confidence: float = 0.7, username: str = None,
+              tenant_id: str = None) -> int:
+    """
+    Sauvegarde une règle apprise par Raya.
+    Déduplication par égalité exacte normalisée (LOWER+TRIM).
+    Phase 3a : vectorise la règle à la création pour le RAG.
+    """
+    if not username:
+        raise ValueError("save_rule : username obligatoire")
+    if not rule or not rule.strip():
+        raise ValueError("save_rule : règle vide refusée")
+
+    rule_clean = rule.strip()
+    effective_tenant = tenant_id or DEFAULT_TENANT
+
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id FROM aria_rules
+            WHERE active = true
+              AND username = %s
+              AND category = %s
+              AND LOWER(TRIM(rule)) = LOWER(TRIM(%s))
+            LIMIT 1
+        """, (username, category, rule_clean))
+        existing = c.fetchone()
+
+        if existing:
+            c.execute("""
+                UPDATE aria_rules
+                SET reinforcements = reinforcements + 1,
+                    confidence = LEAST(1.0, confidence + 0.1),
+                    updated_at = NOW()
+                WHERE id = %s
+            """, (existing[0],))
+            conn.commit()
+            return existing[0]
+
+        vec = _embed_rule(rule_clean, category)
+
+        if vec:
+            c.execute("""
+                INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence, embedding)
+                VALUES (%s, %s, %s, %s, %s, %s, %s::vector) RETURNING id
+            """, (username, effective_tenant, category, rule_clean, source, confidence, vec))
+        else:
+            c.execute("""
+                INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence)
+                VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+            """, (username, effective_tenant, category, rule_clean, source, confidence))
+
+        rule_id = c.fetchone()[0]
+        conn.commit()
+        return rule_id
+    finally:
+        if conn:
+            conn.close()
+
+
+def delete_rule(rule_id: int, username: str = 'guillaume') -> bool:
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            "UPDATE aria_rules SET active = false, updated_at = NOW() WHERE id = %s AND username = %s",
+            (rule_id, username)
+        )
+        conn.commit()
+        return c.rowcount > 0
+    finally:
+        if conn:
+            conn.close()
+
+
+def extract_keywords_from_rule(rule: str) -> list:
+    import re
+    keywords = re.findall(r"'([^']+)'", rule.lower())
+    if keywords:
+        return [k.strip() for k in keywords if len(k.strip()) > 2]
+    match = re.search(r"(?:contenant|de)\s+(.+?)(?:\s*=|\s*\u2192|\s*$)", rule.lower())
+    if match:
+        parts = [p.strip() for p in match.group(1).split(',')]
+        return [p for p in parts if len(p) > 2]
+    return []
+
+
+def seed_default_rules(username: str = 'guillaume'):
+    """Raya apprend d'elle-même. Aucune règle par défaut."""
+    pass
+
+
+# ─── WRAPPERS DÉPRÉCIÉS (compat ascendante) ───
+
+_KNOWN_CATEGORIES = {
+    'tri_mails', 'urgence', 'anti_spam', 'style_reponse', 'regroupement',
+    'contacts_cles', 'categories_mail', 'memoire', 'mail_filter',
+    'comportement', 'drive_pv', 'affichage', 'teams_ingestion',
+}
+
+
+def get_rules_by_category(username_or_category=None, category_or_username='guillaume') -> list:
+    """DÉPRÉCIÉ — Utiliser app.rule_engine.get_rules_by_category(username, category)."""
+    warnings.warn(
+        "app.memory_rules.get_rules_by_category est déprécié. "
+        "Utiliser app.rule_engine.get_rules_by_category(username, category).",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    if username_or_category in _KNOWN_CATEGORIES:
+        category = username_or_category
+        username = category_or_username
+    else:
+        username = username_or_category
+        category = category_or_username
+    from app.rule_engine import get_rules_by_category as canonical
+    return canonical(username, category)
+
+
+def get_memoire_param(username_or_param=None, param_or_default=None, default_or_username=None):
+    """DÉPRÉCIÉ — Utiliser app.rule_engine.get_memoire_param(username, param, default)."""
+    warnings.warn(
+        "app.memory_rules.get_memoire_param est déprécié. "
+        "Utiliser app.rule_engine.get_memoire_param(username, param, default).",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    if isinstance(username_or_param, str) and "_" in username_or_param and len(username_or_param) < 30:
+        raise TypeError(
+            f"Appel ambigu à get_memoire_param : '{username_or_param}' ressemble à un nom de paramètre, "
+            f"pas à un username. Utiliser l'ordre canonique : (username, param, default)."
+        )
+    from app.rule_engine import get_memoire_param as canonical
+    return canonical(username_or_param, param_or_default, default_or_username)
+
+
+def get_rules_as_text(categories: list, username: str = 'guillaume') -> str:
+    """Wrapper pour compat — délègue à rule_engine."""
+    from app.rule_engine import get_rules_by_category as canonical
+    all_rules = []
+    for cat in categories:
+        for r in canonical(username, cat):
+            all_rules.append(f"[{cat}] {r}")
+    return "\n".join(all_rules) if all_rules else ""
+
+
+def get_antispam_keywords(username: str = 'guillaume') -> list:
+    from app.rule_engine import get_rules_by_category as canonical
+    rules = canonical(username, 'anti_spam')
+    keywords = []
+    for rule in rules:
+        parts = [p.strip().lower() for p in rule.replace("'", "").split(',')]
+        keywords.extend([p for p in parts if len(p) > 2])
+    for kw in ['mailer-daemon', 'noreply@', 'no-reply@']:
+        if kw not in keywords:
+            keywords.append(kw)
+    return list(dict.fromkeys(keywords))
