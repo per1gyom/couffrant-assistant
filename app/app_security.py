@@ -68,6 +68,10 @@ input:focus {{ border-color: var(--accent);
   border: 1px solid rgba(239,68,68,0.3); color: #b91c1c;
   border-radius: 8px; padding: 10px 14px; font-size: 13px;
   margin-bottom: 16px; }}
+.forgot-link {{ text-align: center; margin-top: 14px; }}
+.forgot-link a {{ color: var(--text-muted); font-size: 13px;
+  text-decoration: none; transition: color 0.15s; }}
+.forgot-link a:hover {{ color: var(--accent); text-decoration: underline; }}
 </style>
 </head>
 <body>
@@ -89,6 +93,7 @@ input:focus {{ border-color: var(--accent);
       </div>
       <button type="submit" class="submit-btn">Se connecter</button>
     </form>
+    <p class="forgot-link"><a href="/forgot-password">Mot de passe oublié ?</a></p>
   </div>
 </div>
 </body>
