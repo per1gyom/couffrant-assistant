@@ -8,9 +8,15 @@ Migration vers un autre LLM = ajouter un nouveau provider ici, pas toucher au re
 
 Variables d'environnement :
     LLM_PROVIDER         : 'anthropic' (défaut), 'openai' (futur), 'mistral' (futur)
-    LLM_MODEL_SMART      : modèle "intelligent" (raisonnement, synthèses)
-    LLM_MODEL_FAST       : modèle "rapide" (filtrage, classifications courtes)
-    ANTHROPIC_API_KEY    : clé Anthropic (déjà utilisée aujourd'hui)
+    LLM_MODEL_SMART      : modèle "intelligent" — conversations quotidiennes, analyse mails
+    LLM_MODEL_FAST       : modèle "rapide" — filtrage, classifications, routage de tier
+    LLM_MODEL_DEEP       : modèle "profond" — synthèse, hot_summary, onboarding, audit règles
+    ANTHROPIC_API_KEY    : clé Anthropic
+
+Tiers :
+    fast  (Haiku)  : micro-appels OUI/NON, routage, triage mails
+    smart (Sonnet) : conversations quotidiennes, analyse mails, suggestions
+    deep  (Opus)   : synthèse de sessions, hot_summary, audit cohérence, onboarding
 """
 import os
 from app.config import (
@@ -25,12 +31,13 @@ LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").lower()
 # Mapping des tiers "logiques" vers les modèles réels selon le provider
 _PROVIDER_MODELS = {
     "anthropic": {
-        "smart": os.getenv("LLM_MODEL_SMART", ANTHROPIC_MODEL_SMART),
         "fast":  os.getenv("LLM_MODEL_FAST",  ANTHROPIC_MODEL_FAST),
+        "smart": os.getenv("LLM_MODEL_SMART", ANTHROPIC_MODEL_SMART),
+        "deep":  os.getenv("LLM_MODEL_DEEP",  "claude-opus-4-6-20260401"),
     },
     # Futurs providers à brancher ici :
-    # "openai":  {"smart": "gpt-5",                  "fast": "gpt-5-mini"},
-    # "mistral": {"smart": "mistral-large-latest",   "fast": "mistral-small-latest"},
+    # "openai":  {"fast": "gpt-5-mini", "smart": "gpt-5", "deep": "gpt-5"},
+    # "mistral": {"fast": "mistral-small-latest", "smart": "mistral-large-latest", "deep": "mistral-large-latest"},
 }
 
 
@@ -61,7 +68,7 @@ def llm_complete(
 
     Args:
         messages   : liste {"role": "user|assistant", "content": "..."}
-        model_tier : "smart" pour raisonnement/synthèse, "fast" pour classifications
+        model_tier : "fast" | "smart" | "deep"
         max_tokens : limite de tokens en sortie
         system     : prompt système (optionnel)
         temperature: optionnel, défaut du provider sinon
