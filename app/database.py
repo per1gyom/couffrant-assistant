@@ -280,6 +280,24 @@ def init_postgres():
     c.execute("CREATE INDEX IF NOT EXISTS idx_pending_actions_user_status ON pending_actions (username, status, created_at DESC)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_pending_actions_tenant ON pending_actions (tenant_id, status)")
 
+    # Suivi des coûts LLM par tenant (Phase 2 — couche d'abstraction LLM)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS llm_usage (
+            id SERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL,
+            username TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            input_tokens INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            cost_usd_estimate NUMERIC(10, 6),
+            purpose TEXT,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_tenant_date ON llm_usage (tenant_id, created_at DESC)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_llm_usage_username_date ON llm_usage (username, created_at DESC)")
+
     conn.commit()
     conn.close()
 
@@ -318,7 +336,7 @@ def init_postgres():
         "ALTER TABLE sent_mail_memory DROP CONSTRAINT IF EXISTS sent_mail_msg_user_unique",
         "ALTER TABLE sent_mail_memory ADD CONSTRAINT sent_mail_msg_user_unique UNIQUE (message_id, username)",
         "ALTER TABLE aria_contacts DROP CONSTRAINT IF EXISTS aria_contacts_email_key",
-        "INSERT INTO tenants (id, name, settings) VALUES ('couffrant_solar', 'Couffrant Solar', '{\"email_provider\": \"microsoft\", \"sharepoint_folder\": \"1_Photovolta\u00efque\"}') ON CONFLICT (id) DO NOTHING",
+        """INSERT INTO tenants (id, name, settings) VALUES ('couffrant_solar', 'Couffrant Solar', '{"email_provider": "microsoft", "sharepoint_folder": "1_Photovoltaïque"}') ON CONFLICT (id) DO NOTHING""",
         "CREATE EXTENSION IF NOT EXISTS vector",
         "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS embedding vector(1536)",
         "ALTER TABLE aria_insights ADD COLUMN IF NOT EXISTS embedding vector(1536)",
