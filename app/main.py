@@ -18,7 +18,7 @@ from app.feedback_store import init_db
 from app.mail_memory_store import init_mail_db
 from app.token_manager import get_valid_microsoft_token, get_all_users_with_tokens
 from app.app_security import init_default_user
-from app.memory_loader import MEMORY_OK, seed_default_rules
+from app.memory_loader import MEMORY_OK
 
 from app.routes.auth import router as auth_router
 from app.routes.admin import router as admin_router
@@ -47,7 +47,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        # CSP adaptée à l'app : Google Fonts, inline styles/scripts nécessaires
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline'; "
@@ -98,11 +97,20 @@ def startup_event():
         init_default_user()
     except Exception as e:
         print(f"[Raya] Erreur init_default_user: {e}")
+
+    # Seeding du tenant principal si pas encore fait
+    # Remplace l'ancien seed_default_rules (no-op) par un vrai seeding en base
     try:
+        from app.seeding import seed_tenant, is_tenant_seeded
         admin_username = os.getenv("APP_USERNAME", "guillaume").strip()
-        seed_default_rules(admin_username)
+        if not is_tenant_seeded(admin_username):
+            print(f"[Raya] Seeding initial pour {admin_username} (profil pv_french)")
+            counts = seed_tenant("couffrant_solar", admin_username, profile="pv_french")
+            print(f"[Raya] Seeding terminé : {counts}")
+        else:
+            print(f"[Raya] {admin_username} déjà seedé, skip")
     except Exception as e:
-        print(f"[Raya] Erreur seed_default_rules: {e}")
+        print(f"[Raya] Erreur seeding: {e}")
 
     def setup_webhooks():
         time.sleep(30)
