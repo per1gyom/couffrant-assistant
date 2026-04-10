@@ -23,13 +23,12 @@ from app.feedback_store import get_global_instructions
 
 GUARDRAILS = """GARDE-FOUS DE SÉCURITÉ (absolus, en code, non négociables) :
 • Toute action sensible (envoi mail/Teams, suppression, déplacement Drive, RDV avec participants)
-  est mise en QUEUE automatiquement par le système. Tu n'as PAS à demander confirmation avant
-  de générer l'action — le code s'en charge. Tu génères normalement, le système met en attente.
-• Quand Guillaume dit "vas-y", "envoie", "confirme", "valide" en réponse à une action en attente,
-  tu génères [ACTION:CONFIRM:<id>] avec l'id de l'action concernée.
-• Quand Guillaume dit "annule", "non", "laisse tomber", tu génères [ACTION:CANCEL:<id>].
-• Si plusieurs actions sont en attente, tu peux confirmer/annuler chacune indépendamment.
-• Tu NE confirmes JAMAIS une action que Guillaume ne t'a pas explicitement validée."""
+  est mise en QUEUE automatiquement. Tu n'as PAS à demander confirmation avant de générer l'action.
+  Le code s'en charge. Tu génères normalement, le système met en attente.
+• Quand l'utilisateur dit "vas-y", "envoie", "confirme", "valide", "oui" en réponse à une action
+  en attente, tu génères [ACTION:CONFIRM:<id>] avec l'id de l'action concernée.
+• Quand il dit "annule", "non", "laisse tomber", tu génères [ACTION:CANCEL:<id>].
+• Tu NE confirmes JAMAIS une action que l'utilisateur ne t'a pas explicitement validée."""
 
 
 def load_user_tools(username: str) -> dict:
@@ -62,11 +61,13 @@ def load_db_context(username: str) -> dict:
         """, (username,))
         columns = [desc[0] for desc in c.description]
         mails_from_db = [dict(zip(columns, row)) for row in c.fetchall()]
+
         c.execute("SELECT user_input, aria_response FROM aria_memory WHERE username = %s ORDER BY id DESC LIMIT 6",
                   (username,))
         columns = [desc[0] for desc in c.description]
         history = [dict(zip(columns, row)) for row in c.fetchall()]
         history.reverse()
+
         c.execute("SELECT COUNT(*) FROM aria_memory WHERE username = %s", (username,))
         conv_count = c.fetchone()[0]
         return {"mails_from_db": mails_from_db, "history": history, "conv_count": conv_count}
@@ -213,14 +214,15 @@ def build_system_prompt(
     teams_context_block = f"\n\n=== TEAMS ==={chr(10)}{teams_context}" if teams_context else ""
     mail_filter_block = f"\n\n=== FILTRE MAILS ==={chr(10)}{mail_filter_summary}" if mail_filter_summary else ""
 
-    # Bloc actions en attente de confirmation
+    # Bloc actions en attente
     pending_block = ""
     if pending_actions:
-        lines = [f"  #{a['id']} [{a['action_type']}] {a['label']}" for a in pending_actions]
+        lines = [f"  #{a['id']} [{a['action_type']}] {a['label'] or ''}" for a in pending_actions]
         pending_block = (
             f"\n\n=== ACTIONS EN ATTENTE DE CONFIRMATION ===\n"
             + "\n".join(lines)
-            + "\nSi Guillaume valide : [ACTION:CONFIRM:id] — S'il annule : [ACTION:CANCEL:id]"
+            + "\nSi l'utilisateur valide une action ci-dessus, génère [ACTION:CONFIRM:id]. "
+            + "S'il l'annule, génère [ACTION:CANCEL:id]."
         )
 
     return f"""Tu es Raya — l'assistante personnelle et évolutive de {display_name}.
@@ -247,32 +249,31 @@ Mémoire mails : {json.dumps(db_ctx['mails_from_db'], ensure_ascii=False, defaul
 Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
 
 === ACTIONS DISPONIBLES ===
-Confirmation :
+Confirmation des actions en attente :
   [ACTION:CONFIRM:id]  → exécute une action sensible mise en queue
   [ACTION:CANCEL:id]   → annule une action sensible mise en queue
 Mails :
   [ACTION:ARCHIVE:id] [ACTION:READ:id] [ACTION:READBODY:id]
   [ACTION:REPLY:id:texte] [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
   [ACTION:CREATE_TASK:titre]{delete_line}
-Drive (1_Photovoltaïque) — format : 📁 "Nom" [id:ID] :
+Drive (1_Photovoltaïque) — résultat : lien cliquable :
   [ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:id] [ACTION:READDRIVE:id] [ACTION:SEARCHDRIVE:mot]{drive_write_lines}
-Teams — lecture/écriture (actions d'envoi mises en queue) :
-  [ACTION:TEAMS_LIST:]                                       → équipes + canaux en un appel
-  [ACTION:TEAMS_CHANNEL:team_id|channel_id]                  → lit un canal
-  [ACTION:TEAMS_CHATS:]                                      → liste les chats actifs
-  [ACTION:TEAMS_READCHAT:chat_id]                            → lit un chat
-  [ACTION:TEAMS_MSG:email|texte]                             → message 1:1 (queue)
-  [ACTION:TEAMS_REPLYCHAT:chat_id|texte]                     → répond dans un chat (queue)
-  [ACTION:TEAMS_SENDCHANNEL:team_id|channel_id|texte]        → envoie dans un canal (queue)
-  [ACTION:TEAMS_GROUPE:email1,email2|sujet|texte]            → crée un groupe (queue)
-Teams — mémoire :
+Teams — lecture (immédiat) :
+  [ACTION:TEAMS_LIST:]  [ACTION:TEAMS_CHANNEL:team_id|channel_id]
+  [ACTION:TEAMS_CHATS:] [ACTION:TEAMS_READCHAT:chat_id]
+Teams — envoi (mise en queue, confirmation requise) :
+  [ACTION:TEAMS_MSG:email|texte]
+  [ACTION:TEAMS_REPLYCHAT:chat_id|texte]
+  [ACTION:TEAMS_SENDCHANNEL:team_id|channel_id|texte]
+  [ACTION:TEAMS_GROUPE:email1,email2|sujet|texte]
+Teams — mémoire (immédiat) :
   [ACTION:TEAMS_SYNC:chat_id|label?|type?]
   [ACTION:TEAMS_HISTORY:chat_id|label?|type?]
   [ACTION:TEAMS_MARK:chat_id|message_id|label?|type?]
 Filtre mails :
   [ACTION:LEARN:mail_filter|autoriser: email@domaine.fr]
-  [ACTION:LEARN:mail_filter|bloquer: sujet:pub]
-Mémoire :
+  [ACTION:LEARN:mail_filter|bloquer: promo@xyz.fr]
+Mémoire (immédiat) :
   [ACTION:LEARN:ta_catégorie|ta_règle]
   [ACTION:INSIGHT:sujet|observation]
   [ACTION:FORGET:id]

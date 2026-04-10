@@ -6,7 +6,6 @@ sont exécutés en parallèle via ThreadPoolExecutor pour réduire
 la latence de 300–400ms par conversation.
 
 Auth : require_user via Depends — lève 401 si non authentifié.
-Plus de fallback 'guillaume' possible.
 """
 import os
 import re
@@ -115,12 +114,12 @@ def raya_endpoint(
 
 
 def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: str) -> dict:
-    # 1. Contexte DB + actions en attente
+
+    # 1. Contexte DB + tokens
     tools = load_user_tools(username)
     db_ctx = load_db_context(username)
     instructions = get_global_instructions(tenant_id=tenant_id)
     outlook_token = get_valid_microsoft_token(username)
-    pending_actions = get_pending(username=username, tenant_id=tenant_id, limit=10)
 
     # 2. Appels réseau en PARALLÈLE
     live_mails, agenda, teams_ctx, mail_filter = [], [], "", ""
@@ -138,17 +137,20 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         try: mail_filter = f_filter.result(timeout=3)
         except Exception: pass
 
-    # 3. Prompt système (inclut les actions en attente)
+    # 3. Actions en attente (injecte dans le prompt)
+    pending_list = get_pending(username=username, tenant_id=tenant_id, limit=10)
+
+    # 4. Construction du prompt système
     user_content_parts = _build_user_content(payload)
     system = build_system_prompt(
         username=username, tenant_id=tenant_id, query=payload.query or "",
         tools=tools, db_ctx=db_ctx, outlook_token=outlook_token,
         live_mails=live_mails, agenda=agenda, instructions=instructions,
         teams_context=teams_ctx, mail_filter_summary=mail_filter,
-        pending_actions=pending_actions,
+        pending_actions=pending_list,
     )
 
-    # 4. Historique + appel Claude
+    # 5. Historique + appel Claude
     messages = []
     for h in db_ctx["history"]:
         messages.append({"role": "user", "content": h["user_input"]})
@@ -160,24 +162,24 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     )
     raya_response = response.content[0].text
 
-    # 5. Exécution des actions (queue pour les sensibles)
+    # 6. Exécution des actions (queue pour les sensibles)
     actions_confirmed = execute_actions(
         raya_response=raya_response,
         username=username,
+        tenant_id=tenant_id,
         outlook_token=outlook_token,
         mails_from_db=db_ctx["mails_from_db"],
         live_mails=live_mails,
         tools=tools,
-        tenant_id=tenant_id,
         conversation_id=None,
     )
 
-    # 6. Réponse propre
+    # 7. Réponse propre
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', raya_response).strip()
     if actions_confirmed:
         clean_response += "\n\n" + "\n".join(actions_confirmed)
 
-    # 7. Sauvegarde
+    # 8. Sauvegarde
     conn = None
     try:
         conn = get_pg_conn()
@@ -190,7 +192,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     finally:
         if conn: conn.close()
 
-    # 8. Synthèse auto si seuil atteint
+    # 9. Synthèse auto si seuil atteint
     synth_threshold = get_memoire_param(username, "synth_threshold", 15)
     if MEMORY_OK and db_ctx["conv_count"] > 0 and db_ctx["conv_count"] % synth_threshold == 0:
         try:
@@ -201,7 +203,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         except Exception:
             pass
 
-    # 9. Actions en attente actualisées (après exécution)
+    # 10. Actions en attente mises à jour (après exécution)
     updated_pending = get_pending(username=username, tenant_id=tenant_id, limit=10)
 
     return {
