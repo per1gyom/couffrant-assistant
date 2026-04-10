@@ -1,92 +1,57 @@
-/**
- * Service Worker Raya — Phase 4 (PWA)
- *
- * Stratégie :
- *   - Assets statiques (CSS, JS) : Cache-first avec fallback réseau
- *   - API calls (/raya, /token-status…) : Network-first, jamais mis en cache
- *   - Pages HTML : Network-first, fallback cache si hors-ligne
- *
- * Le SW ne met PAS en cache les réponses LLM.
- * Les conversations nécessitent une connexion active.
- */
-
 const CACHE_NAME = 'raya-v1';
-
-const PRECACHE_ASSETS = [
+const PRECACHE = [
   '/static/chat.css',
   '/static/onboarding.css',
+  '/static/mobile.css',
   '/static/chat.js',
-  '/static/manifest.json',
+  'https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js',
+  'https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js',
 ];
 
-const NEVER_CACHE = [
-  '/raya', '/raya/', '/onboarding/', '/token-status',
-  '/speak', '/synth', '/build-memory', '/admin/', '/logout',
-];
-
-function shouldNeverCache(pathname) {
-  return NEVER_CACHE.some(p => pathname === p || pathname.startsWith(p));
-}
-
-// ── INSTALL ──
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then(cache => cache.addAll(PRECACHE_ASSETS))
+      .then(cache => cache.addAll(PRECACHE).catch(() => {}))
       .then(() => self.skipWaiting())
-      .catch(err => console.warn('[SW] Précache partiel :', err))
   );
 });
 
-// ── ACTIVATE ──
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))))
-      .then(() => self.clients.claim())
+    caches.keys().then(keys =>
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+    ).then(() => self.clients.claim())
   );
 });
 
-// ── FETCH ──
 self.addEventListener('fetch', event => {
-  const { request } = event;
-  const url = new URL(request.url);
-
-  if (request.method !== 'GET') return;
-  if (shouldNeverCache(url.pathname)) {
-    event.respondWith(fetch(request).catch(() => offlineResponse()));
-    return;
-  }
-
-  if (url.pathname.startsWith('/static/')) {
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith('/raya') || url.pathname.startsWith('/onboarding') ||
+      url.pathname.startsWith('/admin') || url.pathname.startsWith('/memory') ||
+      url.pathname.startsWith('/token-status')) return;
+  if (url.pathname.startsWith('/static/') || url.hostname === 'cdn.jsdelivr.net') {
     event.respondWith(
-      caches.match(request).then(cached => {
-        if (cached) return cached;
-        return fetch(request).then(res => {
-          caches.open(CACHE_NAME).then(c => c.put(request, res.clone()));
-          return res;
-        });
-      })
+      caches.match(event.request).then(cached =>
+        cached || fetch(event.request).then(response => {
+          if (response.ok) {
+            const clone = response.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          }
+          return response;
+        })
+      )
     );
     return;
   }
-
-  event.respondWith(
-    fetch(request)
-      .then(res => {
-        caches.open(CACHE_NAME).then(c => c.put(request, res.clone()));
-        return res;
-      })
-      .catch(() => caches.match(request).then(c => c || offlineResponse()))
-  );
+  if (url.pathname === '/chat' || url.pathname === '/') {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+  }
 });
-
-function offlineResponse() {
-  return new Response(
-    '<html><meta charset="utf-8"><body style="font-family:sans-serif;text-align:center;padding:40px">'
-    + '<h2>✦ Raya</h2><p>Connexion requise.</p>'
-    + '<button onclick="location.reload()">Réessayer</button>'
-    + '</body></html>',
-    { headers: { 'Content-Type': 'text/html; charset=utf-8' } }
-  );
-}

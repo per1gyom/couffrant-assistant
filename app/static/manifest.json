@@ -1,35 +1,14 @@
 {
-  "name": "Raya — Assistante IA",
+  "name": "Raya",
   "short_name": "Raya",
-  "description": "Votre assistante personnelle IA — mails, agenda, Drive et Teams en un seul endroit.",
+  "description": "Assistante IA personnelle",
   "start_url": "/chat",
   "display": "standalone",
   "background_color": "#f5f7fa",
   "theme_color": "#6366f1",
   "orientation": "portrait-primary",
   "icons": [
-    {
-      "src": "/static/icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "/static/icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
-    }
-  ],
-  "screenshots": [
-    {
-      "src": "/static/icons/screenshot-mobile.png",
-      "sizes": "390x844",
-      "type": "image/png",
-      "form_factor": "narrow"
-    }
-  ],
-  "categories": ["productivity", "business"],
-  "lang": "fr",
-  "dir": "ltr"
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
 }
