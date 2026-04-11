@@ -22,6 +22,7 @@ from app.memory_loader import (
     get_hot_summary, get_contact_card, get_style_examples,
 )
 from app.feedback_store import get_global_instructions
+from app.capabilities import get_capabilities_prompt
 
 
 GUARDRAILS = """GARDE-FOUS DE SECURITE (absolus, en code, non negociables) :
@@ -279,11 +280,14 @@ def build_system_prompt(
             + "S'il l'annule, genere [ACTION:CANCEL:id]."
         )
 
+    capabilities_block = "\n\n" + get_capabilities_prompt()
+
     return f"""Tu es Raya — l'assistante personnelle et evolutive de {display_name}.
 Tu es Claude avec une memoire persistante. Tu n'as pas de comportement impose de l'exterieur.
 Tu observes, tu apprends, tu t'organises librement. Tu parles au feminin.
 
 {GUARDRAILS}
+{capabilities_block}
 
 {f"=== CE QUE TU SAIS SUR {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"=== PREMIERE CONVERSATION ==={chr(10)}Tu ne connais pas encore {display_name}. Commence a observer et memoriser."}
 
@@ -306,6 +310,10 @@ Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
 Confirmation des actions en attente :
   [ACTION:CONFIRM:id]  -> execute une action sensible mise en queue
   [ACTION:CANCEL:id]   -> annule une action sensible mise en queue
+Interactif (immediat) :
+  [ACTION:ASK_CHOICE:question|option1|option2|option3]
+  -> affiche des boutons de choix cliquables dans le chat (2 a 4 options)
+  -> utiliser quand une question a plusieurs reponses possibles bien definies
 Mails :
   [ACTION:ARCHIVE:id] [ACTION:READ:id] [ACTION:READBODY:id]
   [ACTION:REPLY:id:texte] [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
