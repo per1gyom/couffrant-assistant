@@ -1,10 +1,9 @@
 """
 Endpoints Raya : /speak, /raya, /token-status, /raya/feedback, /raya/why/{id}.
 
-Phase 3b (B8) : détection de session thématique via detect_session_theme().
-Si les derniers échanges portent sur un sujet cohérent, le contexte RAG
-est enrichi avec tout ce qui concerne ce sujet.
+Phase 3b (B8) : detection de session thematique via detect_session_theme().
 """
+import json
 import os
 import re
 import io
@@ -36,7 +35,7 @@ from app.routes.aria_context import (
     load_agenda, load_teams_context, load_mail_filter_summary,
     build_system_prompt,
 )
-from app.routes.aria_actions import execute_actions
+from app.routes.aria_actions import execute_actions, _ASK_CHOICE_PREFIX
 from app.routes.deps import require_user
 
 router = APIRouter(tags=["raya"])
@@ -55,7 +54,7 @@ class FeedbackPayload(BaseModel):
     comment: Optional[str] = None
 
 
-# ─── ENDPOINTS ───
+# --- ENDPOINTS ---
 
 @router.get("/token-status")
 def token_status(request: Request, user: dict = Depends(require_user)):
@@ -66,7 +65,7 @@ def token_status(request: Request, user: dict = Depends(require_user)):
         if not token:
             warnings.append({
                 "provider": "Microsoft 365",
-                "message": "Token expiré — mails, Teams et agenda inaccessibles.",
+                "message": "Token expire — mails, Teams et agenda inaccessibles.",
                 "action": "Se reconnecter",
                 "action_url": "/login",
                 "severity": "error",
@@ -81,7 +80,7 @@ def speak_text(payload: dict = Body(...)):
     api_key = os.environ.get("ELEVENLABS_API_KEY", "")
     voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "")
     if not api_key or not voice_id:
-        return {"error": "Clés ElevenLabs manquantes"}
+        return {"error": "Cles ElevenLabs manquantes"}
     text = payload.get("text", "")
     clean = re.sub(r'#{1,6}\s+', '', text)
     clean = re.sub(r'\*\*(.*?)\*\*', r'\1', clean)
@@ -117,9 +116,10 @@ def raya_endpoint(
         tb = traceback.format_exc()
         print(f"[Raya] ERREUR ENDPOINT pour {username}:\n{tb}")
         return {
-            "answer": "⚠️ Une erreur interne est survenue. L'incident a été loggé.",
+            "answer": "⚠️ Une erreur interne est survenue. L'incident a ete logue.",
             "actions": [], "pending_actions": [],
             "aria_memory_id": None, "model_tier": "smart",
+            "ask_choice": None,
         }
 
 
@@ -143,7 +143,7 @@ def raya_feedback(
             username=username, tenant_id=tenant_id,
             comment=payload.comment or "",
         )
-    return {"status": "error", "message": "feedback_type doit être 'positive' ou 'negative'"}
+    return {"status": "error", "message": "feedback_type doit etre 'positive' ou 'negative'"}
 
 
 @router.get("/raya/why/{aria_memory_id}")
@@ -158,7 +158,7 @@ def raya_why(
     return {"status": "ok", **meta}
 
 
-# ─── CORE ───
+# --- CORE ---
 
 def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: str) -> dict:
 
@@ -168,7 +168,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     instructions = get_global_instructions(tenant_id=tenant_id)
     outlook_token = get_valid_microsoft_token(username)
 
-    # 2. Appels réseau en PARALLÈLE
+    # 2. Appels reseau en PARALLELE
     live_mails, agenda, teams_ctx, mail_filter = [], [], "", ""
     with ThreadPoolExecutor(max_workers=4) as pool:
         f_mails  = pool.submit(load_live_mails, outlook_token, username)
@@ -187,7 +187,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     # 3. Actions en attente
     pending_list = get_pending(username=username, tenant_id=tenant_id, limit=10)
 
-    # 4. Routage de tier + détection de session thématique (Phase 3b B8)
+    # 4. Routage de tier + detection de session thematique
     model_tier    = "smart"
     session_theme = None
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -200,9 +200,9 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         except Exception: pass
 
     if session_theme:
-        print(f"[Raya] Session thématique détectée pour {username} : '{session_theme}'")
+        print(f"[Raya] Session thematique detectee pour {username} : '{session_theme}'")
 
-    # 5. Construction du prompt système
+    # 5. Construction du prompt systeme
     user_content_parts = _build_user_content(payload)
     system = build_system_prompt(
         username=username, tenant_id=tenant_id, query=payload.query or "",
@@ -229,20 +229,31 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     log_llm_usage(result, username=username, tenant_id=tenant_id,
                   purpose="raya_main_conversation")
 
-    # 7. Exécution des actions
-    actions_confirmed = execute_actions(
+    # 7. Execution des actions
+    actions_raw = execute_actions(
         raya_response=raya_response, username=username, tenant_id=tenant_id,
         outlook_token=outlook_token, mails_from_db=db_ctx["mails_from_db"],
         live_mails=live_mails, tools=tools, conversation_id=None,
     )
 
-    # 8. Réponse propre — retire les balises [ACTION:...] du texte affiché
+    # 8. Extraction ASK_CHOICE du flux confirmed
+    ask_choice = None
+    actions_confirmed = []
+    for item in actions_raw:
+        if item.startswith(_ASK_CHOICE_PREFIX):
+            try:
+                ask_choice = json.loads(item[len(_ASK_CHOICE_PREFIX):])
+            except Exception:
+                pass
+        else:
+            actions_confirmed.append(item)
+
+    # 9. Reponse propre — retire les balises [ACTION:...] du texte affiche
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', raya_response).strip()
     if actions_confirmed:
-        # \n\n entre chaque confirmation pour séparation correcte en Markdown
         clean_response += "\n\n" + "\n\n".join(actions_confirmed)
 
-    # 9. Sauvegarde
+    # 10. Sauvegarde
     aria_memory_id = None
     conn = None
     try:
@@ -257,7 +268,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     finally:
         if conn: conn.close()
 
-    # 10. Métadonnées en background
+    # 11. Metadonnees en background
     if aria_memory_id:
         try:
             from app.rag import retrieve_rules
@@ -270,7 +281,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
             daemon=True,
         ).start()
 
-    # 11. Synthèse auto
+    # 12. Synthese auto
     synth_threshold = get_memoire_param(username, "synth_threshold", 15)
     if MEMORY_OK and db_ctx["conv_count"] > 0 and db_ctx["conv_count"] % synth_threshold == 0:
         try:
@@ -281,7 +292,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         except Exception:
             pass
 
-    # 12. Actions en attente mises à jour
+    # 13. Actions en attente mises a jour
     updated_pending = get_pending(username=username, tenant_id=tenant_id, limit=10)
 
     return {
@@ -290,6 +301,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         "pending_actions": updated_pending,
         "aria_memory_id":  aria_memory_id,
         "model_tier":      model_tier,
+        "ask_choice":      ask_choice,  # C3 : boutons de choix interactifs
     }
 
 
