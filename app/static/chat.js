@@ -1,6 +1,6 @@
 // Raya Chat — JavaScript
 
-// ─── ÉTAT GLOBAL ───
+// --- ETAT GLOBAL ---
 const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('input');
 const sendBtn = document.getElementById('sendBtn');
@@ -19,10 +19,14 @@ let isAdmin=false;
 let shortcutsEditMode=false;
 let pendingShortcuts=[];
 
-// État onboarding conversationnel
+// Etat onboarding conversationnel
 let _onboardingActive = false;
 
-// ─── INIT ───
+// C2 : cible active du micro (inputEl par defaut, ou textarea feedback)
+let _micTarget = null;
+let _finalTextBaseTarget = '';
+
+// --- INIT ---
 async function init() {
   renderQuickActions();
   checkHealth();
@@ -56,7 +60,7 @@ async function checkHealth() {
   catch(e) { dot.className = 'logo-dot off'; }
 }
 
-// ─── ONBOARDING CONVERSATIONNEL v2 ───
+// --- ONBOARDING CONVERSATIONNEL v2 ---
 async function checkOnboarding() {
   try {
     const r = await fetch('/onboarding/status');
@@ -179,7 +183,7 @@ function closeOnboarding() {
   if (overlay) overlay.classList.remove('open');
 }
 
-// ─── TOKEN ALERT ───
+// --- TOKEN ALERT ---
 async function checkTokenStatus() {
   try {
     const r = await fetch('/token-status');
@@ -212,7 +216,7 @@ function toggleTokenBanner() {
 
 function closeTokenBanner() { document.getElementById('tokenBanner').classList.remove('visible'); }
 
-// ─── TOASTS ───
+// --- TOASTS ---
 function showToast(msg, type='ok', duration=3000) {
   const container = document.getElementById('toast-container');
   const toast = document.createElement('div');
@@ -223,7 +227,7 @@ function showToast(msg, type='ok', duration=3000) {
   setTimeout(() => { toast.style.animation = 'toastOut 0.3s ease forwards'; setTimeout(() => toast.remove(), 300); }, duration);
 }
 
-// ─── AUTO SPEAK ───
+// --- AUTO SPEAK ---
 function toggleAutoSpeak() {
   autoSpeak = !autoSpeak;
   const btn = document.getElementById('autoSpeakBtn');
@@ -231,7 +235,7 @@ function toggleAutoSpeak() {
   else { btn.classList.remove('active'); btn.textContent='🔇 Muet'; }
 }
 
-// ─── RACCOURCIS ───
+// --- RACCOURCIS ---
 const DEFAULT_SHORTCUTS = [
   { icon:'📬', label:'Mails urgents', query:'Quels sont mes mails urgents ?' },
   { icon:'📅', label:'Planning', query:"Quel est mon planning aujourd'hui ?" },
@@ -285,14 +289,14 @@ function addShortcut() {
 }
 function saveShortcuts() { saveShortcutsToStorage(pendingShortcuts); renderQuickActions(); closeShortcuts(); showToast('Raccourcis enregistrés ✓', 'ok'); }
 
-// ─── SCROLL ───
+// --- SCROLL ---
 function scrollToBottom(smooth=true) { messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: smooth ? 'smooth' : 'instant' }); }
 function onMessagesScroll() {
   const dist = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight;
   document.getElementById('scrollDownBtn').classList.toggle('visible', dist > 150);
 }
 
-// ─── MESSAGES ───
+// --- MESSAGES ---
 function autoResize(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,120)+'px'; }
 function handleKey(e) { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
 
@@ -359,7 +363,7 @@ function addLoading() {
   row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row); scrollToBottom(); return row;
 }
 
-// ─── FEEDBACK 👍👎 ───
+// --- FEEDBACK 👍👎 ---
 async function sendFeedback(ariaMemoryId, type, btn) {
   if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
   try {
@@ -375,34 +379,121 @@ async function sendFeedback(ariaMemoryId, type, btn) {
   } catch(e) { if (btn) { btn.disabled = false; btn.style.opacity = ''; } }
 }
 
+// C2 : feedback dialog avec micro + trace dans le chat
 function openFeedbackDialog(ariaMemoryId, btn) {
   const existing = document.getElementById('feedback-dialog-' + ariaMemoryId);
-  if (existing) { existing.remove(); return; }
+  if (existing) { existing.remove(); _releaseMicFromFeedback(); return; }
+
   const dialog = document.createElement('div');
-  dialog.id = 'feedback-dialog-' + ariaMemoryId; dialog.className = 'feedback-dialog';
+  dialog.id = 'feedback-dialog-' + ariaMemoryId;
+  dialog.className = 'feedback-dialog';
   dialog.innerHTML = `
     <div class="feedback-dialog-label">Qu'est-ce qui n'était pas satisfaisant ?</div>
-    <textarea class="feedback-dialog-input" placeholder="(optionnel) Décris le problème..." rows="2"></textarea>
+    <div class="feedback-dialog-input-row">
+      <textarea class="feedback-dialog-input" placeholder="(optionnel) Décris le problème... ou utilise le 🎤" rows="2"></textarea>
+      <button class="feedback-dialog-mic" title="Dicter ma réponse">🎤</button>
+    </div>
     <div class="feedback-dialog-btns">
       <button class="feedback-dialog-send">👎 Envoyer</button>
       <button class="feedback-dialog-cancel">✕ Annuler</button>
     </div>
   `;
+
+  const textarea = dialog.querySelector('.feedback-dialog-input');
+  const micDialogBtn = dialog.querySelector('.feedback-dialog-mic');
+
+  // C2a : bouton micro redirige vers le textarea du dialog
+  micDialogBtn.onclick = () => {
+    if (isListening) {
+      stopListening();
+      _releaseMicFromFeedback();
+    } else {
+      _micTarget = textarea;
+      _finalTextBaseTarget = textarea.value;
+      micDialogBtn.textContent = '⏹';
+      micDialogBtn.style.color = 'var(--danger, #ef4444)';
+      startListening();
+    }
+  };
+
+  // C2b : trace dans le chat apres soumission
   dialog.querySelector('.feedback-dialog-send').onclick = async () => {
-    const comment = dialog.querySelector('.feedback-dialog-input').value.trim();
+    const comment = textarea.value.trim();
     dialog.remove();
+    _releaseMicFromFeedback();
+    if (btn) { btn.textContent = '👎⏳'; btn.disabled = true; btn.style.opacity = '0.7'; }
+
+    // Trace utilisateur dans le chat
+    const userMsg = comment
+      ? `Tu as signalé un problème : "${comment}"`
+      : 'Tu as signalé que cette réponse était insatisfaisante.';
+    addMessage(userMsg, 'user');
+    const loading = addLoading();
+
     const r = await fetch('/raya/feedback', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ aria_memory_id: ariaMemoryId, feedback_type: 'negative', comment })
     });
     const d = await r.json();
+    loading.remove();
+
     if (d.ok || d.status === 'ok') {
       if (btn) { btn.textContent = '👎✅'; btn.disabled = true; btn.style.opacity = '0.5'; }
-      showToast(d.rule_text ? 'Règle corrective créée ✔' : 'Feedback enregistré', 'ok', 3000);
+      if (d.rule_text) {
+        // Raya propose une regle corrective + boutons Oui/Non
+        const ruleMsg = `J'ai analysé le problème. Voici la règle que je propose de retenir :\n\n**${d.rule_text}**\n\nC'est correct ?`;
+        const rayaRow = addMessage(ruleMsg, 'raya');
+        // Boutons de validation de la regle
+        const btnZone = document.createElement('div');
+        btnZone.className = 'onb-choices';
+        btnZone.style.marginTop = '8px';
+        const yesBtn = document.createElement('button');
+        yesBtn.className = 'onb-choice-btn'; yesBtn.textContent = '✓ Oui, apprends';
+        yesBtn.onclick = async () => {
+          btnZone.querySelectorAll('button').forEach(b => b.disabled = true);
+          btnZone.style.opacity = '0.5';
+          await fetch('/raya/feedback', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ aria_memory_id: ariaMemoryId, feedback_type: 'negative', comment, confirm_rule: true })
+          });
+          addMessage('Règle retenue. ✅', 'raya');
+          showToast('Règle apprise', 'ok', 2000);
+        };
+        const noBtn = document.createElement('button');
+        noBtn.className = 'onb-choice-btn'; noBtn.textContent = '✕ Non, oublie';
+        noBtn.onclick = () => {
+          btnZone.querySelectorAll('button').forEach(b => b.disabled = true);
+          btnZone.style.opacity = '0.5';
+          addMessage('Ok, je n\'apprends rien cette fois.', 'raya');
+        };
+        btnZone.appendChild(yesBtn); btnZone.appendChild(noBtn);
+        rayaRow.after(btnZone);
+      } else {
+        addMessage('Feedback enregistré, merci. Je vais m\'améliorer.', 'raya');
+      }
+    } else {
+      addMessage('Désolée, impossible de traiter le feedback pour l\'instant.', 'raya');
     }
   };
-  dialog.querySelector('.feedback-dialog-cancel').onclick = () => dialog.remove();
+
+  dialog.querySelector('.feedback-dialog-cancel').onclick = () => {
+    dialog.remove();
+    _releaseMicFromFeedback();
+  };
+
   btn.closest('.message-row').after(dialog);
+}
+
+function _releaseMicFromFeedback() {
+  if (_micTarget) {
+    _micTarget = null;
+    _finalTextBaseTarget = '';
+    // Remet les boutons mic dialog en etat normal
+    document.querySelectorAll('.feedback-dialog-mic').forEach(b => {
+      b.textContent = '🎤'; b.style.color = '';
+    });
+    if (isListening) stopListening();
+  }
 }
 
 async function showWhy(ariaMemoryId, btn) {
@@ -429,8 +520,35 @@ async function showWhy(ariaMemoryId, btn) {
   } catch(e) {}
 }
 
-// ─── ACTIONS EN ATTENTE ───
-// C3 : boutons désactivés immédiatement au clic pour empêcher les double-clics
+// --- C3 : ASK_CHOICE — boutons de choix interactifs ---
+function renderAskChoice(choiceData) {
+  if (!choiceData || !choiceData.question || !choiceData.options) return;
+
+  // Retire tout choix precedent non resolu
+  document.querySelectorAll('.ask-choice-zone').forEach(el => el.remove());
+
+  const zone = document.createElement('div');
+  zone.className = 'ask-choice-zone onb-choices';
+  zone.style.marginTop = '8px';
+
+  choiceData.options.forEach(opt => {
+    const btn = document.createElement('button');
+    btn.className = 'onb-choice-btn';
+    btn.textContent = opt;
+    btn.onclick = () => {
+      zone.querySelectorAll('button').forEach(b => b.disabled = true);
+      zone.style.opacity = '0.5';
+      inputEl.value = opt;
+      sendMessage();
+    };
+    zone.appendChild(btn);
+  });
+
+  messagesEl.appendChild(zone);
+  scrollToBottom();
+}
+
+// --- ACTIONS EN ATTENTE ---
 function renderPendingActions(pendingList) {
   const existing = document.getElementById('pending-actions-zone'); if (existing) existing.remove();
   if (!pendingList || pendingList.length === 0) return;
@@ -448,7 +566,6 @@ function renderPendingActions(pendingList) {
     const btns = document.createElement('div'); btns.className = 'pending-btns';
     const confirmBtn = document.createElement('button'); confirmBtn.className = 'pending-btn confirm'; confirmBtn.textContent = '✓ Confirmer';
     confirmBtn.onclick = () => {
-      // Désactivation immédiate — empêche les double-clics
       if (confirmBtn.disabled) return;
       confirmBtn.disabled = true;
       confirmBtn.textContent = '⏳ En cours...';
@@ -473,7 +590,7 @@ function renderPendingActions(pendingList) {
   inputZone.parentNode.insertBefore(zone, inputZone);
 }
 
-// ─── SEND MESSAGE ───
+// --- SEND MESSAGE ---
 async function sendMessage() {
   const text = inputEl.value.trim(); if (!text && !currentFile) return;
 
@@ -482,6 +599,9 @@ async function sendMessage() {
     await _sendOnboardingAnswer(text);
     return;
   }
+
+  // Retire les choix interactifs en cours
+  document.querySelectorAll('.ask-choice-zone').forEach(el => el.remove());
 
   const fileSnapshot = currentFile ? {...currentFile} : null;
   inputEl.value = ''; inputEl.style.height = 'auto'; inputEl.classList.remove('interim');
@@ -495,6 +615,10 @@ async function sendMessage() {
     const data = await response.json(); loading.remove();
     const msgRow = addMessage(data.answer, 'raya', null, data.aria_memory_id || null);
     if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'));
+
+    // C3 : affiche les boutons de choix si Raya en a generes
+    if (data.ask_choice) renderAskChoice(data.ask_choice);
+
     if (data.actions && data.actions.length > 0) {
       const ok = data.actions.filter(a => a.startsWith('✅')); const err = data.actions.filter(a => a.startsWith('❌')); const pend = data.actions.filter(a => a.startsWith('⏸️'));
       if (ok.length) showToast(ok[0].replace('✅','').trim(), 'ok', 3000);
@@ -511,7 +635,7 @@ async function sendMessage() {
 }
 function quickAsk(text) { inputEl.value = text; sendMessage(); }
 
-// ─── FICHIERS ───
+// --- FICHIERS ---
 function handleFileSelect(e) {
   const file = e.target.files[0]; if (!file) return;
   if (file.size > 10*1024*1024) { alert('Fichier trop volumineux (max 10 Mo).'); return; }
@@ -530,7 +654,7 @@ function removeAttachment() {
   document.getElementById('attachBtn').classList.remove('has-file');
 }
 
-// ─── AUDIO ───
+// --- AUDIO ---
 function speak(text, btn) {
   stopSpeech(); speakAborted = false; currentSpeakBtn = btn || null;
   if (currentSpeakBtn) { currentSpeakBtn.textContent='⏹ Stop'; currentSpeakBtn.classList.add('playing'); }
@@ -546,7 +670,8 @@ function speak(text, btn) {
 function resetSpeakUI() { if (currentSpeakBtn) { currentSpeakBtn.textContent='🔊 Écouter'; currentSpeakBtn.classList.remove('playing'); currentSpeakBtn=null; } }
 function stopSpeech() { speakAborted = true; if (currentAudio) { currentAudio.pause(); currentAudio=null; } window.speechSynthesis && window.speechSynthesis.cancel(); resetSpeakUI(); }
 
-// ─── MICRO ───
+// --- MICRO ---
+// C2 : le micro peut cibler inputEl (par defaut) ou _micTarget (textarea feedback)
 function toggleMic() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { alert('Reconnaissance vocale non supportée.\nUtilisez Chrome ou Edge.'); return; }
@@ -554,16 +679,20 @@ function toggleMic() {
 }
 function startListening() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) return;
-  finalTextBase = inputEl.value;
+  const target = _micTarget || inputEl;
+  finalTextBase = _micTarget ? _finalTextBaseTarget : inputEl.value;
   const rec = new SR(); rec.lang='fr-FR'; rec.continuous=false; rec.interimResults=true; rec.maxAlternatives=1;
-  rec.onstart = () => { isListening=true; micBtn.classList.add('listening'); micBtn.textContent='⏹'; micStatus.classList.add('visible'); inputWrapper.classList.add('mic-active'); };
+  rec.onstart = () => {
+    isListening=true;
+    if (!_micTarget) { micBtn.classList.add('listening'); micBtn.textContent='⏹'; micStatus.classList.add('visible'); inputWrapper.classList.add('mic-active'); }
+  };
   rec.onresult = (e) => {
     clearSilenceTimer(); let interim='', final='';
     for (let i=e.resultIndex; i<e.results.length; i++) {
       if (e.results[i].isFinal) final+=e.results[i][0].transcript+' '; else interim+=e.results[i][0].transcript;
     }
-    if (interim) { inputEl.value=(finalTextBase+' '+interim).trim(); inputEl.classList.add('interim'); autoResize(inputEl); }
-    if (final) { finalTextBase=(finalTextBase+' '+final).trim(); inputEl.value=finalTextBase; inputEl.classList.remove('interim'); autoResize(inputEl); }
+    if (interim) { target.value=(finalTextBase+' '+interim).trim(); if (!_micTarget) { target.classList.add('interim'); autoResize(target); } }
+    if (final) { finalTextBase=(finalTextBase+' '+final).trim(); target.value=finalTextBase; if (!_micTarget) { target.classList.remove('interim'); autoResize(target); } }
     resetSilenceTimer();
   };
   rec.onerror = (e) => {
@@ -575,10 +704,18 @@ function startListening() {
 }
 function resetSilenceTimer() { clearSilenceTimer(); silenceTimer=setTimeout(()=>{ if(isListening) stopListening(); },3000); }
 function clearSilenceTimer() { if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;} }
-function stopListening() { isListening=false; clearSilenceTimer(); cleanupMicUI(); inputEl.classList.remove('interim'); if(inputEl.value) autoResize(inputEl); inputEl.focus(); }
-function cleanupMicUI() { micBtn.classList.remove('listening'); micBtn.textContent='🎤'; micStatus.classList.remove('visible'); inputWrapper.classList.remove('mic-active'); }
+function stopListening() {
+  isListening=false; clearSilenceTimer(); cleanupMicUI();
+  if (!_micTarget) { inputEl.classList.remove('interim'); if(inputEl.value) autoResize(inputEl); inputEl.focus(); }
+}
+function cleanupMicUI() {
+  if (!_micTarget) {
+    micBtn.classList.remove('listening'); micBtn.textContent='🎤';
+    micStatus.classList.remove('visible'); inputWrapper.classList.remove('mic-active');
+  }
+}
 
-// ─── TRIAGE ───
+// --- TRIAGE ---
 async function startTriage() {
   stopSpeech(); triageBar.classList.remove('visible');
   const loading = addLoading();
@@ -609,7 +746,7 @@ async function handleTriage(action) {
   setTimeout(()=>nextTriage(),3000);
 }
 
-// ─── TIROIR ADMIN ───
+// --- TIROIR ADMIN ---
 function toggleDrawer() { const d=document.getElementById('drawer'); if(d.classList.contains('open')) closeDrawer(); else openDrawer(); }
 function openDrawer() { document.getElementById('drawer').classList.add('open'); document.getElementById('drawerOverlay').classList.add('open'); document.getElementById('adminBtn').classList.add('active'); }
 function closeDrawer() { document.getElementById('drawer').classList.remove('open'); document.getElementById('drawerOverlay').classList.remove('open'); document.getElementById('adminBtn').classList.remove('active'); }
@@ -666,12 +803,13 @@ function formatDrawerResult(d) {
   return JSON.stringify(d).replace(/[{}"]/g,'').replace(/,/g,'\n').substring(0,200);
 }
 
-// ─── KEYBOARD ───
+// --- KEYBOARD ---
 document.addEventListener('keydown', e => {
   if (e.key==='Escape') {
     closeDrawer();
     document.getElementById('modalShortcuts').classList.remove('open');
     closeOnboarding();
+    _releaseMicFromFeedback();
   }
 });
 document.getElementById('modalShortcuts').addEventListener('click', e => { if(e.target===document.getElementById('modalShortcuts')) closeShortcuts(); });
