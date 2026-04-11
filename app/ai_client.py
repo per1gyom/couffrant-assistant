@@ -14,14 +14,10 @@ Garde-fous immuables :
 
 import json
 import re
-import anthropic
 
-from app.config import ANTHROPIC_API_KEY, ANTHROPIC_MODEL_FAST, ANTHROPIC_MODEL_SMART
+from app.llm_client import llm_complete
 from app.database import get_pg_conn
 from app.rule_engine import get_rules_as_text, get_rules_by_category
-
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-MODEL = ANTHROPIC_MODEL_FAST
 
 
 def _parse_json_safe(text: str) -> dict:
@@ -245,12 +241,13 @@ missing_fields (array), suggested_reply_subject, suggested_reply (sans signature
 
 Catégories valides : {categories_str}{odoo_block}{style_block}{examples_block}{instructions_block}"""
 
-    response = client.messages.create(
-        model=MODEL, max_tokens=1024,
+    result = llm_complete(
+        messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
+        model_tier="fast",
+        max_tokens=1024,
         system=system_prompt,
-        messages=[{"role": "user", "content": json.dumps(payload, ensure_ascii=False)}]
     )
-    return _parse_json_safe(response.content[0].text)
+    return _parse_json_safe(result["text"])
 
 
 def summarize_messages(
