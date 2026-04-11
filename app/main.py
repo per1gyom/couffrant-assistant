@@ -55,7 +55,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 app = FastAPI(title="Raya")
 
 app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=30 * 24 * 3600)
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=7 * 24 * 3600)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
