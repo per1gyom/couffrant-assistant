@@ -57,9 +57,6 @@ async function checkHealth() {
 }
 
 // ─── ONBOARDING CONVERSATIONNEL v2 ───
-// Moteur d'elicitation dynamique : questions open ou choice (boutons).
-// sendMessage() intercepte _onboardingActive et route vers /onboarding/answer.
-
 async function checkOnboarding() {
   try {
     const r = await fetch('/onboarding/status');
@@ -79,39 +76,23 @@ async function _startOnboardingChat() {
     const d = await r.json();
     loading.remove();
     _onboardingActive = true;
-
-    // Message d'intro (séparé de la question)
     if (d.intro) addMessage(d.intro, 'raya');
-
-    // Rend la première question selon son type
     _renderOnboardingStep(d);
-
-    // Lien Passer discret
     const skipBar = document.createElement('div');
     skipBar.id = 'onb-skip-bar';
     skipBar.className = 'onb-chat-skip';
     skipBar.innerHTML = '<a href="#" onclick="skipOnboarding(); return false;">Passer l\'onboarding pour l\'instant →</a>';
     messagesEl.appendChild(skipBar);
-
     inputEl.placeholder = 'Réponds ici ou utilise le 🎤 micro…';
     scrollToBottom();
   } catch(e) { loading.remove(); }
 }
 
 function _renderOnboardingStep(step) {
-  // Retire les anciens boutons s'il y en avait
   document.querySelectorAll('.onb-choices').forEach(el => el.remove());
-
-  if (step.type === 'done' || step.done) {
-    _onboardingDone(step);
-    return;
-  }
-
-  // Affiche la question dans le chat
+  if (step.type === 'done' || step.done) { _onboardingDone(step); return; }
   const question = step.question || step.next_message;
   if (question) addMessage(question, 'raya');
-
-  // Si type choice : affiche les boutons cliquables
   if (step.type === 'choice' && step.options && step.options.length > 0) {
     const container = document.createElement('div');
     container.className = 'onb-choices';
@@ -151,7 +132,6 @@ async function _sendOnboardingAnswer(text) {
   inputEl.value = '';
   inputEl.style.height = 'auto';
   document.querySelectorAll('.onb-choices').forEach(el => el.remove());
-
   const loading = addLoading();
   try {
     const r = await fetch('/onboarding/answer', {
@@ -418,7 +398,7 @@ function openFeedbackDialog(ariaMemoryId, btn) {
     const d = await r.json();
     if (d.ok || d.status === 'ok') {
       if (btn) { btn.textContent = '👎✅'; btn.disabled = true; btn.style.opacity = '0.5'; }
-      showToast(d.rule_text ? 'Règle corrective créée par Opus ✔' : 'Feedback enregistré', 'ok', 3000);
+      showToast(d.rule_text ? 'Règle corrective créée ✔' : 'Feedback enregistré', 'ok', 3000);
     }
   };
   dialog.querySelector('.feedback-dialog-cancel').onclick = () => dialog.remove();
@@ -450,6 +430,7 @@ async function showWhy(ariaMemoryId, btn) {
 }
 
 // ─── ACTIONS EN ATTENTE ───
+// C3 : boutons désactivés immédiatement au clic pour empêcher les double-clics
 function renderPendingActions(pendingList) {
   const existing = document.getElementById('pending-actions-zone'); if (existing) existing.remove();
   if (!pendingList || pendingList.length === 0) return;
@@ -466,9 +447,26 @@ function renderPendingActions(pendingList) {
     }
     const btns = document.createElement('div'); btns.className = 'pending-btns';
     const confirmBtn = document.createElement('button'); confirmBtn.className = 'pending-btn confirm'; confirmBtn.textContent = '✓ Confirmer';
-    confirmBtn.onclick = () => { inputEl.value = `Confirme l'action ${action.id}`; sendMessage(); }; btns.appendChild(confirmBtn);
+    confirmBtn.onclick = () => {
+      // Désactivation immédiate — empêche les double-clics
+      if (confirmBtn.disabled) return;
+      confirmBtn.disabled = true;
+      confirmBtn.textContent = '⏳ En cours...';
+      card.querySelectorAll('button').forEach(b => b.disabled = true);
+      inputEl.value = `Confirme l'action ${action.id}`;
+      sendMessage();
+    };
+    btns.appendChild(confirmBtn);
     const cancelBtn = document.createElement('button'); cancelBtn.className = 'pending-btn cancel'; cancelBtn.textContent = '✕ Annuler';
-    cancelBtn.onclick = () => { inputEl.value = `Annule l'action ${action.id}`; sendMessage(); }; btns.appendChild(cancelBtn);
+    cancelBtn.onclick = () => {
+      if (cancelBtn.disabled) return;
+      cancelBtn.disabled = true;
+      cancelBtn.textContent = '⏳ En cours...';
+      card.querySelectorAll('button').forEach(b => b.disabled = true);
+      inputEl.value = `Annule l'action ${action.id}`;
+      sendMessage();
+    };
+    btns.appendChild(cancelBtn);
     card.appendChild(btns); zone.appendChild(card);
   });
   const inputZone = document.querySelector('.input-zone');
@@ -479,7 +477,6 @@ function renderPendingActions(pendingList) {
 async function sendMessage() {
   const text = inputEl.value.trim(); if (!text && !currentFile) return;
 
-  // Interception onboarding
   if (_onboardingActive && text && !currentFile) {
     inputEl.value = ''; inputEl.style.height = 'auto';
     await _sendOnboardingAnswer(text);
