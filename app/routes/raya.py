@@ -37,6 +37,7 @@ from app.routes.aria_context import (
 )
 from app.routes.aria_actions import execute_actions, _ASK_CHOICE_PREFIX
 from app.routes.deps import require_user
+from app.rate_limiter import check_rate_limit
 
 router = APIRouter(tags=["raya"])
 
@@ -110,6 +111,13 @@ def raya_endpoint(
 ):
     username = user["username"]
     tenant_id = user["tenant_id"]
+    if not check_rate_limit(username):
+        return {
+            "answer": "⚠️ Trop de messages en peu de temps. Attends un moment avant de continuer.",
+            "actions": [], "pending_actions": [],
+            "aria_memory_id": None, "model_tier": "smart",
+            "ask_choice": None,
+        }
     try:
         return _raya_core(request, payload, username, tenant_id)
     except Exception:
