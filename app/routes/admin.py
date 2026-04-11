@@ -17,6 +17,7 @@ from app.routes.deps import (
     require_user, require_admin, require_tenant_admin,
     get_session_tenant_id, assert_same_tenant,
 )
+from app.admin_audit import log_admin_action
 
 router = APIRouter(tags=["admin"])
 
@@ -100,9 +101,11 @@ def update_profile_password(
 def admin_unlock_user(
     request: Request,
     target: str,
-    _: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
-    return unlock_account(target)
+    result = unlock_account(target)
+    log_admin_action(admin["username"], "unlock_user", target)
+    return result
 
 
 # ─── CONFIG SHAREPOINT ───
@@ -279,16 +282,19 @@ def admin_list_users(request: Request, _: dict = Depends(require_admin)):
 def admin_create_user(
     request: Request,
     payload: dict = Body(...),
-    _: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
-    return create_user(
-        payload.get("username", "").strip(),
+    new_username = payload.get("username", "").strip()
+    result = create_user(
+        new_username,
         payload.get("password", ""),
         payload.get("scope", SCOPE_USER),
         payload.get("tools"),
         tenant_id=payload.get("tenant_id", DEFAULT_TENANT),
         email=payload.get("email"),
     )
+    log_admin_action(admin["username"], "create_user", new_username)
+    return result
 
 
 @router.put("/admin/update-user/{target}")
@@ -296,9 +302,12 @@ def admin_update_user(
     request: Request,
     target: str,
     payload: dict = Body(...),
-    _: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
-    return update_user(target, email=payload.get("email"), scope=payload.get("scope"))
+    new_scope = payload.get("scope", "")
+    result = update_user(target, email=payload.get("email"), scope=new_scope)
+    log_admin_action(admin["username"], "update_scope", target, new_scope)
+    return result
 
 
 @router.delete("/admin/delete-user/{target}")
@@ -307,7 +316,9 @@ def admin_delete_user(
     target: str,
     user: dict = Depends(require_admin),
 ):
-    return delete_user(target, user["username"])
+    result = delete_user(target, user["username"])
+    log_admin_action(user["username"], "delete_user", target)
+    return result
 
 
 @router.post("/admin/reset-password/{target}")
@@ -324,7 +335,7 @@ def admin_reset_password(
 def admin_users_reset_password(
     request: Request,
     username: str,
-    _: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
     """
     Génère un mot de passe temporaire aléatoire de 12 caractères pour l'utilisateur.
@@ -348,6 +359,7 @@ def admin_users_reset_password(
             (hash_password(temp_password), username),
         )
         conn.commit()
+        log_admin_action(admin["username"], "reset_password", username)
         return {
             "status": "ok",
             "username": username,
@@ -380,14 +392,17 @@ def tenant_create_user(
     scope = payload.get("scope", SCOPE_USER)
     if user["scope"] == SCOPE_TENANT_ADMIN and scope not in (SCOPE_USER, SCOPE_CS):
         scope = SCOPE_USER
-    return create_user(
-        payload.get("username", "").strip(),
+    new_username = payload.get("username", "").strip()
+    result = create_user(
+        new_username,
         payload.get("password", ""),
         scope,
         payload.get("tools"),
         tenant_id=tenant_id,
         email=payload.get("email"),
     )
+    log_admin_action(user["username"], "create_user", new_username)
+    return result
 
 
 @router.put("/tenant/update-user/{target}")
@@ -395,10 +410,13 @@ def tenant_update_user(
     request: Request,
     target: str,
     payload: dict = Body(...),
-    _: dict = Depends(require_tenant_admin),
+    admin: dict = Depends(require_tenant_admin),
 ):
     assert_same_tenant(request, target)
-    return update_user(target, email=payload.get("email"), scope=payload.get("scope"))
+    new_scope = payload.get("scope", "")
+    result = update_user(target, email=payload.get("email"), scope=new_scope)
+    log_admin_action(admin["username"], "update_scope", target, new_scope)
+    return result
 
 
 @router.delete("/tenant/delete-user/{target}")
@@ -408,7 +426,9 @@ def tenant_delete_user(
     user: dict = Depends(require_tenant_admin),
 ):
     assert_same_tenant(request, target)
-    return delete_user(target, user["username"], user["tenant_id"])
+    result = delete_user(target, user["username"], user["tenant_id"])
+    log_admin_action(user["username"], "delete_user", target)
+    return result
 
 
 @router.post("/tenant/reset-password/{target}")
@@ -542,14 +562,16 @@ def admin_set_tool(
     target: str,
     tool: str,
     payload: dict = Body(...),
-    _: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
-    return set_user_tool(
+    result = set_user_tool(
         target, tool,
         payload.get("access_level", "read_only"),
         payload.get("enabled", True),
         payload.get("config", {}),
     )
+    log_admin_action(admin["username"], "update_tools", target, tool)
+    return result
 
 
 @router.delete("/admin/user-tools/{target}/{tool}")
@@ -557,9 +579,11 @@ def admin_remove_tool(
     request: Request,
     target: str,
     tool: str,
-    _: dict = Depends(require_admin),
+    admin: dict = Depends(require_admin),
 ):
-    return remove_user_tool(target, tool)
+    result = remove_user_tool(target, tool)
+    log_admin_action(admin["username"], "update_tools", target, f"remove:{tool}")
+    return result
 
 
 @router.get("/init-db")
