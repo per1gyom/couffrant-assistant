@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 11/04/2026 ~20h15** — Opus
+**Dernière mise à jour : 12/04/2026 ~19h00** — Opus
 
 ## 0. CONSIGNES GUILLAUME
 - Ne JAMAIS suggérer de changer de conversation. Relire ce fichier si besoin.
@@ -17,38 +17,44 @@ Guillaume (dirigeant) / Opus (architecte, MCP GitHub+Postgres) / Sonnet (exécut
 ## 2. Stack
 FastAPI Python 3.13 sur Railway. Repo public `github.com/per1gyom/couffrant-assistant` main. Railway projet `invigorating-wholeness` / env `production` / service `Aria`. Postgres+pgvector base `railway`, tenant `couffrant_solar`. Anthropic 3 tiers + OpenAI text-embedding-3-small.
 
-## 3. État vérifié 11/04/2026 fin de soirée
+## 3. État vérifié 12/04/2026
 **RAG vectoriel ACTIVÉ ✅** — 1045/1045 embeddings.
 **Tests Phase 4 — 16/16 VERTS ✅** (a/b/c/d).
-**Webhook Teams ✅ CLOS** : subscription Microsoft valide en base (`612c8084-...`), expire 13/04/2026 12:42 UTC, `client_state` présent, `APP_BASE_URL` correcte. Le ValidationError 400 mentionné en début de journée était un **bug historique déjà corrigé**, plus reproduit en logs récents.
+**Webhook Teams ✅** : subscription Microsoft valide, renouvellement auto 6h via thread daemon.
+**Audit global ✅** : réalisé le 12/04/2026, tous les fichiers lus. Roadmap V2 commitée.
 
-Commits du jour : `f5f9d78`, `ff5ff10` (fixes tests), `942099e`, et state updates.
+## 4. TODO — ROADMAP V2 (voir `docs/raya_roadmap_v2.md` pour détails)
+Ordre d'exécution :
+1. **Phase 5A** — Sécurité & dette technique (14 tâches, 5A-1 à 5A-14)
+2. **Phase 5B** — Optimisation prompt (5 tâches)
+3. **Phase 5C** — Robustesse (4 tâches)
+4. **Phase 5D** — Mode Dirigeant multi-société (4 tâches)
+5. **Phase 5E** — Conscience outils + proactivité + Jarvis minimal (5 tâches)
+6. **Phase 5G** — Maturité relationnelle (7 tâches)
+7. **Phase 5F** — Dashboard & refactoring (3 tâches)
+8. **Phase 7** — Jarvis complet (10 tâches)
+9. **Phase 6** — Ouverture (6 tâches)
 
-## 4. TODO ordre priorité
-1. **AUDIT GLOBAL DU PROJET** (demande explicite Guillaume) : vérifier cohérence vision Raya, pertinence outils à disposition, modes mémoire, modes apprentissage, modes mémorisation, vectorisation, B1–B32 vs réalité prod. Comme audit fait dans conversations précédentes. À faire en début de prochaine session.
-2. ⚠️ **Vérifier job renouvellement subscription Microsoft** : expire 13/04 12:42 UTC. Confirmer qu'APScheduler la renouvelle automatiquement (sinon webhook tombe dans 44h). Sonnet à mandater.
-3. Second compte super_admin de secours.
-4. proactivity_scan B10.
-5. Dashboard /admin/costs B17.
-6. Premiers MCP par tenant B16.
-7. user_tenant_access.
-8. Migration Alembic scope/status (B11/B12/B25, non urgent).
-9. Nettoyage : 12 patch_*.py locaux + 2 projets Railway parasites (`gregarious-wholeness`, `celebrated-achievement`) + repo local Mac.
+**Prochaine étape immédiate :** Phase 5A-1 (supprimer mot de passe par défaut config.py)
 
 ## 5. Décisions B1–B32 (résumé)
-B1-B2 routage Haiku/Sonnet/Opus. B3-B7/B14/B30/B32 RAG + rule_validator NEW/DUPLICATE/REFINE/SPLIT/CONFLICT, mémoire 4 couches. B11-B12 multi-tenant 3 rôles. B16/B18/B23 tools_registry, MCP par tenant facturé. B21-B22 hiérarchie règle>skill>code. B9-B10/B15/B27 3 niveaux notifs, bouton Pourquoi, mode hors-cadre. B13 onboarding élicitation. B29 honnêteté épistémique. B17 /admin/costs. B20 rename aria→raya à la fin. B24 API externe Phase 5. B25 versioning règles. B31 boucle feedback 👍👎.
+B1-B2 routage Haiku/Sonnet/Opus ✅. B3-B7/B14/B30/B32 RAG + rule_validator ✅. B5 audit Opus ✅. B6 décroissance ✅. B8 session thématique ✅. B9 notifs ✅. B11-B12 multi-tenant 🟡 partiel. B13 onboarding ✅. B16/B18/B23 tools_registry 🟡. B17 /admin/costs ❌. B20 rename 🟡. B21-B22 hiérarchie ✅. B24 API ❌. B25 versioning ❌. B27 Pourquoi ✅. B29 honnêteté ✅. B31 feedback ✅. B10 proactivity ❌. B15 hors-cadre ❌.
 
 ## 6. Schéma aria_rules
-`id, category, rule, source, confidence, reinforcements, active(bool), created_at, updated_at, context, username, tenant_id, embedding(vector)`. Pas de scope/status. Scope implicite. Migration Alembic à faire.
+`id, category, rule, source, confidence, reinforcements, active(bool), created_at, updated_at, context, username, tenant_id, embedding(vector)`. Pas de scope/status. Scope implicite. Migration Alembic à faire (Phase 6-5).
 
-## 7. Facturation
-Forfait tenant 150-300€/mois. User sup 30-50€/mois. Multi-tenant 50-80€/tenant. MCP par serveur. Surcoût LLM hors quota.
+## 7. Utilisateurs cibles
+- **Guillaume Perrin** — Couffrant Solar (PV, Loire). Microsoft 365 + Odoo + SharePoint. ~10 boîtes mail (mix MS/Gmail).
+- **Charlotte Couffrant** — Juillet (événementiel). Gmail + LinkedIn + Instagram. Beta test multi-tenant.
 
 ## 8. Pièges
 - Repo local Mac abandonné, conflit `git pull`. Ne pas y toucher sauf session dédiée.
 - 12 patch_*.py locaux = vieux scripts one-shot, sans valeur.
 - 2 projets Railway parasites à supprimer plus tard.
-- 2 versions `get_memoire_param` (memory_rules vs rule_engine).
+- 2 versions `get_memoire_param` (memory_rules vs rule_engine) → 5A-9.
+- Double `get_contacts_keywords` (rule_engine vs memory_contacts) → 5A-8.
+- 3 fichiers contournent `llm_client.py` (ai_client, memory_contacts, memory_style) → 5A-5/6/7.
+- `tools_registry` pas consulté par `aria_actions.py` → 5A-10.
 - Cleanup fixture tests Phase 4 isolée sur `username='test_phase4'`.
 - CLI Railway oublie linking quand on change session/dossier — refaire `cd ~/couffrant-assistant && railway link`.
 
