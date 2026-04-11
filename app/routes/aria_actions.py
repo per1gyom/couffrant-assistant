@@ -2,13 +2,12 @@
 Execution des actions Raya.
 Parse la reponse de Claude et execute les [ACTION:...] correspondants.
 
-Logique :
-- DELETE = corbeille (recuperable) -> execution directe groupee, pas de queue
-- Actions sensibles (REPLY, TEAMS_MSG, MOVEDRIVE, etc.) -> queue pending_actions
-- Actions immediates (ARCHIVE, READ, LISTDRIVE, LEARN...) -> executees directement
-- [ACTION:CONFIRM:id] -> execute l'action en queue
-- [ACTION:CANCEL:id] -> annule l'action en queue
+DELETE = corbeille (recuperable) -> execution directe groupee, pas de queue.
+Actions sensibles (REPLY, TEAMS_MSG, MOVEDRIVE...) -> queue pending_actions.
+[ACTION:ASK_CHOICE:question|opt1|opt2] -> boutons de choix dans le chat.
+[ACTION:LEARN:...] -> validation via rule_validator avant ecriture en base.
 """
+import json
 import re
 import threading
 
@@ -33,6 +32,9 @@ from app.pending_actions import (
     queue_action, confirm_action, cancel_action,
     mark_executed, mark_failed, is_sensitive,
 )
+
+# Prefixe special pour transmettre ASK_CHOICE a raya.py sans casser l'API
+_ASK_CHOICE_PREFIX = "__CHOICE__:"
 
 
 def is_valid_outlook_id(msg_id: str) -> bool:
@@ -70,6 +72,9 @@ def execute_actions(
 
     if MEMORY_OK:
         confirmed += _handle_memory_actions(raya_response, username, synth_threshold, tenant_id)
+
+    # ASK_CHOICE : toujours traite (independant des outils)
+    confirmed += _handle_ask_choice(raya_response)
 
     return confirmed
 
@@ -117,7 +122,6 @@ def _execute_confirmed_action(action: dict, outlook_token: str, tools: dict) -> 
                     "error": r.get("message", "envoi echoue")}
 
         if action_type == "DELETE_GROUPED":
-            # Action groupee : liste d'IDs dans payload["message_ids"]
             ids = payload.get("message_ids", [])
             ok_count = 0
             for msg_id in ids:
@@ -189,9 +193,7 @@ def _execute_confirmed_action(action: dict, outlook_token: str, tools: dict) -> 
 # --- MAILS ---
 
 def _build_delete_label(subjects: list) -> str:
-    """Genere un label synthetique pour une suppression groupee. Ex: 'Supprimer 5 mails (LinkedIn x3, Studeria x2)'"""
     from collections import Counter
-    # Extrait le premier mot significatif de chaque sujet pour regrouper
     keywords = []
     for s in subjects:
         words = s.split()
@@ -200,14 +202,13 @@ def _build_delete_label(subjects: list) -> str:
     counts = Counter(keywords)
     top = sorted(counts.items(), key=lambda x: -x[1])[:4]
     detail = ", ".join(f"{kw} x{n}" if n > 1 else kw for kw, n in top)
-    return f"Supprimer {len(subjects)} mail{'s' if len(subjects)>1 else ''} ({detail})"
+    return f"Supprimer {len(subjects)} mail{'s' if len(subjects) > 1 else ''} ({detail})"
 
 
 def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_mails,
                          username, tenant_id, conversation_id):
     confirmed = []
 
-    # C1/C2 : DELETE groupe en une seule action directe (corbeille = recuperable)
     if mail_can_delete:
         delete_ids = []
         delete_subjects = []
@@ -559,18 +560,155 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
     return confirmed
 
 
+# --- ASK_CHOICE (C3) ---
+
+def _handle_ask_choice(response: str) -> list:
+    """
+    Parse [ACTION:ASK_CHOICE:question|option1|option2|option3].
+    Serialise en __CHOICE__:{json} pour extraction dans raya.py.
+    """
+    confirmed = []
+    # On ne prend que la PREMIERE occurrence (pas de cascades de questions)
+    TAG = '[ACTION:ASK_CHOICE:'
+    start = response.find(TAG)
+    if start == -1:
+        return confirmed
+
+    content_start = start + len(TAG)
+    # Cherche la fermeture du tag
+    close = response.find(']', content_start)
+    if close == -1:
+        return confirmed
+
+    content = response[content_start:close]
+    parts = [p.strip() for p in content.split('|') if p.strip()]
+    if len(parts) < 2:
+        return confirmed
+
+    question = parts[0]
+    options = parts[1:][:4]  # max 4 options
+
+    confirmed.append(
+        _ASK_CHOICE_PREFIX + json.dumps(
+            {"question": question, "options": options},
+            ensure_ascii=False,
+        )
+    )
+    return confirmed
+
+
 # --- MEMOIRE ---
+
+def _parse_learn_actions(response: str) -> list:
+    """
+    C4 — Parser robuste pour [ACTION:LEARN:category|rule].
+
+    Gere les ] a l'interieur du texte de la regle (ex : references [terme],
+    listes entre crochets). Le ] qui ferme le tag ACTION est celui suivi
+    d'un saut de ligne, d'un autre [ACTION:, d'un espace+[, ou de la fin
+    de chaine.
+    """
+    results = []
+    TAG = '[ACTION:LEARN:'
+    pos = 0
+
+    while True:
+        start = response.find(TAG, pos)
+        if start == -1:
+            break
+
+        after_tag = start + len(TAG)
+        pipe = response.find('|', after_tag)
+        if pipe == -1:
+            pos = start + 1
+            continue
+
+        category = response[after_tag:pipe].strip()
+        # Category invalide si elle contient des caracteres inattendus
+        if not category or ']' in category or '\n' in category or '|' in category:
+            pos = start + 1
+            continue
+
+        rule_start = pipe + 1
+        search = rule_start
+        rule_end = -1
+
+        while search < len(response):
+            bracket = response.find(']', search)
+            if bracket == -1:
+                break
+
+            next_pos = bracket + 1
+
+            # Fin de chaine -> ce ] ferme le tag
+            if next_pos >= len(response):
+                rule_end = bracket
+                break
+
+            next_char = response[next_pos]
+
+            # ] suivi de \n, \r, ou [ -> ferme le tag
+            if next_char in '\n\r[':
+                rule_end = bracket
+                break
+
+            # ] suivi de " [" -> ferme le tag
+            if next_char == ' ' and next_pos + 1 < len(response) and response[next_pos + 1] == '[':
+                rule_end = bracket
+                break
+
+            # Ce ] est probablement dans le texte de la regle, continuer
+            search = bracket + 1
+
+        if rule_end == -1:
+            # Fallback : premier ] disponible
+            fallback = response.find(']', rule_start)
+            if fallback != -1:
+                rule_end = fallback
+            else:
+                pos = start + 1
+                continue
+
+        rule = response[rule_start:rule_end].strip()
+        if rule:
+            results.append((category, rule))
+
+        pos = rule_end + 1
+
+    return results
+
 
 def _handle_memory_actions(response: str, username: str, synth_threshold: int,
                            tenant_id: str = 'couffrant_solar') -> list:
     confirmed = []
 
-    for match in re.finditer(r'\[ACTION:LEARN:([^|^\]]+)\|([^\]]+)\]', response):
-        category = match.group(1).strip()
-        rule = match.group(2).strip()
+    # C4 : parser robuste + C1 : validation via rule_validator
+    for category, rule in _parse_learn_actions(response):
         try:
-            save_rule(category, rule, "auto", 0.7, username)
-            confirmed.append(f"🧠 Memorise [{category}] : {rule[:120]}{'...' if len(rule) > 120 else ''}")
+            # Tente la validation Opus si disponible (non bloquant)
+            try:
+                from app.rule_validator import validate_rule_before_save, apply_validation_result
+                result = validate_rule_before_save(username, tenant_id, category, rule)
+                decision = result.get("decision", "NEW")
+
+                if decision == "CONFLICT":
+                    conflict_msg = result.get("conflict_message", "Conflit detecte avec une regle existante.")
+                    confirmed.append(f"⚠️ Conflit de regle : {conflict_msg}")
+                    continue
+
+                if decision == "DUPLICATE":
+                    confirmed.append(f"🧠 Deja en memoire [{category}] (doublon ignore)")
+                    continue
+
+                messages = apply_validation_result(result, username, tenant_id)
+                label = " | ".join(messages) if messages else f"[{category}]"
+                confirmed.append(f"🧠 Memorise {label} : {rule[:120]}{'...' if len(rule) > 120 else ''}")
+
+            except ImportError:
+                # rule_validator non disponible -> fallback direct
+                save_rule(category, rule, "auto", 0.7, username)
+                confirmed.append(f"🧠 Memorise [{category}] : {rule[:120]}{'...' if len(rule) > 120 else ''}")
+
         except Exception as e:
             print(f"[LEARN] Erreur: {e}")
 
