@@ -1,19 +1,33 @@
 """
-Seeding initial des règles d'un tenant.
+Seeding initial des regles d'un tenant.
 
-Au lieu de hardcoder les règles métier dans rule_engine.py et ai_client.py,
-on les insère dans aria_rules au premier démarrage avec une confidence basse.
+Au lieu de hardcoder les regles metier dans rule_engine.py et ai_client.py,
+on les insere dans aria_rules au premier demarrage avec une confidence basse.
 Raya peut ensuite les modifier, les renforcer ou les supprimer naturellement.
 
 Profils disponibles :
-    pv_french      — Couffrant Solar (photovoltaïque, France)
-    event_planner  — Organisatrice événementielle (femme de Guillaume)
-    generic        — Nouveau tenant sans métier spécifique
+    pv_french      — Couffrant Solar (photovoltaique, France)
+    event_planner  — Organisatrice evenementielle
+    generic        — Nouveau tenant sans metier specifique
 """
 from app.memory_rules import save_rule
 
 
-# ─── PROFILS DE SEEDING ───
+# --- REGLES UX COMMUNES A TOUS LES PROFILS ---
+# Ces regles codifient du bon sens UX, pas des preferences personnelles.
+# Elles sont seedees pour tous les tenants, tous profils confondus.
+
+COMMON_BEHAVIOR_RULES = [
+    # C6 : corbeille = action directe, pas de confirmation
+    "Mise a la corbeille (DELETE) = action directe sans confirmation. C'est recuperable.",
+    # Confirmation uniquement pour les actions vraiment irreversibles
+    "Confirmer uniquement les actions irreversibles : envoi mail, envoi Teams, creation evenement calendrier, deplacement fichier Drive, copie fichier Drive.",
+    # Une regle = une seule idee
+    "Quand tu apprends plusieurs choses d'un coup, genere plusieurs [ACTION:LEARN] separes — une regle = une seule idee.",
+]
+
+
+# --- PROFILS DE SEEDING ---
 
 PROFILE_PV_FRENCH = {
     "categories_mail": [
@@ -21,19 +35,19 @@ PROFILE_PV_FRENCH = {
         "fournisseur", "reunion", "securite", "interne", "notification", "autre",
     ],
     "regroupement": [
-        "catégorie raccordement = urgent",
-        "catégorie consuel = urgent",
-        "catégorie financier contenant 'relance', 'retard' = urgent",
-        "catégorie financier = a_traiter",
-        "catégorie notification = faible",
+        "categorie raccordement = urgent",
+        "categorie consuel = urgent",
+        "categorie financier contenant 'relance', 'retard' = urgent",
+        "categorie financier = a_traiter",
+        "categorie notification = faible",
     ],
     "tri_mails": [
-        "Mails contenant 'enedis', 'consuel', 'raccordement' → catégorie raccordement",
-        "Mails contenant 'devis', 'offre', 'contrat' → catégorie commercial",
-        "Mails contenant 'réunion', 'meeting' → catégorie reunion",
-        "Mails contenant 'chantier', 'planning', 'installation' → catégorie chantier",
-        "Mails contenant 'facture', 'paiement', 'échéance' → catégorie financier",
-        "Mails contenant 'fournisseur', 'livraison', 'commande' → catégorie fournisseur",
+        "Mails contenant 'enedis', 'consuel', 'raccordement' -> categorie raccordement",
+        "Mails contenant 'devis', 'offre', 'contrat' -> categorie commercial",
+        "Mails contenant 'reunion', 'meeting' -> categorie reunion",
+        "Mails contenant 'chantier', 'planning', 'installation' -> categorie chantier",
+        "Mails contenant 'facture', 'paiement', 'echeance' -> categorie financier",
+        "Mails contenant 'fournisseur', 'livraison', 'commande' -> categorie fournisseur",
     ],
     "memoire": [
         "synth_threshold:15",
@@ -44,33 +58,27 @@ PROFILE_PV_FRENCH = {
 
 PROFILE_EVENT_PLANNER = {
     "categories_mail": [
-        "client",        # mails de clients existants ou prospects
-        "prestataire",   # traiteurs, lieux, DJ, fleuristes, photographes, etc.
-        "lieu",          # mails liés à des lieux d'événements
-        "logistique",    # transport, livraison, montage, démontage
-        "commercial",    # devis, contrats, factures, acomptes
-        "interne",       # collaborateurs, équipe
-        "notification",  # confirmations automatiques, agendas
-        "autre",
+        "client", "prestataire", "lieu", "logistique", "commercial", "interne",
+        "notification", "autre",
     ],
     "regroupement": [
-        "catégorie commercial contenant 'urgent', 'relance', 'retard' = urgent",
-        "catégorie client contenant 'urgent', 'asap', 'demain' = urgent",
-        "catégorie lieu = a_traiter",
-        "catégorie prestataire = a_traiter",
-        "catégorie notification = faible",
+        "categorie commercial contenant 'urgent', 'relance', 'retard' = urgent",
+        "categorie client contenant 'urgent', 'asap', 'demain' = urgent",
+        "categorie lieu = a_traiter",
+        "categorie prestataire = a_traiter",
+        "categorie notification = faible",
     ],
     "tri_mails": [
-        "Mails contenant 'devis', 'contrat', 'facture', 'acompte' → catégorie commercial",
-        "Mails contenant 'traiteur', 'fleuriste', 'DJ', 'photographe', 'son', 'lumière' → catégorie prestataire",
-        "Mails contenant 'salle', 'château', 'domaine', 'lieu', 'espace' → catégorie lieu",
-        "Mails contenant 'transport', 'livraison', 'montage', 'démontage', 'installation' → catégorie logistique",
-        "Mails contenant 'mariage', 'réception', 'événement', 'cérémonie' → catégorie client",
+        "Mails contenant 'devis', 'contrat', 'facture', 'acompte' -> categorie commercial",
+        "Mails contenant 'traiteur', 'fleuriste', 'DJ', 'photographe', 'son', 'lumiere' -> categorie prestataire",
+        "Mails contenant 'salle', 'chateau', 'domaine', 'lieu', 'espace' -> categorie lieu",
+        "Mails contenant 'transport', 'livraison', 'montage', 'installation' -> categorie logistique",
+        "Mails contenant 'mariage', 'reception', 'evenement', 'ceremonie' -> categorie client",
     ],
     "comportement": [
-        "Quand je parle d'un événement, considère qu'il y a un client principal et plusieurs prestataires impliqués.",
-        "La coordination de prestataires est au cœur du métier : dates, disponibilités et confirmations sont cruciales.",
-        "Les délais sont souvent serrés en organisation événementielle — traite les relances sans réponse comme urgentes.",
+        "Quand je parle d'un evenement, il y a un client principal et plusieurs prestataires impliques.",
+        "La coordination de prestataires est au coeur du metier : dates, disponibilites et confirmations sont cruciales.",
+        "Les delais sont souvent serres : traite les relances sans reponse comme urgentes.",
     ],
     "memoire": [
         "synth_threshold:15",
@@ -100,41 +108,55 @@ PROFILES = {
 def seed_tenant(tenant_id: str, admin_username: str,
                 profile: str = "pv_french") -> dict:
     """
-    Insère les règles initiales d'un tenant dans aria_rules.
-    Idempotent : si une règle identique existe déjà, elle est juste renforcée.
+    Insere les regles initiales d'un tenant dans aria_rules.
+    Idempotent : si une regle identique existe deja, elle est juste renforcee.
 
-    Args:
-        tenant_id     : identifiant du tenant
-        admin_username: utilisateur principal (les règles sont scopées par username)
-        profile       : 'pv_french', 'event_planner' ou 'generic'
-
-    Returns:
-        Dict compteur par catégorie : {"categories_mail": 8, "tri_mails": 5, ...}
+    Seed aussi les regles UX communes (bon sens, valables pour tous).
     """
     if profile not in PROFILES:
         raise ValueError(f"Profil inconnu : '{profile}'. Disponibles : {list(PROFILES.keys())}")
 
     counts = {}
+
+    # Regles UX communes en premier
+    counts["comportement"] = 0
+    for rule_text in COMMON_BEHAVIOR_RULES:
+        try:
+            save_rule(
+                category="comportement",
+                rule=rule_text,
+                source="seed",
+                confidence=0.8,  # Confidence plus haute : ce sont des garde-fous UX
+                username=admin_username,
+                tenant_id=tenant_id,
+            )
+            counts["comportement"] += 1
+        except Exception as e:
+            print(f"[seeding] Erreur [comportement] '{rule_text[:40]}': {e}")
+
+    # Regles specifiques au profil
     for category, rules in PROFILES[profile].items():
-        counts[category] = 0
+        if category not in counts:
+            counts[category] = 0
         for rule_text in rules:
             try:
                 save_rule(
                     category=category,
                     rule=rule_text,
                     source="seed",
-                    confidence=0.5,       # Confidence basse — Raya peut les modifier
+                    confidence=0.5,
                     username=admin_username,
-                    tenant_id=tenant_id,  # Scopé au tenant dès la création
+                    tenant_id=tenant_id,
                 )
                 counts[category] += 1
             except Exception as e:
                 print(f"[seeding] Erreur [{category}] '{rule_text[:40]}': {e}")
+
     return counts
 
 
 def is_tenant_seeded(username: str) -> bool:
-    """Retourne True si le user a déjà au moins une règle avec source='seed'."""
+    """Retourne True si le user a deja au moins une regle avec source='seed'."""
     from app.database import get_pg_conn
     conn = None
     try:
