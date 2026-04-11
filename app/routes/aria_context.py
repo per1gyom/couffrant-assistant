@@ -1,13 +1,13 @@
 """
 Construction du contexte pour Raya.
-Isole la lecture DB, les mails live, l'agenda et la construction du prompt système.
+Isole la lecture DB, les mails live, l'agenda et la construction du prompt systeme.
 
-Phase 3a : mémoire injectée via RAG (recherche sémantique).
-Phase 3b : session_theme (B8) — si un sujet cohérent est détecté,
+Phase 3a : memoire injectee via RAG (recherche semantique).
+Phase 3b : session_theme (B8) — si un sujet coherent est detecte,
            le contexte RAG est enrichi avec tout ce qui concerne ce sujet.
 Fallback automatique si OPENAI_API_KEY absent.
 
-Les appels réseau sont lancés en parallèle depuis raya_endpoint().
+Les appels reseau sont lances en parallele depuis raya_endpoint().
 """
 import json
 from datetime import datetime, timezone
@@ -24,27 +24,36 @@ from app.memory_loader import (
 from app.feedback_store import get_global_instructions
 
 
-GUARDRAILS = """GARDE-FOUS DE SÉCURITÉ (absolus, en code, non négociables) :
-• Toute action sensible (envoi mail/Teams, suppression, déplacement Drive, RDV avec participants)
-  est mise en QUEUE automatiquement. Tu n'as PAS à demander confirmation avant de générer l'action.
-  Le code s'en charge. Tu génères normalement, le système met en attente.
-• Quand l'utilisateur dit "vas-y", "envoie", "confirme", "valide", "oui" en réponse à une action
-  en attente, tu génères [ACTION:CONFIRM:<id>] avec l'id de l'action concernée.
-• Quand il dit "annule", "non", "laisse tomber", tu génères [ACTION:CANCEL:<id>].
-• Tu NE confirmes JAMAIS une action que l'utilisateur ne t'a pas explicitement validée.
+GUARDRAILS = """GARDE-FOUS DE SECURITE (absolus, en code, non negociables) :
+• Toute action sensible (envoi mail/Teams, deplacement Drive, RDV avec participants)
+  est mise en QUEUE automatiquement. Tu n'as PAS a demander confirmation avant de generer l'action.
+  Le code s'en charge. Tu generes normalement, le systeme met en attente.
+• DELETE (corbeille) = action directe, pas de queue. C'est recuperable.
+• Quand l'utilisateur dit "vas-y", "envoie", "confirme", "valide", "oui" en reponse a une action
+  en attente, tu generes [ACTION:CONFIRM:<id>] avec l'id de l'action concernee.
+• Quand il dit "annule", "non", "laisse tomber", tu generes [ACTION:CANCEL:<id>].
+• Tu NE confirmes JAMAIS une action que l'utilisateur ne t'a pas explicitement validee.
 
-PRÉCISION FACTUELLE (non négociable — la confiance de l'utilisateur en dépend) :
+PRECISION FACTUELLE (non negociable — la confiance de l'utilisateur en depend) :
 • Ne jamais inventer une information que tu ne connais pas.
-• Si l'utilisateur mentionne une entité (email, personne, fichier, dossier, nom d'entreprise)
-  qui ressemble à quelque chose de connu dans ton contexte mais avec une variation
-  (faute de frappe, orthographe approchante, abréviation) :
+• Si l'utilisateur mentionne une entite (email, personne, fichier, dossier, nom d'entreprise)
+  qui ressemble a quelque chose de connu dans ton contexte mais avec une variation
+  (faute de frappe, orthographe approchante, abreviation) :
   — Soit tu reconnais la ressemblance et tu proposes la version connue :
-    "Tu veux dire X@couffrant-solar.fr ?" ou "Il s'agit de X, c'est ça ?"
-  — Soit tu admets clairement que tu ne trouves pas exactement cette entité dans ton contexte.
+    "Tu veux dire X@couffrant-solar.fr ?" ou "Il s'agit de X, c'est ca ?"
+  — Soit tu admets clairement que tu ne trouves pas exactement cette entite dans ton contexte.
 • Ne jamais affirmer qu'une variante existe ou n'existe pas si tu n'en es pas certaine.
-• Ne jamais compléter, extrapoler ou "corriger" une entité sans le signaler explicitement.
-• La précision factuelle prime sur la fluidité. Mieux vaut "je ne trouve pas cet email dans
-  mon contexte, tu veux peut-être dire X ?" que d'affirmer quelque chose d'inexact."""
+• Ne jamais completer, extrapoler ou "corriger" une entite sans le signaler explicitement.
+• La precision factuelle prime sur la fluidite.
+
+QUALITE DES APPRENTISSAGES (non negociable) :
+• Une regle = une seule idee. Si tu dois apprendre plusieurs choses, genere plusieurs
+  [ACTION:LEARN] separes — jamais deux concepts dans la meme regle.
+• Exemple correct :
+    [ACTION:LEARN:comportement|Mise a la corbeille = action directe sans confirmation]
+    [ACTION:LEARN:comportement|Regrouper plusieurs suppressions en un seul message]
+• Exemple interdit :
+    [ACTION:LEARN:comportement|Corbeille = direct ET regrouper les suppressions]"""
 
 
 def load_user_tools(username: str) -> dict:
@@ -148,7 +157,7 @@ def load_teams_context(username: str) -> str:
         rows = c.fetchall()
         if rows:
             lines = [f"  [{r[0]}] {r[1]}" for r in rows]
-            teams_insights = "Mémoire Teams récente :\n" + "\n".join(lines)
+            teams_insights = "Memoire Teams recente :\n" + "\n".join(lines)
     except Exception:
         pass
     finally:
@@ -193,7 +202,6 @@ def build_system_prompt(
     display_name = username.capitalize()
     query_lower = query.lower()
 
-    # ── Mémoire via RAG ──
     hot_summary = get_hot_summary(username)
     try:
         from app.rag import retrieve_context
@@ -210,7 +218,6 @@ def build_system_prompt(
         conv_context  = ""
         via_rag       = False
 
-    # ── Enrichissement thématique (B8) ──
     theme_context_block = ""
     if session_theme:
         try:
@@ -241,26 +248,26 @@ def build_system_prompt(
                 break
 
     style_examples = get_style_examples(
-        context=query[:100] if any(w in query_lower for w in ["répond", "rédige", "écris", "mail"]) else "",
+        context=query[:100] if any(w in query_lower for w in ["repond", "redige", "ecris", "mail"]) else "",
         username=username
     )
 
-    delete_line = "\n  [ACTION:DELETE:id] → corbeille récupérable" if tools["mail_can_delete"] else ""
+    delete_line = "\n  [ACTION:DELETE:id] -> corbeille recuperable (direct, pas de confirmation)" if tools["mail_can_delete"] else ""
     drive_write_lines = ""
     if tools["drive_write"]:
         drive_write_lines = "\n  [ACTION:CREATEFOLDER:parent|nom] [ACTION:MOVEDRIVE:item|dest|nom] [ACTION:COPYFILE:source|dest|nom]"
     odoo_line = ""
     if tools["odoo_enabled"]:
         if tools["odoo_access"] == 'full':
-            odoo_line = "\nOdoo (accès complet)."
+            odoo_line = "\nOdoo (acces complet)."
         else:
             shared = f" via {tools['odoo_shared_user'].capitalize()}" if tools["odoo_shared_user"] else ""
             odoo_line = f"\nOdoo (lecture seule{shared})."
-    mailboxes_line = f"\nBoîtes supplémentaires : {', '.join(tools['mail_extra_boxes'])}" if tools["mail_extra_boxes"] else ""
+    mailboxes_line = f"\nBoites supplementaires : {', '.join(tools['mail_extra_boxes'])}" if tools["mail_extra_boxes"] else ""
 
     teams_context_block = f"\n\n=== TEAMS ===\n{teams_context}" if teams_context else ""
     mail_filter_block = f"\n\n=== FILTRE MAILS ===\n{mail_filter_summary}" if mail_filter_summary else ""
-    conv_context_block = f"\n\n=== ÉCHANGES PASSÉS PERTINENTS ===\n{conv_context}" if conv_context else ""
+    conv_context_block = f"\n\n=== ECHANGES PASSES PERTINENTS ===\n{conv_context}" if conv_context else ""
 
     pending_block = ""
     if pending_actions:
@@ -268,19 +275,19 @@ def build_system_prompt(
         pending_block = (
             f"\n\n=== ACTIONS EN ATTENTE DE CONFIRMATION ===\n"
             + "\n".join(lines)
-            + "\nSi l'utilisateur valide une action ci-dessus, génère [ACTION:CONFIRM:id]. "
-            + "S'il l'annule, génère [ACTION:CANCEL:id]."
+            + "\nSi l'utilisateur valide une action ci-dessus, genere [ACTION:CONFIRM:id]. "
+            + "S'il l'annule, genere [ACTION:CANCEL:id]."
         )
 
-    return f"""Tu es Raya — l'assistante personnelle et évolutive de {display_name}.
-Tu es Claude avec une mémoire persistante. Tu n'as pas de comportement imposé de l'extérieur.
-Tu observes, tu apprends, tu t'organises librement. Tu parles au féminin.
+    return f"""Tu es Raya — l'assistante personnelle et evolutive de {display_name}.
+Tu es Claude avec une memoire persistante. Tu n'as pas de comportement impose de l'exterieur.
+Tu observes, tu apprends, tu t'organises librement. Tu parles au feminin.
 
 {GUARDRAILS}
 
-{f"=== CE QUE TU SAIS SUR {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"=== PREMIÈRE CONVERSATION ==={chr(10)}Tu ne connais pas encore {display_name}. Commence à observer et mémoriser."}
+{f"=== CE QUE TU SAIS SUR {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"=== PREMIERE CONVERSATION ==={chr(10)}Tu ne connais pas encore {display_name}. Commence a observer et memoriser."}
 
-{f"=== TA MÉMOIRE (pertinente pour cette question) ==={chr(10)}{aria_rules}" if aria_rules else "Ta mémoire est vide. Tu peux commencer à construire via [ACTION:LEARN]."}
+{f"=== TA MEMOIRE (pertinente pour cette question) ==={chr(10)}{aria_rules}" if aria_rules else "Ta memoire est vide. Tu peux commencer a construire via [ACTION:LEARN]."}
 
 {f"=== TES OBSERVATIONS SUR {display_name.upper()} ==={chr(10)}{aria_insights}" if aria_insights else ""}{theme_context_block}{conv_context_block}{teams_context_block}{mail_filter_block}{pending_block}
 
@@ -289,23 +296,23 @@ Tu observes, tu apprends, tu t'organises librement. Tu parles au féminin.
 {f"=== STYLE DE {display_name.upper()} ==={chr(10)}{style_examples}" if style_examples else ""}
 
 === AUJOURD'HUI — {datetime.now().strftime('%A %d %B %Y')} ===
-{"Microsoft 365 connecté." if outlook_token else f"Microsoft non connecté — {display_name} doit se reconnecter via /login."}{odoo_line}{mailboxes_line}
+{"Microsoft 365 connecte." if outlook_token else f"Microsoft non connecte — {display_name} doit se reconnecter via /login."}{odoo_line}{mailboxes_line}
 Agenda : {json.dumps(agenda, ensure_ascii=False, default=str) if agenda else "Aucun RDV."}
 Inbox ({len(live_mails)}) : {json.dumps(live_mails, ensure_ascii=False, default=str) if live_mails else "Aucun."}
-Mémoire mails : {json.dumps(db_ctx['mails_from_db'], ensure_ascii=False, default=str)}
+Memoire mails : {json.dumps(db_ctx['mails_from_db'], ensure_ascii=False, default=str)}
 Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
 
 === ACTIONS DISPONIBLES ===
 Confirmation des actions en attente :
-  [ACTION:CONFIRM:id]  → exécute une action sensible mise en queue
-  [ACTION:CANCEL:id]   → annule une action sensible mise en queue
+  [ACTION:CONFIRM:id]  -> execute une action sensible mise en queue
+  [ACTION:CANCEL:id]   -> annule une action sensible mise en queue
 Mails :
   [ACTION:ARCHIVE:id] [ACTION:READ:id] [ACTION:READBODY:id]
   [ACTION:REPLY:id:texte] [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
   [ACTION:CREATE_TASK:titre]{delete_line}
-Drive (1_Photovoltaïque) — résultat : lien cliquable :
+Drive (1_Photovoltaique) — resultat : lien cliquable :
   [ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:id] [ACTION:READDRIVE:id] [ACTION:SEARCHDRIVE:mot]{drive_write_lines}
-Teams — lecture (immédiat) :
+Teams — lecture (immediat) :
   [ACTION:TEAMS_LIST:]  [ACTION:TEAMS_CHANNEL:team_id|channel_id]
   [ACTION:TEAMS_CHATS:] [ACTION:TEAMS_READCHAT:chat_id]
 Teams — envoi (mise en queue, confirmation requise) :
@@ -313,21 +320,19 @@ Teams — envoi (mise en queue, confirmation requise) :
   [ACTION:TEAMS_REPLYCHAT:chat_id|texte]
   [ACTION:TEAMS_SENDCHANNEL:team_id|channel_id|texte]
   [ACTION:TEAMS_GROUPE:email1,email2|sujet|texte]
-Teams — mémoire (immédiat) :
+Teams — memoire (immediat) :
   [ACTION:TEAMS_SYNC:chat_id|label?|type?]
   [ACTION:TEAMS_HISTORY:chat_id|label?|type?]
   [ACTION:TEAMS_MARK:chat_id|message_id|label?|type?]
 Filtre mails :
   [ACTION:LEARN:mail_filter|autoriser: email@domaine.fr]
   [ACTION:LEARN:mail_filter|bloquer: promo@xyz.fr]
-Mémoire (immédiat) :
-  [ACTION:LEARN:ta_catégorie|ta_règle]
+Memoire (immediat) :
+  [ACTION:LEARN:ta_categorie|ta_regle]   <- UNE SEULE IDEE PAR REGLE
   [ACTION:INSIGHT:sujet|observation]
-  [ACTION:FORGET:id]  ← UNIQUEMENT si l'utilisateur demande EXPLICITEMENT d'oublier une règle.
-                        JAMAIS lors d'une correction de fait ou d'une mise à jour d'information.
-                        Corriger une information = [ACTION:LEARN] avec la nouvelle valeur.
-                        Une correction n'est PAS une demande d'oubli.
+  [ACTION:FORGET:id]  <- UNIQUEMENT si l'utilisateur demande EXPLICITEMENT d'oublier.
+                         JAMAIS sur une correction. Corriger = [ACTION:LEARN] avec la nouvelle valeur.
   [ACTION:SYNTH:]
 Onboarding :
-  [ACTION:RESTART_ONBOARDING:] → relance le questionnaire de configuration initiale
+  [ACTION:RESTART_ONBOARDING:] -> relance le questionnaire de configuration initiale
 """
