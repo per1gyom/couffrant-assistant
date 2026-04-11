@@ -311,7 +311,7 @@ class TestFeedbackEndpoint:
         """
         from app.feedback import process_negative_feedback
 
-        with patch("app.feedback.llm_complete", return_value={
+        with patch("app.llm_client.llm_complete", return_value={
             "text": json.dumps({
                 "rule_text": "Ne pas dire que Raya est limitee au texte brut",
                 "category": "comportement",
