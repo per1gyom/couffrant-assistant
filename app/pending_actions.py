@@ -1,36 +1,41 @@
 """
 Queue de confirmation pour les actions sensibles de Raya.
 
-Aucune action irréversible (REPLY, DELETE, TEAMS_MSG, etc.) ne doit être
-exécutée sans passer par cette queue. C'est le garde-fou en CODE qui complète
-le garde-fou en PROMPT (GUARDRAILS dans aria_context.py).
+Aucune action vraiment irréversible (REPLY, TEAMS_MSG, etc.) ne doit être
+executée sans passer par cette queue.
+
+DELETE = corbeille Outlook (recuperable) -> execution directe, pas de queue.
+DELETE_PERMANENT = suppression definitive -> queue + confirmation.
+ARCHIVE = inoffensif -> execution directe.
 
 Cycle de vie d'une action :
-    pending → confirmed → executing → executed
-                       ⇘ cancelled
-    pending → expired  (après 24h)
-    pending → cancelled (si Guillaume refuse)
+    pending -> confirmed -> executing -> executed
+                        ⇘ cancelled
+    pending -> expired  (apres 24h)
+    pending -> cancelled (si l'utilisateur refuse)
 """
 import json
 from app.database import get_pg_conn
 
 
-# Actions qui nécessitent confirmation obligatoire
+# Actions qui necessitent confirmation obligatoire (irreversibles ou a fort impact)
 SENSITIVE_ACTIONS = {
     "REPLY",
     "TEAMS_MSG",
     "TEAMS_REPLYCHAT",
     "TEAMS_SENDCHANNEL",
     "TEAMS_GROUPE",
-    "DELETE",
+    "DELETE_PERMANENT",  # suppression definitive uniquement
     "MOVEDRIVE",
     "COPYFILE",
     "CREATEEVENT",
+    # DELETE (corbeille) est intentionnellement absent : recuperable, execution directe
+    # ARCHIVE est intentionnellement absent : inoffensif, execution directe
 }
 
 
 def is_sensitive(action_type: str) -> bool:
-    """Retourne True si l'action nécessite confirmation."""
+    """Retourne True si l'action necessite confirmation."""
     return action_type.upper() in SENSITIVE_ACTIONS
 
 
@@ -101,7 +106,7 @@ def get_pending(username: str, tenant_id: str, limit: int = 10) -> list:
 
 
 def get_action(action_id: int, username: str, tenant_id: str):
-    """Lit une action en queue par son ID (vérification appartenance)."""
+    """Lit une action en queue par son ID (verification appartenance)."""
     conn = None
     try:
         conn = get_pg_conn()
@@ -126,8 +131,8 @@ def get_action(action_id: int, username: str, tenant_id: str):
 
 def confirm_action(action_id: int, username: str, tenant_id: str):
     """
-    Marque une action comme confirmée.
-    Retourne l'action mise à jour, ou None si introuvable / déjà traitée.
+    Marque une action comme confirmee.
+    Retourne l'action mise a jour, ou None si introuvable / deja traitee.
     """
     conn = None
     try:
@@ -150,7 +155,7 @@ def confirm_action(action_id: int, username: str, tenant_id: str):
 
 
 def cancel_action(action_id: int, username: str, tenant_id: str, reason: str = "") -> bool:
-    """Marque une action comme annulée."""
+    """Marque une action comme annulee."""
     conn = None
     try:
         conn = get_pg_conn()
@@ -213,7 +218,7 @@ def mark_failed(action_id: int, error: str) -> None:
 
 
 def expire_old_pending(hours: int = 24) -> int:
-    """Job à appeler périodiquement pour expirer les actions trop vieilles."""
+    """Job a appeler periodiquement pour expirer les actions trop vieilles."""
     conn = None
     try:
         conn = get_pg_conn()
