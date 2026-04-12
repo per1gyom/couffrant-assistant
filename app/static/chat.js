@@ -9,6 +9,7 @@ const triageBar = document.getElementById('triageBar');
 const micStatus = document.getElementById('micStatus');
 const inputWrapper = document.getElementById('inputWrapper');
 
+let speakSpeed = 1.2; // Vitesse de lecture ElevenLabs (0.5-2.5)
 let isListening=false, currentAudio=null, speakAborted=false, currentSpeakBtn=null;
 let triageQueue=[], triageCurrent=null, silenceTimer=null;
 let finalTextBase='';
@@ -283,7 +284,7 @@ function renderShortcutList() {
 function removePendingShortcut(i) { pendingShortcuts.splice(i,1); renderShortcutList(); }
 function addShortcut() {
   const input = document.getElementById('newShortcutText'); const text = input.value.trim(); if (!text) return;
-  const emojis = ['💬','🔧','📌','🗂','📝','🎯','💡','🔍'];
+  const emojis = ['💬','🔧','📌','?ddc2','📝','🎯','💡','🔍'];
   pendingShortcuts.push({ icon: emojis[pendingShortcuts.length % emojis.length], label: text, query: text });
   renderShortcutList(); input.value = ''; input.focus();
 }
@@ -312,7 +313,7 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
   if (welcome) welcome.remove();
   const row = document.createElement('div'); row.className = 'message-row ' + type;
   const avatar = document.createElement('div'); avatar.className = 'avatar ' + type + '-avatar';
-  avatar.textContent = type === 'raya' ? '✦' : (currentUser ? currentUser[0].toUpperCase() : 'G');
+  avatar.textContent = type === 'raya' ? '❆' : (currentUser ? currentUser[0].toUpperCase() : 'G');
   const bubble = document.createElement('div'); bubble.className = 'bubble';
   if (fileInfo && fileInfo.type && fileInfo.type.startsWith('image/')) {
     const img = document.createElement('img'); img.className = 'attached-image';
@@ -357,7 +358,7 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
 
 function addLoading() {
   const row = document.createElement('div'); row.className = 'message-row raya';
-  const avatar = document.createElement('div'); avatar.className = 'avatar raya-avatar'; avatar.textContent = '✦';
+  const avatar = document.createElement('div'); avatar.className = 'avatar raya-avatar'; avatar.textContent = '❆';
   const bubble = document.createElement('div'); bubble.className = 'bubble loading-bubble';
   bubble.innerHTML = '<div class="dot-anim"></div><div class="dot-anim"></div><div class="dot-anim"></div>';
   row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row); scrollToBottom(); return row;
@@ -613,6 +614,16 @@ async function sendMessage() {
     if (fileSnapshot) { body.file_data=fileSnapshot.data; body.file_type=fileSnapshot.type; body.file_name=fileSnapshot.name; }
     const response = await fetch('/raya', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const data = await response.json(); loading.remove();
+
+    // Détection commande vitesse dans la réponse Raya
+    if (data.answer) {
+      const speedMatch = data.answer.match(/\[SPEAK_SPEED:([\d.]+)\]/);
+      if (speedMatch) {
+        setSpeakSpeed(parseFloat(speedMatch[1]));
+        data.answer = data.answer.replace(/\[SPEAK_SPEED:[\d.]+\]/, '').trim();
+      }
+    }
+
     const msgRow = addMessage(data.answer, 'raya', null, data.aria_memory_id || null);
     if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'));
 
@@ -658,7 +669,7 @@ function removeAttachment() {
 function speak(text, btn) {
   stopSpeech(); speakAborted = false; currentSpeakBtn = btn || null;
   if (currentSpeakBtn) { currentSpeakBtn.textContent='⏹ Stop'; currentSpeakBtn.classList.add('playing'); }
-  fetch('/speak', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text}) })
+  fetch('/speak', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text, speed: speakSpeed}) })
     .then(r => r.ok ? r.blob() : Promise.reject())
     .then(blob => {
       if (speakAborted || blob.size < 100) { resetSpeakUI(); return; }
@@ -669,6 +680,10 @@ function speak(text, btn) {
 }
 function resetSpeakUI() { if (currentSpeakBtn) { currentSpeakBtn.textContent='🔊 Écouter'; currentSpeakBtn.classList.remove('playing'); currentSpeakBtn=null; } }
 function stopSpeech() { speakAborted = true; if (currentAudio) { currentAudio.pause(); currentAudio=null; } window.speechSynthesis && window.speechSynthesis.cancel(); resetSpeakUI(); }
+function setSpeakSpeed(newSpeed) {
+  speakSpeed = Math.max(0.5, Math.min(2.5, newSpeed));
+  showToast('Vitesse de lecture : ' + speakSpeed.toFixed(1) + 'x', 'ok', 2000);
+}
 
 // --- MICRO ---
 // C2 : le micro peut cibler inputEl (par defaut) ou _micTarget (textarea feedback)
