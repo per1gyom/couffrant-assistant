@@ -6,6 +6,7 @@ Phase 5B-1    : injection dynamique des actions par domaine via detect_query_dom
 5D-2f         : charge les tenants de l'utilisateur et les passe au prompt builder.
 7-6D          : marquage automatique du rapport matinal livré via le chat.
 WEB-SEARCH    : activation de la recherche web Anthropic via RAYA_WEB_SEARCH_ENABLED.
+SPEAK-SPEED   : vitesse de lecture ElevenLabs dynamique via payload.speed.
 """
 import json
 import os
@@ -91,6 +92,9 @@ def speak_text(payload: dict = Body(...)):
     if not api_key or not voice_id:
         return {"error": "Cles ElevenLabs manquantes"}
     text = payload.get("text", "")
+    # Vitesse dynamique (0.5-2.5) — défaut ELEVENLABS_SPEED ou 1.2
+    speed = payload.get("speed", float(os.getenv("ELEVENLABS_SPEED", "1.2")))
+    speed = max(0.5, min(2.5, float(speed)))
     clean = re.sub(r'#{1,6}\s+', '', text)
     clean = re.sub(r'\*\*(.*?)\*\*', r'\1', clean)
     clean = re.sub(r'\*(.*?)\*', r'\1', clean)
@@ -103,7 +107,8 @@ def speak_text(payload: dict = Body(...)):
         headers={"xi-api-key": api_key, "Content-Type": "application/json"},
         json={"text": clean, "model_id": "eleven_flash_v2_5",
               "voice_settings": {"stability": 0.5, "similarity_boost": 0.8,
-                                  "style": 0.2, "use_speaker_boost": True}},
+                                  "style": 0.2, "use_speaker_boost": True,
+                                  "speed": speed}},
         timeout=30,
     )
     if resp.status_code != 200:

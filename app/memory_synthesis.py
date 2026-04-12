@@ -117,6 +117,7 @@ Phase MATURITE — PORTRAIT PROFOND :
 
     prompt = f"""Tu es Raya, l'assistante personnelle de {display_name}.
 Tu le connais. Tu observes ses habitudes. Tu construis un portrait operationnel vivant.
+INTERDIT : ne JAMAIS inclure le mot "Jarvis". L'assistante s'appelle Raya.
 {phase_instruction}
 
 Mails recents :
