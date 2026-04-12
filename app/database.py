@@ -440,6 +440,24 @@ def init_postgres():
     c.execute("ALTER TABLE dossier_narratives ADD COLUMN IF NOT EXISTS embedding vector(1536)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_narratives_embedding ON dossier_narratives USING hnsw (embedding vector_cosine_ops)")
 
+    # Rapports quotidiens stockés (7-6R)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS daily_reports (
+            id SERIAL PRIMARY KEY,
+            username TEXT NOT NULL,
+            tenant_id TEXT,
+            report_date DATE DEFAULT CURRENT_DATE,
+            content TEXT NOT NULL,
+            sections JSONB DEFAULT '[]',
+            delivered BOOLEAN DEFAULT false,
+            delivered_via TEXT,
+            delivered_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(username, report_date)
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_reports_user ON daily_reports (username, report_date DESC)")
+
     conn.commit()
     conn.close()
 
