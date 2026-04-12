@@ -6,8 +6,7 @@ import json
 import re
 
 from app.database import get_pg_conn
-from app.ai_client import client
-from app.config import ANTHROPIC_MODEL_FAST
+from app.llm_client import llm_complete
 
 DEFAULT_TENANT = 'couffrant_solar'
 
@@ -131,11 +130,12 @@ def rebuild_contacts(tenant_id: str = DEFAULT_TENANT) -> int:
 Sujets : {subjects_text}\nExtrait : {preview_text[:500]}
 Réponds en JSON : name, company, role, summary (2-3 lignes)"""
         try:
-            response = client.messages.create(
-                model=ANTHROPIC_MODEL_FAST, max_tokens=200,
-                messages=[{"role": "user", "content": prompt}]
+            result = llm_complete(
+                messages=[{"role": "user", "content": prompt}],
+                model_tier="fast",
+                max_tokens=200,
             )
-            raw = re.sub(r'^```(?:json)?\s*', '', response.content[0].text.strip(), flags=re.MULTILINE)
+            raw = re.sub(r'^```(?:json)?\s*', '', result["text"].strip(), flags=re.MULTILINE)
             raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
             try:
                 parsed = json.loads(raw)
