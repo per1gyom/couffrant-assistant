@@ -10,7 +10,6 @@ Fonctions canoniques à utiliser :
 Phase 3a : save_rule vectorise la règle à la création (si OPENAI_API_KEY présent).
 Dégradation gracieuse si clé absente — la règle est insérée sans vecteur.
 """
-import warnings
 from app.database import get_pg_conn
 
 DEFAULT_TENANT = 'couffrant_solar'
@@ -158,70 +157,3 @@ def extract_keywords_from_rule(rule: str) -> list:
 def seed_default_rules(username: str = 'guillaume'):
     """Raya apprend d'elle-même. Aucune règle par défaut."""
     pass
-
-
-# ─── WRAPPERS DÉPRÉCIÉS (compat ascendante) ───
-
-_KNOWN_CATEGORIES = {
-    'tri_mails', 'urgence', 'anti_spam', 'style_reponse', 'regroupement',
-    'contacts_cles', 'categories_mail', 'memoire', 'mail_filter',
-    'comportement', 'drive_pv', 'affichage', 'teams_ingestion',
-}
-
-
-def get_rules_by_category(username_or_category=None, category_or_username='guillaume') -> list:
-    """DÉPRÉCIÉ — Utiliser app.rule_engine.get_rules_by_category(username, category)."""
-    warnings.warn(
-        "app.memory_rules.get_rules_by_category est déprécié. "
-        "Utiliser app.rule_engine.get_rules_by_category(username, category).",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    if username_or_category in _KNOWN_CATEGORIES:
-        category = username_or_category
-        username = category_or_username
-    else:
-        username = username_or_category
-        category = category_or_username
-    from app.rule_engine import get_rules_by_category as canonical
-    return canonical(username, category)
-
-
-def get_memoire_param(username_or_param=None, param_or_default=None, default_or_username=None):
-    """DÉPRÉCIÉ — Utiliser app.rule_engine.get_memoire_param(username, param, default)."""
-    warnings.warn(
-        "app.memory_rules.get_memoire_param est déprécié. "
-        "Utiliser app.rule_engine.get_memoire_param(username, param, default).",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    if isinstance(username_or_param, str) and "_" in username_or_param and len(username_or_param) < 30:
-        raise TypeError(
-            f"Appel ambigu à get_memoire_param : '{username_or_param}' ressemble à un nom de paramètre, "
-            f"pas à un username. Utiliser l'ordre canonique : (username, param, default)."
-        )
-    from app.rule_engine import get_memoire_param as canonical
-    return canonical(username_or_param, param_or_default, default_or_username)
-
-
-def get_rules_as_text(categories: list, username: str = 'guillaume') -> str:
-    """Wrapper pour compat — délègue à rule_engine."""
-    from app.rule_engine import get_rules_by_category as canonical
-    all_rules = []
-    for cat in categories:
-        for r in canonical(username, cat):
-            all_rules.append(f"[{cat}] {r}")
-    return "\n".join(all_rules) if all_rules else ""
-
-
-def get_antispam_keywords(username: str = 'guillaume') -> list:
-    from app.rule_engine import get_rules_by_category as canonical
-    rules = canonical(username, 'anti_spam')
-    keywords = []
-    for rule in rules:
-        parts = [p.strip().lower() for p in rule.replace("'", "").split(',')]
-        keywords.extend([p for p in parts if len(p) > 2])
-    for kw in ['mailer-daemon', 'noreply@', 'no-reply@']:
-        if kw not in keywords:
-            keywords.append(kw)
-    return list(dict.fromkeys(keywords))

@@ -6,14 +6,17 @@ Sources :
   get_all_contact_cards   → app.memory_contacts
   save_style_example      → app.memory_style
   load_sent_mails_to_style→ app.memory_style
-  get_antispam_keywords   → app.memory_rules
-  get_memoire_param       → app.memory_rules (signature : param, default, username)
+  get_antispam_keywords   → app.rule_engine
+  get_memoire_param       → app.rule_engine (signature : username, param, default)
+  get_rules_by_category   → app.rule_engine (signature : username, category)
 """
 from app.memory_rules import (  # noqa
-    get_aria_rules, get_rules_by_category, get_antispam_keywords,
-    get_memoire_param, save_rule, delete_rule, seed_default_rules,
+    get_aria_rules, save_rule, delete_rule, seed_default_rules,
 )
-from app.rule_engine import get_contacts_keywords  # noqa — dans rule_engine, pas memory_rules
+from app.rule_engine import (  # noqa
+    get_rules_by_category, get_antispam_keywords,
+    get_memoire_param, get_contacts_keywords,
+)
 from app.memory_contacts import (  # noqa
     get_contact_card, rebuild_contacts, get_all_contact_cards,
 )
