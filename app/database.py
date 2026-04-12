@@ -380,6 +380,27 @@ def init_postgres():
     """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_patterns_user ON aria_patterns (username, active, confidence DESC)")
 
+    # Historique des versions de règles (5F-2)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS aria_rules_history (
+            id SERIAL PRIMARY KEY,
+            rule_id INTEGER NOT NULL,
+            username TEXT NOT NULL,
+            tenant_id TEXT,
+            category TEXT,
+            rule TEXT NOT NULL,
+            confidence REAL,
+            reinforcements INTEGER,
+            active BOOLEAN,
+            change_type TEXT NOT NULL,
+            changed_at TIMESTAMP DEFAULT NOW(),
+            CONSTRAINT change_type_check CHECK (
+                change_type IN ('created', 'updated', 'reinforced', 'deactivated', 'rollback')
+            )
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_rules_history_rule ON aria_rules_history (rule_id, changed_at DESC)")
+
     conn.commit()
     conn.close()
 
@@ -419,7 +440,7 @@ def init_postgres():
         "ALTER TABLE sent_mail_memory DROP CONSTRAINT IF EXISTS sent_mail_msg_user_unique",
         "ALTER TABLE sent_mail_memory ADD CONSTRAINT sent_mail_msg_user_unique UNIQUE (message_id, username)",
         "ALTER TABLE aria_contacts DROP CONSTRAINT IF EXISTS aria_contacts_email_key",
-        """INSERT INTO tenants (id, name, settings) VALUES ('couffrant_solar', 'Couffrant Solar', '{"email_provider": "microsoft", "sharepoint_folder": "1_Photovolta\u00efque"}') ON CONFLICT (id) DO NOTHING""",
+        """INSERT INTO tenants (id, name, settings) VALUES ('couffrant_solar', 'Couffrant Solar', '{"email_provider": "microsoft", "sharepoint_folder": "1_Photovoltaïque"}') ON CONFLICT (id) DO NOTHING""",
         "CREATE EXTENSION IF NOT EXISTS vector",
         "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS embedding vector(1536)",
         "ALTER TABLE aria_insights ADD COLUMN IF NOT EXISTS embedding vector(1536)",
