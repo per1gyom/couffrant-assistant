@@ -1,11 +1,13 @@
 """
-RAG (Retrieval-Augmented Generation) pour Raya — Phase 3a + 3b + 4.
+RAG (Retrieval-Augmented Generation) pour Raya — Phase 3a + 3b + 4 + 5D-2.
 
 Phase 3a : injection par similarité sémantique au lieu d'injection en bloc.
 Phase 3b : retrieve_rules retourne {text, ids} pour traçabilité feedback.
            retrieve_theme_context enrichit le contexte si session thématique (B8).
 Phase 4  : filtre confidence >= 0.30 dans retrieve_rules (décroissance B6).
            Les règles sous le seuil sont masquées du RAG mais restent en base.
+5D-2c    : toutes les fonctions acceptent tenant_ids (liste) pour le mode dirigeant.
+           tenant_ids prioritaire sur tenant_id. Rétro-compatible.
 """
 from app.embedding import search_similar, is_available
 from app.database import get_pg_conn
@@ -24,10 +26,12 @@ RAG_CONFIDENCE_THRESHOLD = 0.30
 
 
 def retrieve_rules(query: str, username: str, tenant_id: str = None,
+                   tenant_ids: list[str] = None,
                    limit: int = RAG_RULES_LIMIT) -> dict:
     """
     Retourne {text: str, ids: list[int]} — règles les plus pertinentes.
     Phase 4 : exclut les règles avec confidence < 0.30 (décroissance B6).
+    5D-2c : supporte tenant_ids pour recherche multi-tenant.
     """
     conf_filter = f"active = true AND category != 'memoire' AND confidence >= {RAG_CONFIDENCE_THRESHOLD}"
 
@@ -36,7 +40,15 @@ def retrieve_rules(query: str, username: str, tenant_id: str = None,
         try:
             conn = get_pg_conn()
             c = conn.cursor()
-            if tenant_id:
+            if tenant_ids:
+                c.execute("""
+                    SELECT id, category, rule FROM aria_rules
+                    WHERE active = true AND username = %s
+                      AND (tenant_id = ANY(%s) OR tenant_id IS NULL)
+                      AND category != 'memoire' AND confidence >= %s
+                    ORDER BY confidence DESC, reinforcements DESC LIMIT 60
+                """, (username, tenant_ids, RAG_CONFIDENCE_THRESHOLD))
+            elif tenant_id:
                 c.execute("""
                     SELECT id, category, rule FROM aria_rules
                     WHERE active = true AND username = %s
@@ -68,6 +80,7 @@ def retrieve_rules(query: str, username: str, tenant_id: str = None,
         query_text=query,
         limit=limit,
         tenant_id=tenant_id,
+        tenant_ids=tenant_ids,
         extra_filter=conf_filter,
     )
     if not rows:
@@ -80,6 +93,7 @@ def retrieve_rules(query: str, username: str, tenant_id: str = None,
 
 
 def retrieve_insights(query: str, username: str, tenant_id: str = None,
+                      tenant_ids: list[str] = None,
                       limit: int = RAG_INSIGHTS_LIMIT) -> str:
     """Retourne les insights les plus pertinents. Fallback : top N par reinforcements."""
     if not is_available():
@@ -92,6 +106,7 @@ def retrieve_insights(query: str, username: str, tenant_id: str = None,
         query_text=query,
         limit=limit,
         tenant_id=tenant_id,
+        tenant_ids=tenant_ids,
     )
     if not rows:
         from app.memory_synthesis import get_aria_insights
@@ -101,6 +116,7 @@ def retrieve_insights(query: str, username: str, tenant_id: str = None,
 
 
 def retrieve_relevant_mails(query: str, username: str, tenant_id: str = None,
+                             tenant_ids: list[str] = None,
                              limit: int = RAG_MAILS_LIMIT) -> list:
     if not is_available():
         return []
@@ -110,11 +126,13 @@ def retrieve_relevant_mails(query: str, username: str, tenant_id: str = None,
         query_text=query,
         limit=limit,
         tenant_id=tenant_id,
+        tenant_ids=tenant_ids,
     )
 
 
 def retrieve_relevant_conversations(query: str, username: str,
                                      tenant_id: str = None,
+                                     tenant_ids: list[str] = None,
                                      limit: int = RAG_CONV_LIMIT) -> str:
     if not is_available():
         return ""
@@ -124,6 +142,7 @@ def retrieve_relevant_conversations(query: str, username: str,
         query_text=query,
         limit=limit,
         tenant_id=tenant_id,
+        tenant_ids=tenant_ids,
     )
     if not rows:
         return ""
@@ -133,7 +152,8 @@ def retrieve_relevant_conversations(query: str, username: str,
     ])
 
 
-def retrieve_theme_context(theme: str, username: str, tenant_id: str = None) -> dict:
+def retrieve_theme_context(theme: str, username: str, tenant_id: str = None,
+                           tenant_ids: list[str] = None) -> dict:
     """Enrichit le contexte avec tout ce qui concerne le thème de session (B8)."""
     if not is_available() or not theme:
         return {"extra_rules": "", "extra_insights": "", "extra_mails": []}
@@ -142,15 +162,18 @@ def retrieve_theme_context(theme: str, username: str, tenant_id: str = None) -> 
 
     extra_rules_rows = search_similar(
         table="aria_rules", username=username, query_text=theme,
-        limit=RAG_THEME_RULES_EXTRA, tenant_id=tenant_id, extra_filter=conf_filter,
+        limit=RAG_THEME_RULES_EXTRA, tenant_id=tenant_id,
+        tenant_ids=tenant_ids, extra_filter=conf_filter,
     )
     extra_insights_rows = search_similar(
         table="aria_insights", username=username, query_text=theme,
         limit=RAG_THEME_INSIGHTS_EXTRA, tenant_id=tenant_id,
+        tenant_ids=tenant_ids,
     )
     extra_mails = search_similar(
         table="mail_memory", username=username, query_text=theme,
         limit=RAG_THEME_MAILS_EXTRA, tenant_id=tenant_id,
+        tenant_ids=tenant_ids,
     ) or []
 
     return {
@@ -160,13 +183,14 @@ def retrieve_theme_context(theme: str, username: str, tenant_id: str = None) -> 
     }
 
 
-def retrieve_context(query: str, username: str, tenant_id: str = None) -> dict:
+def retrieve_context(query: str, username: str, tenant_id: str = None,
+                     tenant_ids: list[str] = None) -> dict:
     """Point d'entrée principal — retourne tout le contexte RAG."""
     via_rag = is_available()
-    rules_result   = retrieve_rules(query, username, tenant_id)
-    insights_text  = retrieve_insights(query, username, tenant_id)
-    conv_text      = retrieve_relevant_conversations(query, username, tenant_id)
-    relevant_mails = retrieve_relevant_mails(query, username, tenant_id)
+    rules_result   = retrieve_rules(query, username, tenant_id, tenant_ids=tenant_ids)
+    insights_text  = retrieve_insights(query, username, tenant_id, tenant_ids=tenant_ids)
+    conv_text      = retrieve_relevant_conversations(query, username, tenant_id, tenant_ids=tenant_ids)
+    relevant_mails = retrieve_relevant_mails(query, username, tenant_id, tenant_ids=tenant_ids)
     return {
         "rules_text":     rules_result["text"],
         "rule_ids":       rules_result["ids"],
