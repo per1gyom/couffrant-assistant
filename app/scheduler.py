@@ -1,5 +1,5 @@
 """
-Scheduler de jobs périodiques Raya — Phase 4.
+Scheduler de jobs périodiques Raya — Phase 4 + 7.
 
 Utilise APScheduler (BackgroundScheduler) pour exécuter des tâches
 de maintenance sans bloquer le serveur FastAPI.
@@ -12,18 +12,20 @@ Variables d'environnement pour désactiver un job individuellement :
   SCHEDULER_TOKEN_ENABLED=false        → désactive token_refresh
   SCHEDULER_PROACTIVITY_ENABLED=false  → désactive proactivity_scan
   SCHEDULER_PATTERNS_ENABLED=false     → désactive pattern_analysis
+  SCHEDULER_HEARTBEAT_ENABLED=false    → désactive heartbeat_morning (7-6)
 
 Valeur par défaut : true (tous les jobs actifs).
 
 Jobs :
-  expire_pending   : toutes les heures
-  confidence_decay : lundi 02h00 (adaptatif par user, 5G-2)
-  opus_audit       : dimanche 03h00
-  webhook_setup    : 30s au démarrage (une fois)
-  webhook_renewal  : toutes les 6h
-  token_refresh    : toutes les 45 min
-  proactivity_scan : toutes les 30 min (5E-4b)
-  pattern_analysis : dimanche 04h00 (5G-4)
+  expire_pending    : toutes les heures
+  confidence_decay  : lundi 02h00 (adaptatif par user, 5G-2)
+  opus_audit        : dimanche 03h00
+  webhook_setup     : 30s au démarrage (une fois)
+  webhook_renewal   : toutes les 6h
+  token_refresh     : toutes les 45 min
+  proactivity_scan  : toutes les 30 min (5E-4b)
+  pattern_analysis  : dimanche 04h00 (5G-4)
+  heartbeat_morning : 07h00 chaque matin (7-6) — résumé WhatsApp
 """
 import os
 from app.logging_config import get_logger
@@ -126,6 +128,13 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("[Scheduler] Job DÉSACTIVÉ : pattern_analysis")
 
+    if _job_enabled("SCHEDULER_HEARTBEAT_ENABLED"):
+        scheduler.add_job(func=_job_heartbeat_morning, trigger=CronTrigger(hour=7, minute=0),
+                          id="heartbeat_morning", name="Heartbeat matinal Raya", replace_existing=True)
+        logger.info("[Scheduler] Job enregistré : heartbeat_morning (07h00)")
+    else:
+        logger.info("[Scheduler] Job DÉSACTIVÉ : heartbeat_morning")
+
 
 # ─── FONCTIONS JOB ───
 
@@ -139,10 +148,7 @@ def _job_expire_pending():
 
 
 def _job_confidence_decay():
-    """
-    Décroissance de confiance adaptée par utilisateur (5G-2).
-    decay_per_week et mask_threshold varient selon la phase de maturité.
-    """
+    """Décroissance de confiance adaptée par utilisateur (5G-2)."""
     try:
         from app.database import get_pg_conn
         from app.maturity import get_adaptive_params
@@ -320,11 +326,111 @@ def _scan_user(username: str):
     conn.close()
 
 
+def _job_heartbeat_morning():
+    """Envoie un résumé matinal à chaque utilisateur avec Twilio configuré. (7-6)"""
+    try:
+        from app.database import get_pg_conn
+        from app.connectors.twilio_connector import send_whatsapp, is_available
+
+        if not is_available():
+            logger.info("[Heartbeat] Twilio non configuré, skip")
+            return
+
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT DISTINCT username FROM aria_memory
+            WHERE created_at > NOW() - INTERVAL '7 days'
+        """)
+        active_users = [r[0] for r in c.fetchall()]
+        conn.close()
+
+        sent = 0
+        for username in active_users:
+            try:
+                phone = os.getenv(f"NOTIFICATION_PHONE_{username.upper()}", "").strip()
+                if not phone:
+                    phone = os.getenv("NOTIFICATION_PHONE_DEFAULT", "").strip()
+                if not phone:
+                    continue
+
+                summary = _build_morning_summary(username)
+                if summary:
+                    send_whatsapp(phone, summary)
+                    sent += 1
+            except Exception as e:
+                logger.error(f"[Heartbeat] Erreur {username}: {e}")
+
+        logger.info(f"[Heartbeat] Envoyé à {sent} utilisateur(s)")
+    except Exception as e:
+        logger.error(f"[Heartbeat] ERREUR: {e}")
+
+
+def _build_morning_summary(username: str) -> str:
+    """Construit le résumé matinal pour un utilisateur."""
+    from app.database import get_pg_conn
+
+    conn = get_pg_conn()
+    c = conn.cursor()
+
+    # Mails reçus depuis les 12 dernières heures
+    c.execute("""
+        SELECT COUNT(*) as total,
+               COUNT(*) FILTER (WHERE priority = 'haute') as urgent,
+               COUNT(*) FILTER (WHERE priority = 'moyenne') as moyen,
+               COUNT(*) FILTER (WHERE needs_reply = 1 AND reply_status = 'pending') as a_repondre
+        FROM mail_memory
+        WHERE username = %s AND created_at > NOW() - INTERVAL '12 hours'
+    """, (username,))
+    mail_stats = c.fetchone()
+
+    # Alertes actives non vues
+    c.execute("""
+        SELECT COUNT(*) FROM proactive_alerts
+        WHERE username = %s AND seen = false AND dismissed = false
+          AND (expires_at IS NULL OR expires_at > NOW())
+    """, (username,))
+    alerts_count = c.fetchone()[0]
+
+    conn.close()
+
+    total     = mail_stats[0] or 0
+    urgent    = mail_stats[1] or 0
+    moyen     = mail_stats[2] or 0
+    a_repondre = mail_stats[3] or 0
+    silencieux = max(0, total - urgent - moyen)
+
+    if total == 0 and alerts_count == 0:
+        return (
+            "☀️ Bonjour ! Raya veille.\n\n"
+            "Nuit calme — aucun mail notable.\n"
+            "Bonne journée !"
+        )
+
+    lines = ["☀️ Bonjour ! Raya veille.\n"]
+
+    if total > 0:
+        lines.append(f"📬 {total} mail(s) cette nuit :")
+        if urgent > 0:
+            lines.append(f"  🔴 {urgent} urgent(s)")
+        if moyen > 0:
+            lines.append(f"  🟡 {moyen} à voir")
+        if silencieux > 0:
+            lines.append(f"  ⚪ {silencieux} silencieux")
+
+    if a_repondre > 0:
+        lines.append(f"\n✉️ {a_repondre} réponse(s) en attente")
+
+    if alerts_count > 0:
+        lines.append(f"\n⚠️ {alerts_count} alerte(s) active(s)")
+
+    lines.append("\nConnecte-toi au chat pour les détails.")
+
+    return "\n".join(lines)
+
+
 def _job_pattern_analysis():
-    """
-    Détecte les patterns comportementaux — hebdomadaire dimanche 04h00 (5G-4).
-    Skipe les utilisateurs en phase discovery (pas assez de données).
-    """
+    """Détecte les patterns comportementaux — hebdomadaire dimanche 04h00 (5G-4)."""
     try:
         from app.database import get_pg_conn
         from app.maturity import compute_maturity_score
@@ -343,7 +449,7 @@ def _job_pattern_analysis():
             try:
                 maturity = compute_maturity_score(username)
                 if maturity["phase"] == "discovery":
-                    continue  # pas assez de données
+                    continue
                 _analyze_patterns(username)
                 analyzed += 1
             except Exception as e:
@@ -402,18 +508,18 @@ PATTERNS DÉJÀ CONNUS :
 {json.dumps(existing, ensure_ascii=False) if existing else "Aucun."}
 
 Détecte les NOUVEAUX comportements récurrents :
-- temporal : "traite les mails X le jour Y", "consulte le Drive le matin"
+- temporal : "traite les mails X le jour Y"
 - relational : "quand X envoie un mail, c'est toujours Y"
 - thematic : "après un mail chantier, cherche toujours le dossier"
 - workflow : "archive puis répond puis crée une tâche"
-- preference : "préfère des réponses courtes", "n'aime pas les relances auto"
+- preference : "préfère des réponses courtes"
 
 Ne répète PAS les patterns déjà connus.
 Réponds en JSON strict (sans backticks) :
 {{"new_patterns": [
   {{"type": "temporal|relational|thematic|workflow|preference",
     "description": "description claire en français",
-    "evidence": "ce qui te fait dire ça (exemples concrets)",
+    "evidence": "exemples concrets",
     "confidence": 0.0-1.0}}
 ]}}
 Si aucun nouveau pattern : {{"new_patterns": []}}"""
