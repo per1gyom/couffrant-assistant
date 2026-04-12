@@ -8,6 +8,7 @@ Phase 3a :
     Opus compare les nouvelles regles candidates avec celles deja en base
     pour eviter les doublons semantiques.
 5G-6 : rebuild_hot_summary adapte selon la phase de maturite.
+8-TON : section "Ton et communication" ajoutee au hot_summary.
 
 Signatures canoniques utilisees ici (depuis rule_engine) :
   get_memoire_param(username, param, default, tenant_id=None)
@@ -56,6 +57,7 @@ def rebuild_hot_summary(username: str = 'guillaume',
     Reconstruit le resume operationnel chaud (hot_summary).
     5B-2 : prompt enrichi 3 niveaux + vectorisation.
     5G-6 : prompt adapte selon la phase de maturite.
+    8-TON : section "Ton et communication" incluse dans le resume.
     """
     conn = None
     try:
@@ -129,7 +131,7 @@ Contacts actifs :
 Dernieres conversations :
 {json.dumps(history, ensure_ascii=False)}
 
-Genere un resume structure en 3 niveaux (~500 mots) :
+Genere un resume structure en 4 sections (~600 mots) :
 
 1. SITUATION OPERATIONNELLE
    Ce qui est en cours, urgent, en attente. Les dossiers ouverts.
@@ -149,12 +151,22 @@ Genere un resume structure en 3 niveaux (~500 mots) :
    - Points sensibles (sujets ou il est particulierement attentif)
    Si tu manques de donnees, indique ce que tu aurais besoin d'observer.
 
+4. TON ET COMMUNICATION
+   Comment {display_name} aime etre adresse par Raya.
+   Deduis ces informations des echanges observes :
+   - Longueur preferee : reponses courtes et directes, ou longues et detaillees ?
+   - Registre : informel/decontracte ou formel/professionnel ?
+   - Niveau de detail technique : aime-t-il les explications techniques, ou prefere-t-il le resultat direct ?
+   - Format prefere : listes, paragraphes, ou une seule phrase ?
+   - Preferences exprimees explicitement (ex : "sois plus concis", "je prefere les details", "parle-moi comme un collegue") ?
+   Si trop peu de donnees : indique-le brievement et note ce qu'il faudrait observer.
+
 Factuel, direct, sans blabla. N'invente rien — base-toi uniquement sur les donnees."""
 
     result = llm_complete(
         messages=[{"role": "user", "content": prompt}],
         model_tier="deep",
-        max_tokens=1200,
+        max_tokens=1400,
     )
     summary = result["text"]
     log_llm_usage(result, username=username, tenant_id=tenant_id, purpose="rebuild_hot_summary")

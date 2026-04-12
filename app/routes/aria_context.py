@@ -12,6 +12,7 @@ Phase 3b : session_theme (B8) — si un sujet coherent est detecte,
 WEB-SEARCH : web_info — informe Raya qu'elle a acces a internet.
 SPEAK-SPEED : [SPEAK_SPEED:x] — commande de vitesse vocale.
 Fix-Jarvis : Raya ne connait PAS et n'utilise JAMAIS le mot "Jarvis".
+8-TON   : bloc adaptatif de ton selon les preferences de l'utilisateur.
 Fallback automatique si OPENAI_API_KEY absent.
 
 Les appels reseau sont lances en parallele depuis raya_endpoint().
@@ -507,20 +508,20 @@ Tu connais {display_name} en profondeur. Comportement attendu :
         report = get_today_report(username)
         if report and not report["delivered"]:
             report_block = (
-                "\n\n=== RAPPORT DU JOUR (prêt, non livré) ===\n"
+                "\n\n=== RAPPORT DU JOUR (pr\u00eat, non livr\u00e9) ===\n"
                 "Un rapport matinal est disponible pour l'utilisateur.\n"
-                "Si l'utilisateur demande son rapport, lis-le ou envoie-le selon sa préférence.\n"
+                "Si l'utilisateur demande son rapport, lis-le ou envoie-le selon sa pr\u00e9f\u00e9rence.\n"
                 "Tu peux le livrer :\n"
                 "  - En le lisant ici dans le chat\n"
                 "  - \u00c0 l'oral via [ACTION:SPEAK] (si l'utilisateur le demande)\n"
-                "  - Section par section si l'utilisateur le préfère\n"
+                "  - Section par section si l'utilisateur le pr\u00e9f\u00e8re\n"
                 f"Contenu du rapport :\n{report['content'][:1000]}\n"
-                "Après livraison, le rapport sera marqué comme lu."
+                "Apr\u00e8s livraison, le rapport sera marqu\u00e9 comme lu."
             )
         elif report and report["delivered"]:
             report_block = (
-                "\n\n=== RAPPORT DU JOUR (déjà livré) ===\n"
-                f"Le rapport a été livré via {report['delivered_via']}.\n"
+                "\n\n=== RAPPORT DU JOUR (d\u00e9j\u00e0 livr\u00e9) ===\n"
+                f"Le rapport a \u00e9t\u00e9 livr\u00e9 via {report['delivered_via']}.\n"
                 "L'utilisateur peut le redemander s'il veut."
             )
     except Exception:
@@ -545,12 +546,32 @@ Tu connais {display_name} en profondeur. Comportement attendu :
     except Exception:
         pass
 
-    return f"""Tu es Raya — l'assistante personnelle et evolutive de {display_name}.
+    # 8-TON : extrait la section ton du hot_summary pour l'injecter en haut du prompt
+    ton_block = ""
+    if hot_summary and "TON ET COMMUNICATION" in hot_summary.upper():
+        # Cherche la section dans le hot_summary et l'injecte comme instruction directe
+        ton_block = (
+            "\n\nTON ET COMMUNICATION (adapte obligatoirement) :\n"
+            "Ton hot_summary contient une section \"TON ET COMMUNICATION\" — applique-la "
+            "scrupuleusement a chaque reponse. C'est une preference connue de l'utilisateur, "
+            "pas une suggestion."
+        )
+    else:
+        ton_block = (
+            "\n\nTON ET COMMUNICATION (observation en cours) :\n"
+            "Tu ne connais pas encore les preferences de ton de {display_name}. "
+            "Observe : s'il ecrit court, reponds court. S'il pose des questions detaillees, "
+            "developpe. S'il est informel, sois decontractee. S'il est formel, reste professionnelle. "
+            "Des qu'il exprime une preference explicite (\"sois plus concis\", \"je prefere les details\", "
+            "\"parle-moi comme un collegue\"), genere [ACTION:LEARN:ton|sa_preference]."
+        ).format(display_name=display_name)
+
+    return f"""Tu es Raya \u2014 l'assistante personnelle et evolutive de {display_name}.
 Tu es Claude avec une memoire persistante. Tu n'as pas de comportement impose de l'exterieur.
 Tu observes, tu apprends, tu t'organises librement. Tu parles au feminin.
 Tu ne connais PAS le mot "Jarvis" et tu ne l'utilises JAMAIS. Tu es Raya, c'est ton seul nom.
 
-{GUARDRAILS}
+{GUARDRAILS}{ton_block}
 {capabilities_block}{web_info}
 
 {f"=== CE QUE TU SAIS SUR {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"=== PREMIERE CONVERSATION ==={chr(10)}Tu ne connais pas encore {display_name}. Commence a observer et memoriser."}{maturity_block}{patterns_block}{narrative_block}
@@ -563,8 +584,8 @@ Tu ne connais PAS le mot "Jarvis" et tu ne l'utilises JAMAIS. Tu es Raya, c'est 
 
 {f"=== STYLE DE {display_name.upper()} ==={chr(10)}{style_examples}" if style_examples else ""}
 
-=== AUJOURD'HUI — {datetime.now().strftime('%A %d %B %Y')} ===
-{"Microsoft 365 connecte." if outlook_token else f"Microsoft non connecte — {display_name} doit se reconnecter via /login."}{odoo_line}{mailboxes_line}
+=== AUJOURD'HUI \u2014 {datetime.now().strftime('%A %d %B %Y')} ===
+{"Microsoft 365 connecte." if outlook_token else f"Microsoft non connecte \u2014 {display_name} doit se reconnecter via /login."}{odoo_line}{mailboxes_line}
 Agenda : {json.dumps(agenda, ensure_ascii=False, default=str) if agenda else "Aucun RDV."}
 Inbox ({len(live_mails)}) : {json.dumps(live_mails, ensure_ascii=False, default=str) if live_mails else "Aucun."}
 Memoire mails : {json.dumps(db_ctx['mails_from_db'], ensure_ascii=False, default=str)}
