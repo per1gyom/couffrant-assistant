@@ -401,6 +401,22 @@ def init_postgres():
     """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_rules_history_rule ON aria_rules_history (rule_id, changed_at DESC)")
 
+    # Log d'activité (7-ACT)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS activity_log (
+            id SERIAL PRIMARY KEY,
+            username TEXT NOT NULL,
+            tenant_id TEXT,
+            action_type TEXT NOT NULL,
+            action_target TEXT,
+            action_detail TEXT,
+            source TEXT DEFAULT 'raya',
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_activity_user_date ON activity_log (username, created_at DESC)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_activity_type ON activity_log (username, action_type, created_at DESC)")
+
     conn.commit()
     conn.close()
 
@@ -519,6 +535,8 @@ def init_postgres():
         # ── 7-10 : shadow mode (calibration Jarvis) ──
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS shadow_mode BOOLEAN DEFAULT true",
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS shadow_mode_until TIMESTAMP DEFAULT (NOW() + INTERVAL '14 days')",
+        # ── 7-5 : préférences de notification ──
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_prefs JSONB DEFAULT '{}'",
     ]
     for m in migrations:
         try:
