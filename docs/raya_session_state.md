@@ -32,6 +32,7 @@ Guillaume possède plusieurs sociétés. Raya fait le lien entre elles : vision 
 - Vocabulaire : « Terminal ». Concis. Langage simple.
 - **Règle d'or : aucune écriture sans « ok vas-y » explicite.**
 - **Repo local Mac abandonné.** Tout via GitHub.
+- **Prompts pour Sonnet : Opus les donne directement dans le chat, pas dans des fichiers.**
 
 ### Workflow Opus / Sonnet (NON NÉGOCIABLE)
 
@@ -56,8 +57,8 @@ FastAPI Python 3.13, Railway, PostgreSQL+pgvector, Anthropic 3 tiers, OpenAI emb
 Repo `github.com/per1gyom/couffrant-assistant` main.
 
 ## 2. État 12/04/2026 soir
-**PHASES 5A, 5B, 5C : TERMINÉES ✅**
-**PHASE 5D TERMINÉE ✅** (4/4)
+**PHASES 5A, 5B, 5C, 5D : TERMINÉES ✅** (5D-4 onboarding par tenant reporté)
+**PHASE 5E EN COURS (3/5)**
 
 | Fait | Détail |
 |---|---|
@@ -73,23 +74,26 @@ Repo `github.com/per1gyom/couffrant-assistant` main.
 | APScheduler complet ✅ | Webhooks + tokens + decay + audit + expire |
 | user_tenant_access ✅ | Table many-to-many créée + migration données |
 | Admin secours ✅ | Configurable par env BACKUP_ADMIN_* |
-| **get_user_tenants() ✅** | Retourne tous les tenants d'un user avec rôle + nom |
-| **RAG multi-tenant ✅** | search_similar + retrieve_* acceptent tenant_ids (liste) |
-| **LEARN avec tenant cible ✅** | Format [ACTION:LEARN:cat\|rule\|tenant] + _user pour règles perso |
-| **Prompt multi-tenant ✅** | build_system_prompt injecte le contexte de TOUS les tenants dirigeant |
-| **Core multi-tenant ✅** | _raya_core charge user_tenants et les passe au prompt builder |
-| **save_rule personal=True ✅** | Règles utilisateur (tenant_id=NULL) pour mode dirigeant |
+| get_user_tenants() ✅ | Retourne tous les tenants d'un user avec rôle + nom |
+| RAG multi-tenant ✅ | search_similar + retrieve_* acceptent tenant_ids (liste) |
+| LEARN avec tenant cible ✅ | Format [ACTION:LEARN:cat\|rule\|tenant] + _user pour règles perso |
+| Prompt multi-tenant ✅ | build_system_prompt injecte le contexte de TOUS les tenants dirigeant |
+| Core multi-tenant ✅ | _raya_core charge user_tenants et les passe au prompt builder |
+| save_rule personal=True ✅ | Règles utilisateur (tenant_id=NULL) pour mode dirigeant |
+| **Carte capacités par user ✅** | get_user_capabilities_prompt(username, tools) — outils connectés dynamiques |
+| **Descriptions fonctionnelles ✅** | 23 outils avec functional_description dans tools_registry |
+| **Triage webhook 3 niveaux ✅** | route_mail_action branché : IGNORER/STOCKER_SIMPLE/ANALYSER |
 
-## 3. PROCHAINE ÉTAPE : 5D-4
+## 3. PROCHAINE ÉTAPE : 5E-4
 
-**Onboarding par tenant.** Quand un dirigeant ajoute une nouvelle société, Raya lance
-un questionnaire adapté au métier (photovoltaïque ≠ événementiel). Les questions sont
-générées par le moteur d'élicitation existant.
+**proactivity_scan (B10)** — Job APScheduler toutes les 30 min. Analyse mails récents,
+agenda, deadlines. Génère alertes/rappels intelligents. Consulte la carte des capacités
+avant de proposer quoi que ce soit.
 
-Après 5D-4 : Phase 5E.
+Après 5E-4 : 5E-5 (Jarvis minimal), puis Phase 5G.
 
 ## 4. ROADMAP
-~~5A~~ → ~~5B~~ → ~~5C~~ → ~~5D~~ → **5E** → 5G → 5F → Phase 7 (Jarvis) → Phase 6.
+~~5A~~ → ~~5B~~ → ~~5C~~ → ~~5D~~ → **5E** (3/5) → 5G → 5F → Phase 7 (Jarvis) → Phase 6.
 Voir `docs/raya_roadmap_v2.md`.
 
 ## 5. Utilisateurs
@@ -111,13 +115,3 @@ Rapport pour Opus : fichier(s), ligne(s), SHA.
 
 ## 8. RÈGLE
 À chaque jalon, Opus met à jour ce fichier + `docs/raya_changelog.md`. Non négociable.
-
-## 9. Commits 5D-2 (12/04/2026)
-| SHA | Message |
-|---|---|
-| `9a7eca4` | feat(tenant): get_user_tenants() — 5D-2a |
-| `1b899cf` | feat(embedding): search_similar multi-tenant — 5D-2b |
-| `40b3f87` | feat(rag): multi-tenant retrieval — 5D-2c |
-| `d124ed4` | feat(actions): LEARN with tenant target + personal flag — 5D-2d |
-| `4fbcc8b` | feat(actions): LEARN with tenant target parsing — 5D-2d |
-| `eb44268` | feat(context+raya): multi-tenant prompt + core wiring — 5D-2e/5D-2f |
