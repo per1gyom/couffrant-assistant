@@ -26,23 +26,37 @@ Guillaume possède plusieurs sociétés. Raya fait le lien entre elles : vision 
 
 **Guillaume n'est PAS programmeur.** Expliquer simplement, sans jargon.
 
-### Ce qui rend Raya unique (discussion du 12/04/2026 soir)
+### Ce qui rend Raya unique — les 8 dimensions (discussion 12/04/2026)
 
-Trois propriétés combinées qu'aucun outil n'offre :
+**1. Compréhension cumulative.** Raya observe depuis des semaines/mois. Chaque jour elle comprend mieux. Un assistant humain mettrait 6 mois.
 
-**1. Compréhension cumulative.** Raya connaît les dossiers, les interlocuteurs, les habitudes, les priorités. Pas parce qu'on lui a fait une fiche — parce qu'elle observe depuis des semaines/mois. Chaque jour elle comprend mieux. Un assistant humain mettrait 6 mois.
+**2. Vision transversale.** 10 boîtes mail, plusieurs sociétés, outils éparpillés. Personne n'a cette vision unifiée en temps réel. Raya oui.
 
-**2. Vision transversale.** Guillaume a 10 boîtes mail, plusieurs sociétés, des outils éparpillés. Personne — pas même lui — n'a une vision unifiée en temps réel. Raya oui. "Dupont relance sur Couffrant Solar ET sa facture Juillet est en retard."
+**3. Intelligence de workflow.** Raya observe COMMENT l'utilisateur travaille à travers TOUS ses outils : séquences apprises (mail → Drive → Odoo → réponse), anticipation des prochaines étapes, détection d'oublis ("tu n'as pas mis à jour Odoo comme d'habitude"), proposition d'améliorations ("tu fais ça 3x/semaine, je peux automatiser"), détection d'anomalies cross-outils ("le devis Odoo dit 12k€ mais le mail dit 15k€").
 
-**3. Intelligence de workflow (FONDAMENTAL).** Raya ne surveille pas que les mails. Elle observe COMMENT l'utilisateur travaille à travers TOUS ses outils. Exemples concrets :
+**4. Mémoire narrative des dossiers.** Pas juste des règles — l'HISTOIRE d'un dossier. "Le projet Dupont a commencé en janvier, 3 retards, dernier devis 15k€, relation tendue depuis le dépassement de mars." Quand Guillaume parle de Dupont, Raya a toute l'histoire en tête.
 
-- **Séquences apprises** : "Quand Guillaume reçoit un mail chantier, il ouvre le dossier Drive, vérifie le devis Odoo, puis répond." Après 5 occurrences, Raya connaît cette séquence.
-- **Anticipation** : "Tu viens de recevoir un mail chantier Dupont. Voici le dossier Drive et le résumé Odoo — prêt."
-- **Détection d'oublis** : "Tu as répondu au client mais tu n'as pas mis à jour le statut Odoo comme d'habitude. Oubli ?"
-- **Amélioration** : "Tu fais cette séquence 3 fois par semaine. Je peux la faire pour toi automatiquement."
-- **Détection d'anomalies** : "Le devis Odoo dit 12k€ mais le mail fournisseur mentionne 15k€. Écart à vérifier."
+**5. Préparation anticipée.** Raya voit une réunion demain dans le calendrier. Sans qu'on lui demande : derniers mails, statut chantier Odoo, documents Drive, points en suspens. Briefing WhatsApp le matin même.
 
-C'est ce qui fait de Raya un outil indispensable. Avec le temps, sa compréhension des tâches et responsabilités de son utilisateur devient d'une puissance phénoménale. C'est ça le projet novateur.
+**6. Intelligence d'équipe.** Raya comprend l'équipe à travers les échanges observés. "Pierre gère les raccordements, Marie l'administratif." Quand un mail arrive : "Ce raccordement → d'habitude Pierre s'en charge, je lui transfère ?"
+
+**7. Conscience du rythme business.** Fin de mois = factures. Fin de trimestre = reporting. Été = ralentissement. Raya intègre ces cycles dans son évaluation et ses propositions. "On est le 28, 3 factures en retard totalisant 24k€."
+
+**8. Méta-apprentissage.** Raya apprend de ses propres erreurs au niveau systémique. "Je me trompe souvent sur les sujets financiers → je dois être plus prudente et confirmer davantage dans ce domaine."
+
+### Deux niveaux de Jarvis sur le même moteur
+
+**Jarvis personnel (Mode Utilisateur)** — Raya comprend MON workflow, anticipe MES besoins, agit dans MES limites. Chaque collaborateur a sa propre Raya qui apprend de lui.
+
+**Jarvis managérial (Mode Admin/Dirigeant)** — Le gérant d'un tenant a une vision sur TOUTE son équipe via Raya :
+- Voir comment chaque collaborateur travaille (statistiques, métriques)
+- Identifier les méthodes de travail les plus efficaces
+- Croiser les techniques : si Pierre traite un dossier en 3 étapes là où Marie en fait 5, Raya le détecte
+- Proposer les meilleures pratiques à ceux qui en ont besoin (pas du flicage — de l'intelligence collective)
+- Tableau de bord d'efficacité de l'équipe (temps de traitement, taux de réponse, processus suivis)
+- Raya suggère à Marie : "j'ai remarqué une approche plus rapide pour les raccordements" Et à Guillaume : "l'efficacité sur les raccordements a progressé de 20% ce mois"
+
+Le cloisonnement reste absolu : un collaborateur ne voit que ses propres données. Seul l'admin du tenant voit la vue d'ensemble.
 
 ---
 
@@ -114,39 +128,32 @@ Repo `github.com/per1gyom/couffrant-assistant` main.
 
 ## 4. PROCHAINE ÉTAPE : Phase 7 (Jarvis)
 
-### Vision Phase 7 (discussion Guillaume 12/04/2026 soir)
+### Les 4 piliers de Phase 7
 
-Phase 7 n'est PAS "ajouter des notifications". C'est le moment où Raya passe
-de RÉACTIVE à PROACTIVE. Elle devient un collaborateur indispensable.
+**Pilier 1 — Filtre intelligent** (roadmap 7-1 à 7-10)
+Surveiller toutes les entrées, trier, alerter au bon moment par le bon canal.
 
-**Deux axes de proactivité :**
+**Pilier 2 — Intelligence de workflow**
+activity_log, séquences cross-outils, détection d'oublis, proposition d'améliorations, automatisation des tâches répétitives.
 
-**Axe 1 — Filtre intelligent (roadmap existante)** : Raya surveille les entrées
-(mails, Teams, calendrier) et filtre/alerte/agit. Entonnoir 5 étages.
+**Pilier 3 — Mémoire narrative + Préparation anticipée**
+Historique vivant par dossier/contact, briefings automatiques avant réunions, conscience du rythme business.
 
-**Axe 2 — Intelligence de workflow (nouveau, clé du projet)** : Raya observe
-COMMENT l'utilisateur travaille à travers ses outils. Elle apprend les séquences
-d'actions, détecte les oublis, repère les anomalies, et propose des améliorations.
-C'est ce qui la rend véritablement indispensable avec le temps.
+**Pilier 4 — Supervision managériale**
+Vue admin sur l'équipe : métriques par collaborateur, identification des meilleures pratiques, proposition de transfert de compétences, tableau de bord d'efficacité. Le tout dans le respect du cloisonnement (chaque user ne voit que ses données).
 
-Concrètement il faudra :
-- Table `activity_log` : logger les actions faites via Raya (quoi, quand, sur quoi)
-- Étendre le moteur de patterns (5G-4) pour analyser les SÉQUENCES D'ACTIONS cross-outils
-- Étendre le proactivity_scan pour vérifier "séquence habituelle suivie ?"
-- En phase Maturité : proposer d'automatiser les séquences répétitives
+### Priorités immédiates
 
-### Priorités Phase 7
-
-1. **7-10 Mode ombre** — calibration du jugement avant d'agir seule
-2. **7-2 Modèle d'urgence enrichi** — score 0-100, certitude, escalade Opus
-3. **7-1 Multi-mailbox** — voir toutes les boîtes (Microsoft + Gmail)
-4. **7-3 WhatsApp structuré** — messages avec résumé + options d'action
-5. **7-NEW Activity log + workflow patterns** — observer les processus de travail
-6. **7-5 Préférences de sollicitation** — plages horaires, VIP, contexte calendrier
-7. **7-6 Heartbeat matinal** — preuve de vie quotidienne
+1. **7-10 Mode ombre** — calibration du jugement
+2. **7-2 Modèle d'urgence enrichi** — score 0-100
+3. **7-1 Multi-mailbox** — Microsoft + Gmail
+4. **7-3 WhatsApp structuré** — résumé + options
+5. **7-NEW Activity log + workflow patterns**
+6. **7-5 Préférences de sollicitation**
+7. **7-6 Heartbeat matinal**
 
 DÉJÀ FAIT : Twilio connector, proactive_alerts, notification WhatsApp,
-triage 3 niveaux, route_mail_action, moteur de patterns. Le socle est là.
+triage 3 niveaux, route_mail_action, moteur de patterns.
 
 ## 5. ROADMAP
 ~~5A~~ → ~~5B~~ → ~~5C~~ → ~~5D~~ → ~~5E~~ → ~~5G~~ → ~~5F~~ → **Phase 7** → Phase 6.
