@@ -80,11 +80,17 @@ def search_similar(
     query_text: str,
     limit: int = 5,
     tenant_id: str = None,
+    tenant_ids: list[str] = None,
     extra_filter: str = "",
 ) -> list:
     """
     Recherche sémantique dans une table par similarité cosinus.
     Retourne les lignes les plus proches du texte de requête.
+
+    Supporte le mode multi-tenant (5D-2b) :
+      - tenant_id  : filtre sur un seul tenant (comportement original)
+      - tenant_ids : filtre sur plusieurs tenants (mode dirigeant)
+      - Si les deux sont fournis, tenant_ids prend la priorité.
 
     Si pas de vecteur disponible (clé manquante), retourne [].
     L'appelant doit gérer le fallback vers une recherche textuelle.
@@ -106,9 +112,15 @@ def search_similar(
         if username:
             filters.append("username = %s")
             params.append(username)
-        if tenant_id:
+
+        # Multi-tenant : tenant_ids prioritaire sur tenant_id
+        if tenant_ids:
+            filters.append("tenant_id = ANY(%s)")
+            params.append(tenant_ids)
+        elif tenant_id:
             filters.append("tenant_id = %s")
             params.append(tenant_id)
+
         if extra_filter:
             filters.append(extra_filter)
 
