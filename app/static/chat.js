@@ -1,4 +1,7 @@
-// Raya Chat — JavaScript
+// Raya Chat — Core
+// Dépendances : chat-onboarding.js, chat-shortcuts.js, chat-voice.js,
+//               chat-feedback.js, chat-triage.js, chat-admin.js
+// (chargés avant ce fichier dans aria_chat.html)
 
 // --- ETAT GLOBAL ---
 const messagesEl = document.getElementById('messages');
@@ -19,24 +22,19 @@ let currentUser='';
 let isAdmin=false;
 let shortcutsEditMode=false;
 let pendingShortcuts=[];
-
-// Etat onboarding conversationnel
 let _onboardingActive = false;
-
-// C2 : cible active du micro (inputEl par defaut, ou textarea feedback)
 let _micTarget = null;
 let _finalTextBaseTarget = '';
 
-// --- INIT ---
-async function init() {
-  renderQuickActions();
-  checkHealth();
-  loadUserInfo();
-  loadMailCount();
-  checkTokenStatus();
-  checkOnboarding();
-  document.getElementById('autoSpeakBtn').classList.add('active');
-  messagesEl.addEventListener('scroll', onMessagesScroll);
+// --- HORLOGE ---
+function updateClock(){document.getElementById('clock') && (document.getElementById('clock').textContent=new Date().toLocaleString('fr-FR',{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}));}
+setInterval(updateClock,1000); updateClock();
+
+// --- SANTE ---
+async function checkHealth() {
+  const dot = document.getElementById('msStatus');
+  try { const d = await (await fetch('/health')).json(); dot.className = d.status === 'ok' ? 'logo-dot' : 'logo-dot off'; }
+  catch(e) { dot.className = 'logo-dot off'; }
 }
 
 async function loadUserInfo() {
@@ -55,167 +53,17 @@ async function loadMailCount() {
   } catch(e) {}
 }
 
-async function checkHealth() {
-  const dot = document.getElementById('msStatus');
-  try { const d = await (await fetch('/health')).json(); dot.className = d.status === 'ok' ? 'logo-dot' : 'logo-dot off'; }
-  catch(e) { dot.className = 'logo-dot off'; }
+// --- INIT ---
+async function init() {
+  renderQuickActions();
+  checkHealth();
+  loadUserInfo();
+  loadMailCount();
+  checkTokenStatus();
+  checkOnboarding();
+  document.getElementById('autoSpeakBtn').classList.add('active');
+  messagesEl.addEventListener('scroll', onMessagesScroll);
 }
-
-// --- ONBOARDING CONVERSATIONNEL v2 ---
-async function checkOnboarding() {
-  try {
-    const r = await fetch('/onboarding/status');
-    if (!r.ok) return;
-    const d = await r.json();
-    if (d.status === 'pending' || d.status === 'in_progress') {
-      await _startOnboardingChat();
-    }
-  } catch(e) {}
-}
-
-async function _startOnboardingChat() {
-  const loading = addLoading();
-  try {
-    const r = await fetch('/onboarding/start', { method: 'POST' });
-    if (!r.ok) { loading.remove(); return; }
-    const d = await r.json();
-    loading.remove();
-    _onboardingActive = true;
-    if (d.intro) addMessage(d.intro, 'raya');
-    _renderOnboardingStep(d);
-    const skipBar = document.createElement('div');
-    skipBar.id = 'onb-skip-bar';
-    skipBar.className = 'onb-chat-skip';
-    skipBar.innerHTML = '<a href="#" onclick="skipOnboarding(); return false;">Passer l\'onboarding pour l\'instant →</a>';
-    messagesEl.appendChild(skipBar);
-    inputEl.placeholder = 'Réponds ici ou utilise le 🎤 micro…';
-    scrollToBottom();
-  } catch(e) { loading.remove(); }
-}
-
-function _renderOnboardingStep(step) {
-  document.querySelectorAll('.onb-choices').forEach(el => el.remove());
-  if (step.type === 'done' || step.done) { _onboardingDone(step); return; }
-  const question = step.question || step.next_message;
-  if (question) addMessage(question, 'raya');
-  if (step.type === 'choice' && step.options && step.options.length > 0) {
-    const container = document.createElement('div');
-    container.className = 'onb-choices';
-    step.options.forEach(opt => {
-      const btn = document.createElement('button');
-      btn.className = 'onb-choice-btn';
-      btn.textContent = opt;
-      btn.onclick = () => {
-        container.querySelectorAll('button').forEach(b => b.disabled = true);
-        container.style.opacity = '0.5';
-        _sendOnboardingAnswer(opt);
-      };
-      container.appendChild(btn);
-    });
-    const skipBtn = document.createElement('button');
-    skipBtn.className = 'onb-choice-skip';
-    skipBtn.textContent = 'Passer →';
-    skipBtn.onclick = () => { container.remove(); _sendOnboardingAnswer('(passe)'); };
-    container.appendChild(skipBtn);
-    messagesEl.appendChild(container);
-  }
-  scrollToBottom();
-}
-
-function _onboardingDone(step) {
-  _onboardingActive = false;
-  document.getElementById('onb-skip-bar')?.remove();
-  document.querySelectorAll('.onb-choices').forEach(el => el.remove());
-  inputEl.placeholder = 'Envoie un message à Raya…';
-  const msg = step.next_message || step.summary || 'Parfait, je construis ton profil en arrière-plan.';
-  addMessage(msg, 'raya');
-  _pollOnboardingCompletion();
-}
-
-async function _sendOnboardingAnswer(text) {
-  addMessage(text, 'user');
-  inputEl.value = '';
-  inputEl.style.height = 'auto';
-  document.querySelectorAll('.onb-choices').forEach(el => el.remove());
-  const loading = addLoading();
-  try {
-    const r = await fetch('/onboarding/answer', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ answer: text }),
-    });
-    const d = await r.json();
-    loading.remove();
-    _renderOnboardingStep(d);
-  } catch(e) {
-    loading.remove();
-    _onboardingActive = false;
-    inputEl.placeholder = 'Envoie un message à Raya…';
-  }
-}
-
-function _pollOnboardingCompletion() {
-  let attempts = 0;
-  const iv = setInterval(async () => {
-    attempts++;
-    if (attempts > 10) { clearInterval(iv); return; }
-    try {
-      const r = await fetch('/onboarding/status');
-      const d = await r.json();
-      if (d.status === 'done' || d.status === 'completed') {
-        clearInterval(iv);
-        showToast('✨ Profil configuré par Raya !', 'ok', 4000);
-      }
-    } catch(e) { clearInterval(iv); }
-  }, 3000);
-}
-
-async function skipOnboarding() {
-  try { await fetch('/onboarding/skip', { method: 'POST' }); } catch(e) {}
-  _onboardingActive = false;
-  document.getElementById('onb-skip-bar')?.remove();
-  document.querySelectorAll('.onb-choices').forEach(el => el.remove());
-  inputEl.placeholder = 'Envoie un message à Raya…';
-  addMessage('Pas de problème — tu pourras relancer la configuration depuis le menu ⚙️ Admin.', 'raya');
-}
-
-function closeOnboarding() {
-  const overlay = document.getElementById('onboardingOverlay');
-  if (overlay) overlay.classList.remove('open');
-}
-
-// --- TOKEN ALERT ---
-async function checkTokenStatus() {
-  try {
-    const r = await fetch('/token-status');
-    if (!r.ok) return;
-    const d = await r.json();
-    if (d.warnings && d.warnings.length > 0) {
-      window._tokenWarnings = d.warnings;
-      const btn = document.getElementById('tokenAlertBtn');
-      if (btn) btn.style.display = 'inline-flex';
-    }
-  } catch(e) {}
-}
-
-function renderTokenBanner() {
-  const banner = document.getElementById('tokenBanner');
-  const warnings = window._tokenWarnings || [];
-  banner.innerHTML = warnings.map(w => `
-    <div class="token-banner-item">
-      <span class="token-banner-msg"><strong>${w.provider}</strong> — ${w.message}</span>
-      ${w.action_url ? `<a href="${w.action_url}" class="token-banner-link">${w.action}</a>` : ''}
-    </div>
-  `).join('') + `<button class="token-banner-close" onclick="closeTokenBanner()" title="Fermer">✕</button>`;
-}
-
-function toggleTokenBanner() {
-  const banner = document.getElementById('tokenBanner');
-  if (!banner.classList.contains('visible')) renderTokenBanner();
-  banner.classList.toggle('visible');
-}
-
-function closeTokenBanner() { document.getElementById('tokenBanner').classList.remove('visible'); }
 
 // --- TOASTS ---
 function showToast(msg, type='ok', duration=3000) {
@@ -236,60 +84,6 @@ function toggleAutoSpeak() {
   else { btn.classList.remove('active'); btn.textContent='🔇 Muet'; }
 }
 
-// --- RACCOURCIS ---
-const DEFAULT_SHORTCUTS = [
-  { icon:'📬', label:'Mails urgents', query:'Quels sont mes mails urgents ?' },
-  { icon:'📅', label:'Planning', query:"Quel est mon planning aujourd'hui ?" },
-  { icon:'⚡', label:'Chantiers', query:'Donne-moi un point sur mes chantiers en cours' },
-  { icon:'📊', label:'Point semaine', query:'Fais-moi un point de la semaine' },
-  { icon:'🔔', label:'Relances', query:'Quelles sont mes relances en attente ?' },
-  { icon:'📋', label:'Trier mes mails', query:'__TRIAGE__' },
-];
-
-function getShortcuts() {
-  try { const s = localStorage.getItem('raya_shortcuts'); if (s) return JSON.parse(s); } catch(e) {}
-  return DEFAULT_SHORTCUTS;
-}
-function saveShortcutsToStorage(s) { try { localStorage.setItem('raya_shortcuts', JSON.stringify(s)); } catch(e) {} }
-
-function renderQuickActions() {
-  const row = document.getElementById('quickRow');
-  const shortcuts = getShortcuts();
-  row.innerHTML = '';
-  shortcuts.forEach((s, i) => {
-    const btn = document.createElement('button');
-    btn.className = 'quick-btn' + (shortcutsEditMode ? ' edit-mode' : '');
-    btn.innerHTML = `${s.icon||''} ${s.label}`;
-    if (shortcutsEditMode) { btn.onclick = () => removeShortcutDirect(i); btn.title = 'Cliquer pour supprimer'; }
-    else { btn.onclick = () => s.query === '__TRIAGE__' ? startTriage() : quickAsk(s.query); }
-    row.appendChild(btn);
-  });
-  const addBtn = document.createElement('button'); addBtn.className = 'quick-add-btn'; addBtn.textContent = '+ Ajouter';
-  addBtn.style.display = shortcutsEditMode ? 'inline-flex' : 'none'; addBtn.onclick = openShortcuts; row.appendChild(addBtn);
-  const editBtn = document.createElement('button'); editBtn.className = 'quick-edit-btn';
-  editBtn.textContent = shortcutsEditMode ? '✓ Terminer' : '✏️';
-  editBtn.title = shortcutsEditMode ? "Terminer l'édition" : 'Personnaliser les raccourcis';
-  editBtn.onclick = toggleShortcutsEdit; row.appendChild(editBtn);
-}
-
-function toggleShortcutsEdit() { shortcutsEditMode = !shortcutsEditMode; renderQuickActions(); if (shortcutsEditMode) showToast('Cliquez sur un raccourci pour le supprimer', 'info', 2500); }
-function removeShortcutDirect(index) { const s = getShortcuts(); const removed = s[index]; s.splice(index,1); saveShortcutsToStorage(s); renderQuickActions(); showToast(`"${removed.label}" supprimé`, 'ok', 2000); }
-function openShortcuts() { pendingShortcuts = [...getShortcuts()]; renderShortcutList(); document.getElementById('modalShortcuts').classList.add('open'); }
-function closeShortcuts() { document.getElementById('modalShortcuts').classList.remove('open'); }
-function renderShortcutList() {
-  document.getElementById('shortcutList').innerHTML = pendingShortcuts.map((s,i) =>
-    `<div class="shortcut-item"><span>${s.icon||''} ${s.label}</span><button class="shortcut-del" onclick="removePendingShortcut(${i})">✕</button></div>`
-  ).join('');
-}
-function removePendingShortcut(i) { pendingShortcuts.splice(i,1); renderShortcutList(); }
-function addShortcut() {
-  const input = document.getElementById('newShortcutText'); const text = input.value.trim(); if (!text) return;
-  const emojis = ['💬','🔧','📌','?ddc2','📝','🎯','💡','🔍'];
-  pendingShortcuts.push({ icon: emojis[pendingShortcuts.length % emojis.length], label: text, query: text });
-  renderShortcutList(); input.value = ''; input.focus();
-}
-function saveShortcuts() { saveShortcutsToStorage(pendingShortcuts); renderQuickActions(); closeShortcuts(); showToast('Raccourcis enregistrés ✓', 'ok'); }
-
 // --- SCROLL ---
 function scrollToBottom(smooth=true) { messagesEl.scrollTo({ top: messagesEl.scrollHeight, behavior: smooth ? 'smooth' : 'instant' }); }
 function onMessagesScroll() {
@@ -297,7 +91,7 @@ function onMessagesScroll() {
   document.getElementById('scrollDownBtn').classList.toggle('visible', dist > 150);
 }
 
-// --- MESSAGES ---
+// --- INPUT ---
 function autoResize(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,120)+'px'; }
 function handleKey(e) { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
 
@@ -308,6 +102,7 @@ function cleanText(t) {
     .replace(/\n{3,}/g,'\n\n').trim();
 }
 
+// --- MESSAGES (partagées avec autres modules) ---
 function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
   const welcome = messagesEl.querySelector('.welcome');
   if (welcome) welcome.remove();
@@ -346,7 +141,7 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
       thumbUp.onclick = () => sendFeedback(ariaMemoryId, 'positive', thumbUp); actions.appendChild(thumbUp);
       const thumbDown = document.createElement('button'); thumbDown.className = 'feedback-btn'; thumbDown.title = 'À améliorer'; thumbDown.textContent = '👎';
       thumbDown.onclick = () => openFeedbackDialog(ariaMemoryId, thumbDown); actions.appendChild(thumbDown);
-      const whyBtn = document.createElement('button'); whyBtn.className = 'feedback-btn why-btn'; whyBtn.title = 'Pourquoi cette réponse ?'; whyBtn.textContent = '💡';
+      const whyBtn = document.createElement('button'); whyBtn.className = 'feedback-btn why-btn'; whyBtn.title = 'Pourquoi cette réponse ?'; whyBtn.textContent = '💡';
       whyBtn.onclick = () => showWhy(ariaMemoryId, whyBtn); actions.appendChild(whyBtn);
     }
     bubble.appendChild(actions);
@@ -364,189 +159,17 @@ function addLoading() {
   row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row); scrollToBottom(); return row;
 }
 
-// --- FEEDBACK 👍👎 ---
-async function sendFeedback(ariaMemoryId, type, btn) {
-  if (btn) { btn.disabled = true; btn.style.opacity = '0.5'; }
-  try {
-    const r = await fetch('/raya/feedback', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ aria_memory_id: ariaMemoryId, feedback_type: type, comment: '' })
-    });
-    const d = await r.json();
-    if (d.ok || d.status === 'ok') {
-      if (btn) btn.textContent = type === 'positive' ? '👍✅' : '👎✅';
-      if (type === 'positive') showToast('👍 Noté, merci !', 'ok', 2000);
-    } else { if (btn) { btn.disabled = false; btn.style.opacity = ''; } }
-  } catch(e) { if (btn) { btn.disabled = false; btn.style.opacity = ''; } }
-}
-
-// C2 : feedback dialog avec micro + trace dans le chat
-function openFeedbackDialog(ariaMemoryId, btn) {
-  const existing = document.getElementById('feedback-dialog-' + ariaMemoryId);
-  if (existing) { existing.remove(); _releaseMicFromFeedback(); return; }
-
-  const dialog = document.createElement('div');
-  dialog.id = 'feedback-dialog-' + ariaMemoryId;
-  dialog.className = 'feedback-dialog';
-  dialog.innerHTML = `
-    <div class="feedback-dialog-label">Qu'est-ce qui n'était pas satisfaisant ?</div>
-    <div class="feedback-dialog-input-row">
-      <textarea class="feedback-dialog-input" placeholder="(optionnel) Décris le problème... ou utilise le 🎤" rows="2"></textarea>
-      <button class="feedback-dialog-mic" title="Dicter ma réponse">🎤</button>
-    </div>
-    <div class="feedback-dialog-btns">
-      <button class="feedback-dialog-send">👎 Envoyer</button>
-      <button class="feedback-dialog-cancel">✕ Annuler</button>
-    </div>
-  `;
-
-  const textarea = dialog.querySelector('.feedback-dialog-input');
-  const micDialogBtn = dialog.querySelector('.feedback-dialog-mic');
-
-  // C2a : bouton micro redirige vers le textarea du dialog
-  micDialogBtn.onclick = () => {
-    if (isListening) {
-      stopListening();
-      _releaseMicFromFeedback();
-    } else {
-      _micTarget = textarea;
-      _finalTextBaseTarget = textarea.value;
-      micDialogBtn.textContent = '⏹';
-      micDialogBtn.style.color = 'var(--danger, #ef4444)';
-      startListening();
-    }
-  };
-
-  // C2b : trace dans le chat apres soumission
-  dialog.querySelector('.feedback-dialog-send').onclick = async () => {
-    const comment = textarea.value.trim();
-    dialog.remove();
-    _releaseMicFromFeedback();
-    if (btn) { btn.textContent = '👎⏳'; btn.disabled = true; btn.style.opacity = '0.7'; }
-
-    // Trace utilisateur dans le chat
-    const userMsg = comment
-      ? `Tu as signalé un problème : "${comment}"`
-      : 'Tu as signalé que cette réponse était insatisfaisante.';
-    addMessage(userMsg, 'user');
-    const loading = addLoading();
-
-    const r = await fetch('/raya/feedback', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ aria_memory_id: ariaMemoryId, feedback_type: 'negative', comment })
-    });
-    const d = await r.json();
-    loading.remove();
-
-    if (d.ok || d.status === 'ok') {
-      if (btn) { btn.textContent = '👎✅'; btn.disabled = true; btn.style.opacity = '0.5'; }
-      if (d.rule_text) {
-        // Raya propose une regle corrective + boutons Oui/Non
-        const ruleMsg = `J'ai analysé le problème. Voici la règle que je propose de retenir :\n\n**${d.rule_text}**\n\nC'est correct ?`;
-        const rayaRow = addMessage(ruleMsg, 'raya');
-        // Boutons de validation de la regle
-        const btnZone = document.createElement('div');
-        btnZone.className = 'onb-choices';
-        btnZone.style.marginTop = '8px';
-        const yesBtn = document.createElement('button');
-        yesBtn.className = 'onb-choice-btn'; yesBtn.textContent = '✓ Oui, apprends';
-        yesBtn.onclick = async () => {
-          btnZone.querySelectorAll('button').forEach(b => b.disabled = true);
-          btnZone.style.opacity = '0.5';
-          await fetch('/raya/feedback', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ aria_memory_id: ariaMemoryId, feedback_type: 'negative', comment, confirm_rule: true })
-          });
-          addMessage('Règle retenue. ✅', 'raya');
-          showToast('Règle apprise', 'ok', 2000);
-        };
-        const noBtn = document.createElement('button');
-        noBtn.className = 'onb-choice-btn'; noBtn.textContent = '✕ Non, oublie';
-        noBtn.onclick = () => {
-          btnZone.querySelectorAll('button').forEach(b => b.disabled = true);
-          btnZone.style.opacity = '0.5';
-          addMessage('Ok, je n\'apprends rien cette fois.', 'raya');
-        };
-        btnZone.appendChild(yesBtn); btnZone.appendChild(noBtn);
-        rayaRow.after(btnZone);
-      } else {
-        addMessage('Feedback enregistré, merci. Je vais m\'améliorer.', 'raya');
-      }
-    } else {
-      addMessage('Désolée, impossible de traiter le feedback pour l\'instant.', 'raya');
-    }
-  };
-
-  dialog.querySelector('.feedback-dialog-cancel').onclick = () => {
-    dialog.remove();
-    _releaseMicFromFeedback();
-  };
-
-  btn.closest('.message-row').after(dialog);
-}
-
-function _releaseMicFromFeedback() {
-  if (_micTarget) {
-    _micTarget = null;
-    _finalTextBaseTarget = '';
-    // Remet les boutons mic dialog en etat normal
-    document.querySelectorAll('.feedback-dialog-mic').forEach(b => {
-      b.textContent = '🎤'; b.style.color = '';
-    });
-    if (isListening) stopListening();
-  }
-}
-
-async function showWhy(ariaMemoryId, btn) {
-  const existing = document.getElementById('why-panel-' + ariaMemoryId);
-  if (existing) { existing.remove(); return; }
-  try {
-    const d = await (await fetch('/raya/why/' + ariaMemoryId)).json();
-    if (!d.ok) return;
-    const panel = document.createElement('div');
-    panel.id = 'why-panel-' + ariaMemoryId; panel.className = 'why-panel';
-    const tierLabel = d.model_tier === 'deep' ? '🧠 Opus (analyse complexe)' : '⚡ Sonnet (réponse rapide)';
-    const ragLabel = d.via_rag ? `RAG actif — ${(d.rule_ids||[]).length} règle(s) ciblée(s)` : 'Injection en bloc (RAG non actif)';
-    const rulesHtml = d.rules_detail && d.rules_detail.length > 0
-      ? d.rules_detail.map(r => `<div class="why-rule"><span class="why-cat">[${r.category}]</span> ${r.rule.substring(0,80)}${r.rule.length>80?'...':''} <span class="why-conf">${(r.confidence*100).toFixed(0)}%</span></div>`).join('')
-      : '<div class="why-empty">Aucune règle injectée</div>';
-    panel.innerHTML = `
-      <div class="why-header"><span>💡 Pourquoi cette réponse ?</span><button class="why-close" onclick="this.closest('.why-panel').remove()">✕</button></div>
-      <div class="why-row">🤖 Modèle : <strong>${tierLabel}</strong></div>
-      <div class="why-row">🔍 Mémoire : <strong>${ragLabel}</strong></div>
-      <div class="why-rules-title">Règles utilisées :</div>
-      ${rulesHtml}
-    `;
-    btn.closest('.message-row').after(panel);
-  } catch(e) {}
-}
-
-// --- C3 : ASK_CHOICE — boutons de choix interactifs ---
+// --- ASK_CHOICE ---
 function renderAskChoice(choiceData) {
   if (!choiceData || !choiceData.question || !choiceData.options) return;
-
-  // Retire tout choix precedent non resolu
   document.querySelectorAll('.ask-choice-zone').forEach(el => el.remove());
-
-  const zone = document.createElement('div');
-  zone.className = 'ask-choice-zone onb-choices';
-  zone.style.marginTop = '8px';
-
+  const zone = document.createElement('div'); zone.className = 'ask-choice-zone onb-choices'; zone.style.marginTop = '8px';
   choiceData.options.forEach(opt => {
-    const btn = document.createElement('button');
-    btn.className = 'onb-choice-btn';
-    btn.textContent = opt;
-    btn.onclick = () => {
-      zone.querySelectorAll('button').forEach(b => b.disabled = true);
-      zone.style.opacity = '0.5';
-      inputEl.value = opt;
-      sendMessage();
-    };
+    const btn = document.createElement('button'); btn.className = 'onb-choice-btn'; btn.textContent = opt;
+    btn.onclick = () => { zone.querySelectorAll('button').forEach(b => b.disabled = true); zone.style.opacity = '0.5'; inputEl.value = opt; sendMessage(); };
     zone.appendChild(btn);
   });
-
-  messagesEl.appendChild(zone);
-  scrollToBottom();
+  messagesEl.appendChild(zone); scrollToBottom();
 }
 
 // --- ACTIONS EN ATTENTE ---
@@ -566,24 +189,10 @@ function renderPendingActions(pendingList) {
     }
     const btns = document.createElement('div'); btns.className = 'pending-btns';
     const confirmBtn = document.createElement('button'); confirmBtn.className = 'pending-btn confirm'; confirmBtn.textContent = '✓ Confirmer';
-    confirmBtn.onclick = () => {
-      if (confirmBtn.disabled) return;
-      confirmBtn.disabled = true;
-      confirmBtn.textContent = '⏳ En cours...';
-      card.querySelectorAll('button').forEach(b => b.disabled = true);
-      inputEl.value = `Confirme l'action ${action.id}`;
-      sendMessage();
-    };
+    confirmBtn.onclick = () => { if (confirmBtn.disabled) return; confirmBtn.disabled=true; confirmBtn.textContent='⏳ En cours...'; card.querySelectorAll('button').forEach(b=>b.disabled=true); inputEl.value=`Confirme l'action ${action.id}`; sendMessage(); };
     btns.appendChild(confirmBtn);
     const cancelBtn = document.createElement('button'); cancelBtn.className = 'pending-btn cancel'; cancelBtn.textContent = '✕ Annuler';
-    cancelBtn.onclick = () => {
-      if (cancelBtn.disabled) return;
-      cancelBtn.disabled = true;
-      cancelBtn.textContent = '⏳ En cours...';
-      card.querySelectorAll('button').forEach(b => b.disabled = true);
-      inputEl.value = `Annule l'action ${action.id}`;
-      sendMessage();
-    };
+    cancelBtn.onclick = () => { if (cancelBtn.disabled) return; cancelBtn.disabled=true; cancelBtn.textContent='⏳ En cours...'; card.querySelectorAll('button').forEach(b=>b.disabled=true); inputEl.value=`Annule l'action ${action.id}`; sendMessage(); };
     btns.appendChild(cancelBtn);
     card.appendChild(btns); zone.appendChild(card);
   });
@@ -594,228 +203,62 @@ function renderPendingActions(pendingList) {
 // --- SEND MESSAGE ---
 async function sendMessage() {
   const text = inputEl.value.trim(); if (!text && !currentFile) return;
-
   if (_onboardingActive && text && !currentFile) {
-    inputEl.value = ''; inputEl.style.height = 'auto';
-    await _sendOnboardingAnswer(text);
-    return;
+    inputEl.value=''; inputEl.style.height='auto';
+    await _sendOnboardingAnswer(text); return;
   }
-
-  // Retire les choix interactifs en cours
   document.querySelectorAll('.ask-choice-zone').forEach(el => el.remove());
-
   const fileSnapshot = currentFile ? {...currentFile} : null;
-  inputEl.value = ''; inputEl.style.height = 'auto'; inputEl.classList.remove('interim');
-  removeAttachment(); sendBtn.disabled = true; stopSpeech();
-  addMessage(text||'[Fichier joint]', 'user', fileSnapshot);
+  inputEl.value=''; inputEl.style.height='auto'; inputEl.classList.remove('interim');
+  removeAttachment(); sendBtn.disabled=true; stopSpeech();
+  addMessage(text||'[Fichier joint]','user',fileSnapshot);
   const loading = addLoading();
   try {
     const body = { query: text||(fileSnapshot?'Analyse ce fichier.':'') };
     if (fileSnapshot) { body.file_data=fileSnapshot.data; body.file_type=fileSnapshot.type; body.file_name=fileSnapshot.name; }
-    const response = await fetch('/raya', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const response = await fetch('/raya',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const data = await response.json(); loading.remove();
-
-    // Détection commande vitesse dans la réponse Raya
+    // Détection commande vitesse
     if (data.answer) {
       const speedMatch = data.answer.match(/\[SPEAK_SPEED:([\d.]+)\]/);
-      if (speedMatch) {
-        setSpeakSpeed(parseFloat(speedMatch[1]));
-        data.answer = data.answer.replace(/\[SPEAK_SPEED:[\d.]+\]/, '').trim();
-      }
+      if (speedMatch) { setSpeakSpeed(parseFloat(speedMatch[1])); data.answer = data.answer.replace(/\[SPEAK_SPEED:[\d.]+\]/,'').trim(); }
     }
-
-    const msgRow = addMessage(data.answer, 'raya', null, data.aria_memory_id || null);
+    const msgRow = addMessage(data.answer,'raya',null,data.aria_memory_id||null);
     if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'));
-
-    // C3 : affiche les boutons de choix si Raya en a generes
     if (data.ask_choice) renderAskChoice(data.ask_choice);
-
     if (data.actions && data.actions.length > 0) {
-      const ok = data.actions.filter(a => a.startsWith('✅')); const err = data.actions.filter(a => a.startsWith('❌')); const pend = data.actions.filter(a => a.startsWith('⏸️'));
-      if (ok.length) showToast(ok[0].replace('✅','').trim(), 'ok', 3000);
-      if (err.length) showToast(err[0].replace('❌','').trim(), 'err', 4000);
-      if (pend.length) showToast(`${pend.length} action(s) en attente`, 'info', 4000);
+      const ok=data.actions.filter(a=>a.startsWith('✅')); const err=data.actions.filter(a=>a.startsWith('❌')); const pend=data.actions.filter(a=>a.startsWith('⏸️'));
+      if (ok.length) showToast(ok[0].replace('✅','').trim(),'ok',3000);
+      if (err.length) showToast(err[0].replace('❌','').trim(),'err',4000);
+      if (pend.length) showToast(`${pend.length} action(s) en attente`,'info',4000);
     }
-    if (data.pending_actions && data.pending_actions.length > 0) renderPendingActions(data.pending_actions);
-    else { const zone = document.getElementById('pending-actions-zone'); if (zone) zone.remove(); }
+    if (data.pending_actions && data.pending_actions.length>0) renderPendingActions(data.pending_actions);
+    else { const zone=document.getElementById('pending-actions-zone'); if(zone) zone.remove(); }
   } catch(e) {
-    loading.remove(); addMessage('Erreur de connexion à Raya. Réessayez.', 'raya');
-    showToast('Erreur de connexion', 'err');
+    loading.remove(); addMessage('Erreur de connexion à Raya. Réessayez.','raya');
+    showToast('Erreur de connexion','err');
   }
-  sendBtn.disabled = false;
+  sendBtn.disabled=false;
 }
-function quickAsk(text) { inputEl.value = text; sendMessage(); }
+function quickAsk(text) { inputEl.value=text; sendMessage(); }
 
 // --- FICHIERS ---
 function handleFileSelect(e) {
-  const file = e.target.files[0]; if (!file) return;
-  if (file.size > 10*1024*1024) { alert('Fichier trop volumineux (max 10 Mo).'); return; }
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    currentFile = { data: ev.target.result.split(',')[1], type: file.type, name: file.name };
-    document.getElementById('attachmentName').textContent = '📎 ' + file.name;
+  const file=e.target.files[0]; if(!file) return;
+  if(file.size>10*1024*1024){alert('Fichier trop volumineux (max 10 Mo).');return;}
+  const reader=new FileReader();
+  reader.onload=(ev)=>{
+    currentFile={data:ev.target.result.split(',')[1],type:file.type,name:file.name};
+    document.getElementById('attachmentName').textContent='📎 '+file.name;
     document.getElementById('attachmentPreview').classList.add('visible');
     document.getElementById('attachBtn').classList.add('has-file');
   };
-  reader.readAsDataURL(file); e.target.value = '';
+  reader.readAsDataURL(file); e.target.value='';
 }
 function removeAttachment() {
-  currentFile = null;
+  currentFile=null;
   document.getElementById('attachmentPreview').classList.remove('visible');
   document.getElementById('attachBtn').classList.remove('has-file');
-}
-
-// --- AUDIO ---
-function speak(text, btn) {
-  stopSpeech(); speakAborted = false; currentSpeakBtn = btn || null;
-  if (currentSpeakBtn) { currentSpeakBtn.textContent='⏹ Stop'; currentSpeakBtn.classList.add('playing'); }
-  fetch('/speak', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text, speed: speakSpeed}) })
-    .then(r => r.ok ? r.blob() : Promise.reject())
-    .then(blob => {
-      if (speakAborted || blob.size < 100) { resetSpeakUI(); return; }
-      const url = URL.createObjectURL(blob); currentAudio = new Audio(url);
-      currentAudio.onended = resetSpeakUI; currentAudio.onerror = resetSpeakUI;
-      if (!speakAborted) currentAudio.play().catch(resetSpeakUI);
-    }).catch(resetSpeakUI);
-}
-function resetSpeakUI() { if (currentSpeakBtn) { currentSpeakBtn.textContent='🔊 Écouter'; currentSpeakBtn.classList.remove('playing'); currentSpeakBtn=null; } }
-function stopSpeech() { speakAborted = true; if (currentAudio) { currentAudio.pause(); currentAudio=null; } window.speechSynthesis && window.speechSynthesis.cancel(); resetSpeakUI(); }
-function setSpeakSpeed(newSpeed) {
-  speakSpeed = Math.max(0.5, Math.min(2.5, newSpeed));
-  showToast('Vitesse de lecture : ' + speakSpeed.toFixed(1) + 'x', 'ok', 2000);
-}
-
-// --- MICRO ---
-// C2 : le micro peut cibler inputEl (par defaut) ou _micTarget (textarea feedback)
-function toggleMic() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { alert('Reconnaissance vocale non supportée.\nUtilisez Chrome ou Edge.'); return; }
-  if (isListening) stopListening(); else startListening();
-}
-function startListening() {
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) return;
-  const target = _micTarget || inputEl;
-  finalTextBase = _micTarget ? _finalTextBaseTarget : inputEl.value;
-  const rec = new SR(); rec.lang='fr-FR'; rec.continuous=false; rec.interimResults=true; rec.maxAlternatives=1;
-  rec.onstart = () => {
-    isListening=true;
-    if (!_micTarget) { micBtn.classList.add('listening'); micBtn.textContent='⏹'; micStatus.classList.add('visible'); inputWrapper.classList.add('mic-active'); }
-  };
-  rec.onresult = (e) => {
-    clearSilenceTimer(); let interim='', final='';
-    for (let i=e.resultIndex; i<e.results.length; i++) {
-      if (e.results[i].isFinal) final+=e.results[i][0].transcript+' '; else interim+=e.results[i][0].transcript;
-    }
-    if (interim) { target.value=(finalTextBase+' '+interim).trim(); if (!_micTarget) { target.classList.add('interim'); autoResize(target); } }
-    if (final) { finalTextBase=(finalTextBase+' '+final).trim(); target.value=finalTextBase; if (!_micTarget) { target.classList.remove('interim'); autoResize(target); } }
-    resetSilenceTimer();
-  };
-  rec.onerror = (e) => {
-    if (e.error==='not-allowed'||e.error==='permission-denied') alert('Microphone bloqué.\nCliquez sur 🔒 dans la barre d\'adresse.');
-    else if (e.error==='network') { alert('Erreur réseau micro.'); stopListening(); }
-  };
-  rec.onend = () => { if (isListening) setTimeout(()=>{ if(isListening) startListening(); },100); else cleanupMicUI(); };
-  try { rec.start(); resetSilenceTimer(); } catch(e) { stopListening(); }
-}
-function resetSilenceTimer() { clearSilenceTimer(); silenceTimer=setTimeout(()=>{ if(isListening) stopListening(); },3000); }
-function clearSilenceTimer() { if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;} }
-function stopListening() {
-  isListening=false; clearSilenceTimer(); cleanupMicUI();
-  if (!_micTarget) { inputEl.classList.remove('interim'); if(inputEl.value) autoResize(inputEl); inputEl.focus(); }
-}
-function cleanupMicUI() {
-  if (!_micTarget) {
-    micBtn.classList.remove('listening'); micBtn.textContent='🎤';
-    micStatus.classList.remove('visible'); inputWrapper.classList.remove('mic-active');
-  }
-}
-
-// --- TRIAGE ---
-async function startTriage() {
-  stopSpeech(); triageBar.classList.remove('visible');
-  const loading = addLoading();
-  const data = await (await fetch('/triage-queue')).json(); loading.remove();
-  triageQueue = data.mails || [];
-  if (triageQueue.length===0) { const row=addMessage('Aucun mail en attente.','raya'); if(autoSpeak)speak('Aucun mail.',row.querySelector('.speak-btn')); return; }
-  const intro = triageQueue.length+" mails à trier. C'est parti !";
-  const introRow = addMessage(intro,'raya'); if(autoSpeak) speak(intro, introRow.querySelector('.speak-btn'));
-  setTimeout(()=>nextTriage(), 1500);
-}
-function nextTriage() {
-  if (triageQueue.length===0) { triageBar.classList.remove('visible'); const row=addMessage('Triage terminé !','raya'); if(autoSpeak) speak('Triage terminé !',row.querySelector('.speak-btn')); triageCurrent=null; return; }
-  triageCurrent = triageQueue.shift();
-  const msg='De : '+(triageCurrent.from_email||'Inconnu')+'\nSujet : '+(triageCurrent.subject||'(Sans objet)')+'\n\n'+(triageCurrent.raw_body_preview||'').slice(0,200)+'\n\n— Que je fasse ? ('+(triageQueue.length+' restants)');
-  const row=addMessage(msg,'raya'); if(autoSpeak) speak(msg,row.querySelector('.speak-btn'));
-  triageBar.classList.add('visible');
-}
-async function handleTriage(action) {
-  if (!triageCurrent) return; triageBar.classList.remove('visible'); stopSpeech();
-  if (action==='skip') { addMessage('Passé.','raya'); setTimeout(()=>nextTriage(),500); return; }
-  const actionMap={'archive':'Archive le mail '+triageCurrent.message_id,'delete':'Supprime le mail '+triageCurrent.message_id,'reply':'Prépare une réponse pour le mail '+triageCurrent.message_id};
-  const loading=addLoading();
-  try {
-    const data=(await (await fetch('/raya',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:actionMap[action]})})).json()); loading.remove();
-    const row=addMessage(data.answer,'raya'); if(autoSpeak) speak(data.answer,row.querySelector('.speak-btn'));
-    if (data.actions && data.actions.some(a=>a.startsWith('✅'))) showToast('Action effectuée ✓','ok');
-  } catch { loading.remove(); }
-  setTimeout(()=>nextTriage(),3000);
-}
-
-// --- TIROIR ADMIN ---
-function toggleDrawer() { const d=document.getElementById('drawer'); if(d.classList.contains('open')) closeDrawer(); else openDrawer(); }
-function openDrawer() { document.getElementById('drawer').classList.add('open'); document.getElementById('drawerOverlay').classList.add('open'); document.getElementById('adminBtn').classList.add('active'); }
-function closeDrawer() { document.getElementById('drawer').classList.remove('open'); document.getElementById('drawerOverlay').classList.remove('open'); document.getElementById('adminBtn').classList.remove('active'); }
-
-async function drawerAction(btn, url, id) {
-  const el=document.getElementById('result-'+id);
-  el.className='d-btn-result loading'; el.textContent='⏳ En cours…'; btn.disabled=true;
-  try {
-    const d=await (await fetch(url)).json(); const txt=formatDrawerResult(d);
-    el.className='d-btn-result ok'; el.textContent=txt; showToast(txt.split('\n')[0].substring(0,60),'ok');
-  } catch(e) { el.className='d-btn-result err'; el.textContent='❌ Erreur: '+e.message; showToast("Erreur lors de l'action",'err'); }
-  btn.disabled=false;
-}
-async function drawerConfirmAction(e, url, id) { e.stopPropagation(); drawerHideConfirm(e,'confirm-'+id); await drawerAction(e.target.closest('.d-btn'), url, id); }
-function drawerShowConfirm(id) { document.getElementById(id).classList.add('visible'); }
-function drawerHideConfirm(e, id) { e.stopPropagation(); document.getElementById(id).classList.remove('visible'); }
-
-async function drawerMemoryStatus(btn) {
-  const el=document.getElementById('result-status'); el.className='d-btn-result loading'; el.textContent='⏳ Chargement…'; btn.disabled=true;
-  try {
-    const d=await (await fetch('/memory-status')).json(); const n1=d.niveau_1||{}, n2=d.niveau_2||{};
-    el.className='d-btn-result info';
-    el.textContent=`📬 Mails : ${n2.mail_memory||0}\n💬 Conversations : ${n2.conversations_brutes||0}\n📋 Règles actives : ${n1.regles_actives||0}\n💡 Insights : ${n1.insights||0}\n👥 Contacts : ${n1.contacts||0}\n✍️ Style : ${n2.style_examples||0} exemples`;
-  } catch(e) { el.className='d-btn-result err'; el.textContent='❌ Erreur'; }
-  btn.disabled=false;
-}
-async function drawerRules(btn) {
-  const el=document.getElementById('result-rules'); el.className='d-btn-result loading'; el.textContent='⏳ Chargement…'; btn.disabled=true;
-  try {
-    const rules=await (await fetch('/rules')).json(); const active=rules.filter(r=>r.active);
-    if (!active.length) { el.className='d-btn-result info'; el.textContent='Aucune règle active.'; }
-    else {
-      const cats={}; active.forEach(r=>{cats[r.category]=(cats[r.category]||0)+1;});
-      el.className='d-btn-result info';
-      el.textContent=`${active.length} règles actives :\n`+Object.entries(cats).map(([k,v])=>`${k} : ${v}`).join('\n');
-    }
-  } catch(e) { el.className='d-btn-result err'; el.textContent='❌ Erreur'; }
-  btn.disabled=false;
-}
-function formatDrawerResult(d) {
-  if (d.error) return '❌ '+d.error;
-  if (d.status==='ok'||d.status==='termine') {
-    const parts=[];
-    if (d.analyzed!==undefined) parts.push(`✅ ${d.analyzed} analysés`);
-    if (d.remaining!==undefined) parts.push(`${d.remaining} restants`);
-    if (d.inserted!==undefined) parts.push(`✅ ${d.inserted} importés`);
-    if (d.deleted!==undefined) parts.push(`✅ ${d.deleted} supprimés`);
-    if (d.conversations_synthesized!==undefined) parts.push(`✅ ${d.conversations_synthesized} synthétisées`);
-    if (d.rules_extracted!==undefined) parts.push(`${d.rules_extracted} règles extraites`);
-    if (parts.length) return parts.join('\n'); return '✅ OK';
-  }
-  if (d.status==='mail_memory_cleared') return '✅ Historique mails vidé.';
-  if (d.status) return '✅ '+d.status;
-  return JSON.stringify(d).replace(/[{}\"]/g,'').replace(/,/g,'\n').substring(0,200);
 }
 
 // --- KEYBOARD ---
@@ -827,6 +270,5 @@ document.addEventListener('keydown', e => {
     _releaseMicFromFeedback();
   }
 });
-document.getElementById('modalShortcuts').addEventListener('click', e => { if(e.target===document.getElementById('modalShortcuts')) closeShortcuts(); });
 
 init();

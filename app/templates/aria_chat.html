@@ -53,7 +53,7 @@
     <div class="messages" id="messages">
       <div class="welcome" id="welcomeMsg">
         <div class="welcome-icon">✦</div>
-        <h2 id="welcomeTitle">Bonjour !</h2>
+        <h2 id="welcomeTitle">Bonjour !</h2>
         <p>Je suis Raya, ton assistante personnelle.<br>Je surveille tes mails, ton agenda et ton activité.</p>
       </div>
     </div>
@@ -80,7 +80,7 @@
         <button class="icon-btn" id="sendBtn" onclick="sendMessage()">➤</button>
       </div>
     </div>
-    <div class="mic-status" id="micStatus">🎙 En écoute… parle, je t'entends</div>
+    <div class="mic-status" id="micStatus">🎩 En écoute… parle, je t'entends</div>
     <input type="file" id="fileInput" accept="image/*,.pdf" onchange="handleFileSelect(event)">
   </div>
 </div>
@@ -124,7 +124,7 @@
   </div>
   <div class="drawer-body">
     <div class="d-group">
-      <div class="d-group-title">🧠 Mémoire & apprentissage</div>
+      <div class="d-group-title">🧠 Mémoire &amp; apprentissage</div>
       <div class="d-btn" onclick="drawerAction(this,'/build-memory','build')"><span class="d-btn-icon">🔄</span><div class="d-btn-body"><span class="d-btn-label">Reconstruire le contexte</span><span class="d-btn-desc">Relit mails et conversations pour mettre à jour le résumé et les fiches contacts.</span><div class="d-btn-result" id="result-build"></div></div></div>
       <div class="d-btn" onclick="drawerAction(this,'/synth','synth')"><span class="d-btn-icon">📝</span><div class="d-btn-body"><span class="d-btn-label">Synthèse des conversations</span><span class="d-btn-desc">Extrait des règles et insights des 15 dernières conversations.</span><div class="d-btn-result" id="result-synth"></div></div></div>
       <div class="d-btn" onclick="drawerAction(this,'/analyze-raw-mails','analyze')"><span class="d-btn-icon">🔍</span><div class="d-btn-body"><span class="d-btn-label">Analyser mails non traités</span><span class="d-btn-desc">Lance l'analyse IA sur les mails ingérés mais pas encore analysés.</span><div class="d-btn-result" id="result-analyze"></div></div></div>
@@ -139,13 +139,13 @@
     <div class="d-group">
       <div class="d-group-title">⚠️ Actions sensibles</div>
       <div class="d-btn" onclick="drawerAction(this,'/purge-memory','purge')"><span class="d-btn-icon">🗓️</span><div class="d-btn-body"><span class="d-btn-label">Purger les vieux mails</span><span class="d-btn-desc">Supprime les mails de plus de 90 jours. Règles et conversations conservées.</span><div class="d-btn-result" id="result-purge"></div></div></div>
-      <div class="d-btn danger" onclick="drawerShowConfirm('confirm-rebuild')"><span class="d-btn-icon">⛔</span><div class="d-btn-body"><span class="d-btn-label">Vider l'historique mails</span><span class="d-btn-desc">Efface tous les mails en base. Règles et insights préservés.</span><div class="d-confirm" id="confirm-rebuild"><div class="d-confirm-text">⚠️ Tous les mails en base seront supprimés. Confirmer ?</div><div class="d-confirm-btns"><button class="d-confirm-yes" onclick="drawerConfirmAction(event,'/rebuild-memory','rebuild')">Oui, vider</button><button class="d-confirm-no" onclick="drawerHideConfirm(event,'confirm-rebuild')">Annuler</button></div></div><div class="d-btn-result" id="result-rebuild"></div></div></div>
+      <div class="d-btn danger" onclick="drawerShowConfirm('confirm-rebuild')"><span class="d-btn-icon">⛔</span><div class="d-btn-body"><span class="d-btn-label">Vider l'historique mails</span><span class="d-btn-desc">Efface tous les mails en base. Règles et insights préservés.</span><div class="d-confirm" id="confirm-rebuild"><div class="d-confirm-text">⚠️ Tous les mails en base seront supprimés. Confirmer ?</div><div class="d-confirm-btns"><button class="d-confirm-yes" onclick="drawerConfirmAction(event,'/rebuild-memory','rebuild')">Oui, vider</button><button class="d-confirm-no" onclick="drawerHideConfirm(event,'confirm-rebuild')">Annuler</button></div></div><div class="d-btn-result" id="result-rebuild"></div></div></div>
     </div>
     <div class="d-sep"></div>
     <div class="d-group">
       <div class="d-group-title">🔧 Urgence / Debug</div>
-      <div class="d-btn" onclick="drawerAction(this,'/learn-inbox-mails','inbox')"><span class="d-btn-icon">📥</span><div class="d-btn-body"><span class="d-btn-label">Forcer ingestion inbox</span><span class="d-btn-desc">Importe les 50 derniers mails. Utile après une coupure du token.</span><div class="d-btn-result" id="result-inbox"></div></div></div>
-      <div class="d-btn" onclick="drawerAction(this,'/learn-sent-mails','sent')"><span class="d-btn-icon">📤</span><div class="d-btn-body"><span class="d-btn-label">Forcer ingestion envoyés</span><span class="d-btn-desc">Importe les 50 derniers mails envoyés pour enrichir le style.</span><div class="d-btn-result" id="result-sent"></div></div></div>
+      <div class="d-btn" onclick="drawerAction(this,'/learn-inbox-mails','inbox')"><span class="d-btn-icon">📥</span><div class="d-btn-body"><span class="d-btn-label">Forcer ingéstion inbox</span><span class="d-btn-desc">Importe les 50 derniers mails. Utile après une coupure du token.</span><div class="d-btn-result" id="result-inbox"></div></div></div>
+      <div class="d-btn" onclick="drawerAction(this,'/learn-sent-mails','sent')"><span class="d-btn-icon">📤</span><div class="d-btn-body"><span class="d-btn-label">Forcer ingéstion envoyés</span><span class="d-btn-desc">Importe les 50 derniers mails envoyés pour enrichir le style.</span><div class="d-btn-result" id="result-sent"></div></div></div>
       <div class="d-btn" onclick="drawerAction(this,'/init-db','initdb')"><span class="d-btn-icon">🗄️</span><div class="d-btn-body"><span class="d-btn-label">Vérifier la base de données</span><span class="d-btn-desc">Crée les tables manquantes et exécute les migrations. Sans danger.</span><div class="d-btn-result" id="result-initdb"></div></div></div>
     </div>
     <div class="d-sep"></div>
@@ -162,7 +162,15 @@
   </div>
 </div>
 
+<!-- Modules JS (ordre important : les dépendances avant chat.js) -->
+<script src="/static/chat-onboarding.js"></script>
+<script src="/static/chat-shortcuts.js"></script>
+<script src="/static/chat-voice.js"></script>
+<script src="/static/chat-feedback.js"></script>
+<script src="/static/chat-triage.js"></script>
+<script src="/static/chat-admin.js"></script>
 <script src="/static/chat.js"></script>
+
 <script>
   // Enregistrement du Service Worker (PWA)
   if ('serviceWorker' in navigator) {
