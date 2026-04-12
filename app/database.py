@@ -430,6 +430,7 @@ def init_postgres():
         # ── Phase 3a : vectorisation des règles pour RAG ──
         "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS embedding vector(1536)",
         "CREATE INDEX IF NOT EXISTS idx_rules_embedding ON aria_rules USING hnsw (embedding vector_cosine_ops)",
+        "ALTER TABLE aria_hot_summary ADD COLUMN IF NOT EXISTS embedding vector(1536)",
     ]
     for m in migrations:
         try:
