@@ -4,6 +4,22 @@
 
 ---
 
+## ⚠️ RÈGLE IMPÉRATIVE — MISE À JOUR DE CE DOCUMENT
+
+Ce fichier est le JOURNAL DE BORD du projet Raya. Il sert à la fois d'historique
+de ce qui a été fait ET d'objectif pour la suite.
+
+**À chaque session, Opus DOIT :**
+1. Lire ce fichier au début de la session pour comprendre l'état du projet
+2. Mettre à jour ce fichier à chaque jalon significatif (tâche complétée, fix, refactoring)
+3. En fin de session, mettre à jour la section "Historique des sessions" avec un résumé
+4. Mettre à jour les prochaines étapes et les prompts en attente
+
+**C'est non négociable.** Sans ce document à jour, la prochaine session ne sait pas
+où on en est et perd du temps à redécouvrir ce qui a déjà été fait.
+
+---
+
 ## ⭐ ÂME DU PROJET
 Raya = cerveau supplémentaire pour dirigeant. 8 dimensions, 3 modes, supervision managériale. LLM-agnostic, tools-agnostic, channel-agnostic. Raya ne connait PAS le mot "Jarvis".
 
@@ -37,9 +53,9 @@ Gestion tenants (CRUD), formulaire simplifié (forme juridique, SIRET, adresse),
 ### Web search ✅
 Accès internet via web_search Anthropic activé.
 
-## 3. RIEN EN ATTENTE
+## 3. PROMPTS EN ATTENTE
 
-Tous les prompts ont été envoyés et exécutés. Zéro dette.
+Aucun. Zéro dette.
 
 ## 4. PROCHAINES ÉTAPES
 
@@ -57,13 +73,24 @@ Tous les prompts ont été envoyés et exécutés. Zéro dette.
 - Application mobile (PWA ou native)
 - Audit performance (profiler temps de réponse)
 
-## 5. PRINCIPE : Intelligence collective
-Quand un utilisateur est supprimé, ses données personnelles sont effacées mais l'intelligence (règles, insights, patterns, narratives, mails, activity_log) est anonymisée et conservée pour le collectif.
+## 5. PRINCIPES ARCHITECTURAUX
 
-## 6. Reprise
+- **Intelligence collective** : suppression user = données privées effacées, intelligence (règles, insights, patterns, narratives) anonymisée et conservée pour le collectif.
+- **Imports lazy** dans scheduler.py : un module cassé ne bloque pas le démarrage.
+- **Fichiers < 15k** : tout fichier > 20k doit être découpé. Sonnet travaille mieux sur des petits fichiers.
+- **Prompts architecte** : Opus donne le QUOI/OÙ/POURQUOI/CONTRAINTES. Sonnet code.
+
+## 6. HISTORIQUE DES SESSIONS
+
+### Session 12-13/04/2026 (marathon)
+**~50 tâches.** Phase 5D-2 à 5G complètes. Phase 7 (16 tâches Jarvis). Phase 8 (4 tâches intelligence avancée). 5 refactorings majeurs. 9 fixes. Admin panel CRUD tenants. Web search activé. Vision produit documentée (8 dimensions, 3 modes, 4 piliers). Discussion modèle commercial (packs Essentiel/Pro/Dirigeant). Principe intelligence collective établi.
+
+Commits clés : `af3e7762` (Gmail), `cc75f24f` (monitoring+WhatsApp), `b15f928f` (refactor scheduler), `ba6da00f` (anomalies), `ba5602ad` (observer).
+
+## 7. Reprise
 « Bonjour Opus. Projet Raya, Guillaume. On se tutoie, en français, vocabulaire Terminal, concis. Lis `docs/raya_session_state.md` puis `docs/raya_roadmap_v2.md` sur `per1gyom/couffrant-assistant` main via GitHub MCP. Règle d'or : aucune écriture sans mon ok. Reprends où on en était. »
 
-## 7. Variables Railway
+## 8. Variables Railway
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`
 - `NOTIFICATION_PHONE_GUILLAUME`, `NOTIFICATION_PHONE_ADMIN`
 - `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `SCHEDULER_GMAIL_ENABLED=true`
