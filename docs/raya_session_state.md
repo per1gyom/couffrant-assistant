@@ -20,82 +20,53 @@ les formats de rapport, les actions disponibles — tout est dynamique :
 
 - Les **canaux de livraison** (chat, WhatsApp, mail, vocal, Telegram...) sont des OUTILS
   dans le `tools_registry`. Raya consulte la liste, sait lesquels sont disponibles
-  pour cet utilisateur, et propose/utilise en conséquence. Si un canal n'existe pas
-  et que l'utilisateur le demande, Raya répond "je n'ai pas encore ce canal,
-  mais je peux te l'envoyer par X ou Y."
+  pour cet utilisateur, et propose/utilise en conséquence.
 
 - Les **préférences utilisateur** (format du rapport, canal préféré, contenu souhaité)
-  sont des règles apprises dans `aria_rules` — pas du code. L'utilisateur modifie
-  ses préférences en parlant à Raya, pas dans un panneau de configuration.
+  sont des règles apprises dans `aria_rules` — pas du code.
 
-- Pour ajouter un **nouveau canal** (ex: Telegram) : un développeur crée le connecteur
-  (`app/connectors/telegram_connector.py`), l'enregistre dans `tools_registry`,
-  et Raya le propose automatiquement — sans toucher à sa logique.
+- Pour ajouter un **nouveau canal** : connecteur + enregistrement dans `tools_registry`.
+  Raya le propose automatiquement — zéro changement dans sa logique.
 
-C'est le même principe que pour les outils métier : LLM-agnostic, tools-agnostic,
-channel-agnostic. La MÉMOIRE et l'INTELLIGENCE sont l'asset, les tuyaux sont
-interchangeables.
+LLM-agnostic, tools-agnostic, channel-agnostic.
 
 ## 1. Stack
 FastAPI Python 3.13, Railway, PostgreSQL+pgvector, Anthropic 3 tiers, OpenAI embeddings.
 Repo `github.com/per1gyom/couffrant-assistant` main.
 
 ## 2. État
-**PHASES 5 : TERMINÉES ✅** | **PHASE 7 EN COURS (8/10+)**
+**PHASES 5 : TERMINÉES ✅** | **PHASE 7 JARVIS : 11 tâches ✅**
 
 | Fait Phase 7 | Détail |
 |---|---|
-| urgency_model ✅ | Score 0-100, 4 étages (règles→contacts→patterns→Haiku), certitude |
-| Shadow mode ✅ | Alertes [SHADOW] en chat, pas de WhatsApp tant qu'actif |
-| Heartbeat matinal ⚠️ | Code poussé MAIS à redesigner (voir section Rapport ci-dessous) |
-| Notification prefs ✅ | Plages silencieuses, VIP emails/domaines, boost urgence |
-| WhatsApp structuré ✅ | Messages formatés avec 4 options de réponse rapide |
+| urgency_model ✅ | Score 0-100, 4 étages (règles→contacts→patterns→Haiku), certitude, VIP boost |
+| Shadow mode ✅ | shadow_mode + shadow_mode_until sur users, alertes [SHADOW] en chat |
+| Notification prefs ✅ | Plages silencieuses, VIP emails/domaines, calendar_aware, should_notify() |
+| WhatsApp structuré ✅ | send_whatsapp_structured() avec 4 options de réponse rapide |
 | Activity log ✅ | Table + log dans 4 handlers (mail/drive/teams/memory) + conversations |
-| Mémoire narrative ✅ | Table dossier_narratives, vectorisée, injection RAG dans prompt |
-| Briefings réunions ✅ | Job 6h30, prépare briefing par événement via Haiku + narratives |
+| Mémoire narrative ✅ | dossier_narratives vectorisée, injection RAG dans prompt |
+| Briefings réunions ✅ | Job 6h30, Haiku + narratives, alerte par événement |
+| Rapport stocké + ping ✅ | daily_reports table, _prepare_daily_report() stocke, _send_report_ping() ping léger |
+| Livraison rapport ✅ | report_actions.py (get/mark/section), injection prompt, marquage auto dans raya.py |
+| Workflow intelligence ✅ | _analyze_patterns() lit activity_log (150 actions 30j), type workflow dans prompt |
 
-### ⚠️ REDESIGN NÉCESSAIRE : Rapport matinal (7-6)
+Sprint 1 du planning V3 : TERMINÉ ✅
 
-Le heartbeat actuel (push WhatsApp systématique) ne correspond pas à la vision.
+## 3. PROCHAINE ÉTAPE (Sprint 2 — planning V3)
 
-**Vision correcte :**
-1. Raya PRÉPARE le rapport en arrière-plan (stocké, pas envoyé)
-2. Raya envoie un PING léger : "Ton rapport est prêt" (fait sonner le téléphone)
-3. L'utilisateur COMMANDE la livraison sous la forme qu'il veut
-4. Le format du rapport est PERSONNALISABLE par l'utilisateur via la conversation
-5. Raya APPREND le format préféré et le reproduit automatiquement
+1. **7-1 Multi-mailbox Gmail** — OAuth2 + polling + brancher sur le même pipeline webhook
+2. **7-7 Monitoring + fallbacks** — alertes si scan inactif > 10min, fallback SMS
+3. **7-8 Canal WhatsApp bidirectionnel** — recevoir les réponses, parser, exécuter
 
-**Les canaux de livraison ne sont PAS codés en dur.** Ce sont des outils du
-`tools_registry`. Raya ne propose que les canaux disponibles pour cet utilisateur.
-
-**Le contenu du rapport est personnalisable.** L'utilisateur dit "ajoute la météo,
-mes RDV, les factures Odoo". Raya stocke ces préférences comme des règles apprises.
-
-**À FAIRE :** Refactorer `_job_heartbeat_morning` + `_build_morning_summary` :
-- Stocker le rapport dans une table (ex: `daily_reports`) au lieu de l'envoyer
-- Envoyer uniquement un ping notification
-- Ajouter une commande "rapport" dans le chat pour livraison à la demande
-- Ajouter les canaux de livraison comme outils dans tools_registry
-
-## 3. PROCHAINE ÉTAPE
-1. **Redesign heartbeat** → rapport à la demande, canaux dynamiques
-2. **7-1 Multi-mailbox Gmail**
-3. **Workflow intelligence** → pattern engine sur activity_log
-4. **7-7 Monitoring + fallbacks**
+Voir `docs/raya_planning_v3.md` pour le calendrier complet.
 
 ## 4. NOTES POUR PLUS TARD (pré-commercialisation)
 
 ### Raya et ses limites → redirection vers l'humain
-Quand Raya dit à un utilisateur qu'elle ne peut pas faire quelque chose ou qu'elle
-a une limitation (canal manquant, outil non connecté, action non supportée), elle
-doit orienter l'utilisateur vers la bonne personne :
-- **Si collaborateur** → contacter l'admin de son tenant (le gérant de la société)
-- **Si admin/dirigeant** → contacter le support Raya (email/téléphone configurable)
-- Le contact à afficher est configurable par tenant (variable `SUPPORT_EMAIL` existe déjà
-  dans `config.py`, étendre avec `SUPPORT_PHONE`, et un contact admin par tenant)
+- **Si collaborateur** → contacter l'admin de son tenant
+- **Si admin/dirigeant** → contacter le support Raya
+- `SUPPORT_EMAIL` existe déjà dans `config.py`, étendre avec `SUPPORT_PHONE` + contact admin par tenant
 - Raya ne dit jamais "je ne peux pas" sans donner une alternative ou un recours humain
-- À creuser : format du message de redirection, ton (pas robotique), intégration
-  dans le prompt système via `capabilities.py`
 
 ## 5. Reprise
 « Bonjour Opus. Projet Raya, Guillaume. On se tutoie, en français, vocabulaire Terminal, concis. Lis `docs/raya_session_state.md` puis `docs/raya_roadmap_v2.md` sur `per1gyom/couffrant-assistant` main via GitHub MCP. Règle d'or : aucune écriture sans mon ok. Reprends où on en était. »
