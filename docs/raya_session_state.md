@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 13/04/2026 après-midi** — Opus
+**Dernière mise à jour : 12/04/2026 soir** — Opus
 
 ---
 
@@ -38,9 +38,9 @@ Guillaume possède plusieurs sociétés. Raya fait le lien entre elles : vision 
 FastAPI Python 3.13, Railway, PostgreSQL+pgvector, Anthropic 3 tiers, OpenAI embeddings.
 Repo `github.com/per1gyom/couffrant-assistant` main.
 
-## 2. État 13/04/2026
+## 2. État 12/04/2026 soir
 **PHASES 5A, 5B, 5C : TERMINÉES ✅**
-**PHASE 5D EN COURS (2/4)** — 5D-1 table user_tenant_access ✅, 5D-3 admin secours ✅
+**PHASE 5D TERMINÉE ✅** (4/4)
 
 | Fait | Détail |
 |---|---|
@@ -56,19 +56,23 @@ Repo `github.com/per1gyom/couffrant-assistant` main.
 | APScheduler complet ✅ | Webhooks + tokens + decay + audit + expire |
 | user_tenant_access ✅ | Table many-to-many créée + migration données |
 | Admin secours ✅ | Configurable par env BACKUP_ADMIN_* |
+| **get_user_tenants() ✅** | Retourne tous les tenants d'un user avec rôle + nom |
+| **RAG multi-tenant ✅** | search_similar + retrieve_* acceptent tenant_ids (liste) |
+| **LEARN avec tenant cible ✅** | Format [ACTION:LEARN:cat\|rule\|tenant] + _user pour règles perso |
+| **Prompt multi-tenant ✅** | build_system_prompt injecte le contexte de TOUS les tenants dirigeant |
+| **Core multi-tenant ✅** | _raya_core charge user_tenants et les passe au prompt builder |
+| **save_rule personal=True ✅** | Règles utilisateur (tenant_id=NULL) pour mode dirigeant |
 
-## 3. PROCHAINE ÉTAPE : 5D-2
+## 3. PROCHAINE ÉTAPE : 5D-4
 
-**Contexte multi-tenant dans le prompt.** C'est la tâche la plus complexe :
-- Créer une fonction `get_user_tenants(username)` qui interroge `user_tenant_access`
-- Modifier `build_system_prompt` pour injecter le contexte de TOUS les tenants d'un dirigeant
-- Modifier le RAG (`retrieve_context`) pour chercher dans tous les tenants
-- Permettre à Raya de croiser : « Dupont relance sur le chantier (tenant A) ET la facture est en attente (tenant B) »
+**Onboarding par tenant.** Quand un dirigeant ajoute une nouvelle société, Raya lance
+un questionnaire adapté au métier (photovoltaïque ≠ événementiel). Les questions sont
+générées par le moteur d'élicitation existant.
 
-Après 5D-2 : 5D-4 (onboarding par tenant) puis Phase 5E.
+Après 5D-4 : Phase 5E.
 
 ## 4. ROADMAP
-~~5A~~ → ~~5B~~ → ~~5C~~ → **5D** (2/4) → 5E → 5G → 5F → Phase 7 (Jarvis) → Phase 6.
+~~5A~~ → ~~5B~~ → ~~5C~~ → ~~5D~~ → **5E** → 5G → 5F → Phase 7 (Jarvis) → Phase 6.
 Voir `docs/raya_roadmap_v2.md`.
 
 ## 5. Utilisateurs
@@ -90,3 +94,13 @@ Rapport pour Opus : fichier(s), ligne(s), SHA.
 
 ## 8. RÈGLE
 À chaque jalon, Opus met à jour ce fichier + `docs/raya_changelog.md`. Non négociable.
+
+## 9. Commits 5D-2 (12/04/2026)
+| SHA | Message |
+|---|---|
+| `9a7eca4` | feat(tenant): get_user_tenants() — 5D-2a |
+| `1b899cf` | feat(embedding): search_similar multi-tenant — 5D-2b |
+| `40b3f87` | feat(rag): multi-tenant retrieval — 5D-2c |
+| `d124ed4` | feat(actions): LEARN with tenant target + personal flag — 5D-2d |
+| `4fbcc8b` | feat(actions): LEARN with tenant target parsing — 5D-2d |
+| `eb44268` | feat(context+raya): multi-tenant prompt + core wiring — 5D-2e/5D-2f |
