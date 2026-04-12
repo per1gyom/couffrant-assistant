@@ -35,11 +35,11 @@ Repo `github.com/per1gyom/couffrant-assistant` main.
 
 ## 2. État complet
 
-### Phase 7 — 16 tâches ✅
+### Phase 7 — 16 tâches ✅ (COMPLÈTE)
 urgency_model, shadow mode, notification prefs, WhatsApp structuré, activity log, mémoire narrative, briefings réunions, rapport stocké+ping+livraison, workflow intelligence, Gmail connector+pipeline+polling, monitoring système, fallback SMS, WhatsApp bidirectionnel, vitesse lecture dynamique.
 
-### Phase 8 — 4/5 tâches ✅
-8-CYCLES (patterns cycliques), 8-TON (ton adaptatif), 8-ANOMALIES (Odoo vs mails), 8-OBSERVE (observation externe Drive/mail/calendar). Reste 8-COLLAB (Phase commercialisation).
+### Phase 8 — 5/5 tâches ✅ (COMPLÈTE)
+8-CYCLES (patterns cycliques), 8-TON (ton adaptatif), 8-ANOMALIES (Odoo vs mails), 8-OBSERVE (observation externe), 8-COLLAB (collaboration inter-Rayas via tenant_events).
 
 ### Refactorings — 5 ✅
 scheduler.py (43k→5k+8 modules), database.py (31k→9k+migrations), admin.py (20k→3 modules), aria_context.py (25k→13k+loaders), chat.js (40k→10k+6 modules).
@@ -69,23 +69,23 @@ Aucun. Zéro dette.
 - Posts LinkedIn + publication
 
 ### Priorité 3 — Futur
-- 8-COLLAB (collaboration inter-Rayas)
 - Application mobile (PWA ou native)
 - Audit performance (profiler temps de réponse)
 
 ## 5. PRINCIPES ARCHITECTURAUX
 
-- **Intelligence collective** : suppression user = données privées effacées, intelligence (règles, insights, patterns, narratives) anonymisée et conservée pour le collectif.
+- **Intelligence collective** : suppression user = données privées effacées, intelligence anonymisée et conservée.
+- **Collaboration inter-Rayas** : tenant_events + SHARE_EVENT + injection prompt "Activité de l'équipe".
 - **Imports lazy** dans scheduler.py : un module cassé ne bloque pas le démarrage.
-- **Fichiers < 15k** : tout fichier > 20k doit être découpé. Sonnet travaille mieux sur des petits fichiers.
+- **Fichiers < 15k** : tout fichier > 20k doit être découpé.
 - **Prompts architecte** : Opus donne le QUOI/OÙ/POURQUOI/CONTRAINTES. Sonnet code.
 
 ## 6. HISTORIQUE DES SESSIONS
 
 ### Session 12-13/04/2026 (marathon)
-**~50 tâches.** Phase 5D-2 à 5G complètes. Phase 7 (16 tâches Jarvis). Phase 8 (4 tâches intelligence avancée). 5 refactorings majeurs. 9 fixes. Admin panel CRUD tenants. Web search activé. Vision produit documentée (8 dimensions, 3 modes, 4 piliers). Discussion modèle commercial (packs Essentiel/Pro/Dirigeant). Principe intelligence collective établi.
+**~55 tâches.** Phase 5D-2 à 5G complètes. Phase 7 complète (16 tâches). Phase 8 complète (5 tâches). 5 refactorings majeurs. 9 fixes. Admin panel CRUD tenants. Web search activé. Vision produit documentée (8 dimensions, 3 modes, 4 piliers). Discussion modèle commercial (packs). Principes intelligence collective + collaboration inter-Rayas établis.
 
-Commits clés : `af3e7762` (Gmail), `cc75f24f` (monitoring+WhatsApp), `b15f928f` (refactor scheduler), `ba6da00f` (anomalies), `ba5602ad` (observer).
+Commits clés : `af3e7762` (Gmail), `cc75f24f` (monitoring+WhatsApp), `b15f928f` (refactor scheduler), `ba6da00f` (anomalies), `ba5602ad` (observer), `712c83a3` (collab inter-Rayas).
 
 ## 7. Reprise
 « Bonjour Opus. Projet Raya, Guillaume. On se tutoie, en français, vocabulaire Terminal, concis. Lis `docs/raya_session_state.md` puis `docs/raya_roadmap_v2.md` sur `per1gyom/couffrant-assistant` main via GitHub MCP. Règle d'or : aucune écriture sans mon ok. Reprends où on en était. »
