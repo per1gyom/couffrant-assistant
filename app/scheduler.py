@@ -17,7 +17,7 @@ Valeur par défaut : true (tous les jobs actifs).
 
 Jobs :
   expire_pending   : toutes les heures          — expire les pending_actions trop vieilles
-  confidence_decay : hebdomadaire lundi 02h00   — décroissance de confiance (B6)
+  confidence_decay : hebdomadaire lundi 02h00   — décroissance de confiance (B6, adaptive 5G-2)
   opus_audit       : hebdomadaire dimanche 03h00 — audit de cohérence Opus (B5)
   webhook_setup    : 30s après démarrage (une fois) — setup initial des webhooks Microsoft
   webhook_renewal  : toutes les 6 heures            — renouvellement des webhooks Microsoft
@@ -182,43 +182,60 @@ def _job_expire_pending():
 
 def _job_confidence_decay():
     """
-    Décroissance de confiance des règles inactives (B6).
-    - Règles non touchées depuis > 30j : confidence -= 0.05
-    - Confidence < 0.3 → masquées (active=false), pas supprimées
+    Décroissance de confiance des règles inactives (B6 / 5G-2 adaptatif).
+    - Décroissance et seuil de masquage varies par utilisateur selon la phase de maturite
     - Règles seed et onboarding sont protégées
     """
     try:
         from app.database import get_pg_conn
+        from app.maturity import get_adaptive_params
+
         conn = get_pg_conn()
         c = conn.cursor()
 
-        c.execute("""
-            UPDATE aria_rules
-            SET confidence = GREATEST(0.0, confidence - %s),
-                updated_at = NOW()
-            WHERE active = true
-              AND source NOT IN ('seed', 'onboarding')
-              AND updated_at < NOW() - INTERVAL '30 days'
-        """, (CONFIDENCE_DECAY_STEP,))
-        decayed = c.rowcount
+        # Liste des utilisateurs concernés
+        c.execute("SELECT DISTINCT username FROM aria_rules WHERE active = true")
+        users = [r[0] for r in c.fetchall()]
 
-        c.execute("""
-            UPDATE aria_rules
-            SET active     = false,
-                updated_at = NOW()
-            WHERE active = true
-              AND source NOT IN ('seed', 'onboarding')
-              AND confidence < %s
-        """, (CONFIDENCE_MASK_THRESHOLD,))
-        masked = c.rowcount
+        total_decayed = 0
+        total_masked  = 0
+
+        for uname in users:
+            try:
+                params = get_adaptive_params(uname)
+                decay = params["decay_per_week"]
+                mask  = params["mask_threshold"]
+
+                c.execute("""
+                    UPDATE aria_rules
+                    SET confidence = GREATEST(0.0, confidence - %s),
+                        updated_at = NOW()
+                    WHERE active = true AND username = %s
+                      AND source NOT IN ('seed', 'onboarding')
+                      AND updated_at < NOW() - INTERVAL '30 days'
+                """, (decay, uname))
+                total_decayed += c.rowcount
+
+                c.execute("""
+                    UPDATE aria_rules
+                    SET active = false, updated_at = NOW()
+                    WHERE active = true AND username = %s
+                      AND source NOT IN ('seed', 'onboarding')
+                      AND confidence < %s
+                """, (uname, mask))
+                total_masked += c.rowcount
+
+            except Exception as e:
+                logger.error(f"[Scheduler] confidence_decay erreur {uname}: {e}")
 
         conn.commit()
         conn.close()
 
         parts = []
-        if decayed: parts.append(f"{decayed} décrémentée(s)")
-        if masked:  parts.append(f"{masked} masquée(s) (conf < {CONFIDENCE_MASK_THRESHOLD})")
-        logger.info(f"[Scheduler] confidence_decay : {', '.join(parts) if parts else 'aucune règle concernée'}")
+        if total_decayed: parts.append(f"{total_decayed} décrémentée(s)")
+        if total_masked:  parts.append(f"{total_masked} masquée(s)")
+        logger.info(f"[Scheduler] confidence_decay ({len(users)} users) : "
+                    f"{', '.join(parts) if parts else 'aucune règle concernée'}")
 
     except Exception as e:
         logger.error(f"[Scheduler] ERREUR confidence_decay : {e}")
@@ -316,13 +333,10 @@ def _job_proactivity_scan():
         from app.database import get_pg_conn
         from app.proactive_alerts import create_alert, cleanup_expired
 
-        # Nettoyage des alertes expirées
         cleanup_expired()
 
         conn = get_pg_conn()
         c = conn.cursor()
-
-        # Liste des utilisateurs actifs (au moins 1 conversation dans les 7 derniers jours)
         c.execute("""
             SELECT DISTINCT username FROM aria_memory
             WHERE created_at > NOW() - INTERVAL '7 days'
@@ -351,7 +365,6 @@ def _scan_user(username: str):
     conn = get_pg_conn()
     c = conn.cursor()
 
-    # 1. Mails haute priorité non lus depuis > 2h
     c.execute("""
         SELECT id, subject, from_email, priority, received_at
         FROM mail_memory
@@ -374,7 +387,6 @@ def _scan_user(username: str):
             source_type="mail", source_id=str(row[0]),
         )
 
-    # 2. Mails en attente de réponse depuis > 24h
     c.execute("""
         SELECT id, subject, from_email, reply_urgency
         FROM mail_memory

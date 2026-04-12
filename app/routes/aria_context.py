@@ -5,6 +5,7 @@ Isole la lecture DB, les mails live, l'agenda et la construction du prompt syste
 Phase 3a : memoire injectee via RAG (recherche semantique).
 Phase 3b : session_theme (B8) — si un sujet coherent est detecte,
            le contexte RAG est enrichi avec tout ce qui concerne ce sujet.
+5G-3    : maturity_block — comportement adaptatif selon la phase relationnelle.
 Fallback automatique si OPENAI_API_KEY absent.
 
 Les appels reseau sont lances en parallele depuis raya_endpoint().
@@ -34,7 +35,7 @@ GUARDRAILS = """GARDE-FOUS DE SECURITE (absolus, en code, non negociables) :
 • Quand l'utilisateur dit "vas-y", "envoie", "confirme", "valide", "oui" en reponse a une action
   en attente, tu generes [ACTION:CONFIRM:<id>] avec l'id de l'action concernee.
 • Quand il dit "annule", "non", "laisse tomber", tu generes [ACTION:CANCEL:<id>].
-• Tu NE confirmes JAMAIS une action que l'utilisateur ne t'as pas explicitement validee.
+• Tu NE confirmes JAMAIS une action que l'utilisateur ne t'a pas explicitement validee.
 
 PRECISION FACTUELLE (non negociable — la confiance de l'utilisateur en depend) :
 • Ne jamais inventer une information que tu ne connais pas.
@@ -204,7 +205,6 @@ def build_actions_prompt(domains: list[str], tools: dict) -> str:
     """Construit le bloc actions en n'incluant que les domaines pertinents."""
     sections = []
 
-    # Toujours inclus : workflow + interactif
     sections.append("""=== ACTIONS DISPONIBLES ===
 Confirmation des actions en attente :
   [ACTION:CONFIRM:id]  -> execute une action sensible mise en queue
@@ -286,6 +286,50 @@ def build_system_prompt(
         hot_summary = get_hot_summary(username)
         cache.set(cache_key_hot, hot_summary)
 
+    # 5G-3 : comportement adaptatif selon la maturite
+    maturity_block = ""
+    try:
+        from app.maturity import get_adaptive_params
+        adaptive = get_adaptive_params(username)
+        phase = adaptive["phase"]
+        score = adaptive["score"]
+
+        if phase == "discovery":
+            maturity_block = f"""
+
+=== PHASE RELATIONNELLE : DECOUVERTE (score {score}/100) ===
+Tu decouvres {display_name}. Comportement attendu :
+- Confirme tes apprentissages : "j'ai l'impression que tu preferes X, c'est bien ca ?"
+- Pose des questions pour mieux comprendre son fonctionnement
+- Apprends BEAUCOUP (genere des LEARN frequemment)
+- Ne propose PAS d'automatisations, tu n'as pas assez de recul
+- Sois attentive et curieuse, montre que tu ecoutes"""
+
+        elif phase == "consolidation":
+            maturity_block = f"""
+
+=== PHASE RELATIONNELLE : CONSOLIDATION (score {score}/100) ===
+Tu connais bien {display_name}. Comportement attendu :
+- Confirme tes apprentissages seulement sur les NOUVEAUX sujets
+- Propose des raccourcis : "la derniere fois tu as fait X, tu veux que je relance ?"
+- Apprends de facon moderee et qualitative
+- Commence a suggerer ponctuellement : "je pourrais surveiller X pour toi"
+- Sois efficace, moins de questions, plus d'action"""
+
+        elif phase == "maturity":
+            maturity_block = f"""
+
+=== PHASE RELATIONNELLE : MATURITE (score {score}/100) ===
+Tu connais {display_name} en profondeur. Comportement attendu :
+- Agis de facon autonome dans les limites connues
+- Propose des automatisations : "tu fais X chaque semaine, je peux le faire pour toi"
+- N'apprends que sur le NOUVEAU (pas de LEARN redondant)
+- Confirme UNIQUEMENT sur les sujets inedits ou les actions a haut risque
+- Sois proactive : anticipe les besoins avant qu'il les exprime"""
+
+    except Exception:
+        pass
+
     try:
         from app.rag import retrieve_context
         rag_ctx = retrieve_context(query, username, tenant_id)
@@ -301,7 +345,7 @@ def build_system_prompt(
         conv_context  = ""
         via_rag       = False
 
-    # 5B-4 : dédupliquer le contexte conversationnel
+    # 5B-4 : dedupliquer le contexte conversationnel
     if conv_context and db_ctx.get("history"):
         recent_inputs = {h.get("user_input", "")[:80].lower() for h in db_ctx["history"] if h.get("user_input")}
         filtered_parts = []
@@ -382,13 +426,12 @@ def build_system_prompt(
                     lines.append(f"     {a['body'][:150]}")
             alerts_block = (
                 "\n\n=== ALERTES PROACTIVES ===\n"
-                "Tu as des alertes à mentionner à l'utilisateur :\n"
+                "Tu as des alertes a mentionner a l'utilisateur :\n"
                 + "\n".join(lines)
-                + "\nMENTIONNE ces alertes naturellement dans ta réponse. "
+                + "\nMENTIONNE ces alertes naturellement dans ta reponse. "
                 "Ne les ignore pas. Si l'utilisateur parle d'autre chose, "
-                "mentionne-les en fin de message : 'Au fait, j'ai remarqué que...'"
+                "mentionne-les en fin de message : 'Au fait, j'ai remarque que...'"
             )
-            # Marque comme vues (elles ne réapparaîtront pas au prochain échange)
             mark_seen([a["id"] for a in alerts], username)
     except Exception:
         pass
@@ -402,7 +445,7 @@ Tu observes, tu apprends, tu t'organises librement. Tu parles au feminin.
 {GUARDRAILS}
 {capabilities_block}
 
-{f"=== CE QUE TU SAIS SUR {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"=== PREMIERE CONVERSATION ==={chr(10)}Tu ne connais pas encore {display_name}. Commence a observer et memoriser."}
+{f"=== CE QUE TU SAIS SUR {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"=== PREMIERE CONVERSATION ==={chr(10)}Tu ne connais pas encore {display_name}. Commence a observer et memoriser."}{maturity_block}
 
 {f"=== TA MEMOIRE (pertinente pour cette question) ==={chr(10)}{aria_rules}" if aria_rules else "Ta memoire est vide. Tu peux commencer a construire via [ACTION:LEARN]."}
 
