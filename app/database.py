@@ -333,6 +333,32 @@ def init_postgres():
     c.execute("CREATE INDEX IF NOT EXISTS idx_uta_username ON user_tenant_access (username)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_uta_tenant ON user_tenant_access (tenant_id)")
 
+    # Alertes proactives (5E-4a)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS proactive_alerts (
+            id SERIAL PRIMARY KEY,
+            username TEXT NOT NULL,
+            tenant_id TEXT,
+            alert_type TEXT NOT NULL,
+            priority TEXT NOT NULL DEFAULT 'normal',
+            title TEXT NOT NULL,
+            body TEXT,
+            source_type TEXT,
+            source_id TEXT,
+            seen BOOLEAN DEFAULT false,
+            dismissed BOOLEAN DEFAULT false,
+            created_at TIMESTAMP DEFAULT NOW(),
+            expires_at TIMESTAMP DEFAULT (NOW() + INTERVAL '48 hours'),
+            CONSTRAINT alert_type_check CHECK (
+                alert_type IN ('mail_urgent', 'deadline', 'reminder', 'pattern', 'info')
+            ),
+            CONSTRAINT alert_priority_check CHECK (
+                priority IN ('low', 'normal', 'high', 'critical')
+            )
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_alerts_user_active ON proactive_alerts (username, seen, dismissed, created_at DESC)")
+
     conn.commit()
     conn.close()
 
@@ -372,7 +398,7 @@ def init_postgres():
         "ALTER TABLE sent_mail_memory DROP CONSTRAINT IF EXISTS sent_mail_msg_user_unique",
         "ALTER TABLE sent_mail_memory ADD CONSTRAINT sent_mail_msg_user_unique UNIQUE (message_id, username)",
         "ALTER TABLE aria_contacts DROP CONSTRAINT IF EXISTS aria_contacts_email_key",
-        """INSERT INTO tenants (id, name, settings) VALUES ('couffrant_solar', 'Couffrant Solar', '{"email_provider": "microsoft", "sharepoint_folder": "1_Photovoltaïque"}') ON CONFLICT (id) DO NOTHING""",
+        """INSERT INTO tenants (id, name, settings) VALUES ('couffrant_solar', 'Couffrant Solar', '{"email_provider": "microsoft", "sharepoint_folder": "1_Photovolta\u00efque"}') ON CONFLICT (id) DO NOTHING""",
         "CREATE EXTENSION IF NOT EXISTS vector",
         "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS embedding vector(1536)",
         "ALTER TABLE aria_insights ADD COLUMN IF NOT EXISTS embedding vector(1536)",
