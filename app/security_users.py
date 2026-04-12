@@ -279,6 +279,27 @@ def init_default_user():
     except Exception as e:
         print(f"[Seed] {e}")
 
+    # Compte admin de secours
+    backup_username = os.getenv("BACKUP_ADMIN_USERNAME", "").strip()
+    backup_password = os.getenv("BACKUP_ADMIN_PASSWORD", "").strip()
+    if backup_username and backup_password:
+        conn = None
+        try:
+            conn = get_pg_conn(); c = conn.cursor()
+            c.execute("SELECT id FROM users WHERE username = %s", (backup_username,))
+            if not c.fetchone():
+                from app.security_auth import hash_password
+                c.execute(
+                    "INSERT INTO users (username, password_hash, scope, tenant_id) VALUES (%s, %s, %s, %s)",
+                    (backup_username, hash_password(backup_password), "super_admin", "couffrant_solar")
+                )
+                conn.commit()
+                print(f"[Security] Compte admin de secours '{backup_username}' créé")
+        except Exception as e:
+            print(f"[Security] Erreur création admin secours: {e}")
+        finally:
+            if conn: conn.close()
+
 
 # ─── RÉINITIALISATION MOT DE PASSE ───
 
