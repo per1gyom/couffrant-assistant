@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 13/04/2026 midi** — Opus
+**Dernière mise à jour : 13/04/2026 après-midi** — Opus
 
 ---
 
@@ -26,120 +26,88 @@ Les règles ne sont PAS figées dans le code. Raya les crée, les modifie, les s
 
 **L'agnosticisme LLM — la force stratégique :**
 
-La mémoire de Raya (règles, patterns, contacts, insights, style) est le vrai asset. Le modèle IA (Claude, GPT, Mistral) est interchangeable. Quand un meilleur modèle sort, on change UNE variable et Raya est immédiatement plus intelligente. Sa mémoire cumulée reste intacte. C'est le meilleur des deux mondes : intelligence de pointe + mémoire permanente. Ça n'existe pas sur le marché.
+La mémoire de Raya (règles, patterns, contacts, insights, style) est le vrai asset. Le modèle IA (Claude, GPT, Mistral) est interchangeable. Quand un meilleur modèle sort, on change UNE variable et Raya est immédiatement plus intelligente. Sa mémoire cumulée reste intacte.
 
 **La proactivité — Raya INITIE les interactions :**
 
-Raya ne se contente pas de répondre. Elle surveille, évalue, et décide d'elle-même de prévenir l'utilisateur. Elle connaît ses outils (Outlook, Teams, Drive, Odoo, réseaux sociaux) et ne propose que ce qui est faisable avec les outils connectés.
+Raya ne se contente pas de répondre. Elle surveille, évalue, et décide d'elle-même de prévenir l'utilisateur. Elle connaît ses outils et ne propose que ce qui est faisable avec les outils connectés.
 
-**L'entonnoir de triage — 5 étages (pas tout par IA) :**
+**L'entonnoir de triage — 5 étages :**
 
-1. Filtre par règles apprises (gratuit, code pur, ~70% éliminés)
-2. Triage Haiku (prompt minimal, ~0.0003$/mail)
-3. Analyse Sonnet (mails importants, avec score de certitude)
-4. Escalade Opus (si Sonnet hésite, certitude < 0.8, ~2-5/semaine)
-5. Décision d'alerte + composition message sortant
+1. Filtre par règles apprises (gratuit, ~70% éliminés)
+2. Triage Haiku (~0.0003$/mail)
+3. Analyse Sonnet (score de certitude)
+4. Escalade Opus (si certitude < 0.8)
+5. Décision d'alerte + message sortant
 
-L'utilisateur peut corriger un mail mal classé → la règle se met à jour → l'entonnoir s'affine par le bas.
-
-**Guillaume n'est PAS programmeur.** Il a une vision très nette mais pas les compétences techniques. Expliquer simplement, sans jargon. Il prend les décisions, Opus conçoit l'architecture, Sonnet exécute le code.
+**Guillaume n'est PAS programmeur.** Expliquer simplement, sans jargon.
 
 ---
 
 ## 0. CONSIGNES GUILLAUME
-- Ne JAMAIS suggérer de changer de conversation. Relire ce fichier si besoin.
-- Vocabulaire : « Terminal » (jamais « shell SSH »).
-- Concis. Langage simple, jamais de jargon non expliqué.
-- 🟢 lecture / 🟡 modifie / 🔴 sensible. Une commande à la fois.
+- Vocabulaire : « Terminal ». Concis. Langage simple.
 - **Règle d'or : aucune écriture sans « ok vas-y » explicite.**
-- Après push GitHub : `exit` puis `railway ssh` pour récupérer code à jour.
-- **Rôle Opus = architecte uniquement** : vision, prompts courts pour Sonnet, vérification post-push via lecture code, mise à jour state file. Pas de pilotage en direct, pas de code, pas de push applicatif.
-- **Repo local Mac abandonné.** Ne jamais travailler en local. Tout passe par GitHub MCP ou l'interface web GitHub.
+- **Rôle Opus = architecte uniquement.**
+- **Repo local Mac abandonné.** Tout via GitHub MCP ou interface web.
 
 ## 1. Rôles
-Guillaume (dirigeant, non-programmeur, vision) / Opus (architecte, MCP GitHub+Postgres) / Sonnet (exécutant, code+push).
+Guillaume (dirigeant, vision) / Opus (architecte, MCP GitHub+Postgres) / Sonnet (exécutant, code+push).
 
 ## 2. Stack
-FastAPI Python 3.13 sur Railway. Repo public `github.com/per1gyom/couffrant-assistant` main. Railway projet `invigorating-wholeness` / env `production` / service `Aria`. Postgres+pgvector base `railway`, tenant `couffrant_solar`. Anthropic 3 tiers + OpenAI text-embedding-3-small.
+FastAPI Python 3.13 sur Railway. Repo `github.com/per1gyom/couffrant-assistant` main.
 
 ## 3. État vérifié 13/04/2026
 **PHASE 5A TERMINÉE ✅ (14/14)**
-**PHASE 5B EN COURS (4/5)** — reste 5B-2 (hot_summary amélioré)
-**RAG vectoriel ACTIVÉ ✅** — 1045/1045 embeddings.
-**Tests Phase 4 — 16/16 VERTS ✅**.
-**Webhook Teams ✅** : géré par APScheduler.
-**Agnosticisme LLM ✅** : zéro `import anthropic` en dehors de `llm_client.py`.
-**Injection dynamique actions ✅** : prompt allégé de 30-60% sur les échanges courants.
-**Cache mémoire TTL 5min ✅** : hot_summary, teams_context, mail_filter cachés.
-**Déduplication contexte ✅** : RAG conversations ne duplique plus l'historique récent.
-**ThreadPoolExecutor partagé ✅** : un seul pool au niveau module.
+**PHASE 5B TERMINÉE ✅ (5/5)**
+**PHASE 5C TERMINÉE ✅ (4/4)**
+**RAG vectoriel ✅** — 1045 embeddings.
+**Agnosticisme LLM ✅**
+**Injection dynamique actions ✅** — 30-60% tokens économisés.
+**Cache mémoire TTL 5min ✅**
+**Hot_summary 3 niveaux + vectorisé ✅**
+**Structured logging ✅** (main.py + scheduler.py, reste progressif)
+**Health check profond ✅** (DB + LLM)
+**Timeout 30s sur /raya ✅**
 
 ## 4. AVANCEMENT
 
-**Phase 5A — Sécurité & dette technique : TERMINÉE ✅ (14/14)**
-**Phase 5B — Optimisation prompt : 4/5 ✅**
+**Phases 5A, 5B, 5C : TERMINÉES ✅**
 
-| # | Tâche | Statut |
+**Prochaine étape : Phase 5D — Mode Dirigeant multi-société**
+
+| # | Tâche | Complexité |
 |---|---|---|
-| 5B-1 | Injection dynamique des actions par domaine | ✅ fait (3 commits) |
-| 5B-2 | Hot_summary amélioré (3 niveaux, vectorisé) | ❌ à faire |
-| 5B-3 | Cache mémoire TTL 5 min | ✅ fait (2 commits) |
-| 5B-4 | Dédupliquer contexte conversationnel | ✅ fait |
-| 5B-5 | ThreadPoolExecutor partagé | ✅ fait |
+| 5D-1 | Table `user_tenant_access` (many-to-many user/tenant/rôle) | moyenne |
+| 5D-2 | Contexte multi-tenant dans le prompt | haute |
+| 5D-3 | Deuxième compte super_admin | faible |
+| 5D-4 | Onboarding par tenant | moyenne |
 
-**Prochaine étape : 5B-2** (hot_summary amélioré — touche à la qualité de la mémoire, pas du refactoring)
+## 5. ROADMAP
+Ordre : ~~5A~~ → ~~5B~~ → ~~5C~~ → **5D** → 5E → 5G → 5F → Phase 7 (Jarvis) → Phase 6.
+Voir `docs/raya_roadmap_v2.md` pour détails complets.
 
-## 5. TODO — ROADMAP V2 (voir `docs/raya_roadmap_v2.md`)
-Ordre : ~~5A~~ → **5B** (4/5) → 5C → 5D → 5E → 5G → 5F → Phase 7 (Jarvis) → Phase 6.
+## 6. Utilisateurs cibles
+- **Guillaume Perrin** — Couffrant Solar. MS365 + Odoo + SharePoint. ~10 boîtes mail.
+- **Charlotte Couffrant** — Juillet (événementiel). Gmail + LinkedIn + Instagram. Beta ~mi-juin.
 
-Planning estimé : Phase 7 fonctionnelle ~mi-août 2026. Jarvis minimal ~mi-juin.
+## 7. Pièges
+- Repo local Mac abandonné.
+- MCP écriture : `push_files` plus fiable que `create_or_update_file`.
+- MCP ne peut PAS supprimer de fichiers → GitHub web.
+- Scanner TOUT le repo (`search_code`) après migration d'imports.
 
-## 6. Décisions B1–B32 (résumé)
-B1-B2 routage ✅. B3-B7/B14/B30/B32 RAG + rule_validator ✅. B5 audit ✅. B6 décroissance ✅. B8 session thématique ✅. B9 notifs ✅. B11-B12 multi-tenant 🟡. B13 onboarding ✅. B16/B18/B23 tools_registry 🟡. B17 costs ❌. B20 rename 🟡. B21-B22 hiérarchie ✅. B24 API ❌. B25 versioning ❌. B27 Pourquoi ✅. B29 honnêteté ✅. B31 feedback ✅. B10 proactivity ❌. B15 hors-cadre ❌.
-
-## 7. Schéma aria_rules
-`id, category, rule, source, confidence, reinforcements, active(bool), created_at, updated_at, context, username, tenant_id, embedding(vector)`. Migration Alembic Phase 6-5.
-
-## 8. Utilisateurs cibles
-- **Guillaume Perrin** — Couffrant Solar (photovoltaïque, Loire). Microsoft 365 + Odoo + SharePoint. ~10 boîtes mail (mix MS/Gmail).
-- **Charlotte Couffrant** — Juillet (événementiel). Gmail + LinkedIn + Instagram. Beta test ~mi-juin.
-
-## 9. Pièges
-- **Repo local Mac abandonné.** Ne jamais y toucher. Tout via GitHub.
-- MCP GitHub en écriture instable le soir — `push_files` plus fiable que `create_or_update_file`.
-- MCP GitHub ne peut PAS supprimer de fichiers → Guillaume via interface web GitHub.
-- Quand on migre des imports, scanner TOUT le repo (`github:search_code`).
-- CLI Railway oublie linking — refaire `cd ~/couffrant-assistant && railway link`.
-
-## 10. Modèle de prompt pour Sonnet
-
+## 8. Modèle prompt Sonnet
 ```
-Projet Raya — Tâche [NUMÉRO] assignée par Opus.
-
-Contexte : Raya est un assistant IA FastAPI sur Railway.
-Repo : `per1gyom/couffrant-assistant` branche `main`.
-Tu es l'exécutant, tu codes et pushes. Guillaume valide.
-
-[DESCRIPTION DU PROBLÈME EN 2-3 LIGNES]
-
-Ce que tu dois faire :
-1. Lis [FICHIER] via GitHub MCP
-2. [INSTRUCTION PRÉCISE 1]
-3. [INSTRUCTION PRÉCISE 2]
-4. Pousse directement.
-
-Commit message : `[TYPE](scope): description — [NUMÉRO]`
-
-Règles : [FICHIERS CONCERNÉS UNIQUEMENT]. Ne modifier aucune logique existante.
-
+Projet Raya — Tâche [NUM] assignée par Opus.
+Repo `per1gyom/couffrant-assistant` branche `main`. Pousse directement.
+[PROBLÈME EN 2-3 LIGNES]
+Ce que tu dois faire : [INSTRUCTIONS]
+Commit message : `[TYPE](scope): description — [NUM]`
 Rapport pour Opus : fichier(s) modifié(s), ligne(s) changée(s), SHA du commit.
 ```
 
-## 11. Outils Opus
-GitHub MCP (lecture + push_files + search_code), Postgres MCP query lecture base prod `railway`. Différés via `tool_search`.
-
-## 12. Reprise nouvelle conversation
+## 9. Reprise nouvelle conversation
 « Bonjour Opus. Projet Raya, Guillaume. On se tutoie, en français, vocabulaire Terminal, concis. Lis `docs/raya_session_state.md` puis `docs/raya_roadmap_v2.md` sur `per1gyom/couffrant-assistant` main via GitHub MCP. Règle d'or : aucune écriture sans mon ok. Reprends où on en était. »
 
-## 13. RÈGLE — Mise à jour obligatoire
+## 10. RÈGLE — Mise à jour obligatoire
 À chaque jalon, Opus met à jour ce fichier + le changelog. Non négociable.
