@@ -40,6 +40,8 @@ from app.routes.aria_actions import execute_actions, _ASK_CHOICE_PREFIX
 from app.routes.deps import require_user
 from app.rate_limiter import check_rate_limit
 
+_SHARED_POOL = ThreadPoolExecutor(max_workers=6)
+
 router = APIRouter(tags=["raya"])
 
 
@@ -179,7 +181,8 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
 
     # 2. Appels reseau en PARALLELE
     live_mails, agenda, teams_ctx, mail_filter = [], [], "", ""
-    with ThreadPoolExecutor(max_workers=4) as pool:
+    pool = _SHARED_POOL
+    if True:
         f_mails  = pool.submit(load_live_mails, outlook_token, username)
         f_agenda = pool.submit(load_agenda, outlook_token)
         f_teams  = pool.submit(load_teams_context, username)
@@ -199,7 +202,8 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     # 4. Routage de tier + detection de session thematique
     model_tier    = "smart"
     session_theme = None
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    pool = _SHARED_POOL
+    if True:
         f_tier  = pool.submit(route_query_tier, payload.query or "",
                               username, tenant_id, len(db_ctx["history"]))
         f_theme = pool.submit(detect_session_theme, db_ctx["history"])
