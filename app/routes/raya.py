@@ -4,6 +4,7 @@ Endpoints Raya : /speak, /raya, /token-status, /raya/feedback, /raya/why/{id}.
 Phase 3b (B8) : detection de session thematique via detect_session_theme().
 Phase 5B-1    : injection dynamique des actions par domaine via detect_query_domains().
 5D-2f         : charge les tenants de l'utilisateur et les passe au prompt builder.
+7-6D          : marquage automatique du rapport matinal livré via le chat.
 """
 import json
 import os
@@ -282,7 +283,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         else:
             actions_confirmed.append(item)
 
-    # 9. Reponse propre \u2014 retire les balises [ACTION:...] du texte affiche
+    # 9. Reponse propre — retire les balises [ACTION:...] du texte affiche
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', raya_response).strip()
     if actions_confirmed:
         clean_response += "\n\n" + "\n\n".join(actions_confirmed)
@@ -301,6 +302,25 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         conn.commit()
     finally:
         if conn: conn.close()
+
+    # 10b. Log d'activité (7-ACT)
+    try:
+        from app.activity_log import log_activity
+        log_activity(username, "conversation", str(aria_memory_id),
+                     payload.query[:100] if payload.query else "", tenant_id)
+    except Exception:
+        pass
+
+    # 10c. Marquage rapport livré si l'utilisateur le demande dans le chat (7-6D)
+    try:
+        from app.routes.actions.report_actions import get_today_report, mark_report_delivered
+        report = get_today_report(username)
+        if report and not report["delivered"] and len(clean_response) > 200:
+            query_lower = (payload.query or "").lower()
+            if "rapport" in query_lower or "résumé" in query_lower or "resume" in query_lower:
+                mark_report_delivered(report["id"], "chat")
+    except Exception:
+        pass
 
     # 11. Metadonnees en background
     if aria_memory_id:

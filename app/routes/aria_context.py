@@ -8,6 +8,7 @@ Phase 3b : session_theme (B8) — si un sujet coherent est detecte,
 5G-3    : maturity_block — comportement adaptatif selon la phase relationnelle.
 5G-5    : patterns_block — patterns comportementaux detectes (consolidation+maturity).
 7-NAR   : narrative_block — memoire narrative des dossiers (contacts, projets, sujets).
+7-6D    : report_block — rapport du jour disponible/deja livre.
 Fallback automatique si OPENAI_API_KEY absent.
 
 Les appels reseau sont lances en parallele depuis raya_endpoint().
@@ -272,6 +273,7 @@ def build_system_prompt(
     pending_actions: list = None,
     session_theme: str | None = None,
     domains: list[str] | None = None,
+    user_tenants: list | None = None,
 ) -> str:
     display_name = username.capitalize()
     if domains is None:
@@ -332,7 +334,7 @@ Tu connais {display_name} en profondeur. Comportement attendu :
     # 5G-5 : injection des patterns (consolidation + maturity)
     patterns_block = ""
     try:
-        if maturity_block:  # maturity a ete calcule
+        if maturity_block:
             from app.database import get_pg_conn as _pg
             _conn = _pg()
             _c = _conn.cursor()
@@ -362,7 +364,7 @@ Tu connais {display_name} en profondeur. Comportement attendu :
     except Exception:
         pass
 
-    # 7-NAR : memoire narrative des dossiers (contacts, projets, sujets)
+    # 7-NAR : memoire narrative des dossiers
     narrative_block = ""
     try:
         from app.narrative import search_narratives
@@ -373,7 +375,7 @@ Tu connais {display_name} en profondeur. Comportement attendu :
                 lines.append(f"  [{n['entity_type']}:{n['entity_key']}] {n['narrative'][:300]}")
                 if n.get("key_facts"):
                     for fact in n["key_facts"][-3:]:
-                        lines.append(f"    • {fact.get('date', '?')} : {fact.get('fact', '')[:100]}")
+                        lines.append(f"    \u2022 {fact.get('date', '?')} : {fact.get('fact', '')[:100]}")
             narrative_block = (
                 "\n\n=== DOSSIERS EN CONTEXTE ===\n"
                 + "\n".join(lines)
@@ -396,7 +398,6 @@ Tu connais {display_name} en profondeur. Comportement attendu :
         conv_context  = ""
         via_rag       = False
 
-    # 5B-4 : dedupliquer le contexte conversationnel
     if conv_context and db_ctx.get("history"):
         recent_inputs = {h.get("user_input", "")[:80].lower() for h in db_ctx["history"] if h.get("user_input")}
         filtered_parts = []
@@ -471,7 +472,7 @@ Tu connais {display_name} en profondeur. Comportement attendu :
         if alerts:
             lines = []
             for a in alerts:
-                icon = {"critical": "🔴", "high": "🟠", "normal": "🟡", "low": "⚪"}.get(a["priority"], "🟡")
+                icon = {"critical": "\U0001f534", "high": "\U0001f7e0", "normal": "\U0001f7e1", "low": "\u26aa"}.get(a["priority"], "\U0001f7e1")
                 lines.append(f"  {icon} [{a['alert_type']}] {a['title']}")
                 if a.get("body"):
                     lines.append(f"     {a['body'][:150]}")
@@ -484,6 +485,32 @@ Tu connais {display_name} en profondeur. Comportement attendu :
                 "mentionne-les en fin de message : 'Au fait, j'ai remarque que...'"
             )
             mark_seen([a["id"] for a in alerts], username)
+    except Exception:
+        pass
+
+    # 7-6D : rapport du jour disponible
+    report_block = ""
+    try:
+        from app.routes.actions.report_actions import get_today_report
+        report = get_today_report(username)
+        if report and not report["delivered"]:
+            report_block = (
+                "\n\n=== RAPPORT DU JOUR (prêt, non livré) ===\n"
+                "Un rapport matinal est disponible pour l'utilisateur.\n"
+                "Si l'utilisateur demande son rapport, lis-le ou envoie-le selon sa préférence.\n"
+                "Tu peux le livrer :\n"
+                "  - En le lisant ici dans le chat\n"
+                "  - \u00c0 l'oral via [ACTION:SPEAK] (si l'utilisateur le demande)\n"
+                "  - Section par section si l'utilisateur le préfère\n"
+                f"Contenu du rapport :\n{report['content'][:1000]}\n"
+                "Après livraison, le rapport sera marqué comme lu."
+            )
+        elif report and report["delivered"]:
+            report_block = (
+                "\n\n=== RAPPORT DU JOUR (déjà livré) ===\n"
+                f"Le rapport a été livré via {report['delivered_via']}.\n"
+                "L'utilisateur peut le redemander s'il veut."
+            )
     except Exception:
         pass
 
@@ -500,7 +527,7 @@ Tu observes, tu apprends, tu t'organises librement. Tu parles au feminin.
 
 {f"=== TA MEMOIRE (pertinente pour cette question) ==={chr(10)}{aria_rules}" if aria_rules else "Ta memoire est vide. Tu peux commencer a construire via [ACTION:LEARN]."}
 
-{f"=== TES OBSERVATIONS SUR {display_name.upper()} ==={chr(10)}{aria_insights}" if aria_insights else ""}{theme_context_block}{conv_context_block}{teams_context_block}{mail_filter_block}{pending_block}{alerts_block}
+{f"=== TES OBSERVATIONS SUR {display_name.upper()} ==={chr(10)}{aria_insights}" if aria_insights else ""}{theme_context_block}{conv_context_block}{teams_context_block}{mail_filter_block}{pending_block}{alerts_block}{report_block}
 
 {f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}
 
