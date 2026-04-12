@@ -12,7 +12,7 @@ Variables d'environnement pour désactiver un job individuellement :
   SCHEDULER_TOKEN_ENABLED=false        → désactive token_refresh
   SCHEDULER_PROACTIVITY_ENABLED=false  → désactive proactivity_scan
   SCHEDULER_PATTERNS_ENABLED=false     → désactive pattern_analysis
-  SCHEDULER_HEARTBEAT_ENABLED=false    → désactive heartbeat_morning (7-6)
+  SCHEDULER_HEARTBEAT_ENABLED=false    → désactive heartbeat_morning (7-6R)
   SCHEDULER_BRIEFING_ENABLED=false     → désactive meeting_briefing (7-BRIEF)
 
 Valeur par défaut : true (tous les jobs actifs).
@@ -25,9 +25,9 @@ Jobs :
   webhook_renewal   : toutes les 6h
   token_refresh     : toutes les 45 min
   proactivity_scan  : toutes les 30 min (5E-4b)
-  pattern_analysis  : dimanche 04h00 (5G-4)
+  pattern_analysis  : dimanche 04h00 (5G-4 + 7-WF activity_log)
   meeting_briefing  : 06h30 chaque matin (7-BRIEF) — briefings réunions du jour
-  heartbeat_morning : 07h00 chaque matin (7-6) — résumé WhatsApp
+  heartbeat_morning : 07h00 chaque matin (7-6R) — rapport stocké + ping seulement
 """
 import os
 from app.logging_config import get_logger
@@ -377,7 +377,6 @@ def _prepare_briefings(username: str):
 
     tenant_id = get_tenant_id(username)
 
-    # Récupère les événements du jour
     now = datetime.now(timezone.utc)
     start = now.replace(hour=0, minute=0, second=0).isoformat()
     end = now.replace(hour=23, minute=59, second=59).isoformat()
@@ -403,7 +402,6 @@ def _prepare_briefings(username: str):
         if not attendee_emails:
             continue
 
-        # Mails récents avec ces participants
         conn = get_pg_conn()
         c = conn.cursor()
         placeholders = ",".join(["%s"] * len(attendee_emails))
@@ -416,7 +414,6 @@ def _prepare_briefings(username: str):
         recent_mails = c.fetchall()
         conn.close()
 
-        # Narrative si disponible
         narratives_text = ""
         try:
             from app.narrative import search_narratives
@@ -428,7 +425,6 @@ def _prepare_briefings(username: str):
         except Exception:
             pass
 
-        # Briefing via Haiku (rapide)
         mails_text = "\n".join(
             f"  {r[0]} — {r[1]} ({r[3]})" for r in recent_mails
         ) if recent_mails else "Aucun mail récent."
@@ -459,11 +455,10 @@ def _prepare_briefings(username: str):
                 f"{len(recent_mails)} mail(s) récent(s)."
             )
 
-        # Crée l'alerte briefing
         create_alert(
             username=username, tenant_id=tenant_id,
             alert_type="reminder", priority="normal",
-            title=f"📋 Briefing : {subject[:60]}",
+            title=f"\U0001f4cb Briefing : {subject[:60]}",
             body=briefing[:500],
             source_type="calendar_briefing",
             source_id=event.get("id", subject[:50]),
@@ -473,14 +468,13 @@ def _prepare_briefings(username: str):
 
 
 def _job_heartbeat_morning():
-    """Envoie un résumé matinal à chaque utilisateur avec Twilio configuré. (7-6)"""
+    """
+    Prépare le rapport matinal et envoie un PING (pas le contenu). (7-6R)
+    Le rapport est stocké dans daily_reports. L'utilisateur décide
+    comment le recevoir (chat, vocal, mail, WhatsApp).
+    """
     try:
         from app.database import get_pg_conn
-        from app.connectors.twilio_connector import send_whatsapp, is_available
-
-        if not is_available():
-            logger.info("[Heartbeat] Twilio non configuré, skip")
-            return
 
         conn = get_pg_conn()
         c = conn.cursor()
@@ -491,34 +485,33 @@ def _job_heartbeat_morning():
         active_users = [r[0] for r in c.fetchall()]
         conn.close()
 
-        sent = 0
+        prepared = 0
         for username in active_users:
             try:
-                phone = os.getenv(f"NOTIFICATION_PHONE_{username.upper()}", "").strip()
-                if not phone:
-                    phone = os.getenv("NOTIFICATION_PHONE_DEFAULT", "").strip()
-                if not phone:
-                    continue
-
-                summary = _build_morning_summary(username)
-                if summary:
-                    send_whatsapp(phone, summary)
-                    sent += 1
+                _prepare_daily_report(username)
+                _send_report_ping(username)
+                prepared += 1
             except Exception as e:
                 logger.error(f"[Heartbeat] Erreur {username}: {e}")
 
-        logger.info(f"[Heartbeat] Envoyé à {sent} utilisateur(s)")
+        logger.info(f"[Heartbeat] {prepared} rapport(s) préparé(s)")
     except Exception as e:
         logger.error(f"[Heartbeat] ERREUR: {e}")
 
 
-def _build_morning_summary(username: str) -> str:
-    """Construit le résumé matinal pour un utilisateur."""
+def _prepare_daily_report(username: str):
+    """Prépare et stocke le rapport du jour dans daily_reports. Ne l'envoie PAS."""
     from app.database import get_pg_conn
+    from app.app_security import get_tenant_id
+    import json
 
+    tenant_id = get_tenant_id(username)
     conn = get_pg_conn()
     c = conn.cursor()
 
+    sections = []
+
+    # Section 1 : Mails (12 dernières heures)
     c.execute("""
         SELECT COUNT(*) as total,
                COUNT(*) FILTER (WHERE priority = 'haute') as urgent,
@@ -527,54 +520,88 @@ def _build_morning_summary(username: str) -> str:
         FROM mail_memory
         WHERE username = %s AND created_at > NOW() - INTERVAL '12 hours'
     """, (username,))
-    mail_stats = c.fetchone()
+    stats = c.fetchone()
+    total = stats[0] or 0
+    urgent = stats[1] or 0
+    moyen = stats[2] or 0
+    a_repondre = stats[3] or 0
+    silencieux = max(0, total - urgent - moyen)
 
+    mail_lines = []
+    if total > 0:
+        mail_lines.append(f"{total} mail(s) :")
+        if urgent > 0: mail_lines.append(f"  \U0001f534 {urgent} urgent(s)")
+        if moyen > 0: mail_lines.append(f"  \U0001f7e1 {moyen} à voir")
+        if silencieux > 0: mail_lines.append(f"  \u26aa {silencieux} silencieux")
+    else:
+        mail_lines.append("Nuit calme, aucun mail notable.")
+    if a_repondre > 0:
+        mail_lines.append(f"\u2709\ufe0f {a_repondre} réponse(s) en attente")
+
+    sections.append({
+        "type": "mails",
+        "title": "Mails de la nuit",
+        "content": "\n".join(mail_lines),
+    })
+
+    # Section 2 : Alertes actives
     c.execute("""
         SELECT COUNT(*) FROM proactive_alerts
         WHERE username = %s AND seen = false AND dismissed = false
           AND (expires_at IS NULL OR expires_at > NOW())
     """, (username,))
     alerts_count = c.fetchone()[0]
+    if alerts_count > 0:
+        sections.append({
+            "type": "alerts",
+            "title": "Alertes",
+            "content": f"\u26a0\ufe0f {alerts_count} alerte(s) active(s) à consulter.",
+        })
 
+    # Section 3 : TODO — sections personnalisées (météo, RDV, etc.)
+    # Futur : lire aria_rules catégorie 'report_sections' et ajouter dynamiquement.
+
+    full_content = "\n\n".join(
+        f"\U0001f4cc {s['title']}\n{s['content']}" for s in sections
+    )
+    full_content = f"\u2600\ufe0f Bonjour ! Raya veille.\n\n{full_content}"
+
+    c.execute("""
+        INSERT INTO daily_reports (username, tenant_id, content, sections)
+        VALUES (%s, %s, %s, %s::jsonb)
+        ON CONFLICT (username, report_date)
+        DO UPDATE SET content = EXCLUDED.content, sections = EXCLUDED.sections,
+                      created_at = NOW()
+    """, (username, tenant_id, full_content, json.dumps(sections, ensure_ascii=False)))
+    conn.commit()
     conn.close()
 
-    total     = mail_stats[0] or 0
-    urgent    = mail_stats[1] or 0
-    moyen     = mail_stats[2] or 0
-    a_repondre = mail_stats[3] or 0
-    silencieux = max(0, total - urgent - moyen)
 
-    if total == 0 and alerts_count == 0:
-        return (
-            "☀️ Bonjour ! Raya veille.\n\n"
-            "Nuit calme — aucun mail notable.\n"
-            "Bonne journée !"
-        )
+def _send_report_ping(username: str):
+    """Envoie un PING léger pour prévenir que le rapport est prêt."""
+    import os
+    phone = os.getenv(f"NOTIFICATION_PHONE_{username.upper()}", "").strip()
+    if not phone:
+        phone = os.getenv("NOTIFICATION_PHONE_DEFAULT", "").strip()
+    if not phone:
+        return
 
-    lines = ["☀️ Bonjour ! Raya veille.\n"]
+    try:
+        from app.notification_prefs import should_notify
+        if not should_notify(username, "normal"):
+            return
+    except Exception:
+        pass
 
-    if total > 0:
-        lines.append(f"📬 {total} mail(s) cette nuit :")
-        if urgent > 0:
-            lines.append(f"  🔴 {urgent} urgent(s)")
-        if moyen > 0:
-            lines.append(f"  🟡 {moyen} à voir")
-        if silencieux > 0:
-            lines.append(f"  ⚪ {silencieux} silencieux")
-
-    if a_repondre > 0:
-        lines.append(f"\n✉️ {a_repondre} réponse(s) en attente")
-
-    if alerts_count > 0:
-        lines.append(f"\n⚠️ {alerts_count} alerte(s) active(s)")
-
-    lines.append("\nConnecte-toi au chat pour les détails.")
-
-    return "\n".join(lines)
+    try:
+        from app.connectors.twilio_connector import send_whatsapp
+        send_whatsapp(phone, "\u2600\ufe0f Raya — Ton rapport matinal est prêt.\nDis-moi comment tu veux le recevoir.")
+    except Exception as e:
+        logger.error(f"[Heartbeat] Ping échoué {username}: {e}")
 
 
 def _job_pattern_analysis():
-    """Détecte les patterns comportementaux — hebdomadaire dimanche 04h00 (5G-4)."""
+    """Détecte les patterns comportementaux — hebdomadaire dimanche 04h00 (5G-4 + 7-WF)."""
     try:
         from app.database import get_pg_conn
         from app.maturity import compute_maturity_score
@@ -605,7 +632,7 @@ def _job_pattern_analysis():
 
 
 def _analyze_patterns(username: str):
-    """Détecte les patterns récurrents via un appel Opus."""
+    """Détecte les patterns récurrents (conversations + mails + activity_log). (5G-4 + 7-WF)"""
     import json, re
     from app.database import get_pg_conn
     from app.llm_client import llm_complete, log_llm_usage
@@ -629,6 +656,22 @@ def _analyze_patterns(username: str):
     mails = [{"from": r[0], "subject": r[1][:60], "cat": r[2], "prio": r[3],
               "date": str(r[4])} for r in c.fetchall()]
 
+    # 7-WF : activités récentes pour détection de séquences workflow
+    activities = []
+    try:
+        c.execute("""
+            SELECT action_type, action_target, action_detail, tenant_id,
+                   created_at::text as ts
+            FROM activity_log
+            WHERE username = %s AND created_at > NOW() - INTERVAL '30 days'
+            ORDER BY created_at DESC LIMIT 150
+        """, (username,))
+        activities = [{"type": r[0], "target": r[1][:50] if r[1] else "",
+                       "detail": r[2][:60] if r[2] else "", "date": r[4]}
+                      for r in c.fetchall()]
+    except Exception:
+        pass  # activity_log peut ne pas encore avoir de données
+
     c.execute("""
         SELECT pattern_type, description FROM aria_patterns
         WHERE username = %s AND active = true ORDER BY confidence DESC LIMIT 20
@@ -639,15 +682,20 @@ def _analyze_patterns(username: str):
     if len(convs) < 10:
         return
 
+    activities_section = f"""
+ACTIVITÉS (actions via Raya, 30 derniers jours) :
+{json.dumps(activities[:80], ensure_ascii=False)}
+""" if activities else ""
+
     prompt = f"""Tu es Raya en mode analyse interne.
-Voici les 50 dernières conversations et 100 derniers mails de {username}.
+Voici les 50 dernières conversations, 100 derniers mails et les actions récentes de {username}.
 
 CONVERSATIONS :
 {json.dumps(convs[:30], ensure_ascii=False)}
 
 MAILS (30 derniers jours) :
 {json.dumps(mails[:50], ensure_ascii=False)}
-
+{activities_section}
 PATTERNS DÉJÀ CONNUS :
 {json.dumps(existing, ensure_ascii=False) if existing else "Aucun."}
 
@@ -655,7 +703,9 @@ Détecte les NOUVEAUX comportements récurrents :
 - temporal : "traite les mails X le jour Y"
 - relational : "quand X envoie un mail, c'est toujours Y"
 - thematic : "après un mail chantier, cherche toujours le dossier"
-- workflow : "archive puis répond puis crée une tâche"
+- workflow : séquences d'actions répétitives ("après mail_read → drive_list → mail_reply",
+  "chaque lundi : mail_archive en masse puis teams_send"). Sois PRÉCIS sur la séquence :
+  décris l'ordre des actions, la fréquence, et les conditions de déclenchement.
 - preference : "préfère des réponses courtes"
 
 Ne répète PAS les patterns déjà connus.
