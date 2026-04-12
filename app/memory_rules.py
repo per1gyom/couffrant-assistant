@@ -9,6 +9,9 @@ Fonctions canoniques à utiliser :
 
 Phase 3a : save_rule vectorise la règle à la création (si OPENAI_API_KEY présent).
 Dégradation gracieuse si clé absente — la règle est insérée sans vecteur.
+
+5D-2d : save_rule accepte personal=True pour écrire une règle sans tenant
+        (tenant_id=NULL en base). Utilisé pour les règles utilisateur en mode dirigeant.
 """
 from app.database import get_pg_conn
 
@@ -66,11 +69,15 @@ def get_aria_rules(username: str = 'guillaume', tenant_id: str = None) -> str:
 
 def save_rule(category: str, rule: str, source: str = "auto",
               confidence: float = 0.7, username: str = None,
-              tenant_id: str = None) -> int:
+              tenant_id: str = None, personal: bool = False) -> int:
     """
     Sauvegarde une règle apprise par Raya.
     Déduplication par égalité exacte normalisée (LOWER+TRIM).
     Phase 3a : vectorise la règle à la création pour le RAG.
+
+    5D-2d : personal=True → tenant_id=NULL en base (règle utilisateur,
+    pas liée à un tenant). Utilisé quand Raya apprend quelque chose
+    qui concerne le dirigeant lui-même en mode multi-tenant.
     """
     if not username:
         raise ValueError("save_rule : username obligatoire")
@@ -78,7 +85,12 @@ def save_rule(category: str, rule: str, source: str = "auto",
         raise ValueError("save_rule : règle vide refusée")
 
     rule_clean = rule.strip()
-    effective_tenant = tenant_id or DEFAULT_TENANT
+
+    # 5D-2d : personal=True force NULL (règle utilisateur, pas de tenant)
+    if personal:
+        effective_tenant = None
+    else:
+        effective_tenant = tenant_id or DEFAULT_TENANT
 
     conn = None
     try:
