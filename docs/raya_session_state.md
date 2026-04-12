@@ -58,7 +58,7 @@ Repo `github.com/per1gyom/couffrant-assistant` main.
 
 ## 2. État 12/04/2026 soir
 **PHASES 5A, 5B, 5C, 5D : TERMINÉES ✅** (5D-4 onboarding par tenant reporté)
-**PHASE 5E EN COURS (3/5)**
+**PHASE 5E EN COURS (4/5)** — reste 5E-5 (Jarvis minimal)
 
 | Fait | Détail |
 |---|---|
@@ -80,20 +80,24 @@ Repo `github.com/per1gyom/couffrant-assistant` main.
 | Prompt multi-tenant ✅ | build_system_prompt injecte le contexte de TOUS les tenants dirigeant |
 | Core multi-tenant ✅ | _raya_core charge user_tenants et les passe au prompt builder |
 | save_rule personal=True ✅ | Règles utilisateur (tenant_id=NULL) pour mode dirigeant |
-| **Carte capacités par user ✅** | get_user_capabilities_prompt(username, tools) — outils connectés dynamiques |
-| **Descriptions fonctionnelles ✅** | 23 outils avec functional_description dans tools_registry |
-| **Triage webhook 3 niveaux ✅** | route_mail_action branché : IGNORER/STOCKER_SIMPLE/ANALYSER |
+| Carte capacités par user ✅ | get_user_capabilities_prompt(username, tools) — outils connectés dynamiques |
+| Descriptions fonctionnelles ✅ | 23 outils avec functional_description dans tools_registry |
+| Triage webhook 3 niveaux ✅ | route_mail_action branché : IGNORER/STOCKER_SIMPLE/ANALYSER |
+| **proactive_alerts table ✅** | Table + module CRUD (create, get_active, mark_seen, dismiss, cleanup) |
+| **proactivity_scan job ✅** | APScheduler 30min : mails urgents >2h, réponses en attente >24h |
+| **Alertes dans prompt ✅** | Alertes actives injectées dans build_system_prompt, marquées vues après |
 
-## 3. PROCHAINE ÉTAPE : 5E-4
+## 3. PROCHAINE ÉTAPE : 5E-5
 
-**proactivity_scan (B10)** — Job APScheduler toutes les 30 min. Analyse mails récents,
-agenda, deadlines. Génère alertes/rappels intelligents. Consulte la carte des capacités
-avant de proposer quoi que ce soit.
+**Jarvis minimal** — version légère pour commencer à tester : triage multi-boîte
+(Microsoft + Gmail si disponible) + notification WhatsApp/Twilio message texte
+pour les mails importants. Pas d'appel, pas de heartbeat, pas de patterns.
+But : terrain de test concret.
 
-Après 5E-4 : 5E-5 (Jarvis minimal), puis Phase 5G.
+Après 5E-5 : Phase 5G (Maturité relationnelle).
 
 ## 4. ROADMAP
-~~5A~~ → ~~5B~~ → ~~5C~~ → ~~5D~~ → **5E** (3/5) → 5G → 5F → Phase 7 (Jarvis) → Phase 6.
+~~5A~~ → ~~5B~~ → ~~5C~~ → ~~5D~~ → **5E** (4/5) → 5G → 5F → Phase 7 (Jarvis) → Phase 6.
 Voir `docs/raya_roadmap_v2.md`.
 
 ## 5. Utilisateurs
