@@ -15,6 +15,7 @@ WEB-SEARCH : web_info — informe Raya qu'elle a acces a internet.
 SPEAK-SPEED : [SPEAK_SPEED:x] — commande de vitesse vocale.
 Fix-Jarvis : Raya ne connait PAS et n'utilise JAMAIS le mot "Jarvis".
 8-TON   : bloc adaptatif de ton selon les preferences de l'utilisateur.
+8-COLLAB : team_block — evenements tenant non vus + action SHARE_EVENT.
 """
 import os
 import json
@@ -125,6 +126,16 @@ Teams — memoire (immediat) :
   [ACTION:SYNTH:]
 Onboarding :
   [ACTION:RESTART_ONBOARDING:] -> relance le questionnaire de configuration initiale""")
+
+    # 8-COLLAB : partage d'événements avec l'équipe du tenant
+    sections.append("""Collaboration equipe (8-COLLAB) :
+  [ACTION:SHARE_EVENT:type|titre|corps]
+  -> partage un evenement avec tous les membres du tenant (immediat)
+  Types valides : task_completed, document_modified, mail_important,
+                  meeting_scheduled, milestone_reached, alert_shared
+  Exemple : [ACTION:SHARE_EVENT:task_completed|Dossier Dupont finalisé|Raccordement validé et signé le 12/04]
+  DECIDE TOI-MEME de partager si tu juges l'info utile pour l'equipe.
+  Ne demande PAS de confirmation a l'utilisateur — partage directement.""")
 
     sections.append("""Lecture vocale :
   [SPEAK_SPEED:vitesse] -> change la vitesse de lecture (0.5=lent, 1.0=normal, 1.2=defaut, 1.5=rapide, 2.0=tres rapide)
@@ -384,6 +395,49 @@ Tu connais {display_name} en profondeur. Comportement attendu :
     except Exception:
         pass
 
+    # 8-COLLAB : événements non vus de l'équipe du tenant
+    team_block = ""
+    try:
+        from app.tenant_events import get_unseen_events, mark_seen_batch
+        unseen = get_unseen_events(username, tenant_id, limit=5)
+        if unseen:
+            now = datetime.now(timezone.utc)
+            lines = []
+            for ev in unseen:
+                created = ev["created_at"]
+                try:
+                    if hasattr(created, "replace"):
+                        if created.tzinfo is None:
+                            created = created.replace(tzinfo=timezone.utc)
+                        diff_min = int((now - created).total_seconds() / 60)
+                        if diff_min < 60:
+                            when = f"il y a {diff_min} min"
+                        elif diff_min < 1440:
+                            when = f"il y a {diff_min // 60}h"
+                        else:
+                            when = f"il y a {diff_min // 1440}j"
+                    else:
+                        when = str(created)[:10]
+                except Exception:
+                    when = "recemment"
+                lines.append(
+                    f"  [{ev['source_username'].capitalize()}] {ev['title']} ({when})"
+                )
+                if ev.get("body"):
+                    lines.append(f"    → {ev['body'][:120]}")
+            team_block = (
+                "\n\n=== ACTIVITE DE L'EQUIPE (non vu) ===\n"
+                + "\n".join(lines)
+                + "\nMENTIONNE ces activites naturellement si elles sont pertinentes pour "
+                  "la question de l'utilisateur. Utilise-les comme contexte pour enrichir "
+                  "tes reponses sur les dossiers en cours. Tu peux aussi en informer "
+                  "l'utilisateur spontanement : 'Au fait, Pierre a termine...'"
+            )
+            # Marquer comme vus pour que ce bloc ne réapparaisse plus
+            mark_seen_batch([ev["id"] for ev in unseen], username)
+    except Exception:
+        pass
+
     capabilities_block = "\n\n" + get_user_capabilities_prompt(username, tools)
 
     # WEB-SEARCH : informer Raya qu'elle a acces a internet
@@ -433,7 +487,7 @@ Tu ne connais PAS le mot "Jarvis" et tu ne l'utilises JAMAIS. Tu es Raya, c'est 
 
 {f"=== TA MEMOIRE (pertinente pour cette question) ==={chr(10)}{aria_rules}" if aria_rules else "Ta memoire est vide. Tu peux commencer a construire via [ACTION:LEARN]."}
 
-{f"=== TES OBSERVATIONS SUR {display_name.upper()} ==={chr(10)}{aria_insights}" if aria_insights else ""}{theme_context_block}{conv_context_block}{teams_context_block}{mail_filter_block}{pending_block}{alerts_block}{report_block}
+{f"=== TES OBSERVATIONS SUR {display_name.upper()} ==={chr(10)}{aria_insights}" if aria_insights else ""}{theme_context_block}{conv_context_block}{teams_context_block}{mail_filter_block}{pending_block}{alerts_block}{report_block}{team_block}
 
 {f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}
 
