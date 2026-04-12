@@ -54,7 +54,6 @@ def send_whatsapp(to: str, message: str) -> dict:
     from_number = os.getenv("TWILIO_WHATSAPP_FROM", "").strip()
     if not from_number:
         return {"status": "error", "message": "TWILIO_WHATSAPP_FROM non defini"}
-    # Normalisation
     if not to.startswith("whatsapp:"):
         to = f"whatsapp:{to}"
     if not from_number.startswith("whatsapp:"):
@@ -69,6 +68,60 @@ def send_whatsapp(to: str, message: str) -> dict:
         return {"status": "ok", "sid": msg.sid}
     except Exception as e:
         logger.error(f"[Twilio] Erreur envoi WhatsApp: {e}")
+        return {"status": "error", "message": str(e)[:200]}
+
+
+def send_whatsapp_structured(to: str, title: str, body: str,
+                             options: list = None) -> dict:
+    """
+    Envoie un message WhatsApp structure avec des options de reponse rapide (7-3).
+
+    Twilio WhatsApp ne supporte pas nativement les boutons interactifs
+    sans template approuve. On formate un message texte structure avec
+    des numeros de reponse rapide.
+
+    Exemple de message envoye :
+      \U0001f7e0 Raya — Mail important
+
+      De : dupont@client.fr
+      Sujet : Relance chantier photovoltaique
+      Resume : Dupont demande un point sur l'avancement...
+
+      Repondre :
+      1\ufe0f\u20e3 Oui, reponds pour moi
+      2\ufe0f\u20e3 Je m'en occupe
+      3\ufe0f\u20e3 Rappelle-moi dans 1h
+    """
+    client = _get_client()
+    if not client:
+        return {"status": "disabled"}
+
+    from_number = os.getenv("TWILIO_WHATSAPP_FROM", "").strip()
+    if not from_number:
+        return {"status": "error", "message": "TWILIO_WHATSAPP_FROM non defini"}
+
+    if not to.startswith("whatsapp:"):
+        to = f"whatsapp:{to}"
+    if not from_number.startswith("whatsapp:"):
+        from_number = f"whatsapp:{from_number}"
+
+    # Construction du message structure
+    lines = [title, "", body]
+    if options:
+        lines.append("")
+        lines.append("Répondre :")
+        emojis = ["1\ufe0f\u20e3", "2\ufe0f\u20e3", "3\ufe0f\u20e3", "4\ufe0f\u20e3"]
+        for i, opt in enumerate(options[:4]):
+            lines.append(f"  {emojis[i]} {opt}")
+
+    message = "\n".join(lines)[:1600]
+
+    try:
+        msg = client.messages.create(body=message, from_=from_number, to=to)
+        logger.info(f"[Twilio] WhatsApp structure envoye a {to}")
+        return {"status": "ok", "sid": msg.sid}
+    except Exception as e:
+        logger.error(f"[Twilio] Erreur WhatsApp structure: {e}")
         return {"status": "error", "message": str(e)[:200]}
 
 

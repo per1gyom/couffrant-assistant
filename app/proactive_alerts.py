@@ -61,9 +61,9 @@ def create_alert(
 
 def _notify_external(username, tenant_id, alert_type, priority, title, body):
     """
-    Envoie une notification WhatsApp si Twilio est configure
-    et que l'utilisateur a un numero de notification.
+    Envoie une notification WhatsApp structuree si Twilio est configure.
     7-5 : respect des plages silencieuses et du canal prefere.
+    7-3 : messages structures avec options de reponse rapide.
     """
     import os
 
@@ -73,7 +73,7 @@ def _notify_external(username, tenant_id, alert_type, priority, title, body):
         if not should_notify(username, priority):
             return  # plage silencieuse ou chat_only
     except Exception:
-        pass  # si le module n'est pas disponible, on continue
+        pass
 
     phone = os.getenv(f"NOTIFICATION_PHONE_{username.upper()}", "").strip()
     if not phone:
@@ -81,18 +81,32 @@ def _notify_external(username, tenant_id, alert_type, priority, title, body):
     if not phone:
         return
 
-    from app.connectors.twilio_connector import send_whatsapp, is_available
+    from app.connectors.twilio_connector import send_whatsapp_structured, send_whatsapp, is_available
     if not is_available():
         return
 
     icon = "\U0001f534" if priority == "critical" else "\U0001f7e0"
-    message = (
-        f"{icon} Raya \u2014 Alerte {priority}\n\n"
-        f"{title}\n"
-        f"{body[:300] if body else ''}\n\n"
-        f"Connecte-toi au chat pour agir."
-    )
-    send_whatsapp(phone, message)
+    try:
+        send_whatsapp_structured(
+            to=phone,
+            title=f"{icon} Raya \u2014 {alert_type.replace('_', ' ').capitalize()}",
+            body=f"{title}\n{body[:300] if body else ''}",
+            options=[
+                "Oui, g\u00e8re pour moi",
+                "Je m'en occupe",
+                "Rappelle-moi dans 1h",
+                "Ignorer",
+            ],
+        )
+    except Exception:
+        # Fallback texte brut si structure echoue
+        message = (
+            f"{icon} Raya \u2014 Alerte {priority}\n\n"
+            f"{title}\n"
+            f"{body[:300] if body else ''}\n\n"
+            f"Connecte-toi au chat pour agir."
+        )
+        send_whatsapp(phone, message)
 
 
 def get_active_alerts(username: str, limit: int = 10) -> list:
