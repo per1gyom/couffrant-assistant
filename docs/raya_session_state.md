@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 13/04/2026 matin** — Opus
+**Dernière mise à jour : 13/04/2026 midi** — Opus
 
 ---
 
@@ -64,31 +64,35 @@ FastAPI Python 3.13 sur Railway. Repo public `github.com/per1gyom/couffrant-assi
 
 ## 3. État vérifié 13/04/2026
 **PHASE 5A TERMINÉE ✅ (14/14)**
+**PHASE 5B EN COURS (4/5)** — reste 5B-2 (hot_summary amélioré)
 **RAG vectoriel ACTIVÉ ✅** — 1045/1045 embeddings.
 **Tests Phase 4 — 16/16 VERTS ✅**.
-**Webhook Teams ✅** : géré par APScheduler (plus de threads daemon).
-**Agnosticisme LLM ✅** : plus aucun `import anthropic` en dehors de `llm_client.py`.
+**Webhook Teams ✅** : géré par APScheduler.
+**Agnosticisme LLM ✅** : zéro `import anthropic` en dehors de `llm_client.py`.
+**Injection dynamique actions ✅** : prompt allégé de 30-60% sur les échanges courants.
+**Cache mémoire TTL 5min ✅** : hot_summary, teams_context, mail_filter cachés.
+**Déduplication contexte ✅** : RAG conversations ne duplique plus l'historique récent.
+**ThreadPoolExecutor partagé ✅** : un seul pool au niveau module.
 
 ## 4. AVANCEMENT
 
-**Phase 5A — Sécurité & dette technique : TERMINÉE ✅**
+**Phase 5A — Sécurité & dette technique : TERMINÉE ✅ (14/14)**
+**Phase 5B — Optimisation prompt : 4/5 ✅**
 
-Toutes les 14 tâches sont faites. Voir `docs/raya_changelog.md` pour les détails.
-
-**Prochaine étape : Phase 5B — Optimisation prompt**
-
-| # | Tâche | Complexité |
+| # | Tâche | Statut |
 |---|---|---|
-| 5B-1 | Injection dynamique des actions (routeur Haiku classifie les domaines) | haute |
-| 5B-2 | Hot_summary amélioré (3 niveaux, vectorisé) | moyenne |
-| 5B-3 | Cache mémoire TTL 5 min pour règles et insights | moyenne |
-| 5B-4 | Dédupliquer le contexte conversationnel | moyenne |
-| 5B-5 | ThreadPoolExecutor partagé au niveau app | faible |
+| 5B-1 | Injection dynamique des actions par domaine | ✅ fait (3 commits) |
+| 5B-2 | Hot_summary amélioré (3 niveaux, vectorisé) | ❌ à faire |
+| 5B-3 | Cache mémoire TTL 5 min | ✅ fait (2 commits) |
+| 5B-4 | Dédupliquer contexte conversationnel | ✅ fait |
+| 5B-5 | ThreadPoolExecutor partagé | ✅ fait |
+
+**Prochaine étape : 5B-2** (hot_summary amélioré — touche à la qualité de la mémoire, pas du refactoring)
 
 ## 5. TODO — ROADMAP V2 (voir `docs/raya_roadmap_v2.md`)
-Ordre : ~~5A~~ → **5B** → 5C → 5D → 5E → 5G → 5F → Phase 7 (Jarvis) → Phase 6.
+Ordre : ~~5A~~ → **5B** (4/5) → 5C → 5D → 5E → 5G → 5F → Phase 7 (Jarvis) → Phase 6.
 
-Planning estimé : Phase 7 fonctionnelle ~mi-août 2026. Jarvis minimal (triage + WhatsApp) ~mi-juin.
+Planning estimé : Phase 7 fonctionnelle ~mi-août 2026. Jarvis minimal ~mi-juin.
 
 ## 6. Décisions B1–B32 (résumé)
 B1-B2 routage ✅. B3-B7/B14/B30/B32 RAG + rule_validator ✅. B5 audit ✅. B6 décroissance ✅. B8 session thématique ✅. B9 notifs ✅. B11-B12 multi-tenant 🟡. B13 onboarding ✅. B16/B18/B23 tools_registry 🟡. B17 costs ❌. B20 rename 🟡. B21-B22 hiérarchie ✅. B24 API ❌. B25 versioning ❌. B27 Pourquoi ✅. B29 honnêteté ✅. B31 feedback ✅. B10 proactivity ❌. B15 hors-cadre ❌.
@@ -104,12 +108,10 @@ B1-B2 routage ✅. B3-B7/B14/B30/B32 RAG + rule_validator ✅. B5 audit ✅. B6 
 - **Repo local Mac abandonné.** Ne jamais y toucher. Tout via GitHub.
 - MCP GitHub en écriture instable le soir — `push_files` plus fiable que `create_or_update_file`.
 - MCP GitHub ne peut PAS supprimer de fichiers → Guillaume via interface web GitHub.
-- Quand on migre des imports, scanner TOUT le repo (`github:search_code`) pour éviter des oublis (leçon du hotfix memory.py).
+- Quand on migre des imports, scanner TOUT le repo (`github:search_code`).
 - CLI Railway oublie linking — refaire `cd ~/couffrant-assistant && railway link`.
 
 ## 10. Modèle de prompt pour Sonnet
-
-Voici le template à utiliser pour chaque tâche confiée à Sonnet :
 
 ```
 Projet Raya — Tâche [NUMÉRO] assignée par Opus.
@@ -132,12 +134,6 @@ Règles : [FICHIERS CONCERNÉS UNIQUEMENT]. Ne modifier aucune logique existante
 
 Rapport pour Opus : fichier(s) modifié(s), ligne(s) changée(s), SHA du commit.
 ```
-
-Notes :
-- Toujours dire « Pousse directement » (Guillaume ne peut pas juger le code)
-- Un prompt = un seul fichier modifié si possible (moins de risque de casse)
-- Pour les gros fichiers (>10k), diviser en plusieurs commits
-- Toujours demander le rapport pour Opus à la fin
 
 ## 11. Outils Opus
 GitHub MCP (lecture + push_files + search_code), Postgres MCP query lecture base prod `railway`. Différés via `tool_search`.
