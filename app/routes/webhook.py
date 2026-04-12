@@ -1,13 +1,14 @@
 """
 Endpoint Microsoft Graph webhook.
 
-Pipeline de filtrage à 4 niveaux :
+Pipeline de filtrage à 5 niveaux :
   1a. Whitelist Raya (mail_filter autoriser:) → court-circuite le filtre statique
   1b. Filtre heuristique statique (noreply / newsletters / bulk domains)
   1c. Blacklist Raya (mail_filter bloquer:) → bloc supplémentaire
   2.  Règles anti_spam personnalisées
   3.  Triage Haiku : IGNORER / STOCKER_SIMPLE / ANALYSER
   4.  Analyse complète ou stockage simple + stockage
+  5.  Scoring d'urgence + alerte shadow ou réelle (Phase 7)
 
 Raya peut affiner le filtre statique via :
   [ACTION:LEARN:mail_filter|autoriser: dupont@example.com]
@@ -58,10 +59,6 @@ _BULK_SUBJECT_KEYWORDS = (
 # ─── RÈGLES RAYA (mail_filter) ───
 
 def _get_mail_filter_rules(username: str) -> tuple:
-    """
-    Charge les règles mail_filter que Raya a posées.
-    Retourne (whitelist, blacklist).
-    """
     try:
         from app.memory_rules import get_rules_by_category
         rules = get_rules_by_category('mail_filter', username)
@@ -78,7 +75,6 @@ def _get_mail_filter_rules(username: str) -> tuple:
 
 
 def _matches_filter(sender: str, subject: str, patterns: list) -> bool:
-    """Vérifie si expéditeur ou sujet correspond à un pattern de filtre."""
     sender_l = sender.lower()
     subject_l = (subject or "").lower()
     for pattern in patterns:
@@ -96,29 +92,22 @@ def _matches_filter(sender: str, subject: str, patterns: list) -> bool:
 
 
 def _is_bulk_heuristic(sender: str, subject: str, preview: str) -> bool:
-    """Niveau 1b — Filtre heuristique statique."""
     sender_lower = sender.lower()
     subject_lower = (subject or "").lower()
-
     if any(sender_lower.startswith(p) for p in _NOREPLY_PREFIXES):
         return True
-
     domain = sender_lower.split("@")[-1] if "@" in sender_lower else ""
     if any(bulk in domain for bulk in _BULK_DOMAINS):
         return True
-
     if any(kw in subject_lower for kw in _BULK_SUBJECT_KEYWORDS):
         return True
-
     preview_lower = (preview or "").lower()
     if "list-unsubscribe" in preview_lower or "view in browser" in preview_lower:
         return True
-
     return False
 
 
 def _is_spam_by_rules(sender: str, subject: str, preview: str, username: str) -> bool:
-    """Niveau 2 — Règles anti_spam personnalisées."""
     try:
         from app.memory_rules import get_antispam_keywords
         keywords = get_antispam_keywords(username)
@@ -132,7 +121,6 @@ def _is_spam_by_rules(sender: str, subject: str, preview: str, username: str) ->
 
 @router.get("/webhook/microsoft")
 async def webhook_validation_get(validationToken: str = ""):
-    """Validation GET — Microsoft Graph envoie un GET lors du test de connectivité."""
     if validationToken:
         return Response(content=validationToken, media_type="text/plain", status_code=200)
     return Response(status_code=200)
@@ -140,25 +128,10 @@ async def webhook_validation_get(validationToken: str = ""):
 
 @router.post("/webhook/microsoft")
 async def webhook_notification(request: Request):
-    """
-    Endpoint principal.
-
-    Microsoft Graph envoie DEUX types de requêtes POST à cette URL :
-    1. Validation initiale : POST avec ?validationToken=xxx et body vide.
-       → Doit retourner 200 OK avec le token exact en text/plain.
-    2. Notifications réelles : POST avec body JSON contenant les changements.
-       → Doit retourner 202 Accepted.
-
-    Le bug précédent : on essayait de parser le JSON d'abord, ce qui échouait
-    sur la validation (body vide), et on retournait 202 au lieu de 200 + token.
-    Microsoft refusait alors de créer la subscription (ValidationError 400).
-    """
-    # ── Validation Microsoft Graph (priorité absolue) ──
     validation_token = request.query_params.get("validationToken")
     if validation_token:
         return Response(content=validation_token, media_type="text/plain", status_code=200)
 
-    # ── Notifications normales ──
     try:
         body = await request.json()
     except Exception:
@@ -197,14 +170,16 @@ async def webhook_notification(request: Request):
 def _process_mail(username: str, message_id: str):
     """
     Pipeline de filtrage :
-      1a. Whitelist Raya → bypass heuristique si match
+      1a. Whitelist Raya
       1b. Heuristique statique
       1c. Blacklist Raya
       2.  Anti-spam personnalisé
       3.  Triage Haiku : IGNORER / STOCKER_SIMPLE / ANALYSER
       4.  Analyse complète ou stockage simple + stockage
+      5.  Scoring d'urgence + alerte shadow ou réelle (Phase 7)
     """
     try:
+        from datetime import datetime
         from app.token_manager import get_valid_microsoft_token
         from app.graph_client import graph_get
         from app.mail_memory_store import mail_exists, insert_mail
@@ -212,6 +187,7 @@ def _process_mail(username: str, message_id: str):
         from app.router import route_mail_action
         from app.feedback_store import get_global_instructions
         from app.app_security import get_tenant_id
+        from app.database import get_pg_conn
 
         token = get_valid_microsoft_token(username)
         if not token:
@@ -231,7 +207,6 @@ def _process_mail(username: str, message_id: str):
         subject = msg.get("subject", "") or ""
         preview = msg.get("bodyPreview", "") or ""
 
-        # Charge les règles mail_filter de Raya
         whitelist, blacklist = _get_mail_filter_rules(username)
 
         # 1a — Whitelist
@@ -239,7 +214,7 @@ def _process_mail(username: str, message_id: str):
         if whitelisted:
             print(f"[Webhook][L1a-whitelist] Autorisé : '{subject[:50]}' de {sender}")
 
-        # 1b — Heuristique statique (sauté si whitelisted)
+        # 1b — Heuristique statique
         if not whitelisted and _is_bulk_heuristic(sender, subject, preview):
             print(f"[Webhook][L1b-heuristique] Ignoré : '{subject[:50]}' de {sender}")
             return
@@ -258,7 +233,7 @@ def _process_mail(username: str, message_id: str):
         try:
             triage = route_mail_action(sender, subject, preview)
         except Exception:
-            triage = "ANALYSER"  # fallback sûr
+            triage = "ANALYSER"
 
         if triage == "IGNORER":
             print(f"[Webhook][L3-triage] Ignoré : '{subject[:50]}' de {sender}")
@@ -291,7 +266,6 @@ def _process_mail(username: str, message_id: str):
             }
             analysis_status = "stored_simple"
         else:
-            # triage == "ANALYSER" — analyse Sonnet complète
             try:
                 item = analyze_single_mail_with_ai(msg, instructions, username)
                 analysis_status = "done_ai"
@@ -326,6 +300,60 @@ def _process_mail(username: str, message_id: str):
             "mailbox_source": "outlook",
         })
         print(f"[Webhook] Mail stocké pour {username}: '{subject[:60]}'")
+
+        # 5 — Scoring d'urgence + notification (Phase 7)
+        try:
+            from app.urgency_model import score_mail_urgency, get_alert_level
+            urgency = score_mail_urgency(sender, subject, preview, username, tenant_id)
+            urgency_score = urgency["score"]
+            urgency_level = urgency["level"]
+
+            if urgency_level in ("important", "critical"):
+                # Vérifier si shadow mode actif
+                _conn = get_pg_conn()
+                _c = _conn.cursor()
+                _c.execute("""
+                    SELECT shadow_mode, shadow_mode_until FROM users WHERE username = %s
+                """, (username,))
+                _row = _c.fetchone()
+                _conn.close()
+
+                is_shadow = (_row and _row[0] and (_row[1] is None or _row[1] > datetime.now()))
+
+                if is_shadow:
+                    from app.proactive_alerts import create_alert
+                    icon = "\U0001f534" if urgency_level == "critical" else "\U0001f7e0"
+                    create_alert(
+                        username=username, tenant_id=tenant_id,
+                        alert_type="mail_urgent",
+                        priority="critical" if urgency_level == "critical" else "high",
+                        title=f"[SHADOW] {icon} J'aurais envoyé un WhatsApp : {subject[:60]}",
+                        body=(
+                            f"De : {sender}\n"
+                            f"Score urgence : {urgency_score}/100 (certitude {urgency['certainty']})\n"
+                            f"Raisons : {', '.join(urgency['reasons'][:3])}\n"
+                            f"\u2192 En mode réel, j'aurais envoyé un WhatsApp avec ce résumé."
+                        ),
+                        source_type="mail_shadow", source_id=str(message_id[:50]),
+                    )
+                    print(f"[Webhook][Shadow] {urgency_level} {urgency_score}/100 : '{subject[:50]}' de {sender}")
+                else:
+                    from app.proactive_alerts import create_alert
+                    create_alert(
+                        username=username, tenant_id=tenant_id,
+                        alert_type="mail_urgent",
+                        priority="critical" if urgency_level == "critical" else "high",
+                        title=f"Mail {urgency_level} : {subject[:60]}",
+                        body=(
+                            f"De : {sender}\n"
+                            f"Score : {urgency_score}/100\n"
+                            f"{item.get('short_summary', preview[:200])}"
+                        ),
+                        source_type="mail", source_id=str(message_id[:50]),
+                    )
+                    print(f"[Webhook][Jarvis] {urgency_level} {urgency_score}/100 : '{subject[:50]}' \u2192 WhatsApp")
+        except Exception as e:
+            print(f"[Webhook] Erreur scoring urgence: {e}")
 
     except Exception as e:
         print(f"[Webhook] Erreur traitement {username}/{message_id}: {e}")
