@@ -31,8 +31,25 @@ Guillaume possède plusieurs sociétés. Raya fait le lien entre elles : vision 
 ## 0. CONSIGNES
 - Vocabulaire : « Terminal ». Concis. Langage simple.
 - **Règle d'or : aucune écriture sans « ok vas-y » explicite.**
-- **Opus = architecte. Sonnet = exécutant.**
 - **Repo local Mac abandonné.** Tout via GitHub.
+
+### Workflow Opus / Sonnet (NON NÉGOCIABLE)
+
+**Opus = architecte.** Il audite le code, conçoit l'architecture, rédige des prompts
+précis pour Sonnet. **Opus ne code PAS et ne pousse PAS de commits lui-même.**
+Ses tokens sont chers — il les utilise pour la réflexion, la conception,
+et la durée de session. Plus Opus économise ses tokens, plus la session dure longtemps.
+
+**Sonnet = exécutant.** Il reçoit les prompts d'Opus (copiés par Guillaume),
+code les modifications, et pousse directement sur `main`.
+
+**Le cycle :**
+1. Opus lit le code, identifie les changements nécessaires
+2. Opus rédige des prompts Sonnet précis (fichier, fonction, lignes, format commit)
+3. Guillaume valide les prompts
+4. Guillaume copie-colle chaque prompt dans une conversation Sonnet
+5. Sonnet exécute et rapporte (fichier, SHA)
+6. Opus vérifie si besoin et passe à la tâche suivante
 
 ## 1. Stack
 FastAPI Python 3.13, Railway, PostgreSQL+pgvector, Anthropic 3 tiers, OpenAI embeddings.
