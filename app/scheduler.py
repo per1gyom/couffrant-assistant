@@ -28,12 +28,12 @@ Jobs :
   proactivity_scan : toutes les 30 min          — alertes et rappels intelligents (B10)
 """
 import os
-import logging
+from app.logging_config import get_logger
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 
-logger = logging.getLogger(__name__)
+logger = get_logger("raya.scheduler")
 
 _scheduler: BackgroundScheduler | None = None
 
@@ -70,7 +70,7 @@ def start():
     _register_jobs(scheduler)
     scheduler.start()
     jobs = scheduler.get_jobs()
-    print(f"[Scheduler] Démarré — {len(jobs)} job(s) : {[j.id for j in jobs]}")
+    logger.info(f"[Scheduler] Démarré — {len(jobs)} job(s) : {[j.id for j in jobs]}")
 
 
 def stop():
@@ -78,7 +78,7 @@ def stop():
     global _scheduler
     if _scheduler and _scheduler.running:
         _scheduler.shutdown(wait=False)
-        print("[Scheduler] Arrêté")
+        logger.info("[Scheduler] Arrêté")
     _scheduler = None
 
 
@@ -96,9 +96,9 @@ def _register_jobs(scheduler: BackgroundScheduler):
             name="Expiration des actions en attente",
             replace_existing=True,
         )
-        print("[Scheduler] Job enregistré : expire_pending (toutes les heures)")
+        logger.info("[Scheduler] Job enregistré : expire_pending (toutes les heures)")
     else:
-        print("[Scheduler] Job DÉSACTIVÉ : expire_pending (SCHEDULER_EXPIRE_ENABLED=false)")
+        logger.info("[Scheduler] Job DÉSACTIVÉ : expire_pending (SCHEDULER_EXPIRE_ENABLED=false)")
 
     if _job_enabled("SCHEDULER_DECAY_ENABLED"):
         scheduler.add_job(
@@ -108,9 +108,9 @@ def _register_jobs(scheduler: BackgroundScheduler):
             name="Décroissance de confiance des règles inactives",
             replace_existing=True,
         )
-        print("[Scheduler] Job enregistré : confidence_decay (lundi 02h00)")
+        logger.info("[Scheduler] Job enregistré : confidence_decay (lundi 02h00)")
     else:
-        print("[Scheduler] Job DÉSACTIVÉ : confidence_decay (SCHEDULER_DECAY_ENABLED=false)")
+        logger.info("[Scheduler] Job DÉSACTIVÉ : confidence_decay (SCHEDULER_DECAY_ENABLED=false)")
 
     if _job_enabled("SCHEDULER_AUDIT_ENABLED"):
         scheduler.add_job(
@@ -120,9 +120,9 @@ def _register_jobs(scheduler: BackgroundScheduler):
             name="Audit de cohérence des règles par Opus",
             replace_existing=True,
         )
-        print("[Scheduler] Job enregistré : opus_audit (dimanche 03h00)")
+        logger.info("[Scheduler] Job enregistré : opus_audit (dimanche 03h00)")
     else:
-        print("[Scheduler] Job DÉSACTIVÉ : opus_audit (SCHEDULER_AUDIT_ENABLED=false)")
+        logger.info("[Scheduler] Job DÉSACTIVÉ : opus_audit (SCHEDULER_AUDIT_ENABLED=false)")
 
     if _job_enabled("SCHEDULER_WEBHOOK_ENABLED"):
         from datetime import datetime, timedelta
@@ -141,9 +141,9 @@ def _register_jobs(scheduler: BackgroundScheduler):
             name="Renouvellement webhooks Microsoft",
             replace_existing=True,
         )
-        print("[Scheduler] Jobs enregistrés : webhook_setup (30s) + webhook_renewal (6h)")
+        logger.info("[Scheduler] Jobs enregistrés : webhook_setup (30s) + webhook_renewal (6h)")
     else:
-        print("[Scheduler] Jobs DÉSACTIVÉS : webhook (SCHEDULER_WEBHOOK_ENABLED=false)")
+        logger.info("[Scheduler] Jobs DÉSACTIVÉS : webhook (SCHEDULER_WEBHOOK_ENABLED=false)")
 
     if _job_enabled("SCHEDULER_TOKEN_ENABLED"):
         scheduler.add_job(
@@ -153,9 +153,9 @@ def _register_jobs(scheduler: BackgroundScheduler):
             name="Refresh tokens Microsoft",
             replace_existing=True,
         )
-        print("[Scheduler] Job enregistré : token_refresh (45 min)")
+        logger.info("[Scheduler] Job enregistré : token_refresh (45 min)")
     else:
-        print("[Scheduler] Job DÉSACTIVÉ : token_refresh (SCHEDULER_TOKEN_ENABLED=false)")
+        logger.info("[Scheduler] Job DÉSACTIVÉ : token_refresh (SCHEDULER_TOKEN_ENABLED=false)")
 
 
 # ─── FONCTIONS JOB ───
@@ -166,9 +166,9 @@ def _job_expire_pending():
         from app.pending_actions import expire_old_pending
         n = expire_old_pending()
         if n:
-            print(f"[Scheduler] expire_pending : {n} action(s) expirée(s)")
+            logger.info(f"[Scheduler] expire_pending : {n} action(s) expirée(s)")
     except Exception as e:
-        print(f"[Scheduler] ERREUR expire_pending : {e}")
+        logger.error(f"[Scheduler] ERREUR expire_pending : {e}")
 
 
 def _job_confidence_decay():
@@ -209,10 +209,10 @@ def _job_confidence_decay():
         parts = []
         if decayed: parts.append(f"{decayed} décrémentée(s)")
         if masked:  parts.append(f"{masked} masquée(s) (conf < {CONFIDENCE_MASK_THRESHOLD})")
-        print(f"[Scheduler] confidence_decay : {', '.join(parts) if parts else 'aucune règle concernée'}")
+        logger.info(f"[Scheduler] confidence_decay : {', '.join(parts) if parts else 'aucune règle concernée'}")
 
     except Exception as e:
-        print(f"[Scheduler] ERREUR confidence_decay : {e}")
+        logger.error(f"[Scheduler] ERREUR confidence_decay : {e}")
 
 
 def _job_opus_audit():
@@ -238,7 +238,7 @@ def _job_opus_audit():
         conn.close()
 
         if not targets:
-            print("[Scheduler] opus_audit : aucun tenant à auditer")
+            logger.info("[Scheduler] opus_audit : aucun tenant à auditer")
             return
 
         audited = 0
@@ -247,12 +247,12 @@ def _job_opus_audit():
                 _audit_one(tenant_id, username, nb_rules)
                 audited += 1
             except Exception as e:
-                print(f"[Scheduler] ERREUR opus_audit {username}: {e}")
+                logger.error(f"[Scheduler] ERREUR opus_audit {username}: {e}")
 
-        print(f"[Scheduler] opus_audit : {audited} tenant(s) audité(s)")
+        logger.info(f"[Scheduler] opus_audit : {audited} tenant(s) audité(s)")
 
     except Exception as e:
-        print(f"[Scheduler] ERREUR opus_audit : {e}")
+        logger.error(f"[Scheduler] ERREUR opus_audit : {e}")
 
 
 def _job_webhook_setup():
@@ -260,9 +260,9 @@ def _job_webhook_setup():
     try:
         from app.connectors.microsoft_webhook import ensure_all_subscriptions
         ensure_all_subscriptions()
-        print("[Scheduler] webhook_setup : OK")
+        logger.info("[Scheduler] webhook_setup : OK")
     except Exception as e:
-        print(f"[Scheduler] ERREUR webhook_setup : {e}")
+        logger.error(f"[Scheduler] ERREUR webhook_setup : {e}")
 
 
 def _job_webhook_renewal():
@@ -270,9 +270,9 @@ def _job_webhook_renewal():
     try:
         from app.connectors.microsoft_webhook import ensure_all_subscriptions
         ensure_all_subscriptions()
-        print("[Scheduler] webhook_renewal : OK")
+        logger.info("[Scheduler] webhook_renewal : OK")
     except Exception as e:
-        print(f"[Scheduler] ERREUR webhook_renewal : {e}")
+        logger.error(f"[Scheduler] ERREUR webhook_renewal : {e}")
 
 
 def _job_token_refresh():
@@ -283,18 +283,18 @@ def _job_token_refresh():
             try:
                 token = get_valid_microsoft_token(username)
                 if not token:
-                    print(f"[Scheduler] token_refresh ECHEC {username}")
+                    logger.error(f"[Scheduler] token_refresh ECHEC {username}")
                     try:
                         from app.connectors.microsoft_webhook import _send_revoked_alert
                         _send_revoked_alert(username)
                     except Exception:
                         pass
                 else:
-                    print(f"[Scheduler] token_refresh {username}: OK")
+                    logger.info(f"[Scheduler] token_refresh {username}: OK")
             except Exception as e:
-                print(f"[Scheduler] token_refresh erreur {username}: {e}")
+                logger.error(f"[Scheduler] token_refresh erreur {username}: {e}")
     except Exception as e:
-        print(f"[Scheduler] ERREUR token_refresh : {e}")
+        logger.error(f"[Scheduler] ERREUR token_refresh : {e}")
 
 
 def _audit_one(tenant_id: str, username: str, nb_rules: int):
@@ -377,8 +377,8 @@ Ne suggère aucune action automatique."""
         len(parsed.get("redondances", [])) +
         len(parsed.get("obsoletes", []))
     )
-    print(f"[Scheduler] opus_audit {username} : {nb_rules} règles, "
-          f"{nb_issues} problème(s), score={parsed.get('score_coherence', '?')}")
+    logger.info(f"[Scheduler] opus_audit {username} : {nb_rules} règles, "
+                f"{nb_issues} problème(s), score={parsed.get('score_coherence', '?')}")
 
 
 def _ensure_audit_table():
@@ -404,4 +404,4 @@ def _ensure_audit_table():
         conn.commit()
         conn.close()
     except Exception as e:
-        print(f"[Scheduler] ERREUR _ensure_audit_table : {e}")
+        logger.error(f"[Scheduler] ERREUR _ensure_audit_table : {e}")
