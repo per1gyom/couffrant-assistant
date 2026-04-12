@@ -318,6 +318,21 @@ def init_postgres():
     c.execute("CREATE INDEX IF NOT EXISTS idx_response_meta_memory ON aria_response_metadata (aria_memory_id, username)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_response_meta_feedback ON aria_response_metadata (username, feedback_type, created_at DESC)")
 
+    # Mode Dirigeant : accès multi-tenant par utilisateur (5D-1)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS user_tenant_access (
+            id SERIAL PRIMARY KEY,
+            username TEXT NOT NULL,
+            tenant_id TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'user',
+            created_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(username, tenant_id),
+            CONSTRAINT uta_role_check CHECK (role IN ('owner', 'admin', 'user'))
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_uta_username ON user_tenant_access (username)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_uta_tenant ON user_tenant_access (tenant_id)")
+
     conn.commit()
     conn.close()
 
@@ -431,6 +446,8 @@ def init_postgres():
         "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS embedding vector(1536)",
         "CREATE INDEX IF NOT EXISTS idx_rules_embedding ON aria_rules USING hnsw (embedding vector_cosine_ops)",
         "ALTER TABLE aria_hot_summary ADD COLUMN IF NOT EXISTS embedding vector(1536)",
+        # ── 5D-1 : peuplement user_tenant_access depuis données existantes ──
+        "INSERT INTO user_tenant_access (username, tenant_id, role) SELECT username, tenant_id, CASE WHEN scope = 'super_admin' THEN 'owner' WHEN scope = 'admin' THEN 'admin' ELSE 'user' END FROM users WHERE tenant_id IS NOT NULL ON CONFLICT (username, tenant_id) DO NOTHING",
     ]
     for m in migrations:
         try:
