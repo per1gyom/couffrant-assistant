@@ -1,5 +1,5 @@
 """
-Scheduler de jobs périodiques Raya — Phase 4 + 7.
+Scheduler de jobs périodiques Raya — Phase 4 + 7 + 8.
 
 Utilise APScheduler (BackgroundScheduler) pour exécuter des tâches
 de maintenance sans bloquer le serveur FastAPI.
@@ -26,8 +26,8 @@ Jobs :
   webhook_setup     : 30s au démarrage (une fois)
   webhook_renewal   : toutes les 6h
   token_refresh     : toutes les 45 min
-  proactivity_scan  : toutes les 30 min (5E-4b)
-  pattern_analysis  : dimanche 04h00 (5G-4 + 7-WF activity_log)
+  proactivity_scan  : toutes les 30 min (5E-4b) + alertes cycliques (8-CYCLES)
+  pattern_analysis  : dimanche 04h00 (5G-4 + 7-WF + 8-CYCLES activity_log)
   meeting_briefing  : 06h30 chaque matin (7-BRIEF) — briefings réunions du jour
   heartbeat_morning : 07h00 chaque matin (7-6R) — rapport stocké + ping seulement
   gmail_polling     : toutes les 3 min (7-1b) — désactivé par défaut
@@ -320,6 +320,8 @@ def _scan_user(username: str):
     tenant_id = get_tenant_id(username)
     conn = get_pg_conn()
     c = conn.cursor()
+
+    # Mails urgents non traités
     c.execute("""
         SELECT id, subject, from_email, priority, received_at FROM mail_memory
         WHERE username = %s AND priority = 'haute'
@@ -336,6 +338,8 @@ def _scan_user(username: str):
                      title=f"Mail urgent non traité : {row[1][:60]}",
                      body=f"De : {row[2]} — reçu il y a plus de 2h, priorité haute.",
                      source_type="mail", source_id=str(row[0]))
+
+    # Réponses en attente
     c.execute("""
         SELECT id, subject, from_email, reply_urgency FROM mail_memory
         WHERE username = %s AND needs_reply = 1 AND reply_status = 'pending'
@@ -353,7 +357,99 @@ def _scan_user(username: str):
                      title=f"Réponse en attente : {row[1][:60]}",
                      body=f"De : {row[2]} — en attente depuis plus de 24h.",
                      source_type="mail_reply", source_id=str(row[0]))
+
+    # Patterns cycliques calendaires (8-CYCLES)
+    try:
+        from datetime import datetime
+        now = datetime.now()
+        c.execute("""
+            SELECT id, description, evidence FROM aria_patterns
+            WHERE username = %s AND active = true AND pattern_type = 'temporal'
+              AND confidence >= 0.5
+        """, (username,))
+        temporal_patterns = c.fetchall()
+        for pat_id, desc, evidence in temporal_patterns:
+            alert_msg = _check_cyclic_alert(now, desc or "", evidence or "")
+            if alert_msg:
+                # Ne pas recréer si alerte déjà envoyée cette semaine pour ce pattern
+                c.execute("""
+                    SELECT COUNT(*) FROM proactive_alerts
+                    WHERE username = %s AND source_type = 'cyclic_pattern'
+                      AND source_id = %s
+                      AND created_at > NOW() - INTERVAL '6 days'
+                """, (username, str(pat_id)))
+                if c.fetchone()[0] == 0:
+                    create_alert(
+                        username=username, tenant_id=tenant_id,
+                        alert_type="reminder", priority="normal",
+                        title=f"📅 Cycle détecté : {desc[:60]}",
+                        body=alert_msg,
+                        source_type="cyclic_pattern",
+                        source_id=str(pat_id),
+                    )
+    except Exception as e:
+        logger.error(f"[Cyclic] Erreur patterns cycliques {username}: {e}")
+
     conn.close()
+
+
+def _check_cyclic_alert(now, description: str, evidence: str) -> str | None:
+    """
+    Vérifie si la date/heure actuelle correspond à un pattern cyclique. (8-CYCLES)
+    Retourne un message d'alerte si on est dans la période concernée, None sinon.
+    """
+    text = (description + " " + evidence).lower()
+    day = now.day
+    weekday = now.weekday()  # 0=lundi … 6=dimanche
+    month = now.month
+
+    # Fin de mois (25-31)
+    if any(kw in text for kw in ("fin de mois", "fin_mois", "fin du mois", "end of month",
+                                  "relance fin", "facture fin", "clôture mensuelle")):
+        if day >= 25:
+            return (f"Nous sommes le {day} — période de fin de mois.\n"
+                    f"Pattern détecté : {description}")
+
+    # Début de mois (1-5)
+    if any(kw in text for kw in ("début de mois", "debut de mois", "début_mois",
+                                  "début du mois", "premier du mois")):
+        if day <= 5:
+            return (f"Nous sommes le {day} — début de mois.\n"
+                    f"Pattern détecté : {description}")
+
+    # Lundi matin
+    if any(kw in text for kw in ("lundi", "monday", "début de semaine",
+                                  "debut de semaine", "tri mails lundi")):
+        if weekday == 0:
+            return f"C'est lundi — Pattern détecté : {description}"
+
+    # Vendredi / fin de semaine
+    if any(kw in text for kw in ("vendredi", "friday", "fin de semaine",
+                                  "bilan semaine", "point semaine")):
+        if weekday == 4:
+            return f"C'est vendredi — Pattern détecté : {description}"
+
+    # Fin de trimestre (mars, juin, septembre, décembre — à partir du 20)
+    if any(kw in text for kw in ("fin de trimestre", "fin_trimestre", "trimestriel",
+                                  "end of quarter", "reporting trimestriel", "clôture trimestrielle")):
+        if month in (3, 6, 9, 12) and day >= 20:
+            trimestre = {3: "Q1", 6: "Q2", 9: "Q3", 12: "Q4"}.get(month, "")
+            return (f"Fin de trimestre {trimestre} (mois {month}, jour {day}).\n"
+                    f"Pattern détecté : {description}")
+
+    # Août — ralentissement estival
+    if any(kw in text for kw in ("août", "aout", "estival", "ralentissement été",
+                                  "vacances", "summer")):
+        if month == 8:
+            return f"Nous sommes en août — Pattern détecté : {description}"
+
+    # Janvier — reprise d'activité
+    if any(kw in text for kw in ("janvier", "january", "reprise", "nouvelle année",
+                                  "début d'année")):
+        if month == 1:
+            return f"Nous sommes en janvier — Pattern détecté : {description}"
+
+    return None
 
 
 def _job_gmail_polling():
@@ -745,7 +841,7 @@ def _send_report_ping(username: str):
 
 
 def _job_pattern_analysis():
-    """Détecte les patterns comportementaux — hebdomadaire dimanche 04h00 (5G-4 + 7-WF)."""
+    """Détecte les patterns comportementaux — hebdomadaire dimanche 04h00 (5G-4 + 7-WF + 8-CYCLES)."""
     try:
         from app.database import get_pg_conn
         from app.maturity import compute_maturity_score
@@ -776,7 +872,7 @@ def _job_pattern_analysis():
 
 
 def _analyze_patterns(username: str):
-    """Détecte les patterns récurrents (conversations + mails + activity_log). (5G-4 + 7-WF)"""
+    """Détecte les patterns récurrents (conversations + mails + activity_log + cycles). (5G-4 + 7-WF + 8-CYCLES)"""
     import json, re
     from app.database import get_pg_conn
     from app.llm_client import llm_complete, log_llm_usage
@@ -843,11 +939,20 @@ MAILS (30 derniers jours) :
 PATTERNS DÉJÀ CONNUS :
 {json.dumps(existing, ensure_ascii=False) if existing else "Aucun."}
 
-Détecte les NOUVEAUX comportements récurrents :
-- temporal : "traite les mails X le jour Y"
+Détecte les NOUVEAUX comportements récurrents selon ces types :
+
+- temporal : actions récurrentes liées au temps.
+  Sous-type CYCLIQUE (calendaire) — cherche activement des cycles :
+    * hebdomadaire : "tri mails le lundi matin", "point équipe le vendredi"
+    * mensuel : "relances factures en fin de mois (j25-j31)", "reporting début du mois"
+    * trimestriel : "clôture comptable fin de trimestre (mars/juin/sept/déc)"
+    * saisonnier : "ralentissement chantiers en août", "reprise budgets en janvier"
+  Pour les patterns cycliques, OBLIGATOIRE : précise le cycle dans "evidence" sous la forme
+  "cycle:hebdomadaire|période:lundi" ou "cycle:mensuel|période:fin_mois" etc.
+
 - relational : "quand X envoie un mail, c'est toujours Y"
 - thematic : "après un mail chantier, cherche toujours le dossier"
-- workflow : séquences d'actions répétitives. Sois PRÉCIS sur la séquence.
+- workflow : séquences d'actions répétitives (ordre, fréquence, conditions de déclenchement).
 - preference : "préfère des réponses courtes"
 
 Ne répète PAS les patterns déjà connus.
@@ -855,7 +960,7 @@ Réponds en JSON strict (sans backticks) :
 {{"new_patterns": [
   {{"type": "temporal|relational|thematic|workflow|preference",
     "description": "description claire en français",
-    "evidence": "exemples concrets",
+    "evidence": "exemples concrets (pour cycliques: cycle:X|période:Y)",
     "confidence": 0.0-1.0}}
 ]}}
 Si aucun nouveau pattern : {{"new_patterns": []}}"""
