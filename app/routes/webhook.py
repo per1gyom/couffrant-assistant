@@ -6,8 +6,8 @@ Pipeline de filtrage à 4 niveaux :
   1b. Filtre heuristique statique (noreply / newsletters / bulk domains)
   1c. Blacklist Raya (mail_filter bloquer:) → bloc supplémentaire
   2.  Règles anti_spam personnalisées
-  3.  Micro-appel Claude OUI/NON
-  4.  Analyse complète + stockage
+  3.  Triage Haiku : IGNORER / STOCKER_SIMPLE / ANALYSER
+  4.  Analyse complète ou stockage simple + stockage
 
 Raya peut affiner le filtre statique via :
   [ACTION:LEARN:mail_filter|autoriser: dupont@example.com]
@@ -201,18 +201,17 @@ def _process_mail(username: str, message_id: str):
       1b. Heuristique statique
       1c. Blacklist Raya
       2.  Anti-spam personnalisé
-      3.  Claude OUI/NON
-      4.  Analyse + stockage
+      3.  Triage Haiku : IGNORER / STOCKER_SIMPLE / ANALYSER
+      4.  Analyse complète ou stockage simple + stockage
     """
     try:
         from app.token_manager import get_valid_microsoft_token
         from app.graph_client import graph_get
         from app.mail_memory_store import mail_exists, insert_mail
         from app.ai_client import analyze_single_mail_with_ai
-        from app.llm_client import llm_complete
+        from app.router import route_mail_action
         from app.feedback_store import get_global_instructions
         from app.app_security import get_tenant_id
-        from app.config import ANTHROPIC_MODEL_FAST
 
         token = get_valid_microsoft_token(username)
         if not token:
@@ -255,37 +254,52 @@ def _process_mail(username: str, message_id: str):
             print(f"[Webhook][L2-règles] Ignoré : '{subject[:50]}' de {sender}")
             return
 
-        # 3 — LLM OUI/NON (via couche d'abstraction)
+        # 3 — Triage Haiku : IGNORER / STOCKER_SIMPLE / ANALYSER
         try:
-            result = llm_complete(
-                messages=[{"role": "user", "content": (
-                    f"Mail reçu :\nDe : {sender}\nSujet : {subject}\n"
-                    f"Aperçu : {preview[:400]}\n\n"
-                    f"Ce mail mérite-t-il d'être gardé en mémoire ? "
-                    f"Réponds uniquement : OUI ou NON."
-                )}],
-                model_tier="fast",
-                max_tokens=5,
-            )
-            should_store = "OUI" in result["text"].strip().upper()
+            triage = route_mail_action(sender, subject, preview)
         except Exception:
-            should_store = True
+            triage = "ANALYSER"  # fallback sûr
 
-        if not should_store:
-            print(f"[Webhook][L3-LLM] Ignoré : '{subject[:50]}' de {sender}")
+        if triage == "IGNORER":
+            print(f"[Webhook][L3-triage] Ignoré : '{subject[:50]}' de {sender}")
             return
 
-        # 4 — Analyse complète
+        # 4 — Analyse complète ou stockage simple
         tenant_id = get_tenant_id(username)
         instructions = get_global_instructions(tenant_id=tenant_id)
-        try:
-            item = analyze_single_mail_with_ai(msg, instructions, username)
-            analysis_status = "done_ai"
-        except Exception as e:
-            print(f"[Webhook] Erreur analyse {username}: {e}")
-            from app.assistant_analyzer import analyze_single_mail
-            item = analyze_single_mail(msg, username)
-            analysis_status = "fallback"
+
+        if triage == "STOCKER_SIMPLE":
+            print(f"[Webhook][L3-triage] Stockage simple : '{subject[:50]}' de {sender}")
+            item = {
+                "display_title": subject or "(Sans objet)",
+                "category": "autre",
+                "priority": "basse",
+                "reason": "Stockage simple (triage Haiku)",
+                "suggested_action": "Consulter si besoin",
+                "short_summary": preview[:200] if preview else "",
+                "group_hints": [],
+                "confidence": 0.5,
+                "confidence_level": "moyenne",
+                "needs_review": False,
+                "needs_reply": False,
+                "reply_urgency": "basse",
+                "reply_reason": "",
+                "response_type": "pas_de_reponse",
+                "missing_fields": [],
+                "suggested_reply_subject": "",
+                "suggested_reply": "",
+            }
+            analysis_status = "stored_simple"
+        else:
+            # triage == "ANALYSER" — analyse Sonnet complète
+            try:
+                item = analyze_single_mail_with_ai(msg, instructions, username)
+                analysis_status = "done_ai"
+            except Exception as e:
+                print(f"[Webhook] Erreur analyse {username}: {e}")
+                from app.assistant_analyzer import analyze_single_mail
+                item = analyze_single_mail(msg, username)
+                analysis_status = "fallback"
 
         insert_mail({
             "username": username,
