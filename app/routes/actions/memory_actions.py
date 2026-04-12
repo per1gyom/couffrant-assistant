@@ -1,11 +1,13 @@
 """
 Gestion des actions memoire (LEARN, INSIGHT, FORGET, SYNTH, RESTART_ONBOARDING, ASK_CHOICE).
 5D-2d : support tenant cible dans LEARN.
+7-ACT : log d'activite pour LEARN et INSIGHT.
 """
 import json
 import re
 import threading
 from app.memory_loader import MEMORY_OK, save_rule, save_insight, delete_rule, synthesize_session
+from app.activity_log import log_activity
 
 _ASK_CHOICE_PREFIX = "__CHOICE__:"
 
@@ -142,6 +144,7 @@ def _handle_memory_actions(response: str, username: str, synth_threshold: int,
                     f"\U0001f9e0 Memorise {label}{tenant_tag} : "
                     f"{rule[:120]}{'...' if len(rule) > 120 else ''}"
                 )
+                log_activity(username, "learn", category, rule[:100], tenant_id=effective_tenant or tenant_id)
             except ImportError:
                 save_rule(category, rule, "auto", 0.7, username,
                           tenant_id=effective_tenant, personal=is_personal)
@@ -150,6 +153,7 @@ def _handle_memory_actions(response: str, username: str, synth_threshold: int,
                     f"\U0001f9e0 Memorise [{category}]{tenant_tag} : "
                     f"{rule[:120]}{'...' if len(rule) > 120 else ''}"
                 )
+                log_activity(username, "learn", category, rule[:100], tenant_id=effective_tenant or tenant_id)
         except Exception as e:
             print(f"[LEARN] Erreur: {e}")
 
@@ -159,6 +163,7 @@ def _handle_memory_actions(response: str, username: str, synth_threshold: int,
         try:
             save_insight(topic, insight, "auto", username)
             confirmed.append(f"\U0001f4a1 Observe [{topic}] : {insight[:120]}{'...' if len(insight) > 120 else ''}")
+            log_activity(username, "insight", topic, insight[:100], tenant_id=tenant_id)
         except Exception as e:
             print(f"[INSIGHT] Erreur: {e}")
 

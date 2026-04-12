@@ -1,9 +1,11 @@
 """
 Gestion des actions mail (ARCHIVE, READ, REPLY, DELETE, READBODY, CREATEEVENT, CREATE_TASK).
+7-ACT : log d'activite apres chaque action.
 """
 import re
 from app.connectors.outlook_connector import perform_outlook_action
 from app.pending_actions import queue_action
+from app.activity_log import log_activity
 
 
 def is_valid_outlook_id(msg_id: str) -> bool:
@@ -44,6 +46,7 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
                     r = perform_outlook_action("delete_message", {"message_id": msg_id}, token)
                     if r.get("status") == "ok":
                         ok_count += 1
+                        log_activity(username, "mail_delete", msg_id, delete_subjects[delete_ids.index(msg_id)][:100], tenant_id=tenant_id)
                 except Exception:
                     pass
             n = len(delete_ids)
@@ -60,7 +63,11 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
         if not is_valid_outlook_id(msg_id): continue
         try:
             r = perform_outlook_action("archive_message", {"message_id": msg_id}, token)
-            confirmed.append("\u2705 Archive" if r.get("status") == "ok" else f"\u274c {r.get('message')}")
+            if r.get("status") == "ok":
+                confirmed.append("\u2705 Archive")
+                log_activity(username, "mail_archive", msg_id, "", tenant_id=tenant_id)
+            else:
+                confirmed.append(f"\u274c {r.get('message')}")
         except Exception as e:
             confirmed.append(f"\u274c {str(e)[:80]}")
 
@@ -69,6 +76,7 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
         if not is_valid_outlook_id(msg_id): continue
         try:
             perform_outlook_action("mark_as_read", {"message_id": msg_id}, token)
+            log_activity(username, "mail_read", msg_id, "", tenant_id=tenant_id)
         except Exception:
             pass
 
@@ -84,6 +92,7 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
                      "subject": orig.get('subject', ''), "to": orig.get('from_email', '')},
             label=label, conversation_id=conversation_id,
         )
+        log_activity(username, "mail_reply_queued", msg_id, orig.get('subject', '')[:100], tenant_id=tenant_id)
         preview = reply_text[:300] + ("..." if len(reply_text) > 300 else "")
         confirmed.append(
             f"\u23f8\ufe0f Action #{action_id} en attente \u2014 Reponse a envoyer :\n"
@@ -100,6 +109,7 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
             r = perform_outlook_action("get_message_body", {"message_id": msg_id}, token)
             if r.get("status") == "ok":
                 confirmed.append(f"\U0001f4e7 Corps du mail :\n{r.get('body_text', '')[:800]}")
+                log_activity(username, "mail_read", msg_id, "(body)", tenant_id=tenant_id)
         except Exception:
             pass
 
@@ -113,6 +123,7 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
                 payload={"subject": parts[0], "start": parts[1], "end": parts[2], "attendees": attendees},
                 label=label, conversation_id=conversation_id,
             )
+            log_activity(username, "calendar_create", parts[0][:100], parts[1][:20], tenant_id=tenant_id)
             confirmed.append(
                 f"\u23f8\ufe0f Action #{action_id} en attente : {label}\n"
                 f"   Participants : {', '.join(attendees) if attendees else 'aucun'}\n"

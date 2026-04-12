@@ -1,5 +1,6 @@
 """
 Gestion des actions Drive (LISTDRIVE, READDRIVE, SEARCHDRIVE, CREATEFOLDER, MOVEDRIVE, COPYFILE).
+7-ACT : log d'activite apres chaque action.
 """
 import re
 from app.connectors.drive_connector import (
@@ -8,6 +9,7 @@ from app.connectors.drive_connector import (
     _find_sharepoint_site_and_drive,
 )
 from app.pending_actions import queue_action
+from app.activity_log import log_activity
 
 
 def _handle_drive_actions(response, token, drive_write, username, tenant_id, conversation_id):
@@ -26,6 +28,7 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
                     name = it['nom']
                     lines.append(f"  {icon} [**{name}**]({link}){size_str}" if link else f"  {icon} **{name}**{size_str}")
                 confirmed.append(f"\U0001f5c2\ufe0f {r.get('dossier', '1_Photovoltaique')} ({r['count']}) :\n" + "\n".join(lines))
+                log_activity(username, "drive_list", subfolder or "root", f"{r['count']} items", tenant_id=tenant_id)
             else:
                 confirmed.append(f"\u274c {r.get('message', 'Erreur Drive')}")
         except Exception as e:
@@ -45,6 +48,7 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
                         f"\U0001f4c4 [{name}]({link}) \u2014 {r.get('message', '')} {r.get('conseil', '')}" if link
                         else f"\U0001f4c4 {name} \u2014 {r.get('message', '')} {r.get('conseil', '')}"
                     )
+                log_activity(username, "drive_read", file_ref[:200], r.get('fichier', '')[:100], tenant_id=tenant_id)
             else:
                 confirmed.append(f"\u274c {r.get('message')}")
         except Exception as e:
@@ -62,6 +66,7 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
                     name = it['nom']
                     lines.append(f"  {icon} [**{name}**]({link})" if link else f"  {icon} **{name}**")
                 confirmed.append(f"\U0001f50d '{q}' \u2014 {r['count']} resultat(s) :\n" + "\n".join(lines))
+                log_activity(username, "drive_search", q[:200], f"{r['count']} resultats", tenant_id=tenant_id)
             else:
                 confirmed.append(f"\u274c {r.get('message')}")
         except Exception as e:
@@ -74,7 +79,11 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
             try:
                 _, drive_id, _ = _find_sharepoint_site_and_drive(token)
                 r = create_folder(token, parent_id, folder_name, drive_id)
-                confirmed.append(f"\u2705 Dossier '{folder_name}' cree" if r.get("status") == "ok" else f"\u274c {r.get('message')}")
+                if r.get("status") == "ok":
+                    confirmed.append(f"\u2705 Dossier '{folder_name}' cree")
+                    log_activity(username, "drive_create", folder_name[:200], parent_id[:100], tenant_id=tenant_id)
+                else:
+                    confirmed.append(f"\u274c {r.get('message')}")
             except Exception as e:
                 confirmed.append(f"\u274c {str(e)[:80]}")
 

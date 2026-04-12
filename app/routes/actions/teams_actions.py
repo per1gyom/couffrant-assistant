@@ -1,5 +1,6 @@
 """
 Gestion des actions Teams (LIST, CHATS, MSG, REPLYCHAT, SENDCHANNEL, GROUPE, MARK, SYNC, HISTORY).
+7-ACT : log d'activite apres chaque action.
 """
 import re
 import threading
@@ -10,6 +11,7 @@ from app.connectors.teams_connector import (
     send_message_to_user, create_group_chat,
 )
 from app.pending_actions import queue_action
+from app.activity_log import log_activity
 
 
 def _handle_teams_actions(response, token, username, tenant_id, conversation_id):
@@ -24,6 +26,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
                     ch_names = ", ".join(c["name"] for c in t.get("channels", [])[:5]) or "\u2014"
                     lines.append(f"  \U0001f3e2 {t['name']} [id:{t['id']}]\n     Canaux : {ch_names}")
                 confirmed.append(f"\U0001f4cb Teams ({res['count']}) :\n" + "\n".join(lines))
+                log_activity(username, "teams_read", "list", f"{res['count']} teams", tenant_id=tenant_id)
             else:
                 confirmed.append(f"\u274c Teams : {res.get('message')}")
         except Exception as e:
@@ -37,6 +40,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             if res.get("status") == "ok":
                 lines = [f"  [{m['date'][:10]}] {m['sender']} : {m['content'][:120]}" for m in res.get("messages", [])]
                 confirmed.append(f"\U0001f4ac Canal ({res['count']}) :\n" + "\n".join(lines))
+                log_activity(username, "teams_read", channel_id[:200], f"{res['count']} messages", tenant_id=tenant_id)
             else:
                 confirmed.append(f"\u274c Canal : {res.get('message')}")
         except Exception as e:
@@ -51,6 +55,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
                     icon = '\U0001f464' if c['type'] == 'oneOnOne' else '\U0001f465'
                     lines.append(f"  {icon} {c['topic']} [id:{c['id'][:20]}...]")
                 confirmed.append(f"\U0001f4ac Chats Teams ({res['count']}) :\n" + "\n".join(lines))
+                log_activity(username, "teams_read", "chats", f"{res['count']} chats", tenant_id=tenant_id)
             else:
                 confirmed.append(f"\u274c Chats : {res.get('message')}")
         except Exception as e:
@@ -63,6 +68,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             if res.get("status") == "ok":
                 lines = [f"  [{m['date'][:10]}] {m['sender']} : {m['content'][:150]}" for m in res.get("messages", [])]
                 confirmed.append(f"\U0001f4ac Chat ({res['count']}) :\n" + "\n".join(lines))
+                log_activity(username, "teams_read", chat_id[:200], f"{res['count']} messages", tenant_id=tenant_id)
             else:
                 confirmed.append(f"\u274c Chat : {res.get('message')}")
         except Exception as e:
@@ -76,6 +82,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             tenant_id=tenant_id, username=username, action_type="TEAMS_MSG",
             payload={"email": email, "text": text}, label=label, conversation_id=conversation_id,
         )
+        log_activity(username, "teams_send", email[:200], text[:100], tenant_id=tenant_id)
         preview = text[:200] + ("..." if len(text) > 200 else "")
         confirmed.append(f"\u23f8\ufe0f Action #{action_id} en attente : {label}\n   Message : {preview}\n   Pour envoyer : dites \"confirme action {action_id}\"")
 
@@ -87,6 +94,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             payload={"chat_id": chat_id, "text": text},
             label="Repondre dans le chat Teams", conversation_id=conversation_id,
         )
+        log_activity(username, "teams_send", chat_id[:200], text[:100], tenant_id=tenant_id)
         confirmed.append(f"\u23f8\ufe0f Action #{action_id} en attente : Repondre dans le chat Teams\n   Pour envoyer : dites \"confirme action {action_id}\"")
 
     for match in re.finditer(r'\[ACTION:TEAMS_SENDCHANNEL:([^|^\]]+)\|([^|^\]]+)\|(.+?)\]', response, re.DOTALL):
@@ -98,6 +106,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             payload={"team_id": team_id, "channel_id": channel_id, "text": text},
             label="Message dans canal Teams", conversation_id=conversation_id,
         )
+        log_activity(username, "teams_send", channel_id[:200], text[:100], tenant_id=tenant_id)
         confirmed.append(f"\u23f8\ufe0f Action #{action_id} en attente : Message dans canal Teams\n   Pour envoyer : dites \"confirme action {action_id}\"")
 
     for match in re.finditer(r'\[ACTION:TEAMS_GROUPE:([^|^\]]+)\|([^|^\]]+)\|(.+?)\]', response, re.DOTALL):
