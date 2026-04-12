@@ -35,46 +35,82 @@ FastAPI Python 3.13, Railway, PostgreSQL+pgvector, Anthropic 3 tiers, OpenAI emb
 Repo `github.com/per1gyom/couffrant-assistant` main.
 
 ## 2. État
-**PHASES 5 : TERMINÉES ✅** | **PHASE 7 JARVIS : 11 tâches ✅**
+**PHASES 5 : TERMINÉES ✅** | **PHASE 7 JARVIS : 11 tâches ✅** (Sprint 1 terminé)
 
 | Fait Phase 7 | Détail |
 |---|---|
-| urgency_model ✅ | Score 0-100, 4 étages (règles→contacts→patterns→Haiku), certitude, VIP boost |
-| Shadow mode ✅ | shadow_mode + shadow_mode_until sur users, alertes [SHADOW] en chat |
-| Notification prefs ✅ | Plages silencieuses, VIP emails/domaines, calendar_aware, should_notify() |
-| WhatsApp structuré ✅ | send_whatsapp_structured() avec 4 options de réponse rapide |
-| Activity log ✅ | Table + log dans 4 handlers (mail/drive/teams/memory) + conversations |
-| Mémoire narrative ✅ | dossier_narratives vectorisée, injection RAG dans prompt |
-| Briefings réunions ✅ | Job 6h30, Haiku + narratives, alerte par événement |
-| Rapport stocké + ping ✅ | daily_reports table, _prepare_daily_report() stocke, _send_report_ping() ping léger |
-| Livraison rapport ✅ | report_actions.py (get/mark/section), injection prompt, marquage auto dans raya.py |
-| Workflow intelligence ✅ | _analyze_patterns() lit activity_log (150 actions 30j), type workflow dans prompt |
-
-Sprint 1 du planning V3 : TERMINÉ ✅
+| urgency_model ✅ | Score 0-100, 4 étages, certitude, VIP boost |
+| Shadow mode ✅ | Alertes [SHADOW] en chat |
+| Notification prefs ✅ | Plages silencieuses, VIP, should_notify() |
+| WhatsApp structuré ✅ | Options de réponse rapide |
+| Activity log ✅ | Log dans 4 handlers + conversations |
+| Mémoire narrative ✅ | dossier_narratives vectorisée, injection RAG |
+| Briefings réunions ✅ | Job 6h30, Haiku + narratives |
+| Rapport stocké + ping ✅ | daily_reports, ping léger, livraison à la demande |
+| Workflow intelligence ✅ | Pattern engine lit activity_log |
 
 ## 3. PROCHAINE ÉTAPE (Sprint 2 — planning V3)
 
-1. **7-1 Multi-mailbox Gmail** — OAuth2 + polling + brancher sur le même pipeline webhook
+1. **7-1 Multi-mailbox Gmail** — OAuth2 + polling + pipeline webhook
 2. **7-7 Monitoring + fallbacks** — alertes si scan inactif > 10min, fallback SMS
 3. **7-8 Canal WhatsApp bidirectionnel** — recevoir les réponses, parser, exécuter
 
-Voir `docs/raya_planning_v3.md` pour le calendrier complet.
+## 4. CHANTIERS IDENTIFIÉS (discussion Guillaume 12/04/2026 soir)
 
-## 4. NOTES POUR PLUS TARD (pré-commercialisation)
+### Volet A — Outils de création (nouvelles capacités Raya)
+Raya doit pouvoir PRODUIRE des livrables, pas juste informer.
+Tous ces outils = nouveaux connecteurs dans `tools_registry`.
+
+| Outil | Complexité | Technologie probable |
+|---|---|---|
+| Créer des fichiers Excel | Faible | openpyxl (Python) |
+| Créer des PDF | Faible | reportlab ou weasyprint (Python) |
+| Créer des visuels / images | Moyenne | DALL-E API ou Stable Diffusion |
+| Modifier des images | Moyenne | Pillow + IA génération |
+| Créer des posts LinkedIn (texte + visuel) | Moyenne | Template + génération |
+| Publier directement sur LinkedIn | Haute | LinkedIn API (OAuth2) |
+| Publier sur Instagram | Haute | Instagram Graph API |
+
+Même principe que les autres outils : connecteur + tools_registry + description
+fonctionnelle. Raya propose de créer un fichier quand c'est pertinent.
+Exemple : "Prépare-moi un récap chantier Dupont en PDF" → Raya génère le PDF
+depuis les données qu'elle a en mémoire (mails, narrative, Odoo).
+
+### Volet B — Ergonomie / UI
+Le site fonctionne mais peut être amélioré :
+
+- **Design épuré** — simplifier, alléger, moderniser
+- **Largeur du chat** — le texte est trop étroit, doit occuper plus de largeur
+- **Responsive / zoom** — le layout doit s'adapter correctement à tous les zooms
+- **UX globale** — à évaluer quand les features Jarvis seront testables
+
+Chantier frontend (HTML/CSS/JS templates) indépendant du backend.
+Peut être fait en parallèle sans bloquer Phase 7/8.
+
+### Volet C — Application mobile (futur)
+Objectif : Raya accessible depuis le téléphone.
+Deux options à évaluer :
+- **PWA** (Progressive Web App) — le plus rapide. L'app web actuelle devient
+  installable. Le `sw.js` (service worker) existe déjà. Push notifications via PWA.
+- **App native** (React Native / Flutter) — plus lourd, projet en soi. À évaluer
+  uniquement si la PWA ne suffit pas (notifications fiables, accès micro pour vocal).
+
+À planifier APRÈS la beta Charlotte (mi-juin). Pas prioritaire avant.
+
+## 5. NOTES PRÉ-COMMERCIALISATION
 
 ### Raya et ses limites → redirection vers l'humain
 - **Si collaborateur** → contacter l'admin de son tenant
 - **Si admin/dirigeant** → contacter le support Raya
-- `SUPPORT_EMAIL` existe déjà dans `config.py`, étendre avec `SUPPORT_PHONE` + contact admin par tenant
-- Raya ne dit jamais "je ne peux pas" sans donner une alternative ou un recours humain
+- `SUPPORT_EMAIL` existe dans `config.py`, étendre avec `SUPPORT_PHONE` + admin par tenant
 
-## 5. Reprise
+## 6. Reprise
 « Bonjour Opus. Projet Raya, Guillaume. On se tutoie, en français, vocabulaire Terminal, concis. Lis `docs/raya_session_state.md` puis `docs/raya_roadmap_v2.md` sur `per1gyom/couffrant-assistant` main via GitHub MCP. Règle d'or : aucune écriture sans mon ok. Reprends où on en était. »
 
-## 6. RÈGLE
+## 7. RÈGLE
 À chaque jalon, Opus met à jour ce fichier. Non négociable.
 
-## 7. Variables Railway
+## 8. Variables Railway
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`
 - `NOTIFICATION_PHONE_GUILLAUME=+33xxxxxxxxx`
 - `SUPPORT_EMAIL` (existe déjà dans config.py)
