@@ -359,6 +359,27 @@ def init_postgres():
     """)
     c.execute("CREATE INDEX IF NOT EXISTS idx_alerts_user_active ON proactive_alerts (username, seen, dismissed, created_at DESC)")
 
+    # Patterns comportementaux (5G-4)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS aria_patterns (
+            id SERIAL PRIMARY KEY,
+            username TEXT NOT NULL,
+            tenant_id TEXT,
+            pattern_type TEXT NOT NULL,
+            description TEXT NOT NULL,
+            evidence TEXT,
+            confidence REAL DEFAULT 0.5,
+            occurrences INTEGER DEFAULT 1,
+            last_seen_at TIMESTAMP DEFAULT NOW(),
+            active BOOLEAN DEFAULT true,
+            created_at TIMESTAMP DEFAULT NOW(),
+            CONSTRAINT pattern_type_check CHECK (
+                pattern_type IN ('temporal', 'relational', 'thematic', 'workflow', 'preference')
+            )
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_patterns_user ON aria_patterns (username, active, confidence DESC)")
+
     conn.commit()
     conn.close()
 
