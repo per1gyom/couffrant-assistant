@@ -6,15 +6,14 @@ de maintenance sans bloquer le serveur FastAPI.
 
 Variables d'environnement pour désactiver un job individuellement
 (filet de sécurité — couper un job sans toucher au code) :
-  SCHEDULER_EXPIRE_ENABLED=false   → désactive expire_pending
-  SCHEDULER_DECAY_ENABLED=false    → désactive confidence_decay
-  SCHEDULER_AUDIT_ENABLED=false    → désactive opus_audit
-  SCHEDULER_WEBHOOK_ENABLED=false  → désactive webhook_setup + webhook_renewal
-  SCHEDULER_TOKEN_ENABLED=false    → désactive token_refresh
+  SCHEDULER_EXPIRE_ENABLED=false       → désactive expire_pending
+  SCHEDULER_DECAY_ENABLED=false        → désactive confidence_decay
+  SCHEDULER_AUDIT_ENABLED=false        → désactive opus_audit
+  SCHEDULER_WEBHOOK_ENABLED=false      → désactive webhook_setup + webhook_renewal
+  SCHEDULER_TOKEN_ENABLED=false        → désactive token_refresh
+  SCHEDULER_PROACTIVITY_ENABLED=false  → désactive proactivity_scan
 
 Valeur par défaut : true (tous les jobs actifs).
-Exemple Railway : ajouter SCHEDULER_AUDIT_ENABLED=false pour couper l'audit
-sans redéploiement.
 
 Jobs :
   expire_pending   : toutes les heures          — expire les pending_actions trop vieilles
@@ -23,9 +22,7 @@ Jobs :
   webhook_setup    : 30s après démarrage (une fois) — setup initial des webhooks Microsoft
   webhook_renewal  : toutes les 6 heures            — renouvellement des webhooks Microsoft
   token_refresh    : toutes les 45 minutes           — refresh des tokens Microsoft
-
-[à venir]
-  proactivity_scan : toutes les 30 min          — alertes et rappels intelligents (B10)
+  proactivity_scan : toutes les 30 minutes           — alertes proactives mails + agenda (5E-4b)
 """
 import os
 from app.logging_config import get_logger
@@ -156,6 +153,18 @@ def _register_jobs(scheduler: BackgroundScheduler):
         logger.info("[Scheduler] Job enregistré : token_refresh (45 min)")
     else:
         logger.info("[Scheduler] Job DÉSACTIVÉ : token_refresh (SCHEDULER_TOKEN_ENABLED=false)")
+
+    if _job_enabled("SCHEDULER_PROACTIVITY_ENABLED"):
+        scheduler.add_job(
+            func=_job_proactivity_scan,
+            trigger=IntervalTrigger(minutes=30),
+            id="proactivity_scan",
+            name="Scan proactif mails + agenda",
+            replace_existing=True,
+        )
+        logger.info("[Scheduler] Job enregistré : proactivity_scan (toutes les 30 min)")
+    else:
+        logger.info("[Scheduler] Job DÉSACTIVÉ : proactivity_scan (SCHEDULER_PROACTIVITY_ENABLED=false)")
 
 
 # ─── FONCTIONS JOB ───
@@ -295,6 +304,102 @@ def _job_token_refresh():
                 logger.error(f"[Scheduler] token_refresh erreur {username}: {e}")
     except Exception as e:
         logger.error(f"[Scheduler] ERREUR token_refresh : {e}")
+
+
+def _job_proactivity_scan():
+    """
+    Scan proactif toutes les 30min — vérifie pour chaque utilisateur actif :
+    1. Mails haute priorité non traités depuis > 2h
+    2. Mails nécessitant une réponse (needs_reply=true) depuis > 24h
+    """
+    try:
+        from app.database import get_pg_conn
+        from app.proactive_alerts import create_alert, cleanup_expired
+
+        # Nettoyage des alertes expirées
+        cleanup_expired()
+
+        conn = get_pg_conn()
+        c = conn.cursor()
+
+        # Liste des utilisateurs actifs (au moins 1 conversation dans les 7 derniers jours)
+        c.execute("""
+            SELECT DISTINCT username FROM aria_memory
+            WHERE created_at > NOW() - INTERVAL '7 days'
+        """)
+        active_users = [r[0] for r in c.fetchall()]
+        conn.close()
+
+        for username in active_users:
+            try:
+                _scan_user(username)
+            except Exception as e:
+                logger.error(f"[Proactivity] Erreur scan {username}: {e}")
+
+        logger.info(f"[Proactivity] Scan terminé — {len(active_users)} utilisateur(s)")
+    except Exception as e:
+        logger.error(f"[Proactivity] ERREUR scan global: {e}")
+
+
+def _scan_user(username: str):
+    """Scan proactif pour un utilisateur : mails urgents + réponses en attente."""
+    from app.database import get_pg_conn
+    from app.proactive_alerts import create_alert
+    from app.app_security import get_tenant_id
+
+    tenant_id = get_tenant_id(username)
+    conn = get_pg_conn()
+    c = conn.cursor()
+
+    # 1. Mails haute priorité non lus depuis > 2h
+    c.execute("""
+        SELECT id, subject, from_email, priority, received_at
+        FROM mail_memory
+        WHERE username = %s AND priority = 'haute'
+          AND created_at > NOW() - INTERVAL '48 hours'
+          AND created_at < NOW() - INTERVAL '2 hours'
+          AND id NOT IN (
+              SELECT CAST(source_id AS INTEGER) FROM proactive_alerts
+              WHERE username = %s AND source_type = 'mail'
+                AND created_at > NOW() - INTERVAL '24 hours'
+          )
+        LIMIT 5
+    """, (username, username))
+    for row in c.fetchall():
+        create_alert(
+            username=username, tenant_id=tenant_id,
+            alert_type="mail_urgent", priority="high",
+            title=f"Mail urgent non traité : {row[1][:60]}",
+            body=f"De : {row[2]} — reçu il y a plus de 2h, priorité haute.",
+            source_type="mail", source_id=str(row[0]),
+        )
+
+    # 2. Mails en attente de réponse depuis > 24h
+    c.execute("""
+        SELECT id, subject, from_email, reply_urgency
+        FROM mail_memory
+        WHERE username = %s AND needs_reply = 1
+          AND reply_status = 'pending'
+          AND created_at < NOW() - INTERVAL '24 hours'
+          AND created_at > NOW() - INTERVAL '7 days'
+          AND id NOT IN (
+              SELECT CAST(source_id AS INTEGER) FROM proactive_alerts
+              WHERE username = %s AND source_type = 'mail_reply'
+                AND created_at > NOW() - INTERVAL '24 hours'
+          )
+        LIMIT 5
+    """, (username, username))
+    for row in c.fetchall():
+        prio = "high" if row[3] == "haute" else "normal"
+        create_alert(
+            username=username, tenant_id=tenant_id,
+            alert_type="reminder", priority=prio,
+            title=f"Réponse en attente : {row[1][:60]}",
+            body=f"De : {row[2]} — en attente depuis plus de 24h.",
+            source_type="mail_reply", source_id=str(row[0]),
+        )
+
+    conn.close()
 
 
 def _audit_one(tenant_id: str, username: str, nb_rules: int):
