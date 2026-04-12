@@ -11,6 +11,7 @@ import io
 import traceback
 import threading
 import requests as http_requests
+import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
@@ -121,8 +122,18 @@ def raya_endpoint(
             "aria_memory_id": None, "model_tier": "smart",
             "ask_choice": None,
         }
+    import concurrent.futures
     try:
-        return _raya_core(request, payload, username, tenant_id)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_raya_core, request, payload, username, tenant_id)
+            return future.result(timeout=30)
+    except concurrent.futures.TimeoutError:
+        return {
+            "answer": "⚠️ Raya est momentanément surchargée. Réessaie dans quelques secondes.",
+            "actions": [], "pending_actions": [],
+            "aria_memory_id": None, "model_tier": "smart",
+            "ask_choice": None,
+        }
     except Exception:
         tb = traceback.format_exc()
         print(f"[Raya] ERREUR ENDPOINT pour {username}:\n{tb}")
