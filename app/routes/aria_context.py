@@ -7,6 +7,7 @@ Phase 3b : session_theme (B8) — si un sujet coherent est detecte,
            le contexte RAG est enrichi avec tout ce qui concerne ce sujet.
 5G-3    : maturity_block — comportement adaptatif selon la phase relationnelle.
 5G-5    : patterns_block — patterns comportementaux detectes (consolidation+maturity).
+7-NAR   : narrative_block — memoire narrative des dossiers (contacts, projets, sujets).
 Fallback automatique si OPENAI_API_KEY absent.
 
 Les appels reseau sont lances en parallele depuis raya_endpoint().
@@ -361,6 +362,25 @@ Tu connais {display_name} en profondeur. Comportement attendu :
     except Exception:
         pass
 
+    # 7-NAR : memoire narrative des dossiers (contacts, projets, sujets)
+    narrative_block = ""
+    try:
+        from app.narrative import search_narratives
+        narratives = search_narratives(query, username, tenant_id=tenant_id, limit=3)
+        if narratives:
+            lines = []
+            for n in narratives:
+                lines.append(f"  [{n['entity_type']}:{n['entity_key']}] {n['narrative'][:300]}")
+                if n.get("key_facts"):
+                    for fact in n["key_facts"][-3:]:
+                        lines.append(f"    • {fact.get('date', '?')} : {fact.get('fact', '')[:100]}")
+            narrative_block = (
+                "\n\n=== DOSSIERS EN CONTEXTE ===\n"
+                + "\n".join(lines)
+            )
+    except Exception:
+        pass
+
     try:
         from app.rag import retrieve_context
         rag_ctx = retrieve_context(query, username, tenant_id)
@@ -476,7 +496,7 @@ Tu observes, tu apprends, tu t'organises librement. Tu parles au feminin.
 {GUARDRAILS}
 {capabilities_block}
 
-{f"=== CE QUE TU SAIS SUR {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"=== PREMIERE CONVERSATION ==={chr(10)}Tu ne connais pas encore {display_name}. Commence a observer et memoriser."}{maturity_block}{patterns_block}
+{f"=== CE QUE TU SAIS SUR {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"=== PREMIERE CONVERSATION ==={chr(10)}Tu ne connais pas encore {display_name}. Commence a observer et memoriser."}{maturity_block}{patterns_block}{narrative_block}
 
 {f"=== TA MEMOIRE (pertinente pour cette question) ==={chr(10)}{aria_rules}" if aria_rules else "Ta memoire est vide. Tu peux commencer a construire via [ACTION:LEARN]."}
 
