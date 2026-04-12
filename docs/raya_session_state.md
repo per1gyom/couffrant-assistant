@@ -14,100 +14,79 @@ Raya est un **cerveau supplémentaire** pour un dirigeant d'entreprise. Comme Ja
 
 **L'expérience visée :**
 
-Guillaume a ~10 boîtes mail. Aujourd'hui, il est noyé sous les notifications. Le rêve : désactiver TOUTES les alertes mail de son téléphone et ne garder qu'un seul canal — Raya. Raya surveille tout en permanence. Si un mail important arrive, Raya envoie un message WhatsApp avec le résumé et les options d'action. Si c'est critique (avocat, banque, deadline), Raya appelle sur WhatsApp avec un résumé vocal et attend une décision. Le matin, Raya envoie un résumé de la nuit même s'il n'y a rien d'urgent — preuve de vie.
+Guillaume a ~10 boîtes mail. Le rêve : désactiver TOUTES les alertes mail et ne garder qu'un seul canal — Raya. Raya surveille tout en permanence. Si un mail important arrive, Raya envoie un message WhatsApp. Si c'est critique, Raya appelle. Le matin, Raya envoie un résumé même si rien d'urgent — preuve de vie.
 
-Guillaume possède plusieurs sociétés. Raya fait le lien entre elles : « Dupont relance sur le chantier (Couffrant Solar) ET la facture est en attente (autre société) ». Vision transversale que personne d'autre n'a.
+Guillaume possède plusieurs sociétés. Raya fait le lien entre elles : vision transversale.
 
-**L'apprentissage — le cœur de Raya :**
+**L'apprentissage — le cœur :** Raya apprend comme deux humains qui se rencontrent. Découverte → Consolidation → Maturité. Règles évolutives, jamais figées dans le code.
 
-Raya apprend comme deux humains qui se rencontrent. Au début (Découverte), elle est attentive, curieuse, elle confirme ce qu'elle croit comprendre. Avec le temps (Consolidation), elle connaît les habitudes, les contacts clés, les patterns. À maturité, elle anticipe et propose des automatisations : « Tu fais X chaque semaine, je peux le faire pour toi. »
+**LLM-agnostic :** La mémoire est le vrai asset. Le modèle IA est interchangeable.
 
-Les règles ne sont PAS figées dans le code. Raya les crée, les modifie, les supprime elle-même. L'utilisateur peut corriger une erreur de classement et Raya met à jour ses règles instantanément. Plus elle apprend, moins elle se trompe, moins elle coûte.
-
-**L'agnosticisme LLM — la force stratégique :**
-
-La mémoire de Raya (règles, patterns, contacts, insights, style) est le vrai asset. Le modèle IA (Claude, GPT, Mistral) est interchangeable. Quand un meilleur modèle sort, on change UNE variable et Raya est immédiatement plus intelligente. Sa mémoire cumulée reste intacte.
-
-**La proactivité — Raya INITIE les interactions :**
-
-Raya ne se contente pas de répondre. Elle surveille, évalue, et décide d'elle-même de prévenir l'utilisateur. Elle connaît ses outils et ne propose que ce qui est faisable avec les outils connectés.
-
-**L'entonnoir de triage — 5 étages :**
-
-1. Filtre par règles apprises (gratuit, ~70% éliminés)
-2. Triage Haiku (~0.0003$/mail)
-3. Analyse Sonnet (score de certitude)
-4. Escalade Opus (si certitude < 0.8)
-5. Décision d'alerte + message sortant
+**Proactivité :** Raya INITIE les interactions. Entonnoir 5 étages pour le triage.
 
 **Guillaume n'est PAS programmeur.** Expliquer simplement, sans jargon.
 
 ---
 
-## 0. CONSIGNES GUILLAUME
+## 0. CONSIGNES
 - Vocabulaire : « Terminal ». Concis. Langage simple.
 - **Règle d'or : aucune écriture sans « ok vas-y » explicite.**
-- **Rôle Opus = architecte uniquement.**
-- **Repo local Mac abandonné.** Tout via GitHub MCP ou interface web.
+- **Opus = architecte. Sonnet = exécutant.**
+- **Repo local Mac abandonné.** Tout via GitHub.
 
-## 1. Rôles
-Guillaume (dirigeant, vision) / Opus (architecte, MCP GitHub+Postgres) / Sonnet (exécutant, code+push).
+## 1. Stack
+FastAPI Python 3.13, Railway, PostgreSQL+pgvector, Anthropic 3 tiers, OpenAI embeddings.
+Repo `github.com/per1gyom/couffrant-assistant` main.
 
-## 2. Stack
-FastAPI Python 3.13 sur Railway. Repo `github.com/per1gyom/couffrant-assistant` main.
+## 2. État 13/04/2026
+**PHASES 5A, 5B, 5C : TERMINÉES ✅**
+**PHASE 5D EN COURS (2/4)** — 5D-1 table user_tenant_access ✅, 5D-3 admin secours ✅
 
-## 3. État vérifié 13/04/2026
-**PHASE 5A TERMINÉE ✅ (14/14)**
-**PHASE 5B TERMINÉE ✅ (5/5)**
-**PHASE 5C TERMINÉE ✅ (4/4)**
-**RAG vectoriel ✅** — 1045 embeddings.
-**Agnosticisme LLM ✅**
-**Injection dynamique actions ✅** — 30-60% tokens économisés.
-**Cache mémoire TTL 5min ✅**
-**Hot_summary 3 niveaux + vectorisé ✅**
-**Structured logging ✅** (main.py + scheduler.py, reste progressif)
-**Health check profond ✅** (DB + LLM)
-**Timeout 30s sur /raya ✅**
+| Fait | Détail |
+|---|---|
+| Agnosticisme LLM ✅ | Zéro import anthropic hors llm_client.py |
+| Injection dynamique actions ✅ | 30-60% tokens économisés |
+| Cache TTL 5min ✅ | hot_summary, teams_ctx, mail_filter |
+| Hot_summary 3 niveaux ✅ | Situation + Patterns + Préférences, vectorisé |
+| Structured logging ✅ | main.py + scheduler.py |
+| Health check profond ✅ | DB + LLM |
+| Timeout 30s ✅ | /raya |
+| Rate limiting ✅ | 60 req/h |
+| Admin audit log ✅ | 10 actions loguées |
+| APScheduler complet ✅ | Webhooks + tokens + decay + audit + expire |
+| user_tenant_access ✅ | Table many-to-many créée + migration données |
+| Admin secours ✅ | Configurable par env BACKUP_ADMIN_* |
 
-## 4. AVANCEMENT
+## 3. PROCHAINE ÉTAPE : 5D-2
 
-**Phases 5A, 5B, 5C : TERMINÉES ✅**
+**Contexte multi-tenant dans le prompt.** C'est la tâche la plus complexe :
+- Créer une fonction `get_user_tenants(username)` qui interroge `user_tenant_access`
+- Modifier `build_system_prompt` pour injecter le contexte de TOUS les tenants d'un dirigeant
+- Modifier le RAG (`retrieve_context`) pour chercher dans tous les tenants
+- Permettre à Raya de croiser : « Dupont relance sur le chantier (tenant A) ET la facture est en attente (tenant B) »
 
-**Prochaine étape : Phase 5D — Mode Dirigeant multi-société**
+Après 5D-2 : 5D-4 (onboarding par tenant) puis Phase 5E.
 
-| # | Tâche | Complexité |
-|---|---|---|
-| 5D-1 | Table `user_tenant_access` (many-to-many user/tenant/rôle) | moyenne |
-| 5D-2 | Contexte multi-tenant dans le prompt | haute |
-| 5D-3 | Deuxième compte super_admin | faible |
-| 5D-4 | Onboarding par tenant | moyenne |
+## 4. ROADMAP
+~~5A~~ → ~~5B~~ → ~~5C~~ → **5D** (2/4) → 5E → 5G → 5F → Phase 7 (Jarvis) → Phase 6.
+Voir `docs/raya_roadmap_v2.md`.
 
-## 5. ROADMAP
-Ordre : ~~5A~~ → ~~5B~~ → ~~5C~~ → **5D** → 5E → 5G → 5F → Phase 7 (Jarvis) → Phase 6.
-Voir `docs/raya_roadmap_v2.md` pour détails complets.
-
-## 6. Utilisateurs cibles
-- **Guillaume Perrin** — Couffrant Solar. MS365 + Odoo + SharePoint. ~10 boîtes mail.
+## 5. Utilisateurs
+- **Guillaume Perrin** — Couffrant Solar. MS365 + Odoo. ~10 boîtes mail.
 - **Charlotte Couffrant** — Juillet (événementiel). Gmail + LinkedIn + Instagram. Beta ~mi-juin.
 
-## 7. Pièges
-- Repo local Mac abandonné.
-- MCP écriture : `push_files` plus fiable que `create_or_update_file`.
-- MCP ne peut PAS supprimer de fichiers → GitHub web.
-- Scanner TOUT le repo (`search_code`) après migration d'imports.
-
-## 8. Modèle prompt Sonnet
+## 6. Modèle prompt Sonnet
 ```
 Projet Raya — Tâche [NUM] assignée par Opus.
 Repo `per1gyom/couffrant-assistant` branche `main`. Pousse directement.
-[PROBLÈME EN 2-3 LIGNES]
+[PROBLÈME]
 Ce que tu dois faire : [INSTRUCTIONS]
 Commit message : `[TYPE](scope): description — [NUM]`
-Rapport pour Opus : fichier(s) modifié(s), ligne(s) changée(s), SHA du commit.
+Rapport pour Opus : fichier(s), ligne(s), SHA.
 ```
 
-## 9. Reprise nouvelle conversation
+## 7. Reprise
 « Bonjour Opus. Projet Raya, Guillaume. On se tutoie, en français, vocabulaire Terminal, concis. Lis `docs/raya_session_state.md` puis `docs/raya_roadmap_v2.md` sur `per1gyom/couffrant-assistant` main via GitHub MCP. Règle d'or : aucune écriture sans mon ok. Reprends où on en était. »
 
-## 10. RÈGLE — Mise à jour obligatoire
-À chaque jalon, Opus met à jour ce fichier + le changelog. Non négociable.
+## 8. RÈGLE
+À chaque jalon, Opus met à jour ce fichier + `docs/raya_changelog.md`. Non négociable.
