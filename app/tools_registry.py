@@ -209,7 +209,7 @@ def get_all_tools() -> list:
 def is_sensitive_action(action_code: str) -> bool:
     """
     Retourne True si l'action nécessite confirmation.
-    Lit depuis le registre, fallback sur pending_actions.py si non trouvé.
+    Lit depuis le registre, fallback local si non trouvé.
     """
     name = action_code.split(":")[1] if ":" in action_code else action_code
     try:
@@ -225,6 +225,9 @@ def is_sensitive_action(action_code: str) -> bool:
             return bool(row[0])
     except Exception:
         pass
-    # Fallback : liste hardcodée de pending_actions.py
-    from app.pending_actions import SENSITIVE_ACTIONS
-    return name in SENSITIVE_ACTIONS
+    # Fallback si tools_registry pas encore populé
+    _FALLBACK_SENSITIVE = {
+        "REPLY", "TEAMS_MSG", "TEAMS_REPLYCHAT", "TEAMS_SENDCHANNEL",
+        "TEAMS_GROUPE", "DELETE_PERMANENT", "MOVEDRIVE", "COPYFILE", "CREATEEVENT",
+    }
+    return name in _FALLBACK_SENSITIVE
