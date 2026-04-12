@@ -17,6 +17,8 @@ Variables d'environnement :
   SCHEDULER_BRIEFING_ENABLED=false     → désactive meeting_briefing (7-BRIEF)
   SCHEDULER_GMAIL_ENABLED=true         → active gmail_polling (7-1b) — défaut: false
   SCHEDULER_MONITOR_ENABLED=false      → désactive system_monitor (7-7) — défaut: true
+  SCHEDULER_ANOMALY_ENABLED=true       → active anomaly_detection (8-ANOMALIES) — défaut: false
+  SCHEDULER_OBSERVER_ENABLED=true      → active external_observer (8-OBSERVE) — défaut: false
 """
 import os
 from app.logging_config import get_logger
@@ -202,3 +204,29 @@ def _register_jobs(scheduler: BackgroundScheduler):
             logger.error(f"[Scheduler] Import échoué pour system_monitor: {e}")
     else:
         logger.info("[Scheduler] Job DÉSACTIVÉ : system_monitor")
+
+    # Anomaly detection (8-ANOMALIES) — désactivé par défaut (activer si Odoo connecté)
+    if _job_enabled("SCHEDULER_ANOMALY_ENABLED", default=False):
+        try:
+            from app.jobs.anomaly_detection import _job_anomaly_detection
+            scheduler.add_job(func=_job_anomaly_detection, trigger=IntervalTrigger(hours=6),
+                              id="anomaly_detection", name="Détection d'anomalies Odoo vs mails",
+                              replace_existing=True)
+            logger.info("[Scheduler] Job enregistré : anomaly_detection (toutes les 6h)")
+        except Exception as e:
+            logger.error(f"[Scheduler] Import échoué pour anomaly_detection: {e}")
+    else:
+        logger.info("[Scheduler] Job DÉSACTIVÉ : anomaly_detection (activer via SCHEDULER_ANOMALY_ENABLED=true)")
+
+    # External observer (8-OBSERVE) — désactivé par défaut
+    if _job_enabled("SCHEDULER_OBSERVER_ENABLED", default=False):
+        try:
+            from app.jobs.external_observer import _job_external_observer
+            scheduler.add_job(func=_job_external_observer, trigger=IntervalTrigger(minutes=30),
+                              id="external_observer", name="Observateur activité externe",
+                              replace_existing=True)
+            logger.info("[Scheduler] Job enregistré : external_observer (30 min)")
+        except Exception as e:
+            logger.error(f"[Scheduler] Import échoué pour external_observer: {e}")
+    else:
+        logger.info("[Scheduler] Job DÉSACTIVÉ : external_observer (activer via SCHEDULER_OBSERVER_ENABLED=true)")
