@@ -34,7 +34,7 @@ GUARDRAILS = """GARDE-FOUS DE SECURITE (absolus, en code, non negociables) :
 • Quand l'utilisateur dit "vas-y", "envoie", "confirme", "valide", "oui" en reponse a une action
   en attente, tu generes [ACTION:CONFIRM:<id>] avec l'id de l'action concernee.
 • Quand il dit "annule", "non", "laisse tomber", tu generes [ACTION:CANCEL:<id>].
-• Tu NE confirmes JAMAIS une action que l'utilisateur ne t'a pas explicitement validee.
+• Tu NE confirmes JAMAIS une action que l'utilisateur ne t'as pas explicitement validee.
 
 PRECISION FACTUELLE (non negociable — la confiance de l'utilisateur en depend) :
 • Ne jamais inventer une information que tu ne connais pas.
@@ -302,13 +302,10 @@ def build_system_prompt(
         via_rag       = False
 
     # 5B-4 : dédupliquer le contexte conversationnel
-    # Si le RAG retourne des conversations qui sont déjà dans l'historique récent,
-    # on les supprime pour éviter d'injecter les mêmes données deux fois.
     if conv_context and db_ctx.get("history"):
         recent_inputs = {h.get("user_input", "")[:80].lower() for h in db_ctx["history"] if h.get("user_input")}
         filtered_parts = []
         for block in conv_context.split("\n---\n"):
-            # Vérifie si ce bloc RAG contient du texte déjà dans l'historique récent
             block_lower = block.lower()
             if not any(inp and inp in block_lower for inp in recent_inputs):
                 filtered_parts.append(block)
@@ -371,6 +368,31 @@ def build_system_prompt(
             + "S'il l'annule, genere [ACTION:CANCEL:id]."
         )
 
+    # 5E-4c : alertes proactives
+    alerts_block = ""
+    try:
+        from app.proactive_alerts import get_active_alerts, mark_seen
+        alerts = get_active_alerts(username, limit=5)
+        if alerts:
+            lines = []
+            for a in alerts:
+                icon = {"critical": "🔴", "high": "🟠", "normal": "🟡", "low": "⚪"}.get(a["priority"], "🟡")
+                lines.append(f"  {icon} [{a['alert_type']}] {a['title']}")
+                if a.get("body"):
+                    lines.append(f"     {a['body'][:150]}")
+            alerts_block = (
+                "\n\n=== ALERTES PROACTIVES ===\n"
+                "Tu as des alertes à mentionner à l'utilisateur :\n"
+                + "\n".join(lines)
+                + "\nMENTIONNE ces alertes naturellement dans ta réponse. "
+                "Ne les ignore pas. Si l'utilisateur parle d'autre chose, "
+                "mentionne-les en fin de message : 'Au fait, j'ai remarqué que...'"
+            )
+            # Marque comme vues (elles ne réapparaîtront pas au prochain échange)
+            mark_seen([a["id"] for a in alerts], username)
+    except Exception:
+        pass
+
     capabilities_block = "\n\n" + get_user_capabilities_prompt(username, tools)
 
     return f"""Tu es Raya — l'assistante personnelle et evolutive de {display_name}.
@@ -384,7 +406,7 @@ Tu observes, tu apprends, tu t'organises librement. Tu parles au feminin.
 
 {f"=== TA MEMOIRE (pertinente pour cette question) ==={chr(10)}{aria_rules}" if aria_rules else "Ta memoire est vide. Tu peux commencer a construire via [ACTION:LEARN]."}
 
-{f"=== TES OBSERVATIONS SUR {display_name.upper()} ==={chr(10)}{aria_insights}" if aria_insights else ""}{theme_context_block}{conv_context_block}{teams_context_block}{mail_filter_block}{pending_block}
+{f"=== TES OBSERVATIONS SUR {display_name.upper()} ==={chr(10)}{aria_insights}" if aria_insights else ""}{theme_context_block}{conv_context_block}{teams_context_block}{mail_filter_block}{pending_block}{alerts_block}
 
 {f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}
 
