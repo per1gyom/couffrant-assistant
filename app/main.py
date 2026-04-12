@@ -16,6 +16,7 @@ from app.feedback_store import init_db
 from app.mail_memory_store import init_mail_db
 from app.app_security import init_default_user
 from app.memory_loader import MEMORY_OK
+from app.logging_config import setup_logging, get_logger
 import app.scheduler as job_scheduler
 
 from app.routes.auth import router as auth_router
@@ -50,6 +51,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 app = FastAPI(title="Raya")
+
+setup_logging()
+logger = get_logger("raya.main")
 
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=7 * 24 * 3600)
@@ -115,30 +119,30 @@ def startup_event():
     try:
         init_default_user()
     except Exception as e:
-        print(f"[Raya] Erreur init_default_user: {e}")
+        logger.error(f"[Raya] Erreur init_default_user: {e}")
 
     try:
         from app.seeding import seed_tenant, is_tenant_seeded
         admin_username = os.getenv("APP_USERNAME", "guillaume").strip()
         if not is_tenant_seeded(admin_username):
-            print(f"[Raya] Seeding initial pour {admin_username}")
+            logger.info(f"[Raya] Seeding initial pour {admin_username}")
             counts = seed_tenant("couffrant_solar", admin_username, profile="pv_french")
-            print(f"[Raya] Seeding termine : {counts}")
+            logger.info(f"[Raya] Seeding termine : {counts}")
         else:
-            print(f"[Raya] {admin_username} deja seede, skip")
+            logger.info(f"[Raya] {admin_username} deja seede, skip")
     except Exception as e:
-        print(f"[Raya] Erreur seeding: {e}")
+        logger.error(f"[Raya] Erreur seeding: {e}")
 
     try:
         from app.tools_registry import seed_tools_registry
         seed_tools_registry()
     except Exception as e:
-        print(f"[ToolsRegistry] Erreur seed: {e}")
+        logger.error(f"[ToolsRegistry] Erreur seed: {e}")
 
     try:
         job_scheduler.start()
     except Exception as e:
-        print(f"[Scheduler] Erreur demarrage: {e}")
+        logger.error(f"[Scheduler] Erreur demarrage: {e}")
 
 
 @app.on_event("shutdown")
@@ -146,4 +150,4 @@ def shutdown_event():
     try:
         job_scheduler.stop()
     except Exception as e:
-        print(f"[Scheduler] Erreur arret: {e}")
+        logger.error(f"[Scheduler] Erreur arret: {e}")
