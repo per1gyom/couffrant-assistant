@@ -26,6 +26,24 @@ Guillaume possède plusieurs sociétés. Raya fait le lien entre elles : vision 
 
 **Guillaume n'est PAS programmeur.** Expliquer simplement, sans jargon.
 
+### Ce qui rend Raya unique (discussion du 12/04/2026 soir)
+
+Trois propriétés combinées qu'aucun outil n'offre :
+
+**1. Compréhension cumulative.** Raya connaît les dossiers, les interlocuteurs, les habitudes, les priorités. Pas parce qu'on lui a fait une fiche — parce qu'elle observe depuis des semaines/mois. Chaque jour elle comprend mieux. Un assistant humain mettrait 6 mois.
+
+**2. Vision transversale.** Guillaume a 10 boîtes mail, plusieurs sociétés, des outils éparpillés. Personne — pas même lui — n'a une vision unifiée en temps réel. Raya oui. "Dupont relance sur Couffrant Solar ET sa facture Juillet est en retard."
+
+**3. Intelligence de workflow (FONDAMENTAL).** Raya ne surveille pas que les mails. Elle observe COMMENT l'utilisateur travaille à travers TOUS ses outils. Exemples concrets :
+
+- **Séquences apprises** : "Quand Guillaume reçoit un mail chantier, il ouvre le dossier Drive, vérifie le devis Odoo, puis répond." Après 5 occurrences, Raya connaît cette séquence.
+- **Anticipation** : "Tu viens de recevoir un mail chantier Dupont. Voici le dossier Drive et le résumé Odoo — prêt."
+- **Détection d'oublis** : "Tu as répondu au client mais tu n'as pas mis à jour le statut Odoo comme d'habitude. Oubli ?"
+- **Amélioration** : "Tu fais cette séquence 3 fois par semaine. Je peux la faire pour toi automatiquement."
+- **Détection d'anomalies** : "Le devis Odoo dit 12k€ mais le mail fournisseur mentionne 15k€. Écart à vérifier."
+
+C'est ce qui fait de Raya un outil indispensable. Avec le temps, sa compréhension des tâches et responsabilités de son utilisateur devient d'une puissance phénoménale. C'est ça le projet novateur.
+
 ---
 
 ## 0. CONSIGNES
@@ -70,26 +88,23 @@ Repo `github.com/per1gyom/couffrant-assistant` main.
 | 5A Sécurité | ✅ | Mot de passe env, cookie 7j, rate limit 60/h, audit log, LLM agnostic complet |
 | 5B Prompt | ✅ | Injection dynamique par domaine, hot_summary 3 niveaux, cache TTL 5min, dédupe RAG |
 | 5C Robustesse | ✅ | Structured logging, health check DB+LLM, timeout 30s, APScheduler complet |
-| 5D Multi-tenant | ✅ | user_tenant_access, get_user_tenants(), RAG cross-tenant, LEARN ciblé par tenant, prompt multi-société, save_rule(personal=True) pour règles user |
-| 5E Conscience + Proactivité | ✅ | Capacités par user dynamiques, 23 descriptions fonctionnelles, triage webhook 3 niveaux (IGNORER/STOCKER_SIMPLE/ANALYSER), proactive_alerts table + scan 30min + injection prompt, Twilio WhatsApp connector + notifications auto sur alertes high/critical |
-| 5G Maturité | ✅ | Score maturité (5 critères × 20pts → discovery/consolidation/maturity), params adaptatifs (decay+mask par phase), prompt adaptatif (3 comportements), moteur patterns (5 types, analyse hebdo Opus), patterns dans prompt (top 8), hot_summary évolutif (factuel→analytique→portrait) |
-| 5F Dashboard | ✅ | /admin/costs (par tenant/user/modèle/purpose/jour), versioning règles (aria_rules_history + rollback), aria_actions.py splitté en 6 sous-modules (app/routes/actions/) |
-
-Reporté : 5D-4 (onboarding par tenant — attendre Charlotte), 5G-7 (modèle générique — après 2 clients).
+| 5D Multi-tenant | ✅ | user_tenant_access, RAG cross-tenant, LEARN ciblé par tenant, prompt multi-société |
+| 5E Conscience + Proactivité | ✅ | Capacités par user, descriptions fonctionnelles, triage 3 niveaux, scan 30min, Twilio WhatsApp |
+| 5G Maturité | ✅ | Score 3 phases, params adaptatifs, patterns (5 types), hot_summary évolutif |
+| 5F Dashboard | ✅ | /admin/costs, versioning règles + rollback, aria_actions splitté en 6 modules |
 
 ## 3. ARCHITECTURE CLÉ (pour le prochain Opus)
 
 ### Fichiers critiques
 - `app/routes/raya.py` — endpoint /raya, _raya_core(), charge user_tenants
-- `app/routes/aria_context.py` — build_system_prompt() (prompt principal Raya)
+- `app/routes/aria_context.py` — build_system_prompt() (prompt principal)
 - `app/routes/actions/` — 6 sous-modules (confirmations, mail, drive, teams, memory, __init__)
-- `app/routes/aria_actions.py` — 3 lignes de réexport (rétrocompat)
 - `app/rag.py` — RAG complet, supporte tenant_ids (liste)
 - `app/embedding.py` — search_similar supporte tenant_ids
 - `app/router.py` — routage tier + detect_session_theme + detect_query_domains + route_mail_action
 - `app/maturity.py` — score maturité + params adaptatifs
 - `app/proactive_alerts.py` — CRUD alertes + notification WhatsApp
-- `app/scheduler.py` — 6 jobs APScheduler (expire, decay, audit, webhook, token, proactivity, patterns)
+- `app/scheduler.py` — 7 jobs APScheduler
 - `app/tenant_manager.py` — CRUD tenants + get_user_tenants()
 - `app/memory_rules.py` — save_rule(personal=True), rollback_rule()
 - `app/capabilities.py` — get_user_capabilities_prompt(username, tools)
@@ -97,38 +112,41 @@ Reporté : 5D-4 (onboarding par tenant — attendre Charlotte), 5G-7 (modèle g�
 - `app/connectors/twilio_connector.py` — WhatsApp + SMS
 - `app/llm_client.py` — SEUL point d'entrée LLM (agnostic)
 
-### Multi-tenant (5D-2)
-- Lecture : dirigeant voit TOUS ses tenants (RAG cross-tenant via tenant_ids)
-- Écriture : LEARN taggé `[ACTION:LEARN:cat|rule|tenant_id]` ou `|_user` pour perso
-- Isolation : collaborateur mono-tenant = zéro changement, voit que son tenant
-- Table : `user_tenant_access` (username, tenant_id, role)
-
-### Maturité (5G)
-- Score 0-100 calculé à chaque appel (1 requête SQL agrégée)
-- 3 phases : discovery (<40), consolidation (40-74), maturity (75+)
-- Paramètres adaptatifs (decay, mask_threshold, synth_frequency)
-- Prompt comportemental injecté dans build_system_prompt
-- Moteur de patterns (analyse hebdo Opus, 5 types, table aria_patterns)
-
-### Proactivité (5E-4/5)
-- proactivity_scan : job APScheduler 30min
-- Crée des alertes dans proactive_alerts (5 types, 4 priorités)
-- Alertes injectées dans prompt, marquées vues après
-- Si priority high/critical : notification WhatsApp via Twilio
-- Déjà prêt pour Phase 7 (socle Jarvis minimal)
-
 ## 4. PROCHAINE ÉTAPE : Phase 7 (Jarvis)
 
-La destination finale. Voir `docs/raya_roadmap_v2.md` section Phase 7 (10 tâches).
+### Vision Phase 7 (discussion Guillaume 12/04/2026 soir)
 
-Priorités immédiates :
-- 7-1 : Multi-mailbox (Microsoft webhook existant + Gmail API/polling)
-- 7-2 : Modèle d'urgence enrichi (score 0-100, certitude, escalade Opus)
-- 7-3 : Canal WhatsApp structuré (Twilio connector existe déjà)
-- 7-10 : Mode ombre (shadow mode) — calibration avant mise en prod
+Phase 7 n'est PAS "ajouter des notifications". C'est le moment où Raya passe
+de RÉACTIVE à PROACTIVE. Elle devient un collaborateur indispensable.
 
-DÉJÀ FAIT pour Phase 7 : Twilio connector, proactive_alerts, notification WhatsApp,
-triage 3 niveaux dans webhook, route_mail_action. Le socle est là.
+**Deux axes de proactivité :**
+
+**Axe 1 — Filtre intelligent (roadmap existante)** : Raya surveille les entrées
+(mails, Teams, calendrier) et filtre/alerte/agit. Entonnoir 5 étages.
+
+**Axe 2 — Intelligence de workflow (nouveau, clé du projet)** : Raya observe
+COMMENT l'utilisateur travaille à travers ses outils. Elle apprend les séquences
+d'actions, détecte les oublis, repère les anomalies, et propose des améliorations.
+C'est ce qui la rend véritablement indispensable avec le temps.
+
+Concrètement il faudra :
+- Table `activity_log` : logger les actions faites via Raya (quoi, quand, sur quoi)
+- Étendre le moteur de patterns (5G-4) pour analyser les SÉQUENCES D'ACTIONS cross-outils
+- Étendre le proactivity_scan pour vérifier "séquence habituelle suivie ?"
+- En phase Maturité : proposer d'automatiser les séquences répétitives
+
+### Priorités Phase 7
+
+1. **7-10 Mode ombre** — calibration du jugement avant d'agir seule
+2. **7-2 Modèle d'urgence enrichi** — score 0-100, certitude, escalade Opus
+3. **7-1 Multi-mailbox** — voir toutes les boîtes (Microsoft + Gmail)
+4. **7-3 WhatsApp structuré** — messages avec résumé + options d'action
+5. **7-NEW Activity log + workflow patterns** — observer les processus de travail
+6. **7-5 Préférences de sollicitation** — plages horaires, VIP, contexte calendrier
+7. **7-6 Heartbeat matinal** — preuve de vie quotidienne
+
+DÉJÀ FAIT : Twilio connector, proactive_alerts, notification WhatsApp,
+triage 3 niveaux, route_mail_action, moteur de patterns. Le socle est là.
 
 ## 5. ROADMAP
 ~~5A~~ → ~~5B~~ → ~~5C~~ → ~~5D~~ → ~~5E~~ → ~~5G~~ → ~~5F~~ → **Phase 7** → Phase 6.
@@ -154,6 +172,5 @@ Rapport pour Opus : fichier(s), ligne(s), SHA.
 À chaque jalon, Opus met à jour ce fichier. Non négociable.
 
 ## 10. Variables Railway à configurer
-Pour activer Jarvis minimal (notifications WhatsApp) :
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`
 - `NOTIFICATION_PHONE_GUILLAUME=+33xxxxxxxxx`
