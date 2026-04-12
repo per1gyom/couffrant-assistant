@@ -2,6 +2,7 @@
 Endpoints Raya : /speak, /raya, /token-status, /raya/feedback, /raya/why/{id}.
 
 Phase 3b (B8) : detection de session thematique via detect_session_theme().
+Phase 5B-1    : injection dynamique des actions par domaine via detect_query_domains().
 """
 import json
 import os
@@ -18,7 +19,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.llm_client import llm_complete, log_llm_usage
-from app.router import route_query_tier, detect_session_theme
+from app.router import route_query_tier, detect_session_theme, detect_query_domains
 from app.database import get_pg_conn
 from app.token_manager import get_valid_microsoft_token
 from app.memory_loader import MEMORY_OK, synthesize_session
@@ -210,6 +211,9 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     if session_theme:
         print(f"[Raya] Session thematique detectee pour {username} : '{session_theme}'")
 
+    # 4b. Détection des domaines pertinents pour injection dynamique des actions
+    domains = detect_query_domains(payload.query or "")
+
     # 5. Construction du prompt systeme
     user_content_parts = _build_user_content(payload)
     system = build_system_prompt(
@@ -219,6 +223,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         teams_context=teams_ctx, mail_filter_summary=mail_filter,
         pending_actions=pending_list,
         session_theme=session_theme,
+        domains=domains,
     )
 
     # 6. Appel LLM
