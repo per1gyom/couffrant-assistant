@@ -43,12 +43,50 @@ def create_alert(
                source_type, source_id))
         alert_id = c.fetchone()[0]
         conn.commit()
+
+        # 5E-5b : notification WhatsApp si alerte haute ou critique
+        if priority in ("high", "critical"):
+            try:
+                _notify_external(username, tenant_id, alert_type, priority, title, body)
+            except Exception as e:
+                import logging
+                logging.getLogger("raya.alerts").error(f"[Alerts] Notif externe echouee: {e}")
+
         return alert_id
     except Exception as e:
         print(f"[ProactiveAlerts] Erreur create_alert: {e}")
         return 0
     finally:
         if conn: conn.close()
+
+
+def _notify_external(username, tenant_id, alert_type, priority, title, body):
+    """
+    Envoie une notification WhatsApp si Twilio est configure
+    et que l'utilisateur a un numero de notification.
+    """
+    import os
+    # Le numero de notification est configure par variable d'env par user
+    # Format : NOTIFICATION_PHONE_<USERNAME>=+33xxxxxxxxx
+    phone = os.getenv(f"NOTIFICATION_PHONE_{username.upper()}", "").strip()
+    if not phone:
+        # Fallback : numero par defaut (pour le premier utilisateur)
+        phone = os.getenv("NOTIFICATION_PHONE_DEFAULT", "").strip()
+    if not phone:
+        return
+
+    from app.connectors.twilio_connector import send_whatsapp, is_available
+    if not is_available():
+        return
+
+    icon = "🔴" if priority == "critical" else "🟠"
+    message = (
+        f"{icon} Raya — Alerte {priority}\n\n"
+        f"{title}\n"
+        f"{body[:300] if body else ''}\n\n"
+        f"Connecte-toi au chat pour agir."
+    )
+    send_whatsapp(phone, message)
 
 
 def get_active_alerts(username: str, limit: int = 10) -> list:
