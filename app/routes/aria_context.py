@@ -1,38 +1,44 @@
 """
 Construction du contexte pour Raya.
-Isole la lecture DB, les mails live, l'agenda et la construction du prompt systeme.
+Coœur du prompt : build_system_prompt() + build_actions_prompt().
+
+Les loaders de données sont dans aria_loaders.py.
+Les load_* sont réexportés ici pour compatibilité avec raya.py.
 
 Phase 3a : memoire injectee via RAG (recherche semantique).
-Phase 3b : session_theme (B8) — si un sujet coherent est detecte,
-           le contexte RAG est enrichi avec tout ce qui concerne ce sujet.
+Phase 3b : session_theme (B8).
 5G-3    : maturity_block — comportement adaptatif selon la phase relationnelle.
-5G-5    : patterns_block — patterns comportementaux detectes (consolidation+maturity).
-7-NAR   : narrative_block — memoire narrative des dossiers (contacts, projets, sujets).
+5G-5    : patterns_block — patterns comportementaux detectes.
+7-NAR   : narrative_block — memoire narrative des dossiers.
 7-6D    : report_block — rapport du jour disponible/deja livre.
 WEB-SEARCH : web_info — informe Raya qu'elle a acces a internet.
 SPEAK-SPEED : [SPEAK_SPEED:x] — commande de vitesse vocale.
 Fix-Jarvis : Raya ne connait PAS et n'utilise JAMAIS le mot "Jarvis".
 8-TON   : bloc adaptatif de ton selon les preferences de l'utilisateur.
-Fallback automatique si OPENAI_API_KEY absent.
-
-Les appels reseau sont lances en parallele depuis raya_endpoint().
 """
 import os
 import json
 from datetime import datetime, timezone
 
-from app.graph_client import graph_get
 from app.database import get_pg_conn
-from app.token_manager import get_valid_microsoft_token
-from app.app_security import get_user_tools
 from app.rule_engine import get_contacts_keywords
-from app.connectors.outlook_connector import perform_outlook_action
 from app.memory_loader import (
     get_hot_summary, get_contact_card, get_style_examples,
 )
-from app.feedback_store import get_global_instructions
-from app.capabilities import get_capabilities_prompt, get_user_capabilities_prompt
+from app.capabilities import get_user_capabilities_prompt
 import app.cache as cache
+
+# ─── Loaders réexportés pour compatibilité avec raya.py ───
+from app.routes.aria_loaders import (
+    load_user_tools, load_db_context, load_live_mails,
+    load_agenda, load_teams_context, load_mail_filter_summary,
+)
+
+__all__ = [
+    "load_user_tools", "load_db_context", "load_live_mails",
+    "load_agenda", "load_teams_context", "load_mail_filter_summary",
+    "build_system_prompt", "build_actions_prompt",
+]
 
 
 GUARDRAILS = """GARDE-FOUS DE SECURITE (absolus, en code, non negociables) :
@@ -65,146 +71,6 @@ QUALITE DES APPRENTISSAGES (non negociable) :
     [ACTION:LEARN:comportement|Regrouper plusieurs suppressions en un seul message]
 • Exemple interdit :
     [ACTION:LEARN:comportement|Corbeille = direct ET regrouper les suppressions]"""
-
-
-def load_user_tools(username: str) -> dict:
-    user_tools = get_user_tools(username)
-    drive_tool = user_tools.get('drive', {})
-    drive_access = drive_tool.get('access_level', 'read_only') if drive_tool.get('enabled', True) else 'none'
-    mail_tool = user_tools.get('outlook', {})
-    odoo_tool = user_tools.get('odoo', {})
-    return {
-        "drive_write": drive_access in ('write', 'full'),
-        "drive_can_delete": drive_tool.get('config', {}).get('can_delete', False),
-        "mail_can_delete": mail_tool.get('config', {}).get('can_delete_mail', False),
-        "mail_extra_boxes": mail_tool.get('config', {}).get('mailboxes', []),
-        "odoo_enabled": odoo_tool.get('enabled', False) and odoo_tool.get('access_level', 'none') != 'none',
-        "odoo_access": odoo_tool.get('access_level', 'none'),
-        "odoo_shared_user": odoo_tool.get('config', {}).get('shared_user'),
-    }
-
-
-def load_db_context(username: str) -> dict:
-    conn = None
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("""
-            SELECT id as db_id, message_id, from_email, subject, display_title, category, priority,
-                   short_summary, suggested_reply, raw_body_preview, received_at, mailbox_source
-            FROM mail_memory WHERE username = %s
-            ORDER BY received_at DESC NULLS LAST LIMIT 10
-        """, (username,))
-        columns = [desc[0] for desc in c.description]
-        mails_from_db = [dict(zip(columns, row)) for row in c.fetchall()]
-
-        c.execute("SELECT user_input, aria_response FROM aria_memory WHERE username = %s ORDER BY id DESC LIMIT 6",
-                  (username,))
-        columns = [desc[0] for desc in c.description]
-        history = [dict(zip(columns, row)) for row in c.fetchall()]
-        history.reverse()
-
-        c.execute("SELECT COUNT(*) FROM aria_memory WHERE username = %s", (username,))
-        conv_count = c.fetchone()[0]
-        return {"mails_from_db": mails_from_db, "history": history, "conv_count": conv_count}
-    finally:
-        if conn: conn.close()
-
-
-def load_live_mails(outlook_token: str, username: str) -> list:
-    if not outlook_token:
-        return []
-    try:
-        data = graph_get(outlook_token, "/me/mailFolders/inbox/messages", params={
-            "$top": 20, "$select": "id,subject,from,receivedDateTime,bodyPreview,isRead",
-            "$orderby": "receivedDateTime DESC"})
-        mails = []
-        for msg in data.get("value", []):
-            mails.append({
-                "message_id": msg["id"],
-                "from_email": msg.get("from", {}).get("emailAddress", {}).get("address", ""),
-                "subject": msg.get("subject", "(Sans objet)"),
-                "raw_body_preview": msg.get("bodyPreview", ""),
-                "received_at": msg.get("receivedDateTime", ""),
-                "is_read": msg.get("isRead", False),
-                "mailbox_source": "outlook",
-            })
-        return mails
-    except Exception as e:
-        print(f"[Raya] Erreur Outlook live {username}: {e}")
-        return []
-
-
-def load_agenda(outlook_token: str) -> list:
-    if not outlook_token:
-        return []
-    try:
-        now = datetime.now(timezone.utc)
-        start = now.replace(hour=0, minute=0, second=0).isoformat()
-        end = now.replace(hour=23, minute=59, second=59).isoformat()
-        result = perform_outlook_action("list_calendar_events",
-            {"start": start, "end": end, "top": 10}, outlook_token)
-        return result.get("items", [])
-    except Exception:
-        return []
-
-
-def load_teams_context(username: str) -> str:
-    cache_key = f"teams_ctx:{username}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
-    try:
-        from app.memory_teams import get_teams_context_summary
-        markers_summary = get_teams_context_summary(username)
-    except Exception:
-        markers_summary = ""
-    teams_insights = ""
-    conn = None
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("""
-            SELECT topic, insight FROM aria_insights
-            WHERE username = %s AND source = 'teams'
-            ORDER BY updated_at DESC LIMIT 5
-        """, (username,))
-        rows = c.fetchall()
-        if rows:
-            lines = [f"  [{r[0]}] {r[1]}" for r in rows]
-            teams_insights = "Memoire Teams recente :\n" + "\n".join(lines)
-    except Exception:
-        pass
-    finally:
-        if conn: conn.close()
-    parts = [p for p in [markers_summary, teams_insights] if p]
-    result = "\n".join(parts) if parts else ""
-    cache.set(cache_key, result)
-    return result
-
-
-def load_mail_filter_summary(username: str) -> str:
-    cache_key = f"mail_filter:{username}"
-    cached = cache.get(cache_key)
-    if cached is not None:
-        return cached
-    try:
-        from app.rule_engine import get_rules_by_category
-        rules = get_rules_by_category(username, 'mail_filter')
-        if not rules:
-            return ""
-        whitelist = [r for r in rules if r.strip().lower().startswith('autoriser:')]
-        blacklist = [r for r in rules if r.strip().lower().startswith('bloquer:')]
-        parts = []
-        if whitelist:
-            parts.append(f"Whitelist ({len(whitelist)}) : " + ", ".join(w[10:].strip() for w in whitelist[:5]))
-        if blacklist:
-            parts.append(f"Blacklist ({len(blacklist)}) : " + ", ".join(b[8:].strip() for b in blacklist[:5]))
-        result = "\n".join(parts)
-        cache.set(cache_key, result)
-        return result
-    except Exception:
-        return ""
 
 
 def build_actions_prompt(domains: list[str], tools: dict) -> str:
@@ -260,7 +126,6 @@ Teams — memoire (immediat) :
 Onboarding :
   [ACTION:RESTART_ONBOARDING:] -> relance le questionnaire de configuration initiale""")
 
-    # Lecture vocale — vitesse dynamique
     sections.append("""Lecture vocale :
   [SPEAK_SPEED:vitesse] -> change la vitesse de lecture (0.5=lent, 1.0=normal, 1.2=defaut, 1.5=rapide, 2.0=tres rapide)
   Exemples : l'utilisateur dit "lis plus vite" -> [SPEAK_SPEED:1.5]
@@ -318,7 +183,6 @@ Tu decouvres {display_name}. Comportement attendu :
 - Apprends BEAUCOUP (genere des LEARN frequemment)
 - Ne propose PAS d'automatisations, tu n'as pas assez de recul
 - Sois attentive et curieuse, montre que tu ecoutes"""
-
         elif phase == "consolidation":
             maturity_block = f"""
 
@@ -329,7 +193,6 @@ Tu connais bien {display_name}. Comportement attendu :
 - Apprends de facon moderee et qualitative
 - Commence a suggerer ponctuellement : "je pourrais surveiller X pour toi"
 - Sois efficace, moins de questions, plus d'action"""
-
         elif phase == "maturity":
             maturity_block = f"""
 
@@ -340,7 +203,6 @@ Tu connais {display_name} en profondeur. Comportement attendu :
 - N'apprends que sur le NOUVEAU (pas de LEARN redondant)
 - Confirme UNIQUEMENT sur les sujets inedits ou les actions a haut risque
 - Sois proactive : anticipe les besoins avant qu'il les exprime"""
-
     except Exception:
         pass
 
@@ -360,7 +222,6 @@ Tu connais {display_name} en profondeur. Comportement attendu :
             """, (username,))
             pattern_rows = _c.fetchall()
             _conn.close()
-
             if pattern_rows:
                 lines = [f"  [{r[0]}] {r[1]} (confiance: {r[2]:.0%}, vu {r[3]}x)"
                          for r in pattern_rows]
@@ -511,10 +372,6 @@ Tu connais {display_name} en profondeur. Comportement attendu :
                 "\n\n=== RAPPORT DU JOUR (pr\u00eat, non livr\u00e9) ===\n"
                 "Un rapport matinal est disponible pour l'utilisateur.\n"
                 "Si l'utilisateur demande son rapport, lis-le ou envoie-le selon sa pr\u00e9f\u00e9rence.\n"
-                "Tu peux le livrer :\n"
-                "  - En le lisant ici dans le chat\n"
-                "  - \u00c0 l'oral via [ACTION:SPEAK] (si l'utilisateur le demande)\n"
-                "  - Section par section si l'utilisateur le pr\u00e9f\u00e8re\n"
                 f"Contenu du rapport :\n{report['content'][:1000]}\n"
                 "Apr\u00e8s livraison, le rapport sera marqu\u00e9 comme lu."
             )
@@ -547,9 +404,7 @@ Tu connais {display_name} en profondeur. Comportement attendu :
         pass
 
     # 8-TON : extrait la section ton du hot_summary pour l'injecter en haut du prompt
-    ton_block = ""
     if hot_summary and "TON ET COMMUNICATION" in hot_summary.upper():
-        # Cherche la section dans le hot_summary et l'injecte comme instruction directe
         ton_block = (
             "\n\nTON ET COMMUNICATION (adapte obligatoirement) :\n"
             "Ton hot_summary contient une section \"TON ET COMMUNICATION\" — applique-la "
@@ -559,12 +414,12 @@ Tu connais {display_name} en profondeur. Comportement attendu :
     else:
         ton_block = (
             "\n\nTON ET COMMUNICATION (observation en cours) :\n"
-            "Tu ne connais pas encore les preferences de ton de {display_name}. "
+            f"Tu ne connais pas encore les preferences de ton de {display_name}. "
             "Observe : s'il ecrit court, reponds court. S'il pose des questions detaillees, "
             "developpe. S'il est informel, sois decontractee. S'il est formel, reste professionnelle. "
             "Des qu'il exprime une preference explicite (\"sois plus concis\", \"je prefere les details\", "
             "\"parle-moi comme un collegue\"), genere [ACTION:LEARN:ton|sa_preference]."
-        ).format(display_name=display_name)
+        )
 
     return f"""Tu es Raya \u2014 l'assistante personnelle et evolutive de {display_name}.
 Tu es Claude avec une memoire persistante. Tu n'as pas de comportement impose de l'exterieur.
