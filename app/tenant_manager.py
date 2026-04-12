@@ -10,24 +10,46 @@ Settings tenant (JSONB) :
   custom_tools     : liste [{id, label, description, config_fields}]
                      Outils tiers à connecter (Salesforce, Monday, HubSpot...)
 """
+import re
 import json
+import unicodedata
 from app.database import get_pg_conn
 
 DEFAULT_TENANT = 'couffrant_solar'
 
 
+def _normalize_tenant_id(value: str) -> str:
+    """
+    Normalise un identifiant tenant (FIX-TENANT-FORM) :
+    - Supprime les accents
+    - Convertit en minuscules
+    - Remplace espaces et tirets par des underscores
+    - Supprime les caractères non autorisés (garde a-z, 0-9, _)
+    ex: "Charlotte Solar" -> "charlotte_solar"
+        "Énergie Verte" -> "energie_verte"
+    """
+    nfd = unicodedata.normalize('NFD', value.strip())
+    without_accents = ''.join(c for c in nfd if unicodedata.category(c) != 'Mn')
+    lowered = without_accents.lower().replace(' ', '_').replace('-', '_')
+    return re.sub(r'[^a-z0-9_]', '', lowered)
+
+
 def create_tenant(tenant_id: str, name: str, settings: dict = None) -> dict:
     if not tenant_id or not name:
         return {"status": "error", "message": "tenant_id et name requis."}
+    # Normalisation de l'ID côté serveur (FIX-TENANT-FORM)
+    normalized_id = _normalize_tenant_id(tenant_id)
+    if not normalized_id:
+        return {"status": "error", "message": "Identifiant invalide après normalisation."}
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
         c.execute("""
             INSERT INTO tenants (id, name, settings) VALUES (%s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name, settings=EXCLUDED.settings
-        """, (tenant_id.strip(), name.strip(), json.dumps(settings or {})))
+        """, (normalized_id, name.strip(), json.dumps(settings or {})))
         conn.commit()
-        return {"status": "ok", "tenant_id": tenant_id}
+        return {"status": "ok", "tenant_id": normalized_id}
     except Exception as e: return {"status": "error", "message": str(e)[:100]}
     finally:
         if conn: conn.close()
