@@ -121,8 +121,7 @@ def create_user(username: str, password: str, scope: str = SCOPE_USER,
     """
     Crée un utilisateur.
     force_reset=True (défaut) : l'utilisateur devra changer son mot de passe à la première connexion.
-    Le mot de passe temporaire doit respecter la politique minimale (8 chars) mais pas les critères forts —
-    c'est le nouveau mot de passe défini par l'utilisateur qui doit être fort.
+    Après création, insère dans user_tenant_access (BUG 1).
     """
     if not username or not password:
         return {"status": "error", "message": "Identifiant et mot de passe requis."}
@@ -130,6 +129,7 @@ def create_user(username: str, password: str, scope: str = SCOPE_USER,
         return {"status": "error", "message": "Mot de passe temporaire trop court (8 caractères min.)."}
     if scope not in ALL_SCOPES:
         scope = SCOPE_USER
+    effective_tenant = (tenant_id or DEFAULT_TENANT).strip()
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -137,7 +137,7 @@ def create_user(username: str, password: str, scope: str = SCOPE_USER,
             INSERT INTO users (username, password_hash, email, scope, tenant_id, must_reset_password)
             VALUES (%s, %s, %s, %s, %s, %s)
         """, (username.strip(), hash_password(password), email or None,
-               scope, tenant_id or DEFAULT_TENANT, force_reset))
+               scope, effective_tenant, force_reset))
         conn.commit()
     except Exception as e:
         if "unique" in str(e).lower():
@@ -145,6 +145,22 @@ def create_user(username: str, password: str, scope: str = SCOPE_USER,
         return {"status": "error", "message": str(e)[:100]}
     finally:
         if conn: conn.close()
+
+    # BUG 1 : Enregistrer dans user_tenant_access
+    try:
+        uta_role = "admin" if "admin" in scope else "user"
+        uta_conn = get_pg_conn()
+        uta_c = uta_conn.cursor()
+        uta_c.execute("""
+            INSERT INTO user_tenant_access (username, tenant_id, role)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (username, tenant_id) DO NOTHING
+        """, (username.strip(), effective_tenant, uta_role))
+        uta_conn.commit()
+        uta_conn.close()
+    except Exception as e:
+        print(f"[create_user] user_tenant_access non mis à jour: {e}")
+
     try:
         from app.memory_manager import seed_default_rules
         seed_default_rules(username.strip())
@@ -178,6 +194,20 @@ def update_user(username: str, email: str = None, scope: str = None,
 
 
 def delete_user(username: str, requesting_user: str, requesting_tenant: str = None) -> dict:
+    """
+    Supprime un utilisateur.
+
+    DONNÉES SUPPRIMÉES (privées / personnelles) :
+      user_tools, oauth_tokens, gmail_tokens, password_reset_tokens,
+      aria_memory, aria_hot_summary, aria_style_examples, aria_session_digests,
+      aria_profile, reply_learning_memory, sent_mail_memory,
+      user_tenant_access, proactive_alerts, daily_reports
+
+    DONNÉES CONSERVÉES (intelligence collective) — anonymisées sous 'ancien_<username>' :
+      aria_rules, aria_insights, aria_patterns, dossier_narratives,
+      mail_memory, activity_log
+    (BUG 3 — FIX-BUGS-AUDIT)
+    """
     if username.strip() == requesting_user.strip():
         return {"status": "error", "message": "Impossible de supprimer son propre compte."}
     if requesting_tenant:
@@ -188,14 +218,43 @@ def delete_user(username: str, requesting_user: str, requesting_tenant: str = No
         conn = get_pg_conn(); c = conn.cursor()
         c.execute("DELETE FROM users WHERE username=%s AND username!=%s",
                   (username.strip(), requesting_user.strip()))
-        if c.rowcount == 0: return {"status": "error", "message": "Introuvable."}
-        for table in ["user_tools", "mail_memory", "aria_memory", "aria_rules", "aria_insights",
-                      "aria_hot_summary", "aria_style_examples", "aria_session_digests",
-                      "sent_mail_memory", "aria_profile", "oauth_tokens",
-                      "reply_learning_memory", "gmail_tokens", "password_reset_tokens"]:
-            c.execute(f"DELETE FROM {table} WHERE username=%s", (username.strip(),))
+        if c.rowcount == 0:
+            return {"status": "error", "message": "Introuvable."}
+
+        # ─ Données personnelles/privées — suppression complète
+        personal_tables = [
+            "user_tools", "oauth_tokens", "gmail_tokens", "password_reset_tokens",
+            "aria_memory", "aria_hot_summary", "aria_style_examples",
+            "aria_session_digests", "aria_profile", "reply_learning_memory",
+            "sent_mail_memory", "user_tenant_access", "proactive_alerts", "daily_reports",
+        ]
+        for table in personal_tables:
+            try:
+                c.execute(f"DELETE FROM {table} WHERE username=%s", (username.strip(),))
+            except Exception:
+                pass  # Table absente → on ignore silencieusement
+
+        # ─ Intelligence collective — anonymisation (l'expérience profite au collectif)
+        anon = f"ancien_{username.strip()}"
+        collective_tables = [
+            "aria_rules", "aria_insights", "aria_patterns",
+            "dossier_narratives", "mail_memory", "activity_log",
+        ]
+        for table in collective_tables:
+            try:
+                c.execute(f"UPDATE {table} SET username=%s WHERE username=%s",
+                          (anon, username.strip()))
+            except Exception:
+                pass  # Table absente → on ignore silencieusement
+
         conn.commit()
-        return {"status": "ok", "message": f"'{username}' supprimé."}
+        return {
+            "status": "ok",
+            "message": (
+                f"'{username}' supprimé. Les règles, insights et narratives "
+                f"sont conservés sous '" + anon + "' pour l'intelligence collective."
+            ),
+        }
     except Exception as e:
         return {"status": "error", "message": str(e)[:100]}
     finally:
