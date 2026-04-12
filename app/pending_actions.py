@@ -35,8 +35,12 @@ SENSITIVE_ACTIONS = {
 
 
 def is_sensitive(action_type: str) -> bool:
-    """Retourne True si l'action necessite confirmation."""
-    return action_type.upper() in SENSITIVE_ACTIONS
+    """Retourne True si l'action necessite confirmation. Consulte tools_registry en priorité."""
+    try:
+        from app.tools_registry import is_sensitive_action
+        return is_sensitive_action(action_type)
+    except Exception:
+        return action_type.upper() in SENSITIVE_ACTIONS
 
 
 def queue_action(
