@@ -57,8 +57,8 @@ FastAPI Python 3.13, Railway, PostgreSQL+pgvector, Anthropic 3 tiers, OpenAI emb
 Repo `github.com/per1gyom/couffrant-assistant` main.
 
 ## 2. État 12/04/2026 soir
-**PHASES 5A, 5B, 5C, 5D : TERMINÉES ✅** (5D-4 onboarding par tenant reporté)
-**PHASE 5E EN COURS (4/5)** — reste 5E-5 (Jarvis minimal)
+**PHASES 5A, 5B, 5C, 5D, 5E : TERMINÉES ✅** (5D-4 onboarding par tenant reporté)
+**PROCHAINE PHASE : 5G** (Maturité relationnelle)
 
 | Fait | Détail |
 |---|---|
@@ -71,7 +71,7 @@ Repo `github.com/per1gyom/couffrant-assistant` main.
 | Timeout 30s ✅ | /raya |
 | Rate limiting ✅ | 60 req/h |
 | Admin audit log ✅ | 10 actions loguées |
-| APScheduler complet ✅ | Webhooks + tokens + decay + audit + expire |
+| APScheduler complet ✅ | Webhooks + tokens + decay + audit + expire + proactivity |
 | user_tenant_access ✅ | Table many-to-many créée + migration données |
 | Admin secours ✅ | Configurable par env BACKUP_ADMIN_* |
 | get_user_tenants() ✅ | Retourne tous les tenants d'un user avec rôle + nom |
@@ -83,21 +83,25 @@ Repo `github.com/per1gyom/couffrant-assistant` main.
 | Carte capacités par user ✅ | get_user_capabilities_prompt(username, tools) — outils connectés dynamiques |
 | Descriptions fonctionnelles ✅ | 23 outils avec functional_description dans tools_registry |
 | Triage webhook 3 niveaux ✅ | route_mail_action branché : IGNORER/STOCKER_SIMPLE/ANALYSER |
-| **proactive_alerts table ✅** | Table + module CRUD (create, get_active, mark_seen, dismiss, cleanup) |
-| **proactivity_scan job ✅** | APScheduler 30min : mails urgents >2h, réponses en attente >24h |
-| **Alertes dans prompt ✅** | Alertes actives injectées dans build_system_prompt, marquées vues après |
+| proactive_alerts ✅ | Table + CRUD + scan 30min + injection prompt + marquage vu |
+| proactivity_scan ✅ | Mails urgents >2h, réponses en attente >24h, nettoyage auto |
+| **Twilio connector ✅** | WhatsApp + SMS, dégradation gracieuse si non configuré |
+| **Notifications Jarvis ✅** | WhatsApp auto sur alertes high/critical via proactive_alerts |
 
-## 3. PROCHAINE ÉTAPE : 5E-5
+## 3. PROCHAINE ÉTAPE : Phase 5G
 
-**Jarvis minimal** — version légère pour commencer à tester : triage multi-boîte
-(Microsoft + Gmail si disponible) + notification WhatsApp/Twilio message texte
-pour les mails importants. Pas d'appel, pas de heartbeat, pas de patterns.
-But : terrain de test concret.
+**Maturité relationnelle.** Raya évolue dans sa relation avec l'utilisateur :
 
-Après 5E-5 : Phase 5G (Maturité relationnelle).
+- 5G-1 : Score de maturité utilisateur (Découverte / Consolidation / Maturité)
+- 5G-2 : Paramètres adaptatifs (synthèse, décroissance, confirmations)
+- 5G-3 : Comportement Raya adaptatif dans le prompt
+- 5G-4 : Moteur de patterns (comportements récurrents)
+- 5G-5 : Proactivité mature (automatisations proposées)
+- 5G-6 : Hot_summary évolutif (factuel → portrait profond)
+- 5G-7 : Modèle générique de démarrage
 
 ## 4. ROADMAP
-~~5A~~ → ~~5B~~ → ~~5C~~ → ~~5D~~ → **5E** (4/5) → 5G → 5F → Phase 7 (Jarvis) → Phase 6.
+~~5A~~ → ~~5B~~ → ~~5C~~ → ~~5D~~ → ~~5E~~ → **5G** → 5F → Phase 7 (Jarvis) → Phase 6.
 Voir `docs/raya_roadmap_v2.md`.
 
 ## 5. Utilisateurs
@@ -119,3 +123,10 @@ Rapport pour Opus : fichier(s), ligne(s), SHA.
 
 ## 8. RÈGLE
 À chaque jalon, Opus met à jour ce fichier + `docs/raya_changelog.md`. Non négociable.
+
+## 9. Variables Railway à configurer
+Pour activer Jarvis minimal (notifications WhatsApp) :
+- `TWILIO_ACCOUNT_SID` — SID du compte Twilio
+- `TWILIO_AUTH_TOKEN` — Token d'authentification
+- `TWILIO_WHATSAPP_FROM` — Numéro WhatsApp Twilio (format: whatsapp:+14155238886)
+- `NOTIFICATION_PHONE_GUILLAUME=+33xxxxxxxxx` — Numéro de Guillaume
