@@ -1,7 +1,7 @@
 """
-Endpoint Microsoft Graph webhook.
+Endpoints webhooks Raya.
 
-Pipeline de filtrage à 5 niveaux :
+Pipeline Microsoft Graph (5 niveaux) :
   1a. Whitelist Raya (mail_filter autoriser:) → court-circuite le filtre statique
   1b. Filtre heuristique statique (noreply / newsletters / bulk domains)
   1c. Blacklist Raya (mail_filter bloquer:) → bloc supplémentaire
@@ -13,11 +13,8 @@ Pipeline de filtrage à 5 niveaux :
 process_incoming_mail() est source-agnostic (7-1b) :
 consommé par le webhook Microsoft ET le polling Gmail.
 
-Raya peut affiner le filtre statique via :
-  [ACTION:LEARN:mail_filter|autoriser: dupont@example.com]
-  [ACTION:LEARN:mail_filter|autoriser: @couffrant-solar.fr]
-  [ACTION:LEARN:mail_filter|autoriser: sujet:devis chantier]
-  [ACTION:LEARN:mail_filter|bloquer: promo@fournisseur.fr]
+7-7 : heartbeat webhook_microsoft après traitement réussi.
+7-8 : endpoint POST /webhook/twilio (WhatsApp entrant).
 """
 import re
 import threading
@@ -200,7 +197,6 @@ def process_incoming_mail(
             analysis_status = "stored_simple"
         else:
             try:
-                # Pseudo-msg compatible avec analyze_single_mail_with_ai
                 mock_msg = {
                     "id": message_id, "subject": subject,
                     "from": {"emailAddress": {"address": sender}},
@@ -248,6 +244,22 @@ def process_incoming_mail(
             "suggested_reply": item.get("suggested_reply"),
             "mailbox_source": mailbox_source,
         })
+
+        # Heartbeat monitoring (7-7)
+        try:
+            from app.database import get_pg_conn as _hb_conn
+            _c2 = _hb_conn()
+            _c3 = _c2.cursor()
+            _c3.execute("""
+                INSERT INTO system_heartbeat (component, last_seen_at, status)
+                VALUES ('webhook_microsoft', NOW(), 'ok')
+                ON CONFLICT (component)
+                DO UPDATE SET last_seen_at = NOW(), status = 'ok'
+            """)
+            _c2.commit()
+            _c2.close()
+        except Exception:
+            pass
 
         # 5 — Scoring d'urgence + alerte
         try:
@@ -338,6 +350,150 @@ async def webhook_notification(request: Request):
         ).start()
 
     return Response(status_code=202)
+
+
+@router.post("/webhook/twilio")
+async def webhook_twilio(request: Request):
+    """
+    Webhook Twilio pour les messages WhatsApp entrants. (7-8)
+    L'utilisateur répond à un message Raya depuis WhatsApp.
+    """
+    try:
+        form = await request.form()
+        from_number = form.get("From", "").replace("whatsapp:", "").strip()
+        body = form.get("Body", "").strip()
+
+        if not from_number or not body:
+            return Response(status_code=200)
+
+        username = _resolve_user_by_phone(from_number)
+        if not username:
+            print(f"[Twilio] Numéro inconnu : {from_number}")
+            return Response(status_code=200)
+
+        threading.Thread(
+            target=_handle_whatsapp_command,
+            args=(username, body, from_number),
+            daemon=True,
+        ).start()
+
+    except Exception as e:
+        print(f"[Twilio] Erreur webhook: {e}")
+
+    return Response(status_code=200)
+
+
+def _resolve_user_by_phone(phone: str) -> str | None:
+    """Retrouve le username à partir du numéro de téléphone. (7-8)"""
+    import os
+    phone_clean = phone.replace("+", "").replace(" ", "")
+    for key, value in os.environ.items():
+        if key.startswith("NOTIFICATION_PHONE_"):
+            val_clean = value.strip().replace("+", "").replace(" ", "")
+            if val_clean == phone_clean:
+                username = key.replace("NOTIFICATION_PHONE_", "").lower()
+                if username not in ("default", "admin"):
+                    return username
+    return None
+
+
+def _handle_whatsapp_command(username: str, message: str, phone: str):
+    """
+    Traite une commande WhatsApp entrante. (7-8)
+    Commandes reconnues :
+      "1" / "oui" / "gère" → exécuter la dernière action proposée
+      "2" / "ok" / "m'en occupe" → marquer dernière alerte comme vue
+      "3" / "rappel" / "1h" → créer un rappel dans 1h
+      "4" / "ignorer" → dismiss l'alerte
+      "rapport" → livrer le rapport matinal
+      Texte libre → accusé de réception
+    """
+    from app.connectors.twilio_connector import send_whatsapp
+    from app.app_security import get_tenant_id
+
+    message_lower = message.lower().strip()
+    tenant_id = get_tenant_id(username)
+
+    # Commande 1 — Confirmer la dernière action pending
+    if message_lower in ("1", "oui", "gère", "gere"):
+        try:
+            from app.pending_actions import get_pending
+            pending = get_pending(username, tenant_id=tenant_id, limit=1)
+            if pending:
+                latest = pending[0]
+                send_whatsapp(phone, f"✅ Confirme l'action #{latest['id']} dans le chat Raya pour l'exécuter.")
+            else:
+                send_whatsapp(phone, "Pas d'action en attente.")
+        except Exception as e:
+            send_whatsapp(phone, f"Erreur : {str(e)[:100]}")
+        return
+
+    # Commande 2 — Marquer dernière alerte comme vue
+    if message_lower in ("2", "ok", "m'en occupe", "men occupe", "je gère", "je gere"):
+        try:
+            from app.proactive_alerts import get_active_alerts, mark_seen
+            alerts = get_active_alerts(username)
+            if alerts:
+                mark_seen([alerts[0]["id"]], username)
+                send_whatsapp(phone, "👍 Noté, tu gères.")
+            else:
+                send_whatsapp(phone, "Pas d'alerte active.")
+        except Exception:
+            pass
+        return
+
+    # Commande 3 — Rappel dans 1h
+    if message_lower in ("3", "rappel", "1h", "rappelle", "plus tard"):
+        try:
+            from app.proactive_alerts import create_alert
+            from datetime import datetime, timedelta
+            create_alert(
+                username=username, tenant_id=tenant_id,
+                alert_type="reminder", priority="normal",
+                title="⏰ Rappel (demandé via WhatsApp)",
+                body=f"Tu as demandé un rappel à {(datetime.now() + timedelta(hours=1)).strftime('%H:%M')}.",
+                source_type="whatsapp_reminder",
+            )
+            send_whatsapp(phone, "⏰ OK, je te rappelle dans 1h.")
+        except Exception:
+            pass
+        return
+
+    # Commande 4 — Dismiss dernière alerte
+    if message_lower in ("4", "ignorer", "ignore", "rien"):
+        try:
+            from app.proactive_alerts import get_active_alerts, dismiss_alert
+            alerts = get_active_alerts(username)
+            if alerts:
+                dismiss_alert(alerts[0]["id"])
+                send_whatsapp(phone, "🔕 Alerte ignorée.")
+        except Exception:
+            pass
+        return
+
+    # Rapport — livrer le rapport matinal
+    if "rapport" in message_lower or "résumé" in message_lower or "resume" in message_lower:
+        try:
+            from app.routes.actions.report_actions import get_today_report, mark_report_delivered
+            report = get_today_report(username)
+            if report:
+                send_whatsapp(phone, report["content"][:1500])
+                mark_report_delivered(report["id"], "whatsapp")
+            else:
+                send_whatsapp(phone, "Pas de rapport disponible aujourd'hui.")
+        except Exception:
+            send_whatsapp(phone, "Erreur lors de la récupération du rapport.")
+        return
+
+    # Texte libre — accusé de réception
+    send_whatsapp(phone, "📩 Message reçu. Connecte-toi au chat pour une réponse complète de Raya.")
+
+    # Logger l'activité
+    try:
+        from app.activity_log import log_activity
+        log_activity(username, "whatsapp_command", message[:100], phone, tenant_id)
+    except Exception:
+        pass
 
 
 def _process_mail(username: str, message_id: str):

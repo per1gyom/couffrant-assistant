@@ -15,6 +15,7 @@ Variables d'environnement pour désactiver un job individuellement :
   SCHEDULER_HEARTBEAT_ENABLED=false    → désactive heartbeat_morning (7-6R)
   SCHEDULER_BRIEFING_ENABLED=false     → désactive meeting_briefing (7-BRIEF)
   SCHEDULER_GMAIL_ENABLED=true         → active gmail_polling (7-1b) — défaut: false
+  SCHEDULER_MONITOR_ENABLED=false      → désactive system_monitor (7-7) — défaut: true
 
 Valeur par défaut : true (tous les jobs actifs), sauf gmail_polling (false).
 
@@ -30,6 +31,7 @@ Jobs :
   meeting_briefing  : 06h30 chaque matin (7-BRIEF) — briefings réunions du jour
   heartbeat_morning : 07h00 chaque matin (7-6R) — rapport stocké + ping seulement
   gmail_polling     : toutes les 3 min (7-1b) — désactivé par défaut
+  system_monitor    : toutes les 10 min (7-7) — monitoring composants + alertes
 """
 import os
 from app.logging_config import get_logger
@@ -154,6 +156,14 @@ def _register_jobs(scheduler: BackgroundScheduler):
         logger.info("[Scheduler] Job enregistré : gmail_polling (3 min)")
     else:
         logger.info("[Scheduler] Job DÉSACTIVÉ : gmail_polling (activer via SCHEDULER_GMAIL_ENABLED=true)")
+
+    # System monitor (7-7) — actif par défaut
+    if _job_enabled("SCHEDULER_MONITOR_ENABLED"):
+        scheduler.add_job(func=_job_system_monitor, trigger=IntervalTrigger(minutes=10),
+                          id="system_monitor", name="Monitoring système", replace_existing=True)
+        logger.info("[Scheduler] Job enregistré : system_monitor (10 min)")
+    else:
+        logger.info("[Scheduler] Job DÉSACTIVÉ : system_monitor")
 
 
 # ─── FONCTIONS JOB ───
@@ -386,8 +396,91 @@ def _job_gmail_polling():
 
         if total > 0:
             logger.info(f"[Gmail] {total} nouveau(x) mail(s) traité(s)")
+
+        # Heartbeat monitoring (7-7)
+        try:
+            from app.database import get_pg_conn as _hb_get
+            _hb = _hb_get()
+            _hb_c = _hb.cursor()
+            _hb_c.execute("""
+                INSERT INTO system_heartbeat (component, last_seen_at, status)
+                VALUES ('gmail_polling', NOW(), 'ok')
+                ON CONFLICT (component)
+                DO UPDATE SET last_seen_at = NOW(), status = 'ok'
+            """)
+            _hb.commit()
+            _hb.close()
+        except Exception:
+            pass
+
     except Exception as e:
         logger.error(f"[Gmail] ERREUR polling: {e}")
+
+
+def _job_system_monitor():
+    """Vérifie que tous les composants critiques sont actifs. (7-7)"""
+    try:
+        from app.database import get_pg_conn
+        from datetime import datetime, timedelta
+
+        conn = get_pg_conn()
+        c = conn.cursor()
+
+        # Enregistrer que le scheduler est vivant
+        c.execute("""
+            INSERT INTO system_heartbeat (component, last_seen_at, status)
+            VALUES ('scheduler', NOW(), 'ok')
+            ON CONFLICT (component)
+            DO UPDATE SET last_seen_at = NOW(), status = 'ok'
+        """)
+        conn.commit()
+
+        # Vérifier les composants critiques
+        threshold = datetime.utcnow() - timedelta(minutes=15)
+        c.execute("""
+            SELECT component, last_seen_at, status FROM system_heartbeat
+            WHERE last_seen_at < %s AND status != 'disabled'
+        """, (threshold,))
+        stale = c.fetchall()
+        conn.close()
+
+        if stale:
+            stale_names = [r[0] for r in stale]
+            logger.warning(f"[Monitor] Composants inactifs : {stale_names}")
+            _send_monitor_alert(stale_names)
+
+    except Exception as e:
+        logger.error(f"[Monitor] ERREUR: {e}")
+
+
+def _send_monitor_alert(stale_components: list):
+    """Envoie une alerte monitoring via WhatsApp (fallback SMS). (7-7)"""
+    phone = os.getenv("NOTIFICATION_PHONE_ADMIN", "").strip()
+    if not phone:
+        phone = os.getenv("NOTIFICATION_PHONE_GUILLAUME", "").strip()
+    if not phone:
+        phone = os.getenv("NOTIFICATION_PHONE_DEFAULT", "").strip()
+    if not phone:
+        return
+
+    message = (
+        f"⚠️ Raya Monitor — Composant(s) inactif(s) depuis >15min :\n"
+        f"{', '.join(stale_components)}\n"
+        f"Vérifier Railway."
+    )
+
+    # Essayer WhatsApp d'abord, SMS en fallback
+    try:
+        from app.connectors.twilio_connector import send_whatsapp, send_sms
+        result = send_whatsapp(phone, message)
+        if result.get("status") != "ok":
+            send_sms(phone, message)
+    except Exception:
+        try:
+            from app.connectors.twilio_connector import send_sms
+            send_sms(phone, message)
+        except Exception as e:
+            logger.error(f"[Monitor] Impossible d'alerter: {e}")
 
 
 def _job_meeting_briefing():
@@ -613,8 +706,6 @@ def _prepare_daily_report(username: str):
             "content": f"\u26a0\ufe0f {alerts_count} alerte(s) active(s) à consulter.",
         })
 
-    # Section 3 : TODO — sections personnalisées via aria_rules catégorie 'report_sections'
-
     full_content = "\n\n".join(
         f"\U0001f4cc {s['title']}\n{s['content']}" for s in sections
     )
@@ -633,7 +724,6 @@ def _prepare_daily_report(username: str):
 
 def _send_report_ping(username: str):
     """Envoie un PING léger pour prévenir que le rapport est prêt."""
-    import os
     phone = os.getenv(f"NOTIFICATION_PHONE_{username.upper()}", "").strip()
     if not phone:
         phone = os.getenv("NOTIFICATION_PHONE_DEFAULT", "").strip()
@@ -710,7 +800,6 @@ def _analyze_patterns(username: str):
     mails = [{"from": r[0], "subject": r[1][:60], "cat": r[2], "prio": r[3],
               "date": str(r[4])} for r in c.fetchall()]
 
-    # 7-WF : activités récentes pour détection de séquences workflow
     activities = []
     try:
         c.execute("""
@@ -758,9 +847,7 @@ Détecte les NOUVEAUX comportements récurrents :
 - temporal : "traite les mails X le jour Y"
 - relational : "quand X envoie un mail, c'est toujours Y"
 - thematic : "après un mail chantier, cherche toujours le dossier"
-- workflow : séquences d'actions répétitives ("après mail_read → drive_list → mail_reply",
-  "chaque lundi : mail_archive en masse puis teams_send"). Sois PRÉCIS sur la séquence :
-  décris l'ordre des actions, la fréquence, et les conditions de déclenchement.
+- workflow : séquences d'actions répétitives. Sois PRÉCIS sur la séquence.
 - preference : "préfère des réponses courtes"
 
 Ne répète PAS les patterns déjà connus.
