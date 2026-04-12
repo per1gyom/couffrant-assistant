@@ -375,7 +375,7 @@ async function sendFeedback(ariaMemoryId, type, btn) {
     const d = await r.json();
     if (d.ok || d.status === 'ok') {
       if (btn) btn.textContent = type === 'positive' ? '👍✅' : '👎✅';
-      if (type === 'positive') showToast('Merci ! Les règles utilisées ont été renforcées.', 'ok', 3000);
+      if (type === 'positive') showToast('👍 Noté, merci !', 'ok', 2000);
     } else { if (btn) { btn.disabled = false; btn.style.opacity = ''; } }
   } catch(e) { if (btn) { btn.disabled = false; btn.style.opacity = ''; } }
 }
@@ -815,7 +815,7 @@ function formatDrawerResult(d) {
   }
   if (d.status==='mail_memory_cleared') return '✅ Historique mails vidé.';
   if (d.status) return '✅ '+d.status;
-  return JSON.stringify(d).replace(/[{}"]/g,'').replace(/,/g,'\n').substring(0,200);
+  return JSON.stringify(d).replace(/[{}\"]/g,'').replace(/,/g,'\n').substring(0,200);
 }
 
 // --- KEYBOARD ---
