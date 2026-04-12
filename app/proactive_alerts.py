@@ -17,14 +17,13 @@ def create_alert(
 ) -> int:
     """
     Insere une alerte proactive.
-    Deduplique par (username, title, source_id) sur les 24 dernieres heures.
+    Deduplique par (username, source_id) sur les 24 dernieres heures.
     Retourne l'id de l'alerte inseree ou 0 si doublon.
     """
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        # Deduplication : meme source_id dans les 24h
         if source_id:
             c.execute("""
                 SELECT id FROM proactive_alerts
@@ -64,13 +63,20 @@ def _notify_external(username, tenant_id, alert_type, priority, title, body):
     """
     Envoie une notification WhatsApp si Twilio est configure
     et que l'utilisateur a un numero de notification.
+    7-5 : respect des plages silencieuses et du canal prefere.
     """
     import os
-    # Le numero de notification est configure par variable d'env par user
-    # Format : NOTIFICATION_PHONE_<USERNAME>=+33xxxxxxxxx
+
+    # 7-5 : verification des preferences de notification
+    try:
+        from app.notification_prefs import should_notify
+        if not should_notify(username, priority):
+            return  # plage silencieuse ou chat_only
+    except Exception:
+        pass  # si le module n'est pas disponible, on continue
+
     phone = os.getenv(f"NOTIFICATION_PHONE_{username.upper()}", "").strip()
     if not phone:
-        # Fallback : numero par defaut (pour le premier utilisateur)
         phone = os.getenv("NOTIFICATION_PHONE_DEFAULT", "").strip()
     if not phone:
         return
@@ -79,9 +85,9 @@ def _notify_external(username, tenant_id, alert_type, priority, title, body):
     if not is_available():
         return
 
-    icon = "🔴" if priority == "critical" else "🟠"
+    icon = "\U0001f534" if priority == "critical" else "\U0001f7e0"
     message = (
-        f"{icon} Raya — Alerte {priority}\n\n"
+        f"{icon} Raya \u2014 Alerte {priority}\n\n"
         f"{title}\n"
         f"{body[:300] if body else ''}\n\n"
         f"Connecte-toi au chat pour agir."
@@ -127,10 +133,7 @@ def get_active_alerts(username: str, limit: int = 10) -> list:
 
 
 def mark_seen(alert_ids: list, username: str) -> int:
-    """
-    Marque les alertes comme vues.
-    Retourne le nombre mis a jour.
-    """
+    """Marque les alertes comme vues. Retourne le nombre mis a jour."""
     if not alert_ids:
         return 0
     conn = None
@@ -174,7 +177,7 @@ def dismiss_alert(alert_id: int, username: str) -> bool:
 
 
 def cleanup_expired() -> int:
-    """Supprime les alertes expirees depuis plus de 7 jours. Retourne le nombre supprime."""
+    """Supprime les alertes expirees depuis plus de 7 jours."""
     conn = None
     try:
         conn = get_pg_conn()

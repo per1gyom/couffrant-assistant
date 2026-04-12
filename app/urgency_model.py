@@ -5,6 +5,7 @@ Score 0-100 par message entrant. Combine :
   - Règles apprises (aria_rules catégorie 'urgence') → gratuit
   - Contacts connus (aria_contacts) → gratuit
   - Patterns temporels (aria_patterns) → gratuit
+  - VIP boost (notification_prefs) → gratuit (7-5)
   - Phase de maturité → ajuste les seuils
   - Score LLM (Haiku) si les règles ne suffisent pas
 
@@ -78,6 +79,17 @@ def score_mail_urgency(sender: str, subject: str, preview: str,
         score = int(score * 0.6 + llm_score * 0.4)
         certainty = max(certainty, llm_certainty)
         reasons += llm_reasons
+
+    # === VIP boost (7-5) ===
+    try:
+        from app.notification_prefs import is_vip_sender, get_notification_prefs
+        if is_vip_sender(sender, username):
+            prefs = get_notification_prefs(username)
+            vip_boost = prefs.get("vip_boost", 30)
+            score += vip_boost
+            reasons.append(f"Contact VIP (+{vip_boost})")
+    except Exception:
+        pass
 
     # Cap à 100
     score = min(100, max(0, score))
