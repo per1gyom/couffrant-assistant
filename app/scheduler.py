@@ -14,8 +14,9 @@ Variables d'environnement pour désactiver un job individuellement :
   SCHEDULER_PATTERNS_ENABLED=false     → désactive pattern_analysis
   SCHEDULER_HEARTBEAT_ENABLED=false    → désactive heartbeat_morning (7-6R)
   SCHEDULER_BRIEFING_ENABLED=false     → désactive meeting_briefing (7-BRIEF)
+  SCHEDULER_GMAIL_ENABLED=true         → active gmail_polling (7-1b) — défaut: false
 
-Valeur par défaut : true (tous les jobs actifs).
+Valeur par défaut : true (tous les jobs actifs), sauf gmail_polling (false).
 
 Jobs :
   expire_pending    : toutes les heures
@@ -28,6 +29,7 @@ Jobs :
   pattern_analysis  : dimanche 04h00 (5G-4 + 7-WF activity_log)
   meeting_briefing  : 06h30 chaque matin (7-BRIEF) — briefings réunions du jour
   heartbeat_morning : 07h00 chaque matin (7-6R) — rapport stocké + ping seulement
+  gmail_polling     : toutes les 3 min (7-1b) — désactivé par défaut
 """
 import os
 from app.logging_config import get_logger
@@ -44,8 +46,9 @@ CONFIDENCE_DECAY_STEP     = 0.05
 AUDIT_MIN_RULES           = 5
 
 
-def _job_enabled(env_var: str) -> bool:
-    return os.getenv(env_var, "true").lower() not in ("false", "0", "no", "off")
+def _job_enabled(env_var: str, default: bool = True) -> bool:
+    val = os.getenv(env_var, "true" if default else "false").lower()
+    return val not in ("false", "0", "no", "off")
 
 
 def get_scheduler() -> BackgroundScheduler:
@@ -143,6 +146,14 @@ def _register_jobs(scheduler: BackgroundScheduler):
         logger.info("[Scheduler] Job enregistré : heartbeat_morning (07h00)")
     else:
         logger.info("[Scheduler] Job DÉSACTIVÉ : heartbeat_morning")
+
+    # Gmail polling — désactivé par défaut (activer via SCHEDULER_GMAIL_ENABLED=true)
+    if _job_enabled("SCHEDULER_GMAIL_ENABLED", default=False):
+        scheduler.add_job(func=_job_gmail_polling, trigger=IntervalTrigger(minutes=3),
+                          id="gmail_polling", name="Gmail polling", replace_existing=True)
+        logger.info("[Scheduler] Job enregistré : gmail_polling (3 min)")
+    else:
+        logger.info("[Scheduler] Job DÉSACTIVÉ : gmail_polling (activer via SCHEDULER_GMAIL_ENABLED=true)")
 
 
 # ─── FONCTIONS JOB ───
@@ -333,6 +344,50 @@ def _scan_user(username: str):
                      body=f"De : {row[2]} — en attente depuis plus de 24h.",
                      source_type="mail_reply", source_id=str(row[0]))
     conn.close()
+
+
+def _job_gmail_polling():
+    """Polling Gmail pour les utilisateurs avec credentials configurés. (7-1b)"""
+    try:
+        from app.connectors.gmail_connector import fetch_new_messages, is_configured
+        from app.routes.webhook import process_incoming_mail
+        from app.database import get_pg_conn
+
+        if not is_configured():
+            logger.info("[Gmail] GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET non configurés, skip")
+            return
+
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("SELECT username FROM users WHERE gmail_credentials IS NOT NULL")
+        gmail_users = [r[0] for r in c.fetchall()]
+        conn.close()
+
+        if not gmail_users:
+            return
+
+        total = 0
+        for username in gmail_users:
+            try:
+                messages = fetch_new_messages(username, max_results=20)
+                for msg in messages:
+                    process_incoming_mail(
+                        username=username,
+                        sender=msg["sender"],
+                        subject=msg["subject"],
+                        preview=msg["preview"],
+                        message_id=msg["message_id"],
+                        received_at=msg["received_at"],
+                        mailbox_source="gmail",
+                    )
+                    total += 1
+            except Exception as e:
+                logger.error(f"[Gmail] Erreur polling {username}: {e}")
+
+        if total > 0:
+            logger.info(f"[Gmail] {total} nouveau(x) mail(s) traité(s)")
+    except Exception as e:
+        logger.error(f"[Gmail] ERREUR polling: {e}")
 
 
 def _job_meeting_briefing():
@@ -558,8 +613,7 @@ def _prepare_daily_report(username: str):
             "content": f"\u26a0\ufe0f {alerts_count} alerte(s) active(s) à consulter.",
         })
 
-    # Section 3 : TODO — sections personnalisées (météo, RDV, etc.)
-    # Futur : lire aria_rules catégorie 'report_sections' et ajouter dynamiquement.
+    # Section 3 : TODO — sections personnalisées via aria_rules catégorie 'report_sections'
 
     full_content = "\n\n".join(
         f"\U0001f4cc {s['title']}\n{s['content']}" for s in sections
@@ -670,7 +724,7 @@ def _analyze_patterns(username: str):
                        "detail": r[2][:60] if r[2] else "", "date": r[4]}
                       for r in c.fetchall()]
     except Exception:
-        pass  # activity_log peut ne pas encore avoir de données
+        pass
 
     c.execute("""
         SELECT pattern_type, description FROM aria_patterns
