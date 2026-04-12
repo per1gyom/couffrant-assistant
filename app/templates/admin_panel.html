@@ -72,8 +72,9 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 .modal-title { font-family: var(--mono); font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 20px; }
 .form-group { margin-bottom: 16px; }
 label { display: block; font-family: var(--mono); font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
-input[type=text], input[type=password], input[type=email], select { width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; color: var(--text); font-family: var(--mono); font-size: 13px; padding: 10px 12px; outline: none; transition: border-color 0.15s; }
-input:focus, select:focus { border-color: var(--accent); }
+input[type=text], input[type=password], input[type=email], select, textarea { width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; color: var(--text); font-family: var(--mono); font-size: 13px; padding: 10px 12px; outline: none; transition: border-color 0.15s; }
+textarea { resize: vertical; min-height: 80px; }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 select option { background: var(--bg3); }
 .modal-footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
 .alert { padding: 12px 16px; border-radius: 6px; font-family: var(--mono); font-size: 12px; margin-bottom: 16px; display: none; }
@@ -121,6 +122,9 @@ select option { background: var(--bg3); }
 .sp-result { font-family: var(--mono); font-size: 11px; margin-top: 8px; min-height: 16px; transition: color 0.2s; }
 .sp-result.ok { color: var(--green); }
 .sp-result.err { color: var(--red); }
+/* Actions tenant (super_admin) */
+.tenant-admin-bar { padding: 10px 20px; background: rgba(0,188,212,0.04); border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
+.tenant-id-tag { font-family: var(--mono); font-size: 10px; color: var(--text3); margin-left: auto; }
 /* Ligne utilisateur bloqué */
 tr.row-locked td { background: rgba(255,82,82,0.04) !important; }
 </style>
@@ -236,8 +240,11 @@ tr.row-locked td { background: rgba(255,82,82,0.04) !important; }
 <section id="tab-companies" class="section">
   <div class="actions-row">
     <button class="btn btn-ghost" onclick="loadCompanies()">&#8635; Actualiser</button>
+    <!-- Visible super_admin uniquement — affiché dynamiquement via initUserScope() -->
+    <button class="btn btn-primary" id="btn-create-tenant" style="display:none" onclick="openModal('create-tenant')">+ Créer une société</button>
     <span id="companies-count" style="font-family:var(--mono);font-size:12px;color:var(--text3)"></span>
   </div>
+  <div id="companies-alert" class="alert"></div>
   <div id="companies-list"><div style="color:var(--text3);font-family:var(--mono);font-size:12px">Chargement...</div></div>
 </section>
 
@@ -313,9 +320,90 @@ tr.row-locked td { background: rgba(255,82,82,0.04) !important; }
   </div>
 </div>
 
+<!-- ─── MODALES GESTION TENANTS (super_admin) ─── -->
+
+<!-- MODAL CRÉATION TENANT -->
+<div class="modal-overlay" id="modal-create-tenant">
+  <div class="modal">
+    <div class="modal-title">🏢 Créer une société</div>
+    <div id="create-tenant-alert" class="alert"></div>
+    <div class="form-group">
+      <label>Identifiant (ID unique)</label>
+      <input type="text" id="tenant-new-id" placeholder="ex: ma_societe (lettres, chiffres, _)" autocomplete="off">
+      <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:5px">Attention : l'ID ne peut pas être modifié après création.</div>
+    </div>
+    <div class="form-group"><label>Nom affiché</label><input type="text" id="tenant-new-name" placeholder="ex: Ma Société SAS"></div>
+    <div class="form-group">
+      <label>Fournisseur email</label>
+      <select id="tenant-new-email-provider">
+        <option value="microsoft">Microsoft 365</option>
+        <option value="google">Google Workspace</option>
+        <option value="none">Aucun</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Dossier SharePoint racine</label><input type="text" id="tenant-new-sp-folder" placeholder="ex: 1_Photovoltaïque"></div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('create-tenant')">Annuler</button>
+      <button class="btn btn-primary" onclick="createTenant()">Créer la société</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL ÉDITION TENANT -->
+<div class="modal-overlay" id="modal-edit-tenant">
+  <div class="modal">
+    <div class="modal-title" id="edit-tenant-modal-title">✏️ Modifier la société</div>
+    <div id="edit-tenant-alert" class="alert"></div>
+    <div class="form-group">
+      <label>ID (non modifiable)</label>
+      <input type="text" id="tenant-edit-id-display" disabled style="opacity:0.5;cursor:not-allowed">
+    </div>
+    <div class="form-group"><label>Nom affiché</label><input type="text" id="tenant-edit-name" placeholder="Nom de la société"></div>
+    <div class="form-group">
+      <label>Fournisseur email</label>
+      <select id="tenant-edit-email-provider">
+        <option value="microsoft">Microsoft 365</option>
+        <option value="google">Google Workspace</option>
+        <option value="none">Aucun</option>
+      </select>
+    </div>
+    <div class="form-group"><label>Dossier SharePoint racine</label><input type="text" id="tenant-edit-sp-folder" placeholder="ex: 1_Photovoltaïque"></div>
+    <div class="form-group"><label>Site SharePoint</label><input type="text" id="tenant-edit-sp-site" placeholder="ex: Commun"></div>
+    <div class="form-group">
+      <label>Settings JSON (avancé)</label>
+      <textarea id="tenant-edit-settings" placeholder='{"email_provider":"microsoft"}'></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('edit-tenant')">Annuler</button>
+      <button class="btn btn-primary" onclick="saveTenant()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL SUPPRESSION TENANT -->
+<div class="modal-overlay" id="modal-delete-tenant">
+  <div class="modal">
+    <div class="modal-title">🗑️ Supprimer la société</div>
+    <div id="delete-tenant-alert" class="alert"></div>
+    <p style="color:var(--text2);font-size:13px;line-height:1.6;margin-bottom:12px">
+      Vous êtes sur le point de supprimer la société :<br>
+      <strong id="delete-tenant-label" style="color:var(--red);font-family:var(--mono)"></strong>
+    </p>
+    <p style="color:var(--yellow);font-family:var(--mono);font-size:11px;margin-bottom:20px">
+      ⚠️ Cette action est irréversible. Les utilisateurs associés ne seront pas supprimés mais perdront leur accès à ce tenant.
+    </p>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('delete-tenant')">Annuler</button>
+      <button class="btn btn-danger" onclick="confirmDeleteTenant()">Supprimer définitivement</button>
+    </div>
+  </div>
+</div>
+
 <script>
 let allRules=[], allInsights=[];
 let currentEditUser=null, usernameToDelete=null;
+let isSuperAdmin=false, currentUserScope='';
+let currentEditTenantId=null, tenantToDelete=null;
 
 function updateClock(){document.getElementById('clock').textContent=new Date().toLocaleString('fr-FR',{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'});}
 setInterval(updateClock,1000); updateClock();
@@ -410,6 +498,7 @@ async function unlockUser(username){
 // ─── SOCIÉTÉS ───
 async function loadCompanies(){
   document.getElementById('companies-list').innerHTML='<div style="color:var(--text3);font-family:var(--mono);font-size:12px"><span class="loader"></span> Chargement...</div>';
+  document.getElementById('companies-alert').className='alert';
   try{
     const tenants=await(await fetch('/admin/tenants-overview')).json();
     document.getElementById('companies-count').textContent=`${tenants.length} société(s)`;
@@ -422,6 +511,7 @@ async function loadCompanies(){
       const spSite = t.sharepoint_site || 'Commun';
       const spFolder = t.sharepoint_folder || '1_Photovoltaïque';
       const spDrive = t.sharepoint_drive || 'Documents';
+      const settingsEscaped = JSON.stringify(t.settings||{}).replace(/'/g,"&apos;").replace(/"/g,'&quot;');
       return `
       <div class="tenant-card">
         <div class="tenant-header" onclick="toggleTenant(${i})">
@@ -468,6 +558,12 @@ async function loadCompanies(){
             </div>
             <div class="sp-result" id="sp-result-${i}"></div>
           </div>
+          ${isSuperAdmin ? `
+          <div class="tenant-admin-bar">
+            <button class="btn btn-accent" style="font-size:11px;padding:5px 12px" onclick="openEditTenant('${t.tenant_id}','${t.name.replace(/'/g,"\\'")}','${settingsEscaped}','${spSite}','${spFolder}')">✏️ Modifier la société</button>
+            <button class="btn btn-danger" style="font-size:11px;padding:5px 12px" onclick="openDeleteTenant('${t.tenant_id}','${t.name.replace(/'/g,"\\'")}')">🗑️ Supprimer</button>
+            <span class="tenant-id-tag">ID : ${t.tenant_id}</span>
+          </div>` : ''}
         </div>
       </div>`;
     }).join('');
@@ -494,6 +590,103 @@ async function saveSharePointConfig(tenantId, i){
     if(d.status==='ok'){result.className='sp-result ok';result.textContent='✅ Config mise à jour.';}
     else{result.className='sp-result err';result.textContent='❌ '+(d.message||'Erreur');}
   }catch(e){result.className='sp-result err';result.textContent='❌ '+e.message;}
+}
+
+// ─── GESTION TENANTS (super_admin) ───
+async function createTenant(){
+  const id=document.getElementById('tenant-new-id').value.trim();
+  const name=document.getElementById('tenant-new-name').value.trim();
+  const emailProvider=document.getElementById('tenant-new-email-provider').value;
+  const spFolder=document.getElementById('tenant-new-sp-folder').value.trim();
+  if(!id||!name){setAlert('create-tenant-alert','ID et nom requis.','err');return;}
+  if(!/^[a-z0-9_]+$/.test(id)){setAlert('create-tenant-alert','ID : lettres minuscules, chiffres et _ uniquement.','err');return;}
+  const settings={email_provider:emailProvider};
+  if(spFolder) settings.sharepoint_folder=spFolder;
+  try{
+    const d=await(await fetch('/admin/tenants',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({id,name,settings})
+    })).json();
+    if(d.status==='ok'||d.id){
+      setAlert('companies-alert','✅ Société "'+name+'" créée avec succès.','ok');
+      closeModal('create-tenant');
+      document.getElementById('tenant-new-id').value='';
+      document.getElementById('tenant-new-name').value='';
+      document.getElementById('tenant-new-sp-folder').value='';
+      loadCompanies();
+    } else {
+      setAlert('create-tenant-alert','❌ '+(d.message||d.detail||'Erreur lors de la création.'),'err');
+    }
+  }catch(e){setAlert('create-tenant-alert','❌ '+e.message,'err');}
+}
+
+function openEditTenant(id, name, settingsStr, spSite, spFolder){
+  currentEditTenantId=id;
+  document.getElementById('edit-tenant-modal-title').textContent='✏️ Modifier — '+name;
+  document.getElementById('tenant-edit-id-display').value=id;
+  document.getElementById('tenant-edit-name').value=name;
+  document.getElementById('tenant-edit-sp-site').value=spSite||'';
+  document.getElementById('tenant-edit-sp-folder').value=spFolder||'';
+  // Décoder les settings
+  let settings={};
+  try{
+    const decoded=settingsStr.replace(/&quot;/g,'"').replace(/&apos;/g,"'");
+    settings=JSON.parse(decoded);
+  }catch(e){}
+  document.getElementById('tenant-edit-email-provider').value=settings.email_provider||'microsoft';
+  document.getElementById('tenant-edit-settings').value=JSON.stringify(settings,null,2);
+  document.getElementById('edit-tenant-alert').className='alert';
+  openModal('edit-tenant');
+}
+
+async function saveTenant(){
+  if(!currentEditTenantId) return;
+  const name=document.getElementById('tenant-edit-name').value.trim();
+  const spSite=document.getElementById('tenant-edit-sp-site').value.trim();
+  const spFolder=document.getElementById('tenant-edit-sp-folder').value.trim();
+  const emailProvider=document.getElementById('tenant-edit-email-provider').value;
+  if(!name){setAlert('edit-tenant-alert','Le nom est requis.','err');return;}
+  // Fusionner les settings
+  let settings={};
+  try{settings=JSON.parse(document.getElementById('tenant-edit-settings').value||'{}');}catch(e){setAlert('edit-tenant-alert','JSON settings invalide.','err');return;}
+  settings.email_provider=emailProvider;
+  if(spFolder) settings.sharepoint_folder=spFolder;
+  if(spSite) settings.sharepoint_site=spSite;
+  try{
+    const d=await(await fetch(`/admin/tenants/${currentEditTenantId}`,{
+      method:'PUT',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({name,settings})
+    })).json();
+    if(d.status==='ok'||d.id){
+      setAlert('companies-alert','✅ Société mise à jour.','ok');
+      closeModal('edit-tenant');
+      loadCompanies();
+    } else {
+      setAlert('edit-tenant-alert','❌ '+(d.message||d.detail||'Erreur'),'err');
+    }
+  }catch(e){setAlert('edit-tenant-alert','❌ '+e.message,'err');}
+}
+
+function openDeleteTenant(id, name){
+  tenantToDelete=id;
+  document.getElementById('delete-tenant-label').textContent=`${name} (${id})`;
+  document.getElementById('delete-tenant-alert').className='alert';
+  openModal('delete-tenant');
+}
+
+async function confirmDeleteTenant(){
+  if(!tenantToDelete) return;
+  try{
+    const d=await(await fetch(`/admin/tenants/${tenantToDelete}`,{method:'DELETE'})).json();
+    if(d.status==='ok'){
+      setAlert('companies-alert','✅ Société supprimée.','ok');
+      closeModal('delete-tenant');
+      loadCompanies();
+    } else {
+      setAlert('delete-tenant-alert','❌ '+(d.message||d.detail||'Erreur lors de la suppression.'),'err');
+    }
+  }catch(e){setAlert('delete-tenant-alert','❌ '+e.message,'err');}
+  tenantToDelete=null;
 }
 
 // MODALS
@@ -592,13 +785,30 @@ async function loadInsights(){
 async function quickAction(url,id){
   const el=document.getElementById(id);
   el.className='action-result'; el.textContent='En cours...';
-  try{const d=await(await fetch(url)).json();el.textContent=JSON.stringify(d).replace(/[{}"]/g,' ').trim().substring(0,120);}
+  try{const d=await(await fetch(url)).json();el.textContent=JSON.stringify(d).replace(/[{}\"]/g,' ').trim().substring(0,120);}
   catch(e){el.textContent='Erreur: '+e.message;el.className='action-result err';}
 }
+
 async function loadProfile(){
-  try{const d=await(await fetch('/profile')).json();document.getElementById('profile-username').textContent=d.username||'—';document.getElementById('profile-email').value=d.email||'';}
-  catch(e){}
+  try{
+    const d=await(await fetch('/profile')).json();
+    document.getElementById('profile-username').textContent=d.username||'—';
+    document.getElementById('profile-email').value=d.email||'';
+  }catch(e){}
 }
+
+// Initialise le scope utilisateur au démarrage (sans ouvrir l'onglet profil)
+async function initUserScope(){
+  try{
+    const d=await(await fetch('/profile')).json();
+    currentUserScope=d.scope||'';
+    isSuperAdmin=(currentUserScope==='admin');
+    if(isSuperAdmin){
+      document.getElementById('btn-create-tenant').style.display='';
+    }
+  }catch(e){}
+}
+
 async function saveEmail(){
   const email=document.getElementById('profile-email').value.trim();
   const d=await(await fetch('/profile/email',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})})).json();
@@ -621,7 +831,9 @@ async function changePassword(){
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') document.querySelectorAll('.modal-overlay.open').forEach(m=>m.classList.remove('open')); });
 document.querySelectorAll('.modal-overlay').forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('open'); }));
 
+// Initialisation
 loadMemoryStatus();
+initUserScope(); // Récupère le scope pour afficher les contrôles super_admin
 </script>
 </body>
 </html>
