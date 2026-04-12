@@ -57,25 +57,32 @@ FastAPI Python 3.13, Railway, PostgreSQL+pgvector, Anthropic 3 tiers, OpenAI emb
 Repo `github.com/per1gyom/couffrant-assistant` main.
 
 ## 2. État 12/04/2026 soir
-**PHASES 5A–5E : TERMINÉES ✅** (5D-4 onboarding par tenant reporté)
-**PHASE 5G EN COURS (3/7)**
+**PHASES 5A–5E, 5G : TERMINÉES ✅** (5D-4 + 5G-7 reportés)
+**PROCHAINE PHASE : 5F** (Dashboard & Refactoring)
 
 | Fait | Détail |
 |---|---|
-| Phases 5A–5E ✅ | Sécurité, prompt, robustesse, multi-tenant, conscience outils, proactivité |
+| Phases 5A–5E ✅ | Sécurité, prompt, robustesse, multi-tenant, conscience outils, proactivité, Jarvis minimal |
 | Score maturité ✅ | compute_maturity_score() : 5 critères × 20 pts → phase auto |
 | Params adaptatifs ✅ | decay + mask_threshold varient par user selon phase |
 | Prompt adaptatif ✅ | Bloc comportemental discovery/consolidation/maturity injecté |
+| Moteur de patterns ✅ | aria_patterns table + analyse hebdo Opus (temporal/relational/thematic/workflow/preference) |
+| Patterns dans prompt ✅ | Top 8 patterns injectés, proposition d'automatisations en phase maturity |
+| Hot_summary évolutif ✅ | Factuel (discovery) → Analytique (consolidation) → Portrait profond (maturity) |
 
-Reste 5G : 5G-4 (patterns), 5G-5 (proactivité mature), 5G-6 (hot_summary évolutif), 5G-7 (modèle générique — reporté après Charlotte).
+Reporté : 5D-4 (onboarding par tenant), 5G-7 (modèle générique — après Charlotte).
 
-## 3. PROCHAINE ÉTAPE : 5G-4
+## 3. PROCHAINE ÉTAPE : Phase 5F
 
-**Moteur de patterns** — analyse périodique des comportements récurrents :
-temporels, relationnels, thématiques. Stockés dans table `aria_patterns`.
+**Dashboard & Refactoring :**
+- 5F-1 : Dashboard `/admin/costs` — visualisation coûts LLM par tenant/user/modèle
+- 5F-2 : Versioning des règles — historique + rollback
+- 5F-3 : Refactoring `aria_actions.py` — split 33k en sous-modules
+
+Après 5F : Phase 7 (Jarvis complet) → Phase 6 (Ouverture).
 
 ## 4. ROADMAP
-~~5A~~ → ~~5B~~ → ~~5C~~ → ~~5D~~ → ~~5E~~ → **5G** (3/7) → 5F → Phase 7 → Phase 6.
+~~5A~~ → ~~5B~~ → ~~5C~~ → ~~5D~~ → ~~5E~~ → ~~5G~~ → **5F** → Phase 7 → Phase 6.
 
 ## 5. Utilisateurs
 - **Guillaume Perrin** — Couffrant Solar. MS365 + Odoo. ~10 boîtes mail.
