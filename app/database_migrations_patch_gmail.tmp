@@ -1,0 +1,17 @@
+        # ── 7-10 : shadow mode (calibration Jarvis) ──
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS shadow_mode BOOLEAN DEFAULT true",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS shadow_mode_until TIMESTAMP DEFAULT (NOW() + INTERVAL '14 days')",
+        # ── 7-5 : préférences de notification ──
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_prefs JSONB DEFAULT '{}'",
+        # ── 7-1a : Gmail OAuth2 ──
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_credentials JSONB DEFAULT NULL",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_last_history_id TEXT DEFAULT NULL",
+    ]
+    for m in migrations:
+        try:
+            c.execute(m)
+            conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"[Migration] Skip ({str(e)[:60]})")
+    conn.close()
