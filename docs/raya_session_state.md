@@ -10,7 +10,7 @@
 - **Règle d'or : aucune écriture sans « ok vas-y » explicite.**
 - Après push GitHub : `exit` puis `railway ssh` pour récupérer code à jour.
 - **Rôle Opus = architecte uniquement** : vision, prompts courts pour Sonnet, vérification post-push via lecture code, mise à jour state file. Pas de pilotage en direct, pas de code, pas de push applicatif.
-- **Prompts pour Sonnet** : inclure instruction de push direct (Guillaume ne peut pas juger le code). Ajouter en fin de prompt : « Rapport pour Opus : fichier(s) modifié(s), ligne(s) changée(s), SHA du commit. Format : [5A-X] fichier → changement. SHA: xxx »
+- **Prompts pour Sonnet** : inclure instruction de push direct (Guillaume ne peut pas juger le code). Ajouter en fin de prompt : « Rapport pour Opus : fichier(s) modifié(s), ligne(s) changée(s), SHA du commit. »
 
 ## 1. Rôles
 Guillaume (dirigeant) / Opus (architecte, MCP GitHub+Postgres) / Sonnet (exécutant).
@@ -33,8 +33,8 @@ FastAPI Python 3.13 sur Railway. Repo public `github.com/per1gyom/couffrant-assi
 | 5A-3 | ✅ fait | Rate limiter 60 req/h par user. `app/rate_limiter.py` créé + intégré dans `app/routes/raya.py`. |
 | 5A-4 | ✅ fait | `app/admin_audit.py` créé + 10 appels log_admin_action intégrés dans `app/routes/admin.py`. |
 | 5A-5 | ✅ fait | `ai_client.py` migré vers `llm_complete()`. Plus d'import Anthropic direct. |
-| 5A-6 | ⏳ EN COURS | `memory_contacts.py` à migrer vers `llm_complete()`. Prompt prêt (voir conversation Opus). |
-| 5A-7 | ⏳ suivant | `memory_style.py` à migrer vers `llm_complete()`. Prompt prêt (voir conversation Opus). |
+| 5A-6 | ⏳ EN COURS | `memory_contacts.py` à migrer vers `llm_complete()`. Prompt prêt. |
+| 5A-7 | ⏳ suivant | `memory_style.py` à migrer vers `llm_complete()`. Prompt prêt. |
 | 5A-8 | ❌ | Supprimer doublon `get_contacts_keywords` dans memory_contacts.py |
 | 5A-9 | ❌ | Supprimer wrapper fragile `get_memoire_param` dans memory_rules.py |
 | 5A-10 | ❌ | Brancher aria_actions.py sur tools_registry |
@@ -56,32 +56,30 @@ Ordre d'exécution :
 9. **Phase 6** — Ouverture (6 tâches)
 
 ## 6. Décisions B1–B32 (résumé)
-B1-B2 routage Haiku/Sonnet/Opus ✅. B3-B7/B14/B30/B32 RAG + rule_validator ✅. B5 audit Opus ✅. B6 décroissance ✅. B8 session thématique ✅. B9 notifs ✅. B11-B12 multi-tenant 🟡 partiel. B13 onboarding ✅. B16/B18/B23 tools_registry 🟡. B17 /admin/costs ❌. B20 rename 🟡. B21-B22 hiérarchie ✅. B24 API ❌. B25 versioning ❌. B27 Pourquoi ✅. B29 honnêteté ✅. B31 feedback ✅. B10 proactivity ❌. B15 hors-cadre ❌.
+B1-B2 routage ✅. B3-B7/B14/B30/B32 RAG + rule_validator ✅. B5 audit ✅. B6 décroissance ✅. B8 session thématique ✅. B9 notifs ✅. B11-B12 multi-tenant 🟡. B13 onboarding ✅. B16/B18/B23 tools_registry 🟡. B17 costs ❌. B20 rename 🟡. B21-B22 hiérarchie ✅. B24 API ❌. B25 versioning ❌. B27 Pourquoi ✅. B29 honnêteté ✅. B31 feedback ✅. B10 proactivity ❌. B15 hors-cadre ❌.
 
 ## 7. Schéma aria_rules
-`id, category, rule, source, confidence, reinforcements, active(bool), created_at, updated_at, context, username, tenant_id, embedding(vector)`. Pas de scope/status. Migration Alembic à faire (Phase 6-5).
+`id, category, rule, source, confidence, reinforcements, active(bool), created_at, updated_at, context, username, tenant_id, embedding(vector)`. Migration Alembic à faire (Phase 6-5).
 
 ## 8. Utilisateurs cibles
 - **Guillaume Perrin** — Couffrant Solar (PV, Loire). Microsoft 365 + Odoo + SharePoint. ~10 boîtes mail (mix MS/Gmail).
-- **Charlotte Couffrant** — Juillet (événementiel d'entreprise). Gmail + LinkedIn + Instagram. Outils détaillés à préciser. Beta test multi-tenant prévu ~mi-juin.
+- **Charlotte Couffrant** — Juillet (événementiel). Gmail + LinkedIn + Instagram. Beta test multi-tenant prévu ~mi-juin.
 
 ## 9. Pièges
-- Repo local Mac abandonné, conflit `git pull`. Ne pas y toucher sauf session dédiée.
-- 12 patch_*.py locaux = vieux scripts one-shot, sans valeur.
-- 2 projets Railway parasites à supprimer plus tard.
-- 2 versions `get_memoire_param` (memory_rules vs rule_engine) → 5A-9.
-- Double `get_contacts_keywords` (rule_engine vs memory_contacts) → 5A-8.
-- ~~3 fichiers contournent `llm_client.py`~~ → 5A-5 fait, 5A-6/7 en cours. Après ça, agnosticisme LLM complet.
+- Repo local Mac abandonné. Ne pas y toucher.
+- 12 patch_*.py locaux = sans valeur.
+- 2 projets Railway parasites à supprimer.
+- `get_memoire_param` doublon (memory_rules vs rule_engine) → 5A-9.
+- `get_contacts_keywords` doublon (rule_engine vs memory_contacts) → 5A-8.
 - `tools_registry` pas consulté par `aria_actions.py` → 5A-10.
-- Cleanup fixture tests Phase 4 isolée sur `username='test_phase4'`.
-- CLI Railway oublie linking quand on change session/dossier — refaire `cd ~/couffrant-assistant && railway link`.
 - MCP GitHub en écriture instable le soir — `push_files` plus fiable que `create_or_update_file`.
+- CLI Railway oublie linking — refaire `cd ~/couffrant-assistant && railway link`.
 
 ## 10. Outils Opus
-GitHub MCP, Postgres MCP query lecture base prod `railway`, filesystem, Claude in Chrome. Différés via `tool_search`.
+GitHub MCP, Postgres MCP query lecture base prod `railway`, filesystem. Différés via `tool_search`.
 
 ## 11. Reprise nouvelle conversation
 « Bonjour Opus. Projet Raya, Guillaume. On se tutoie, en français, vocabulaire Terminal, concis. Lis `docs/raya_session_state.md` puis `docs/raya_roadmap_v2.md` sur `per1gyom/couffrant-assistant` main via GitHub MCP. Règle d'or : aucune écriture sans mon ok. Reprends où on en était. »
 
 ## 12. RÈGLE — Mise à jour obligatoire
-À chaque jalon, Opus propose mise à jour state file, attend ok, commit. Non négociable. S'applique à toutes les futures Opus.
+À chaque jalon, Opus met à jour ce fichier. Non négociable.
