@@ -742,6 +742,7 @@ ACTIVITÉS (actions via Raya, 30 derniers jours) :
 """ if activities else ""
 
     prompt = f"""Tu es Raya en mode analyse interne.
+INTERDIT : ne JAMAIS inclure le mot "Jarvis" dans les descriptions de patterns.
 Voici les 50 dernières conversations, 100 derniers mails et les actions récentes de {username}.
 
 CONVERSATIONS :
