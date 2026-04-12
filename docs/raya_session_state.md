@@ -57,52 +57,25 @@ FastAPI Python 3.13, Railway, PostgreSQL+pgvector, Anthropic 3 tiers, OpenAI emb
 Repo `github.com/per1gyom/couffrant-assistant` main.
 
 ## 2. État 12/04/2026 soir
-**PHASES 5A, 5B, 5C, 5D, 5E : TERMINÉES ✅** (5D-4 onboarding par tenant reporté)
-**PROCHAINE PHASE : 5G** (Maturité relationnelle)
+**PHASES 5A–5E : TERMINÉES ✅** (5D-4 onboarding par tenant reporté)
+**PHASE 5G EN COURS (3/7)**
 
 | Fait | Détail |
 |---|---|
-| Agnosticisme LLM ✅ | Zéro import anthropic hors llm_client.py |
-| Injection dynamique actions ✅ | 30-60% tokens économisés |
-| Cache TTL 5min ✅ | hot_summary, teams_ctx, mail_filter |
-| Hot_summary 3 niveaux ✅ | Situation + Patterns + Préférences, vectorisé |
-| Structured logging ✅ | main.py + scheduler.py |
-| Health check profond ✅ | DB + LLM |
-| Timeout 30s ✅ | /raya |
-| Rate limiting ✅ | 60 req/h |
-| Admin audit log ✅ | 10 actions loguées |
-| APScheduler complet ✅ | Webhooks + tokens + decay + audit + expire + proactivity |
-| user_tenant_access ✅ | Table many-to-many créée + migration données |
-| Admin secours ✅ | Configurable par env BACKUP_ADMIN_* |
-| get_user_tenants() ✅ | Retourne tous les tenants d'un user avec rôle + nom |
-| RAG multi-tenant ✅ | search_similar + retrieve_* acceptent tenant_ids (liste) |
-| LEARN avec tenant cible ✅ | Format [ACTION:LEARN:cat\|rule\|tenant] + _user pour règles perso |
-| Prompt multi-tenant ✅ | build_system_prompt injecte le contexte de TOUS les tenants dirigeant |
-| Core multi-tenant ✅ | _raya_core charge user_tenants et les passe au prompt builder |
-| save_rule personal=True ✅ | Règles utilisateur (tenant_id=NULL) pour mode dirigeant |
-| Carte capacités par user ✅ | get_user_capabilities_prompt(username, tools) — outils connectés dynamiques |
-| Descriptions fonctionnelles ✅ | 23 outils avec functional_description dans tools_registry |
-| Triage webhook 3 niveaux ✅ | route_mail_action branché : IGNORER/STOCKER_SIMPLE/ANALYSER |
-| proactive_alerts ✅ | Table + CRUD + scan 30min + injection prompt + marquage vu |
-| proactivity_scan ✅ | Mails urgents >2h, réponses en attente >24h, nettoyage auto |
-| **Twilio connector ✅** | WhatsApp + SMS, dégradation gracieuse si non configuré |
-| **Notifications Jarvis ✅** | WhatsApp auto sur alertes high/critical via proactive_alerts |
+| Phases 5A–5E ✅ | Sécurité, prompt, robustesse, multi-tenant, conscience outils, proactivité |
+| Score maturité ✅ | compute_maturity_score() : 5 critères × 20 pts → phase auto |
+| Params adaptatifs ✅ | decay + mask_threshold varient par user selon phase |
+| Prompt adaptatif ✅ | Bloc comportemental discovery/consolidation/maturity injecté |
 
-## 3. PROCHAINE ÉTAPE : Phase 5G
+Reste 5G : 5G-4 (patterns), 5G-5 (proactivité mature), 5G-6 (hot_summary évolutif), 5G-7 (modèle générique — reporté après Charlotte).
 
-**Maturité relationnelle.** Raya évolue dans sa relation avec l'utilisateur :
+## 3. PROCHAINE ÉTAPE : 5G-4
 
-- 5G-1 : Score de maturité utilisateur (Découverte / Consolidation / Maturité)
-- 5G-2 : Paramètres adaptatifs (synthèse, décroissance, confirmations)
-- 5G-3 : Comportement Raya adaptatif dans le prompt
-- 5G-4 : Moteur de patterns (comportements récurrents)
-- 5G-5 : Proactivité mature (automatisations proposées)
-- 5G-6 : Hot_summary évolutif (factuel → portrait profond)
-- 5G-7 : Modèle générique de démarrage
+**Moteur de patterns** — analyse périodique des comportements récurrents :
+temporels, relationnels, thématiques. Stockés dans table `aria_patterns`.
 
 ## 4. ROADMAP
-~~5A~~ → ~~5B~~ → ~~5C~~ → ~~5D~~ → ~~5E~~ → **5G** → 5F → Phase 7 (Jarvis) → Phase 6.
-Voir `docs/raya_roadmap_v2.md`.
+~~5A~~ → ~~5B~~ → ~~5C~~ → ~~5D~~ → ~~5E~~ → **5G** (3/7) → 5F → Phase 7 → Phase 6.
 
 ## 5. Utilisateurs
 - **Guillaume Perrin** — Couffrant Solar. MS365 + Odoo. ~10 boîtes mail.
@@ -126,7 +99,5 @@ Rapport pour Opus : fichier(s), ligne(s), SHA.
 
 ## 9. Variables Railway à configurer
 Pour activer Jarvis minimal (notifications WhatsApp) :
-- `TWILIO_ACCOUNT_SID` — SID du compte Twilio
-- `TWILIO_AUTH_TOKEN` — Token d'authentification
-- `TWILIO_WHATSAPP_FROM` — Numéro WhatsApp Twilio (format: whatsapp:+14155238886)
-- `NOTIFICATION_PHONE_GUILLAUME=+33xxxxxxxxx` — Numéro de Guillaume
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`
+- `NOTIFICATION_PHONE_GUILLAUME=+33xxxxxxxxx`
