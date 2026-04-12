@@ -12,6 +12,7 @@ Variables d'environnement :
     LLM_MODEL_FAST       : modèle "rapide" — filtrage, classifications, routage de tier
     LLM_MODEL_DEEP       : modèle "profond" — synthèse, hot_summary, onboarding, audit règles
     ANTHROPIC_API_KEY    : clé Anthropic
+    RAYA_WEB_SEARCH_ENABLED : active la recherche web (défaut: true)
 
 Tiers :
     fast  (Haiku)  : micro-appels OUI/NON, routage, triage mails
@@ -62,6 +63,7 @@ def llm_complete(
     max_tokens: int = 1024,
     system: str = None,
     temperature: float = None,
+    web_search: bool = False,
 ) -> dict:
     """
     Effectue un appel LLM unifié, indépendant du provider.
@@ -72,6 +74,7 @@ def llm_complete(
         max_tokens : limite de tokens en sortie
         system     : prompt système (optionnel)
         temperature: optionnel, défaut du provider sinon
+        web_search : active la recherche web via l'outil natif Anthropic (défaut: False)
 
     Returns:
         dict standardisé :
@@ -82,6 +85,7 @@ def llm_complete(
             "output_tokens": int,
             "model":         str,   # nom réel du modèle utilisé
             "provider":      str,   # 'anthropic', etc.
+            "citations":     list,  # sources web si web_search=True
             "raw":           Any,   # objet brut du provider
         }
 
@@ -98,12 +102,12 @@ def llm_complete(
         raise RuntimeError(f"Tier '{model_tier}' non défini pour {LLM_PROVIDER}")
 
     if LLM_PROVIDER == "anthropic":
-        return _complete_anthropic(messages, model_name, max_tokens, system, temperature)
+        return _complete_anthropic(messages, model_name, max_tokens, system, temperature, web_search)
 
     raise RuntimeError(f"Provider '{LLM_PROVIDER}' déclaré mais non implémenté")
 
 
-def _complete_anthropic(messages, model_name, max_tokens, system, temperature):
+def _complete_anthropic(messages, model_name, max_tokens, system, temperature, web_search=False):
     client = _get_anthropic_client()
 
     kwargs = {
@@ -116,10 +120,29 @@ def _complete_anthropic(messages, model_name, max_tokens, system, temperature):
     if temperature is not None:
         kwargs["temperature"] = temperature
 
+    # WEB-SEARCH : outil natif Anthropic
+    if web_search:
+        kwargs["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
+
     response = client.messages.create(**kwargs)
 
-    # Extraction robuste (un message peut contenir plusieurs blocs)
-    text_parts = [block.text for block in response.content if hasattr(block, "text")]
+    # Extraction robuste — gère les blocs text, tool_use ET web_search_tool_result
+    text_parts = []
+    citations = []
+    for block in response.content:
+        if hasattr(block, "text"):
+            text_parts.append(block.text)
+        elif hasattr(block, "type") and block.type == "web_search_tool_result":
+            # Les résultats de recherche contiennent du texte et des URLs
+            if hasattr(block, "content"):
+                for sub in block.content:
+                    if hasattr(sub, "text"):
+                        text_parts.append(sub.text)
+                    if hasattr(sub, "url"):
+                        citations.append({
+                            "title": getattr(sub, "title", ""),
+                            "url": sub.url,
+                        })
     text = "".join(text_parts)
 
     return {
@@ -129,6 +152,7 @@ def _complete_anthropic(messages, model_name, max_tokens, system, temperature):
         "output_tokens": response.usage.output_tokens,
         "model":         model_name,
         "provider":      "anthropic",
+        "citations":     citations,
         "raw":           response,
     }
 

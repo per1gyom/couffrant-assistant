@@ -5,6 +5,7 @@ Phase 3b (B8) : detection de session thematique via detect_session_theme().
 Phase 5B-1    : injection dynamique des actions par domaine via detect_query_domains().
 5D-2f         : charge les tenants de l'utilisateur et les passe au prompt builder.
 7-6D          : marquage automatique du rapport matinal livré via le chat.
+WEB-SEARCH    : activation de la recherche web Anthropic via RAYA_WEB_SEARCH_ENABLED.
 """
 import json
 import os
@@ -248,16 +249,19 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         user_tenants=user_tenants,
     )
 
-    # 6. Appel LLM
+    # 6. Appel LLM (WEB-SEARCH : activé selon variable d'environnement)
     messages = []
     for h in db_ctx["history"]:
         messages.append({"role": "user",      "content": h["user_input"]})
         messages.append({"role": "assistant", "content": h["aria_response"]})
     messages.append({"role": "user", "content": user_content_parts})
 
+    web_enabled = os.getenv("RAYA_WEB_SEARCH_ENABLED", "true").lower() == "true"
+
     result = llm_complete(
         messages=messages, model_tier=model_tier,
         max_tokens=2048, system=system,
+        web_search=web_enabled,
     )
     raya_response = result["text"]
     model_name    = result["model"]
@@ -283,7 +287,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         else:
             actions_confirmed.append(item)
 
-    # 9. Reponse propre — retire les balises [ACTION:...] du texte affiche
+    # 9. Reponse propre — retire les balises [ACTION:...] du texte affiché
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', raya_response).strip()
     if actions_confirmed:
         clean_response += "\n\n" + "\n\n".join(actions_confirmed)
