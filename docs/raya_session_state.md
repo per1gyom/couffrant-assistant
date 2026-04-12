@@ -66,13 +66,10 @@ Le heartbeat actuel (push WhatsApp systématique) ne correspond pas à la vision
 5. Raya APPREND le format préféré et le reproduit automatiquement
 
 **Les canaux de livraison ne sont PAS codés en dur.** Ce sont des outils du
-`tools_registry`. Aujourd'hui : chat, WhatsApp, vocal (ElevenLabs), mail (Outlook).
-Demain : Telegram, SMS, Push PWA, ou tout autre canal ajouté par un développeur.
-Raya ne propose que les canaux disponibles pour cet utilisateur.
+`tools_registry`. Raya ne propose que les canaux disponibles pour cet utilisateur.
 
 **Le contenu du rapport est personnalisable.** L'utilisateur dit "ajoute la météo,
-mes RDV, les factures Odoo". Raya stocke ces préférences comme des règles apprises
-(pas du code). Chaque utilisateur a SON format.
+mes RDV, les factures Odoo". Raya stocke ces préférences comme des règles apprises.
 
 **À FAIRE :** Refactorer `_job_heartbeat_morning` + `_build_morning_summary` :
 - Stocker le rapport dans une table (ex: `daily_reports`) au lieu de l'envoyer
@@ -86,12 +83,27 @@ mes RDV, les factures Odoo". Raya stocke ces préférences comme des règles app
 3. **Workflow intelligence** → pattern engine sur activity_log
 4. **7-7 Monitoring + fallbacks**
 
-## 4. Reprise
+## 4. NOTES POUR PLUS TARD (pré-commercialisation)
+
+### Raya et ses limites → redirection vers l'humain
+Quand Raya dit à un utilisateur qu'elle ne peut pas faire quelque chose ou qu'elle
+a une limitation (canal manquant, outil non connecté, action non supportée), elle
+doit orienter l'utilisateur vers la bonne personne :
+- **Si collaborateur** → contacter l'admin de son tenant (le gérant de la société)
+- **Si admin/dirigeant** → contacter le support Raya (email/téléphone configurable)
+- Le contact à afficher est configurable par tenant (variable `SUPPORT_EMAIL` existe déjà
+  dans `config.py`, étendre avec `SUPPORT_PHONE`, et un contact admin par tenant)
+- Raya ne dit jamais "je ne peux pas" sans donner une alternative ou un recours humain
+- À creuser : format du message de redirection, ton (pas robotique), intégration
+  dans le prompt système via `capabilities.py`
+
+## 5. Reprise
 « Bonjour Opus. Projet Raya, Guillaume. On se tutoie, en français, vocabulaire Terminal, concis. Lis `docs/raya_session_state.md` puis `docs/raya_roadmap_v2.md` sur `per1gyom/couffrant-assistant` main via GitHub MCP. Règle d'or : aucune écriture sans mon ok. Reprends où on en était. »
 
-## 5. RÈGLE
+## 6. RÈGLE
 À chaque jalon, Opus met à jour ce fichier. Non négociable.
 
-## 6. Variables Railway
+## 7. Variables Railway
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`
 - `NOTIFICATION_PHONE_GUILLAUME=+33xxxxxxxxx`
+- `SUPPORT_EMAIL` (existe déjà dans config.py)
