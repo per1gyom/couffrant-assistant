@@ -5,70 +5,80 @@
 ---
 
 ## ⭐ ÂME DU PROJET
-Raya = cerveau supplémentaire Jarvis pour dirigeant. 8 dimensions, 3 modes, supervision managériale. Voir `docs/raya_roadmap_v2.2.md` et commits précédents.
+Raya = cerveau supplémentaire pour dirigeant. 8 dimensions, 3 modes, supervision managériale. LLM-agnostic, tools-agnostic, channel-agnostic. Voir `docs/raya_roadmap_v2.2.md`.
 
 ## 0. CONSIGNES
 - **Opus = architecte, Sonnet = exécutant. Opus ne code PAS.**
 - **Prompts directement dans le chat, entre barres de code.**
 - **JAMAIS push_files pour du code Python.**
 - **Aucune écriture sans ok explicite de Guillaume.**
-- LLM-agnostic, tools-agnostic, channel-agnostic.
+- Raya ne connait PAS le mot "Jarvis". Elle est Raya.
 
 ## 1. Stack
 FastAPI Python 3.13, Railway, PostgreSQL+pgvector, Anthropic 3 tiers, OpenAI embeddings.
 Repo `github.com/per1gyom/couffrant-assistant` main.
 
 ## 2. État
-**PHASES 5 : TERMINÉES ✅** | **PHASE 7 JARVIS : 13 tâches ✅**
+**PHASES 5 ✅** | **PHASE 7 : 13 tâches ✅** | **Security timeout ✅**
 
-| Fait Phase 7 | Détail |
-|---|---|
-| urgency_model ✅ | Score 0-100, 4 étages, certitude, VIP boost |
-| Shadow mode ✅ | Alertes [SHADOW] en chat, calibration 14j |
-| Notification prefs ✅ | Plages silencieuses, VIP, should_notify() |
-| WhatsApp structuré ✅ | send_whatsapp_structured() avec options |
-| Activity log ✅ | Log dans 4 handlers + conversations |
-| Mémoire narrative ✅ | dossier_narratives vectorisée, injection RAG |
-| Briefings réunions ✅ | Job 6h30, Haiku + narratives |
-| Rapport stocké + ping ✅ | daily_reports, ping léger, livraison à la demande |
-| Livraison rapport ✅ | report_actions.py, injection prompt, marquage auto |
-| Workflow intelligence ✅ | Pattern engine lit activity_log (type workflow) |
-| **Gmail connector ✅** | OAuth2 + polling incrémental historyId |
-| **Pipeline source-agnostic ✅** | process_incoming_mail() — Microsoft + Gmail même entonnoir |
-| **Gmail polling job ✅** | IntervalTrigger 3min, SCHEDULER_GMAIL_ENABLED |
+Phase 7 fait : urgency_model, shadow mode, notification prefs, WhatsApp structuré, activity log, mémoire narrative, briefings réunions, rapport stocké+ping+livraison, workflow intelligence, Gmail connector+pipeline+polling.
+Security : inactivité 2h, cookie max 24h.
 
-Sprint 1 ✅ + Sprint 2 (Gmail) ✅
+## 3. PROMPTS PRÊTS (à envoyer à Sonnet)
 
-## 3. PROCHAINE ÉTAPE
+3 prompts en attente dans la conversation :
+1. **FIX-SPEED-JARVIS** — vitesse lecture ElevenLabs dynamique + purge Jarvis
+2. **7-7** — Monitoring système + fallback SMS
+3. **7-8** — WhatsApp bidirectionnel (webhook entrant + commandes)
 
-Reste Sprint 2 :
-1. **7-7 Monitoring + fallbacks** — alertes si scan inactif > 10min, fallback SMS
-2. **7-8 Canal WhatsApp bidirectionnel** — webhook Twilio entrant, parser, exécuter
+## 4. APRÈS LES PROMPTS EN ATTENTE
 
-Sprint 3-4 :
-3. **7-4 Appel vocal sortant** — ElevenLabs + Twilio Voice
-4. **Canaux dans tools_registry** — chat, WhatsApp, vocal, mail comme outils dynamiques
+### Phase 8 — Intelligence avancée (validée par Guillaume)
 
-## 4. CHANTIERS IDENTIFIÉS (discussion Guillaume 12/04/2026)
+| Tâche | Effort | Description |
+|---|---|---|
+| 8-CYCLES | Faible (0.5 session) | Rythme business dans pattern engine (fin de mois, trimestre) |
+| 8-TON | Faible (0.5 session) | Apprentissage ton/personnalité par utilisateur |
+| 8-ANOMALIES | Moyen (1 session) | Détection anomalies cross-outils (Odoo vs mails) |
+| 8-OBSERVE | Moyen (2-3 sessions) | Observation externe (scan changements Drive/mails/cal hors Raya) |
+| 8-COLLAB | Haute (3-4 sessions) | Collaboration inter-Rayas (événements tenant partagés) |
 
 ### Volet A — Outils de création
-Excel (openpyxl), PDF (reportlab), visuels/images (DALL-E), posts LinkedIn, publication LinkedIn/Instagram.
+Excel (openpyxl), PDF (reportlab), images (DALL-E + Pillow), posts LinkedIn, publication LinkedIn/Instagram.
 
 ### Volet B — Ergonomie UI
 Design épuré, largeur chat, responsive/zoom.
 
-### Volet C — Application mobile (futur)
-PWA (sw.js existe) ou app native. Après beta Charlotte.
+### Volet C — Application mobile
+PWA ou app native. Après beta Charlotte.
 
-## 5. NOTES PRÉ-COMMERCIALISATION
+### Web search
+Prompt WEB-SEARCH rédigé (dans la conversation). Ajoute l'accès internet à Raya via l'outil web_search Anthropic.
+
+## 5. AUDIT PERFORMANCE (à planifier)
+
+Le temps de réponse de Raya est correct mais peut être optimisé.
+Planifier un audit dédié pour :
+- Profiler les appels réseau parallèles (étape 2 de _raya_core)
+- Mesurer le temps de chaque bloc du prompt (hot_summary, RAG, narratives, patterns)
+- Identifier les requêtes SQL lentes (EXPLAIN ANALYZE sur les plus fréquentes)
+- Évaluer si certaines injections prompt peuvent être cachées plus agressivement
+- Tester la réduction du max_tokens si la réponse est simple
+- Benchmark avant/après chaque optimisation
+
+Objectif : réduire le temps de réponse SANS perdre en qualité. Ne pas sacrifier la précision contextuelle pour la vitesse.
+
+## 6. NOTES PRÉ-COMMERCIALISATION
 - Raya redirige vers admin/support quand elle a une limite
 - `SUPPORT_EMAIL` existe dans config.py
 
-## 6. Reprise
+## 7. Reprise
 « Bonjour Opus. Projet Raya, Guillaume. On se tutoie, en français, vocabulaire Terminal, concis. Lis `docs/raya_session_state.md` puis `docs/raya_roadmap_v2.md` sur `per1gyom/couffrant-assistant` main via GitHub MCP. Règle d'or : aucune écriture sans mon ok. Reprends où on en était. »
 
-## 7. Variables Railway
+## 8. Variables Railway
 - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`
 - `NOTIFICATION_PHONE_GUILLAUME=+33xxxxxxxxx`
 - `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `SCHEDULER_GMAIL_ENABLED=true`
+- `RAYA_WEB_SEARCH_ENABLED=true`
+- `ELEVENLABS_SPEED=1.2` (configurable)
 - `SUPPORT_EMAIL`
