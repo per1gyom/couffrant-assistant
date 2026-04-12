@@ -9,10 +9,12 @@ Phase 3b : session_theme (B8) — si un sujet coherent est detecte,
 5G-5    : patterns_block — patterns comportementaux detectes (consolidation+maturity).
 7-NAR   : narrative_block — memoire narrative des dossiers (contacts, projets, sujets).
 7-6D    : report_block — rapport du jour disponible/deja livre.
+WEB-SEARCH : web_info — informe Raya qu'elle a acces a internet.
 Fallback automatique si OPENAI_API_KEY absent.
 
 Les appels reseau sont lances en parallele depuis raya_endpoint().
 """
+import os
 import json
 from datetime import datetime, timezone
 
@@ -516,12 +518,29 @@ Tu connais {display_name} en profondeur. Comportement attendu :
 
     capabilities_block = "\n\n" + get_user_capabilities_prompt(username, tools)
 
+    # WEB-SEARCH : informer Raya qu'elle a acces a internet
+    web_info = ""
+    try:
+        web_enabled = os.getenv("RAYA_WEB_SEARCH_ENABLED", "true").lower() == "true"
+        if web_enabled:
+            web_info = (
+                "\n\n=== ACCES INTERNET ===\n"
+                "Tu as acces a internet via la recherche web. "
+                "Si l'utilisateur te pose une question d'actualite, te demande de verifier "
+                "un site web, de chercher un prix, une meteo, une info recente, "
+                "ou toute question dont la reponse necessite des donnees a jour, "
+                "tu peux faire une recherche web. "
+                "Cite tes sources quand tu utilises des informations trouvees en ligne."
+            )
+    except Exception:
+        pass
+
     return f"""Tu es Raya — l'assistante personnelle et evolutive de {display_name}.
 Tu es Claude avec une memoire persistante. Tu n'as pas de comportement impose de l'exterieur.
 Tu observes, tu apprends, tu t'organises librement. Tu parles au feminin.
 
 {GUARDRAILS}
-{capabilities_block}
+{capabilities_block}{web_info}
 
 {f"=== CE QUE TU SAIS SUR {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"=== PREMIERE CONVERSATION ==={chr(10)}Tu ne connais pas encore {display_name}. Commence a observer et memoriser."}{maturity_block}{patterns_block}{narrative_block}
 
