@@ -55,6 +55,7 @@ def rebuild_hot_summary(username: str = 'guillaume',
     """
     Reconstruit le résumé opérationnel chaud (hot_summary).
     Phase 3a : utilise model_tier="deep" (Opus) pour une meilleure synthèse.
+    5B-2 : prompt enrichi 3 niveaux + vectorisation du résumé.
     """
     conn = None
     try:
@@ -82,7 +83,8 @@ def rebuild_hot_summary(username: str = 'guillaume',
         if conn: conn.close()
 
     display_name = username.capitalize()
-    prompt = f"""Tu es l'assistant de {display_name}.
+    prompt = f"""Tu es Raya, l'assistante personnelle de {display_name}.
+Tu le connais. Tu observes ses habitudes. Tu construis un portrait opérationnel vivant.
 
 Mails récents :
 {json.dumps(mails, ensure_ascii=False, default=str)}
@@ -93,17 +95,32 @@ Contacts actifs :
 Dernières conversations :
 {json.dumps(history, ensure_ascii=False)}
 
-Génère un résumé opérationnel compact (~350 mots) :
-1. SITUATION ACTUELLE — Ce qui est en cours, urgent, en attente
-2. INTERLOCUTEURS CLÉS — Les personnes/entités actives
-3. POINTS D'ATTENTION — Ce qui risque de déraper
+Génère un résumé structuré en 3 niveaux (~500 mots) :
 
-Factuel, direct, sans blabla."""
+1. SITUATION OPÉRATIONNELLE
+   Ce qui est en cours, urgent, en attente. Les dossiers ouverts.
+   Les deadlines proches. Factuel et direct.
+
+2. PATTERNS DÉTECTÉS
+   Les habitudes que tu observes chez {display_name} :
+   - Temporels : quand traite-t-il certains sujets ?
+   - Relationnels : quels contacts reviennent, pour quels sujets ?
+   - Comportementaux : comment réagit-il aux urgences ? aux relances ?
+   Si tu n'as pas assez de données pour un pattern, dis-le.
+
+3. PRÉFÉRENCES ET MODÈLES DE DÉCISION
+   Ce que tu comprends de sa façon de travailler :
+   - Style de communication préféré (direct ? détaillé ? formel ?)
+   - Priorités implicites (qu'est-ce qui passe en premier ?)
+   - Points sensibles (sujets où il est particulièrement attentif)
+   Si tu manques de données, indique ce que tu aurais besoin d'observer.
+
+Factuel, direct, sans blabla. N'invente rien — base-toi uniquement sur les données."""
 
     result = llm_complete(
         messages=[{"role": "user", "content": prompt}],
         model_tier="deep",   # Opus — meilleure synthèse contextuelle
-        max_tokens=800,
+        max_tokens=1200,
     )
     summary = result["text"]
     log_llm_usage(result, username=username, tenant_id=tenant_id,
@@ -121,6 +138,22 @@ Factuel, direct, sans blabla."""
         conn.commit()
     finally:
         if conn: conn.close()
+
+    # Vectorise le hot_summary pour injection RAG fluide
+    try:
+        vec = _vec_str(_embed(summary[:3000]))
+        if vec:
+            conn2 = get_pg_conn()
+            c2 = conn2.cursor()
+            c2.execute(
+                "UPDATE aria_hot_summary SET embedding = %s::vector WHERE username = %s",
+                (vec, username)
+            )
+            conn2.commit()
+            conn2.close()
+    except Exception as e:
+        print(f"[HotSummary] Vectorisation échouée (non bloquant): {e}")
+
     return summary
 
 
