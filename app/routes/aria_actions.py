@@ -1,11 +1,12 @@
-"""
-Execution des actions Raya.
+"""Execution des actions Raya.
 Parse la reponse de Claude et execute les [ACTION:...] correspondants.
 
 DELETE = corbeille (recuperable) -> execution directe groupee, pas de queue.
 Actions sensibles (REPLY, TEAMS_MSG, MOVEDRIVE...) -> queue pending_actions.
 [ACTION:ASK_CHOICE:question|opt1|opt2] -> boutons de choix dans le chat.
 [ACTION:LEARN:...] -> validation via rule_validator avant ecriture en base.
+5D-2d : [ACTION:LEARN:cat|rule|tenant_id] -> ecrit sur un tenant specifique.
+         [ACTION:LEARN:cat|rule|_user]      -> regle personnelle (tenant_id=NULL).
 """
 import json
 import re
@@ -88,22 +89,22 @@ def _handle_confirmations(response, username, tenant_id, outlook_token, tools):
         action_id = int(match.group(1))
         action = confirm_action(action_id, username, tenant_id)
         if not action:
-            confirmed.append(f"❌ Action #{action_id} introuvable, deja traitee ou expiree.")
+            confirmed.append(f"\u274c Action #{action_id} introuvable, deja traitee ou expiree.")
             continue
         result = _execute_confirmed_action(action, outlook_token, tools)
         if result.get("ok"):
             mark_executed(action_id, result)
-            confirmed.append(f"✅ {result.get('message', 'Action executee')}")
+            confirmed.append(f"\u2705 {result.get('message', 'Action executee')}")
         else:
             mark_failed(action_id, result.get("error", "erreur inconnue"))
-            confirmed.append(f"❌ Echec : {result.get('error', 'erreur inconnue')}")
+            confirmed.append(f"\u274c Echec : {result.get('error', 'erreur inconnue')}")
 
     for match in re.finditer(r'\[ACTION:CANCEL:(\d+)\]', response):
         action_id = int(match.group(1))
         ok = cancel_action(action_id, username, tenant_id, reason="Annule par l'utilisateur")
         confirmed.append(
-            f"⏹️ Action #{action_id} annulee." if ok
-            else f"❌ Action #{action_id} introuvable."
+            f"\u23f9\ufe0f Action #{action_id} annulee." if ok
+            else f"\u274c Action #{action_id} introuvable."
         )
 
     return confirmed
@@ -232,11 +233,11 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
             n = len(delete_ids)
             if ok_count == n:
                 confirmed.append(
-                    f"🗑️ {n} mail{'s' if n > 1 else ''} a la corbeille."
-                    if n > 1 else f"🗑️ '{delete_subjects[0]}' a la corbeille."
+                    f"\U0001f5d1\ufe0f {n} mail{'s' if n > 1 else ''} a la corbeille."
+                    if n > 1 else f"\U0001f5d1\ufe0f '{delete_subjects[0]}' a la corbeille."
                 )
             else:
-                confirmed.append(f"🗑️ {ok_count}/{n} mails a la corbeille ({n - ok_count} echoue(s)).")
+                confirmed.append(f"\U0001f5d1\ufe0f {ok_count}/{n} mails a la corbeille ({n - ok_count} echoue(s)).")
 
     for msg_id in re.findall(r'\[ACTION:ARCHIVE:([^\]]+)\]', response):
         msg_id = msg_id.strip()
@@ -244,9 +245,9 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
             continue
         try:
             r = perform_outlook_action("archive_message", {"message_id": msg_id}, token)
-            confirmed.append("✅ Archive" if r.get("status") == "ok" else f"❌ {r.get('message')}")
+            confirmed.append("\u2705 Archive" if r.get("status") == "ok" else f"\u274c {r.get('message')}")
         except Exception as e:
-            confirmed.append(f"❌ {str(e)[:80]}")
+            confirmed.append(f"\u274c {str(e)[:80]}")
 
     for msg_id in re.findall(r'\[ACTION:READ:([^\]]+)\]', response):
         msg_id = msg_id.strip()
@@ -274,11 +275,11 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
         )
         preview = reply_text[:300] + ("..." if len(reply_text) > 300 else "")
         confirmed.append(
-            f"⏸️ Action #{action_id} en attente — Reponse a envoyer :\n"
+            f"\u23f8\ufe0f Action #{action_id} en attente \u2014 Reponse a envoyer :\n"
             f"   A : {orig.get('from_email', '?')}\n"
             f"   Sujet : {orig.get('subject', '?')}\n"
             f"   Message : {preview}\n"
-            f"   Pour envoyer : dites \"confirme action {action_id}\" · Pour annuler : \"annule action {action_id}\""
+            f"   Pour envoyer : dites \"confirme action {action_id}\" \u00b7 Pour annuler : \"annule action {action_id}\""
         )
 
     for msg_id in re.findall(r'\[ACTION:READBODY:([^\]]+)\]', response):
@@ -288,7 +289,7 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
         try:
             r = perform_outlook_action("get_message_body", {"message_id": msg_id}, token)
             if r.get("status") == "ok":
-                confirmed.append(f"📧 Corps du mail :\n{r.get('body_text', '')[:800]}")
+                confirmed.append(f"\U0001f4e7 Corps du mail :\n{r.get('body_text', '')[:800]}")
         except Exception:
             pass
 
@@ -303,7 +304,7 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
                 label=label, conversation_id=conversation_id,
             )
             confirmed.append(
-                f"⏸️ Action #{action_id} en attente : {label}\n"
+                f"\u23f8\ufe0f Action #{action_id} en attente : {label}\n"
                 f"   Participants : {', '.join(attendees) if attendees else 'aucun'}\n"
                 f"   Pour confirmer : dites \"confirme action {action_id}\""
             )
@@ -329,16 +330,16 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
             if r.get("status") == "ok":
                 lines = []
                 for it in r.get("items", []):
-                    icon = "📁" if it.get("type") == "dossier" else "📄"
+                    icon = "\U0001f4c1" if it.get("type") == "dossier" else "\U0001f4c4"
                     size_str = f"  ({it.get('taille_ko','')} Ko)" if it.get("taille_ko") else ""
                     link = it.get("lien", "")
                     name = it['nom']
                     lines.append(f"  {icon} [**{name}**]({link}){size_str}" if link else f"  {icon} **{name}**{size_str}")
-                confirmed.append(f"🗂️ {r.get('dossier', '1_Photovoltaique')} ({r['count']}) :\n" + "\n".join(lines))
+                confirmed.append(f"\U0001f5c2\ufe0f {r.get('dossier', '1_Photovoltaique')} ({r['count']}) :\n" + "\n".join(lines))
             else:
-                confirmed.append(f"❌ {r.get('message', 'Erreur Drive')}")
+                confirmed.append(f"\u274c {r.get('message', 'Erreur Drive')}")
         except Exception as e:
-            confirmed.append(f"❌ Drive : {str(e)[:80]}")
+            confirmed.append(f"\u274c Drive : {str(e)[:80]}")
 
     for match in re.finditer(r'\[ACTION:READDRIVE:([^\]]+)\]', response):
         file_ref = match.group(1).strip()
@@ -346,18 +347,18 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
             r = read_drive_file(token, file_ref)
             if r.get("status") == "ok":
                 if r.get("type") == "texte":
-                    confirmed.append(f"📄 {r['fichier']} :\n{r['contenu'][:2000]}")
+                    confirmed.append(f"\U0001f4c4 {r['fichier']} :\n{r['contenu'][:2000]}")
                 else:
                     link = r.get("lien", "")
                     name = r.get('fichier', file_ref)
                     confirmed.append(
-                        f"📄 [{name}]({link}) — {r.get('message', '')} {r.get('conseil', '')}" if link
-                        else f"📄 {name} — {r.get('message', '')} {r.get('conseil', '')}"
+                        f"\U0001f4c4 [{name}]({link}) \u2014 {r.get('message', '')} {r.get('conseil', '')}" if link
+                        else f"\U0001f4c4 {name} \u2014 {r.get('message', '')} {r.get('conseil', '')}"
                     )
             else:
-                confirmed.append(f"❌ {r.get('message')}")
+                confirmed.append(f"\u274c {r.get('message')}")
         except Exception as e:
-            confirmed.append(f"❌ {str(e)[:80]}")
+            confirmed.append(f"\u274c {str(e)[:80]}")
 
     for match in re.finditer(r'\[ACTION:SEARCHDRIVE:([^\]]+)\]', response):
         q = match.group(1).strip()
@@ -366,15 +367,15 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
             if r.get("status") == "ok":
                 lines = []
                 for it in r.get("items", []):
-                    icon = "📁" if it.get('type') == 'dossier' else "📄"
+                    icon = "\U0001f4c1" if it.get('type') == 'dossier' else "\U0001f4c4"
                     link = it.get("lien", "")
                     name = it['nom']
                     lines.append(f"  {icon} [**{name}**]({link})" if link else f"  {icon} **{name}**")
-                confirmed.append(f"🔍 '{q}' — {r['count']} resultat(s) :\n" + "\n".join(lines))
+                confirmed.append(f"\U0001f50d '{q}' \u2014 {r['count']} resultat(s) :\n" + "\n".join(lines))
             else:
-                confirmed.append(f"❌ {r.get('message')}")
+                confirmed.append(f"\u274c {r.get('message')}")
         except Exception as e:
-            confirmed.append(f"❌ {str(e)[:80]}")
+            confirmed.append(f"\u274c {str(e)[:80]}")
 
     if drive_write:
         for match in re.finditer(r'\[ACTION:CREATEFOLDER:([^|^\]]+)\|([^\]]+)\]', response):
@@ -383,9 +384,9 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
             try:
                 _, drive_id, _ = _find_sharepoint_site_and_drive(token)
                 r = create_folder(token, parent_id, folder_name, drive_id)
-                confirmed.append(f"✅ Dossier '{folder_name}' cree" if r.get("status") == "ok" else f"❌ {r.get('message')}")
+                confirmed.append(f"\u2705 Dossier '{folder_name}' cree" if r.get("status") == "ok" else f"\u274c {r.get('message')}")
             except Exception as e:
-                confirmed.append(f"❌ {str(e)[:80]}")
+                confirmed.append(f"\u274c {str(e)[:80]}")
 
         for match in re.finditer(r'\[ACTION:MOVEDRIVE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', response):
             item_id = match.group(1).strip()
@@ -397,7 +398,7 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
                 payload={"item_id": item_id, "dest_id": dest_id, "new_name": new_name},
                 label=label, conversation_id=conversation_id,
             )
-            confirmed.append(f"⏸️ Action #{action_id} en attente : {label}\n   Pour confirmer : dites \"confirme action {action_id}\"")
+            confirmed.append(f"\u23f8\ufe0f Action #{action_id} en attente : {label}\n   Pour confirmer : dites \"confirme action {action_id}\"")
 
         for match in re.finditer(r'\[ACTION:COPYFILE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', response):
             source_id = match.group(1).strip()
@@ -409,7 +410,7 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
                 payload={"source_id": source_id, "dest_id": dest_id, "new_name": new_name},
                 label=label, conversation_id=conversation_id,
             )
-            confirmed.append(f"⏸️ Action #{action_id} en attente : {label}\n   Pour confirmer : dites \"confirme action {action_id}\"")
+            confirmed.append(f"\u23f8\ufe0f Action #{action_id} en attente : {label}\n   Pour confirmer : dites \"confirme action {action_id}\"")
 
     return confirmed
 
@@ -425,13 +426,13 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             if res.get("status") == "ok":
                 lines = []
                 for t in res.get("teams", []):
-                    ch_names = ", ".join(c["name"] for c in t.get("channels", [])[:5]) or "—"
-                    lines.append(f"  🏢 {t['name']} [id:{t['id']}]\n     Canaux : {ch_names}")
-                confirmed.append(f"📋 Teams ({res['count']}) :\n" + "\n".join(lines))
+                    ch_names = ", ".join(c["name"] for c in t.get("channels", [])[:5]) or "\u2014"
+                    lines.append(f"  \U0001f3e2 {t['name']} [id:{t['id']}]\n     Canaux : {ch_names}")
+                confirmed.append(f"\U0001f4cb Teams ({res['count']}) :\n" + "\n".join(lines))
             else:
-                confirmed.append(f"❌ Teams : {res.get('message')}")
+                confirmed.append(f"\u274c Teams : {res.get('message')}")
         except Exception as e:
-            confirmed.append(f"❌ Teams : {str(e)[:80]}")
+            confirmed.append(f"\u274c Teams : {str(e)[:80]}")
 
     for match in re.finditer(r'\[ACTION:TEAMS_CHANNEL:([^|^\]]+)\|([^\]]+)\]', response):
         team_id = match.group(1).strip()
@@ -440,22 +441,25 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             res = read_channel_messages(token, team_id, channel_id)
             if res.get("status") == "ok":
                 lines = [f"  [{m['date'][:10]}] {m['sender']} : {m['content'][:120]}" for m in res.get("messages", [])]
-                confirmed.append(f"💬 Canal ({res['count']}) :\n" + "\n".join(lines))
+                confirmed.append(f"\U0001f4ac Canal ({res['count']}) :\n" + "\n".join(lines))
             else:
-                confirmed.append(f"❌ Canal : {res.get('message')}")
+                confirmed.append(f"\u274c Canal : {res.get('message')}")
         except Exception as e:
-            confirmed.append(f"❌ Canal : {str(e)[:80]}")
+            confirmed.append(f"\u274c Canal : {str(e)[:80]}")
 
     for _ in re.finditer(r'\[ACTION:TEAMS_CHATS:\]', response):
         try:
             res = list_chats(token)
             if res.get("status") == "ok":
-                lines = [f"  {'👤' if c['type']=='oneOnOne' else '👥'} {c['topic']} [id:{c['id'][:20]}...]" for c in res.get("chats", [])]
-                confirmed.append(f"💬 Chats Teams ({res['count']}) :\n" + "\n".join(lines))
+                lines = []
+                for c in res.get("chats", []):
+                    icon = "\U0001f464" if c['type'] == 'oneOnOne' else "\U0001f465"
+                    lines.append(f"  {icon} {c['topic']} [id:{c['id'][:20]}...]")
+                confirmed.append(f"\U0001f4ac Chats Teams ({res['count']}) :\n" + "\n".join(lines))
             else:
-                confirmed.append(f"❌ Chats : {res.get('message')}")
+                confirmed.append(f"\u274c Chats : {res.get('message')}")
         except Exception as e:
-            confirmed.append(f"❌ Chats : {str(e)[:80]}")
+            confirmed.append(f"\u274c Chats : {str(e)[:80]}")
 
     for match in re.finditer(r'\[ACTION:TEAMS_READCHAT:([^\]]+)\]', response):
         chat_id = match.group(1).strip()
@@ -463,11 +467,11 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             res = read_chat_messages(token, chat_id)
             if res.get("status") == "ok":
                 lines = [f"  [{m['date'][:10]}] {m['sender']} : {m['content'][:150]}" for m in res.get("messages", [])]
-                confirmed.append(f"💬 Chat ({res['count']}) :\n" + "\n".join(lines))
+                confirmed.append(f"\U0001f4ac Chat ({res['count']}) :\n" + "\n".join(lines))
             else:
-                confirmed.append(f"❌ Chat : {res.get('message')}")
+                confirmed.append(f"\u274c Chat : {res.get('message')}")
         except Exception as e:
-            confirmed.append(f"❌ Chat : {str(e)[:80]}")
+            confirmed.append(f"\u274c Chat : {str(e)[:80]}")
 
     for match in re.finditer(r'\[ACTION:TEAMS_MSG:([^|^\]]+)\|(.+?)\]', response, re.DOTALL):
         email = match.group(1).strip()
@@ -478,7 +482,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             payload={"email": email, "text": text}, label=label, conversation_id=conversation_id,
         )
         preview = text[:200] + ("..." if len(text) > 200 else "")
-        confirmed.append(f"⏸️ Action #{action_id} en attente : {label}\n   Message : {preview}\n   Pour envoyer : dites \"confirme action {action_id}\"")
+        confirmed.append(f"\u23f8\ufe0f Action #{action_id} en attente : {label}\n   Message : {preview}\n   Pour envoyer : dites \"confirme action {action_id}\"")
 
     for match in re.finditer(r'\[ACTION:TEAMS_REPLYCHAT:([^|^\]]+)\|(.+?)\]', response, re.DOTALL):
         chat_id = match.group(1).strip()
@@ -488,7 +492,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             payload={"chat_id": chat_id, "text": text},
             label="Repondre dans le chat Teams", conversation_id=conversation_id,
         )
-        confirmed.append(f"⏸️ Action #{action_id} en attente : Repondre dans le chat Teams\n   Pour envoyer : dites \"confirme action {action_id}\"")
+        confirmed.append(f"\u23f8\ufe0f Action #{action_id} en attente : Repondre dans le chat Teams\n   Pour envoyer : dites \"confirme action {action_id}\"")
 
     for match in re.finditer(r'\[ACTION:TEAMS_SENDCHANNEL:([^|^\]]+)\|([^|^\]]+)\|(.+?)\]', response, re.DOTALL):
         team_id = match.group(1).strip()
@@ -499,7 +503,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             payload={"team_id": team_id, "channel_id": channel_id, "text": text},
             label="Message dans canal Teams", conversation_id=conversation_id,
         )
-        confirmed.append(f"⏸️ Action #{action_id} en attente : Message dans canal Teams\n   Pour envoyer : dites \"confirme action {action_id}\"")
+        confirmed.append(f"\u23f8\ufe0f Action #{action_id} en attente : Message dans canal Teams\n   Pour envoyer : dites \"confirme action {action_id}\"")
 
     for match in re.finditer(r'\[ACTION:TEAMS_GROUPE:([^|^\]]+)\|([^|^\]]+)\|(.+?)\]', response, re.DOTALL):
         emails_raw = match.group(1).strip()
@@ -512,7 +516,7 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
             payload={"emails": emails, "topic": topic, "text": text},
             label=label, conversation_id=conversation_id,
         )
-        confirmed.append(f"⏸️ Action #{action_id} en attente : {label}\n   Pour creer : dites \"confirme action {action_id}\"")
+        confirmed.append(f"\u23f8\ufe0f Action #{action_id} en attente : {label}\n   Pour creer : dites \"confirme action {action_id}\"")
 
     for match in re.finditer(r'\[ACTION:TEAMS_MARK:([^|^\]]+)\|([^|^\]]+)\|?([^|^\]]*)\|?([^\]]*)\]', response):
         chat_id = match.group(1).strip()
@@ -522,9 +526,9 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
         try:
             from app.memory_teams import set_teams_marker
             res = set_teams_marker(username, chat_id, message_id, label, chat_type)
-            confirmed.append(res.get("message", "✅ Curseur Teams pose."))
+            confirmed.append(res.get("message", "\u2705 Curseur Teams pose."))
         except Exception as e:
-            confirmed.append(f"❌ Teams mark : {str(e)[:80]}")
+            confirmed.append(f"\u274c Teams mark : {str(e)[:80]}")
 
     for match in re.finditer(r'\[ACTION:TEAMS_SYNC:([^|^\]]+)\|?([^|^\]]*)\|?([^\]]*)\]', response):
         chat_id = match.group(1).strip()
@@ -539,9 +543,9 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
                 target=lambda: ingest_and_synthesize(token, username, chat_id, label, chat_type, since),
                 daemon=True
             ).start()
-            confirmed.append(f"🔄 Sync Teams '{label or chat_id[:20]}' lancee en arriere-plan.")
+            confirmed.append(f"\U0001f504 Sync Teams '{label or chat_id[:20]}' lancee en arriere-plan.")
         except Exception as e:
-            confirmed.append(f"❌ Teams sync : {str(e)[:80]}")
+            confirmed.append(f"\u274c Teams sync : {str(e)[:80]}")
 
     for match in re.finditer(r'\[ACTION:TEAMS_HISTORY:([^|^\]]+)\|?([^|^\]]*)\|?([^\]]*)\]', response):
         chat_id = match.group(1).strip()
@@ -553,9 +557,9 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
                 target=lambda: explore_history(token, username, chat_id, label, chat_type),
                 daemon=True
             ).start()
-            confirmed.append(f"🔍 Exploration historique Teams '{label or chat_id[:20]}' lancee.")
+            confirmed.append(f"\U0001f50d Exploration historique Teams '{label or chat_id[:20]}' lancee.")
         except Exception as e:
-            confirmed.append(f"❌ Teams history : {str(e)[:80]}")
+            confirmed.append(f"\u274c Teams history : {str(e)[:80]}")
 
     return confirmed
 
@@ -568,14 +572,12 @@ def _handle_ask_choice(response: str) -> list:
     Serialise en __CHOICE__:{json} pour extraction dans raya.py.
     """
     confirmed = []
-    # On ne prend que la PREMIERE occurrence (pas de cascades de questions)
     TAG = '[ACTION:ASK_CHOICE:'
     start = response.find(TAG)
     if start == -1:
         return confirmed
 
     content_start = start + len(TAG)
-    # Cherche la fermeture du tag
     close = response.find(']', content_start)
     if close == -1:
         return confirmed
@@ -586,7 +588,7 @@ def _handle_ask_choice(response: str) -> list:
         return confirmed
 
     question = parts[0]
-    options = parts[1:][:4]  # max 4 options
+    options = parts[1:][:4]
 
     confirmed.append(
         _ASK_CHOICE_PREFIX + json.dumps(
@@ -599,14 +601,38 @@ def _handle_ask_choice(response: str) -> list:
 
 # --- MEMOIRE ---
 
+def _extract_tenant_target(raw_rule: str) -> tuple[str, str | None]:
+    """
+    5D-2d : extrait le tenant cible optionnel du texte de la regle.
+
+    Format :
+      "regle simple"                      -> ("regle simple", None)
+      "regle avec tenant|couffrant_solar"  -> ("regle avec tenant", "couffrant_solar")
+      "regle perso|_user"                  -> ("regle perso", "_user")
+
+    Le tenant cible est le segment apres le DERNIER pipe,
+    s'il correspond a un identifiant valide (alphanum + underscore, <= 50 chars).
+    """
+    last_pipe = raw_rule.rfind('|')
+    if last_pipe == -1:
+        return raw_rule, None
+
+    candidate = raw_rule[last_pipe + 1:].strip()
+    if candidate and len(candidate) <= 50 and re.match(r'^_?[a-z][a-z0-9_]*$', candidate):
+        return raw_rule[:last_pipe].strip(), candidate
+
+    return raw_rule, None
+
+
 def _parse_learn_actions(response: str) -> list:
     """
-    C4 — Parser robuste pour [ACTION:LEARN:category|rule].
+    C4 — Parser robuste pour [ACTION:LEARN:category|rule] et
+    [ACTION:LEARN:category|rule|tenant_target] (5D-2d).
 
-    Gere les ] a l'interieur du texte de la regle (ex : references [terme],
-    listes entre crochets). Le ] qui ferme le tag ACTION est celui suivi
-    d'un saut de ligne, d'un autre [ACTION:, d'un espace+[, ou de la fin
-    de chaine.
+    Gere les ] a l'interieur du texte de la regle.
+    Retourne une liste de tuples (category, rule, target_tenant).
+    target_tenant est None si non specifie, "_user" pour regle perso,
+    ou un tenant_id explicite.
     """
     results = []
     TAG = '[ACTION:LEARN:'
@@ -624,7 +650,6 @@ def _parse_learn_actions(response: str) -> list:
             continue
 
         category = response[after_tag:pipe].strip()
-        # Category invalide si elle contient des caracteres inattendus
         if not category or ']' in category or '\n' in category or '|' in category:
             pos = start + 1
             continue
@@ -640,28 +665,23 @@ def _parse_learn_actions(response: str) -> list:
 
             next_pos = bracket + 1
 
-            # Fin de chaine -> ce ] ferme le tag
             if next_pos >= len(response):
                 rule_end = bracket
                 break
 
             next_char = response[next_pos]
 
-            # ] suivi de \n, \r, ou [ -> ferme le tag
             if next_char in '\n\r[':
                 rule_end = bracket
                 break
 
-            # ] suivi de " [" -> ferme le tag
             if next_char == ' ' and next_pos + 1 < len(response) and response[next_pos + 1] == '[':
                 rule_end = bracket
                 break
 
-            # Ce ] est probablement dans le texte de la regle, continuer
             search = bracket + 1
 
         if rule_end == -1:
-            # Fallback : premier ] disponible
             fallback = response.find(']', rule_start)
             if fallback != -1:
                 rule_end = fallback
@@ -671,7 +691,8 @@ def _parse_learn_actions(response: str) -> list:
 
         rule = response[rule_start:rule_end].strip()
         if rule:
-            results.append((category, rule))
+            clean_rule, target_tenant = _extract_tenant_target(rule)
+            results.append((category, clean_rule, target_tenant))
 
         pos = rule_end + 1
 
@@ -683,31 +704,54 @@ def _handle_memory_actions(response: str, username: str, synth_threshold: int,
     confirmed = []
 
     # C4 : parser robuste + C1 : validation via rule_validator
-    for category, rule in _parse_learn_actions(response):
+    # 5D-2d : support tenant cible dans LEARN
+    for category, rule, target_tenant in _parse_learn_actions(response):
+        # 5D-2d : resolution du tenant cible
+        if target_tenant == "_user":
+            effective_tenant = None
+            is_personal = True
+        elif target_tenant:
+            effective_tenant = target_tenant
+            is_personal = False
+        else:
+            effective_tenant = tenant_id
+            is_personal = False
+
         try:
-            # Tente la validation Opus si disponible (non bloquant)
             try:
                 from app.rule_validator import validate_rule_before_save, apply_validation_result
-                result = validate_rule_before_save(username, tenant_id, category, rule)
+                result = validate_rule_before_save(
+                    username, effective_tenant or tenant_id, category, rule
+                )
                 decision = result.get("decision", "NEW")
 
                 if decision == "CONFLICT":
                     conflict_msg = result.get("conflict_message", "Conflit detecte avec une regle existante.")
-                    confirmed.append(f"⚠️ Conflit de regle : {conflict_msg}")
+                    confirmed.append(f"\u26a0\ufe0f Conflit de regle : {conflict_msg}")
                     continue
 
                 if decision == "DUPLICATE":
-                    confirmed.append(f"🧠 Deja en memoire [{category}] (doublon ignore)")
+                    confirmed.append(f"\U0001f9e0 Deja en memoire [{category}] (doublon ignore)")
                     continue
 
-                messages = apply_validation_result(result, username, tenant_id)
+                messages = apply_validation_result(
+                    result, username, effective_tenant or tenant_id
+                )
                 label = " | ".join(messages) if messages else f"[{category}]"
-                confirmed.append(f"🧠 Memorise {label} : {rule[:120]}{'...' if len(rule) > 120 else ''}")
+                tenant_tag = f" @{target_tenant}" if target_tenant else ""
+                confirmed.append(
+                    f"\U0001f9e0 Memorise {label}{tenant_tag} : "
+                    f"{rule[:120]}{'...' if len(rule) > 120 else ''}"
+                )
 
             except ImportError:
-                # rule_validator non disponible -> fallback direct
-                save_rule(category, rule, "auto", 0.7, username)
-                confirmed.append(f"🧠 Memorise [{category}] : {rule[:120]}{'...' if len(rule) > 120 else ''}")
+                save_rule(category, rule, "auto", 0.7, username,
+                          tenant_id=effective_tenant, personal=is_personal)
+                tenant_tag = f" @{target_tenant}" if target_tenant else ""
+                confirmed.append(
+                    f"\U0001f9e0 Memorise [{category}]{tenant_tag} : "
+                    f"{rule[:120]}{'...' if len(rule) > 120 else ''}"
+                )
 
         except Exception as e:
             print(f"[LEARN] Erreur: {e}")
@@ -717,7 +761,7 @@ def _handle_memory_actions(response: str, username: str, synth_threshold: int,
         insight = match.group(2).strip()
         try:
             save_insight(topic, insight, "auto", username)
-            confirmed.append(f"💡 Observe [{topic}] : {insight[:120]}{'...' if len(insight) > 120 else ''}")
+            confirmed.append(f"\U0001f4a1 Observe [{topic}] : {insight[:120]}{'...' if len(insight) > 120 else ''}")
         except Exception as e:
             print(f"[INSIGHT] Erreur: {e}")
 
@@ -726,8 +770,8 @@ def _handle_memory_actions(response: str, username: str, synth_threshold: int,
         try:
             deleted = delete_rule(rule_id, username)
             confirmed.append(
-                f"🗑️ Regle {rule_id} desactivee." if deleted
-                else f"❌ Regle {rule_id} introuvable."
+                f"\U0001f5d1\ufe0f Regle {rule_id} desactivee." if deleted
+                else f"\u274c Regle {rule_id} introuvable."
             )
         except Exception as e:
             print(f"[FORGET] Erreur: {e}")
@@ -738,7 +782,7 @@ def _handle_memory_actions(response: str, username: str, synth_threshold: int,
                 target=lambda u=username, t=synth_threshold: synthesize_session(t, u),
                 daemon=True
             ).start()
-            confirmed.append("🔄 Synthese lancee en arriere-plan.")
+            confirmed.append("\U0001f504 Synthese lancee en arriere-plan.")
         except Exception as e:
             print(f"[SYNTH] Erreur: {e}")
 
@@ -747,11 +791,11 @@ def _handle_memory_actions(response: str, username: str, synth_threshold: int,
             from app.onboarding import restart_onboarding
             ok = restart_onboarding(username, tenant_id)
             confirmed.append(
-                "🔄 Questionnaire relance ! Recharge la page (F5)." if ok
-                else "❌ Impossible de relancer le questionnaire."
+                "\U0001f504 Questionnaire relance ! Recharge la page (F5)." if ok
+                else "\u274c Impossible de relancer le questionnaire."
             )
         except Exception as e:
             print(f"[RESTART_ONBOARDING] Erreur: {e}")
-            confirmed.append("❌ Erreur lors du redemarrage du questionnaire.")
+            confirmed.append("\u274c Erreur lors du redemarrage du questionnaire.")
 
     return confirmed
