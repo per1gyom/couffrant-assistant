@@ -57,32 +57,34 @@ FastAPI Python 3.13, Railway, PostgreSQL+pgvector, Anthropic 3 tiers, OpenAI emb
 Repo `github.com/per1gyom/couffrant-assistant` main.
 
 ## 2. État 12/04/2026 soir
-**PHASES 5A–5E, 5G : TERMINÉES ✅** (5D-4 + 5G-7 reportés)
-**PROCHAINE PHASE : 5F** (Dashboard & Refactoring)
+**TOUTES LES PHASES 5 TERMINÉES ✅** (5D-4 + 5G-7 reportés)
+**PROCHAINE : PHASE 7** (Jarvis complet)
 
-| Fait | Détail |
-|---|---|
-| Phases 5A–5E ✅ | Sécurité, prompt, robustesse, multi-tenant, conscience outils, proactivité, Jarvis minimal |
-| Score maturité ✅ | compute_maturity_score() : 5 critères × 20 pts → phase auto |
-| Params adaptatifs ✅ | decay + mask_threshold varient par user selon phase |
-| Prompt adaptatif ✅ | Bloc comportemental discovery/consolidation/maturity injecté |
-| Moteur de patterns ✅ | aria_patterns table + analyse hebdo Opus (temporal/relational/thematic/workflow/preference) |
-| Patterns dans prompt ✅ | Top 8 patterns injectés, proposition d'automatisations en phase maturity |
-| Hot_summary évolutif ✅ | Factuel (discovery) → Analytique (consolidation) → Portrait profond (maturity) |
+| Phase | Statut | Résumé |
+|---|---|---|
+| 5A Sécurité | ✅ | Mot de passe, cookie, rate limit, audit log |
+| 5B Prompt | ✅ | Injection dynamique, hot_summary, cache, dédupe |
+| 5C Robustesse | ✅ | Structured logging, health check, timeout |
+| 5D Multi-tenant | ✅ | user_tenant_access, RAG cross-tenant, LEARN ciblé, prompt multi-société |
+| 5E Conscience + Proactivité | ✅ | Capacités par user, descriptions fonctionnelles, triage 3 niveaux, scan 30min, Twilio WhatsApp |
+| 5G Maturité | ✅ | Score 3 phases, params adaptatifs, prompt adaptatif, moteur patterns, hot_summary évolutif |
+| 5F Dashboard | ✅ | /admin/costs, versioning règles + rollback, aria_actions splitté en 6 modules |
 
 Reporté : 5D-4 (onboarding par tenant), 5G-7 (modèle générique — après Charlotte).
 
-## 3. PROCHAINE ÉTAPE : Phase 5F
+## 3. PROCHAINE ÉTAPE : Phase 7 (Jarvis)
 
-**Dashboard & Refactoring :**
-- 5F-1 : Dashboard `/admin/costs` — visualisation coûts LLM par tenant/user/modèle
-- 5F-2 : Versioning des règles — historique + rollback
-- 5F-3 : Refactoring `aria_actions.py` — split 33k en sous-modules
+La destination finale. Raya devient le filtre intelligent entre le monde et l'utilisateur.
+Voir `docs/raya_roadmap_v2.md` section Phase 7 pour le détail des 10 tâches (7-1 à 7-10).
 
-Après 5F : Phase 7 (Jarvis complet) → Phase 6 (Ouverture).
+Priorités immédiates :
+- 7-1 : Multi-mailbox (Microsoft + Gmail)
+- 7-2 : Modèle d'urgence enrichi (score 0-100)
+- 7-3 : Canal sortant WhatsApp structuré
+- 7-10 : Mode ombre (shadow mode) — calibration avant mise en production
 
 ## 4. ROADMAP
-~~5A~~ → ~~5B~~ → ~~5C~~ → ~~5D~~ → ~~5E~~ → ~~5G~~ → **5F** → Phase 7 → Phase 6.
+~~5A~~ → ~~5B~~ → ~~5C~~ → ~~5D~~ → ~~5E~~ → ~~5G~~ → ~~5F~~ → **Phase 7** → Phase 6.
 
 ## 5. Utilisateurs
 - **Guillaume Perrin** — Couffrant Solar. MS365 + Odoo. ~10 boîtes mail.
