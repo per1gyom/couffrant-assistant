@@ -80,6 +80,7 @@ select option { background: var(--bg3); }
 .alert { padding: 12px 16px; border-radius: 6px; font-family: var(--mono); font-size: 12px; margin-bottom: 16px; display: none; }
 .alert.ok { background: rgba(0,230,118,0.1); border: 1px solid rgba(0,230,118,0.2); color: var(--green); display: block; }
 .alert.err { background: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.2); color: var(--red); display: block; }
+.field-hint { font-family: var(--mono); font-size: 10px; color: var(--text3); margin-top: 5px; }
 .reset-box { background: rgba(0,230,118,0.07); border: 1px solid rgba(0,230,118,0.2); border-radius: 6px; padding: 12px 14px; margin-top: 12px; }
 .reset-link { font-family: var(--mono); font-size: 11px; word-break: break-all; color: var(--green); margin: 6px 0; }
 .filter-row { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
@@ -103,7 +104,6 @@ select option { background: var(--bg3); }
 .profile-section-title { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
 .profile-info { font-family: var(--mono); font-size: 13px; color: var(--text2); margin-bottom: 16px; }
 .profile-info strong { color: var(--text); }
-/* Sociétés */
 .tenant-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 20px; overflow: hidden; }
 .tenant-header { display: flex; align-items: center; gap: 14px; padding: 18px 20px; cursor: pointer; transition: background 0.15s; }
 .tenant-header:hover { background: var(--bg3); }
@@ -122,10 +122,8 @@ select option { background: var(--bg3); }
 .sp-result { font-family: var(--mono); font-size: 11px; margin-top: 8px; min-height: 16px; transition: color 0.2s; }
 .sp-result.ok { color: var(--green); }
 .sp-result.err { color: var(--red); }
-/* Actions tenant (super_admin) */
 .tenant-admin-bar { padding: 10px 20px; background: rgba(0,188,212,0.04); border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
 .tenant-id-tag { font-family: var(--mono); font-size: 10px; color: var(--text3); margin-left: auto; }
-/* Ligne utilisateur bloqué */
 tr.row-locked td { background: rgba(255,82,82,0.04) !important; }
 </style>
 </head>
@@ -240,7 +238,6 @@ tr.row-locked td { background: rgba(255,82,82,0.04) !important; }
 <section id="tab-companies" class="section">
   <div class="actions-row">
     <button class="btn btn-ghost" onclick="loadCompanies()">&#8635; Actualiser</button>
-    <!-- Visible super_admin uniquement — affiché dynamiquement via initUserScope() -->
     <button class="btn btn-primary" id="btn-create-tenant" style="display:none" onclick="openModal('create-tenant')">+ Créer une société</button>
     <span id="companies-count" style="font-family:var(--mono);font-size:12px;color:var(--text3)"></span>
   </div>
@@ -320,8 +317,6 @@ tr.row-locked td { background: rgba(255,82,82,0.04) !important; }
   </div>
 </div>
 
-<!-- ─── MODALES GESTION TENANTS (super_admin) ─── -->
-
 <!-- MODAL CRÉATION TENANT -->
 <div class="modal-overlay" id="modal-create-tenant">
   <div class="modal">
@@ -329,10 +324,13 @@ tr.row-locked td { background: rgba(255,82,82,0.04) !important; }
     <div id="create-tenant-alert" class="alert"></div>
     <div class="form-group">
       <label>Identifiant (ID unique)</label>
-      <input type="text" id="tenant-new-id" placeholder="ex: ma_societe (lettres, chiffres, _)" autocomplete="off">
-      <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:5px">Attention : l'ID ne peut pas être modifié après création.</div>
+      <input type="text" id="tenant-new-id"
+             placeholder="ex: Charlotte Solar ou charlotte_solar"
+             autocomplete="off"
+             oninput="this.value=normalizeTenantId(this.value)">
+      <div class="field-hint">Converti automatiquement (ex : Charlotte Solar → charlotte_solar). Non modifiable après création.</div>
     </div>
-    <div class="form-group"><label>Nom affiché</label><input type="text" id="tenant-new-name" placeholder="ex: Ma Société SAS"></div>
+    <div class="form-group"><label>Nom affiché</label><input type="text" id="tenant-new-name" placeholder="ex: Charlotte Solar SAS"></div>
     <div class="form-group">
       <label>Fournisseur email</label>
       <select id="tenant-new-email-provider">
@@ -430,6 +428,16 @@ function switchTab(name){
 const fmt=n=>(n||0).toLocaleString('fr-FR');
 const fmtDate=d=>d?new Date(d).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'}):'—';
 const fmtDateShort=d=>{if(!d)return'—';const dt=new Date(d);return dt.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'})+' '+dt.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});};
+
+// ─── NORMALISATION ID TENANT (FIX-TENANT-FORM) ───
+// Même logique que _normalize_tenant_id() côté Python
+function normalizeTenantId(value) {
+  const withoutAccents = value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return withoutAccents
+    .toLowerCase()
+    .replace(/[\s\-]+/g, '_')
+    .replace(/[^a-z0-9_]/g, '');
+}
 
 async function loadMemoryStatus(){
   const data=await(await fetch('/admin/memory-status')).json();
@@ -594,12 +602,13 @@ async function saveSharePointConfig(tenantId, i){
 
 // ─── GESTION TENANTS (super_admin) ───
 async function createTenant(){
-  const id=document.getElementById('tenant-new-id').value.trim();
+  // La valeur est déjà normalisée par oninput — re-normalisation défensive
+  const id = normalizeTenantId(document.getElementById('tenant-new-id').value);
   const name=document.getElementById('tenant-new-name').value.trim();
   const emailProvider=document.getElementById('tenant-new-email-provider').value;
   const spFolder=document.getElementById('tenant-new-sp-folder').value.trim();
-  if(!id||!name){setAlert('create-tenant-alert','ID et nom requis.','err');return;}
-  if(!/^[a-z0-9_]+$/.test(id)){setAlert('create-tenant-alert','ID : lettres minuscules, chiffres et _ uniquement.','err');return;}
+  if(!id){setAlert('create-tenant-alert','Veuillez saisir un identifiant.','err');return;}
+  if(!name){setAlert('create-tenant-alert','Le nom affiché est requis.','err');return;}
   const settings={email_provider:emailProvider};
   if(spFolder) settings.sharepoint_folder=spFolder;
   try{
@@ -607,8 +616,8 @@ async function createTenant(){
       method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({id,name,settings})
     })).json();
-    if(d.status==='ok'||d.id){
-      setAlert('companies-alert','✅ Société "'+name+'" créée avec succès.','ok');
+    if(d.status==='ok'||d.tenant_id){
+      setAlert('companies-alert',`✅ Société "${name}" créée (ID : ${d.tenant_id||id}).`,'ok');
       closeModal('create-tenant');
       document.getElementById('tenant-new-id').value='';
       document.getElementById('tenant-new-name').value='';
@@ -627,7 +636,6 @@ function openEditTenant(id, name, settingsStr, spSite, spFolder){
   document.getElementById('tenant-edit-name').value=name;
   document.getElementById('tenant-edit-sp-site').value=spSite||'';
   document.getElementById('tenant-edit-sp-folder').value=spFolder||'';
-  // Décoder les settings
   let settings={};
   try{
     const decoded=settingsStr.replace(/&quot;/g,'"').replace(/&apos;/g,"'");
@@ -646,9 +654,9 @@ async function saveTenant(){
   const spFolder=document.getElementById('tenant-edit-sp-folder').value.trim();
   const emailProvider=document.getElementById('tenant-edit-email-provider').value;
   if(!name){setAlert('edit-tenant-alert','Le nom est requis.','err');return;}
-  // Fusionner les settings
   let settings={};
-  try{settings=JSON.parse(document.getElementById('tenant-edit-settings').value||'{}');}catch(e){setAlert('edit-tenant-alert','JSON settings invalide.','err');return;}
+  try{settings=JSON.parse(document.getElementById('tenant-edit-settings').value||'{}');}
+  catch(e){setAlert('edit-tenant-alert','JSON settings invalide.','err');return;}
   settings.email_provider=emailProvider;
   if(spFolder) settings.sharepoint_folder=spFolder;
   if(spSite) settings.sharepoint_site=spSite;
@@ -657,7 +665,7 @@ async function saveTenant(){
       method:'PUT',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({name,settings})
     })).json();
-    if(d.status==='ok'||d.id){
+    if(d.status==='ok'||d.tenant_id){
       setAlert('companies-alert','✅ Société mise à jour.','ok');
       closeModal('edit-tenant');
       loadCompanies();
@@ -788,16 +796,11 @@ async function quickAction(url,id){
   try{const d=await(await fetch(url)).json();el.textContent=JSON.stringify(d).replace(/[{}\"]/g,' ').trim().substring(0,120);}
   catch(e){el.textContent='Erreur: '+e.message;el.className='action-result err';}
 }
-
 async function loadProfile(){
-  try{
-    const d=await(await fetch('/profile')).json();
-    document.getElementById('profile-username').textContent=d.username||'—';
-    document.getElementById('profile-email').value=d.email||'';
-  }catch(e){}
+  try{const d=await(await fetch('/profile')).json();document.getElementById('profile-username').textContent=d.username||'—';document.getElementById('profile-email').value=d.email||'';}
+  catch(e){}
 }
 
-// Initialise le scope utilisateur au démarrage (sans ouvrir l'onglet profil)
 async function initUserScope(){
   try{
     const d=await(await fetch('/profile')).json();
@@ -831,9 +834,8 @@ async function changePassword(){
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') document.querySelectorAll('.modal-overlay.open').forEach(m=>m.classList.remove('open')); });
 document.querySelectorAll('.modal-overlay').forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('open'); }));
 
-// Initialisation
 loadMemoryStatus();
-initUserScope(); // Récupère le scope pour afficher les contrôles super_admin
+initUserScope();
 </script>
 </body>
 </html>
