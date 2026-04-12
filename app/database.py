@@ -516,6 +516,9 @@ def init_postgres():
         "ALTER TABLE aria_hot_summary ADD COLUMN IF NOT EXISTS embedding vector(1536)",
         # ── 5D-1 : peuplement user_tenant_access depuis données existantes ──
         "INSERT INTO user_tenant_access (username, tenant_id, role) SELECT username, tenant_id, CASE WHEN scope = 'super_admin' THEN 'owner' WHEN scope = 'admin' THEN 'admin' ELSE 'user' END FROM users WHERE tenant_id IS NOT NULL ON CONFLICT (username, tenant_id) DO NOTHING",
+        # ── 7-10 : shadow mode (calibration Jarvis) ──
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS shadow_mode BOOLEAN DEFAULT true",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS shadow_mode_until TIMESTAMP DEFAULT (NOW() + INTERVAL '14 days')",
     ]
     for m in migrations:
         try:
