@@ -1,17 +1,22 @@
 """
 Chargeur mémoire avec fallbacks gracieux.
+Importe directement depuis les 4 modules source.
 """
 
 try:
-    from app.memory_manager import (
-        get_hot_summary, rebuild_hot_summary,
+    from app.memory_rules import (
+        get_aria_rules, save_rule, delete_rule, seed_default_rules,
+    )
+    from app.memory_contacts import (
         get_contact_card, get_all_contact_cards, rebuild_contacts,
+    )
+    from app.memory_style import (
         get_style_examples, save_style_example, learn_from_correction,
-        load_sent_mails_to_style, purge_old_mails,
-        get_aria_rules, save_rule, delete_rule,
-        get_aria_insights, save_insight,
-        synthesize_session, seed_default_rules,
-        save_reply_learning,
+        load_sent_mails_to_style, save_reply_learning,
+    )
+    from app.memory_synthesis import (
+        get_hot_summary, get_aria_insights, save_insight,
+        synthesize_session, rebuild_hot_summary, purge_old_mails,
     )
     MEMORY_OK = True
 except Exception as _mem_err:

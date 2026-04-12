@@ -1,14 +1,8 @@
 """
-Couche de compatibilité mémoire — liste complète et définitive.
-
-Sources :
-  get_contacts_keywords   → app.rule_engine       (PAS memory_rules)
-  get_all_contact_cards   → app.memory_contacts
-  save_style_example      → app.memory_style
-  load_sent_mails_to_style→ app.memory_style
-  get_antispam_keywords   → app.rule_engine
-  get_memoire_param       → app.rule_engine (signature : username, param, default)
-  get_rules_by_category   → app.rule_engine (signature : username, category)
+DÉPRÉCIÉ — ce fichier n'est plus utilisé.
+memory_loader.py importe désormais directement depuis les modules source.
+Conservé uniquement pour éviter une erreur si un import résiduel existe.
+À supprimer définitivement lors du nettoyage Phase 6.
 """
 from app.memory_rules import (  # noqa
     get_aria_rules, save_rule, delete_rule, seed_default_rules,
