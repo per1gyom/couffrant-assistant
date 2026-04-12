@@ -2,8 +2,7 @@
 Mémoire : style rédactionnel par utilisateur.
 """
 from app.database import get_pg_conn
-from app.ai_client import client
-from app.config import ANTHROPIC_MODEL_FAST
+from app.llm_client import llm_complete
 
 
 def get_style_examples(context: str = "", username: str = 'guillaume') -> str:
@@ -67,11 +66,12 @@ def learn_from_correction(original: str, corrected: str,
         return
 
     try:
-        response = client.messages.create(
-            model=ANTHROPIC_MODEL_FAST, max_tokens=20,
-            messages=[{"role": "user", "content": f"En 5 mots, décris la situation : {corrected[:200]}\nSituation :"}]
+        result = llm_complete(
+            messages=[{"role": "user", "content": f"En 5 mots, décris la situation : {corrected[:200]}\nSituation :"}],
+            model_tier="fast",
+            max_tokens=20,
         )
-        situation = response.content[0].text.strip()
+        situation = result["text"].strip()
     except Exception:
         situation = context or "réponse mail"
     save_style_example(situation=situation, example_text=corrected,
