@@ -48,7 +48,7 @@ scheduler.py (43k→5k+8 modules), database.py (31k→9k+migrations), admin.py (
 Purge Jarvis, security timeout 2h, ElevenLabs speed dynamique, toast feedback, hotfix scheduler lazy imports, tenant form auto-lowercase, tenant creation (infos légales), 5 bugs critiques (user_tenant_access + delete + defaults), intelligence collective préservée sur suppression user.
 
 ### Admin panel ✅
-Gestion tenants (CRUD), formulaire simplifié (forme juridique, SIRET, adresse), SharePoint optionnel après création.
+Gestion tenants (CRUD), formulaire simplifié (forme juridique, SIRET, adresse), SharePoint optionnel.
 
 ### Web search ✅
 Accès internet via web_search Anthropic activé.
@@ -57,20 +57,60 @@ Accès internet via web_search Anthropic activé.
 
 Aucun. Zéro dette.
 
-## 4. PROCHAINES ÉTAPES
+## 4. PROCHAINES ÉTAPES (décision Guillaume 13/04/2026)
 
-### Priorité 1 — Beta Charlotte (mi-juin)
-- Tester le parcours complet : création tenant + users + connexion + conversations
-- Volet B — Ergonomie UI (largeur chat, design épuré, responsive)
+### ⭐ Priorité 1 — Compte Guillaume opérationnel
+Avant Charlotte, il faut que le compte de Guillaume fonctionne à 100%.
 
-### Priorité 2 — Outils de création
-- DALL-E + Pillow (création/modification images)
+**Connectivité outils :**
+- Gmail bidirectionnel — le code est là (7-1a/b) mais en pratique ça ne fonctionne pas.
+  Diagnostiquer : OAuth2 configuré ? Tokens valides ? Polling actif ? Mails reçus ?
+- Odoo — l'API key est rentrée dans Railway mais Raya ne voit rien.
+  Diagnostiquer : ODOO_URL/ODOO_API_KEY/ODOO_DB/ODOO_LOGIN corrects ? Test endpoint ?
+- Identifier d'autres outils de Guillaume à connecter.
+
+**Notifications mobiles (Twilio) :**
+- Tester le rapport matinal → ping WhatsApp sur le téléphone de Guillaume
+- Tester les alertes proactives → notification WhatsApp
+- Tester le WhatsApp bidirectionnel (répondre "1", "rapport", etc.)
+- Configurer l'URL webhook Twilio dans la console Twilio
+
+**Outils de création :**
+- DALL-E + Pillow (images)
 - Excel (openpyxl), PDF (reportlab)
-- Posts LinkedIn + publication
+- Posts LinkedIn
 
-### Priorité 3 — Futur
+### Priorité 2 — Beta Charlotte (tenant "juillet")
+- Créer un user Charlotte dans le tenant "juillet"
+- Connexion → onboarding → premières conversations
+- Vérifier le cloisonnement tenant (Charlotte ne voit pas Couffrant Solar)
+- Tester 8-COLLAB (événements visibles par l'admin Guillaume)
+
+### Priorité 3 — Tenant DEMO (prospection commerciale)
+Créer un tenant "demo" spécial pour démarcher des clients :
+
+**Pré-chargé avec de l'intelligence :**
+- Un jeu de règles de base couvrant des cas d'usage courants
+- Des patterns et habitudes pré-enregistrés
+- Des narratives de dossiers fictifs mais réalistes
+- Un hot_summary cohérent qui donne l'impression que Raya connaît déjà l'utilisateur
+→ Le prospect voit Raya "en action", pas une coquille vide.
+
+**Bouton de PURGE :**
+- Un endpoint admin qui remet le tenant demo à son état initial
+- Supprime toutes les modifications faites pendant la démo
+- Recharge les données de démo pré-définies
+- Le tenant est prêt pour le prochain prospect en un clic
+→ Endpoint : POST /admin/tenants/demo/reset ou bouton dans le panel admin.
+
+**Scénario de démo guidé :**
+- Un parcours type à suivre pendant la démo
+- Montrer : mémoire, apprentissage, proactivité, multi-outils, rapport
+
+### Priorité 4 — UI & Futur
+- Volet B — Ergonomie UI (largeur chat, design, responsive)
 - Application mobile (PWA ou native)
-- Audit performance (profiler temps de réponse)
+- Audit performance
 
 ## 5. PRINCIPES ARCHITECTURAUX
 
@@ -83,7 +123,7 @@ Aucun. Zéro dette.
 ## 6. HISTORIQUE DES SESSIONS
 
 ### Session 12-13/04/2026 (marathon)
-**~55 tâches.** Phase 5D-2 à 5G complètes. Phase 7 complète (16 tâches). Phase 8 complète (5 tâches). 5 refactorings majeurs. 9 fixes. Admin panel CRUD tenants. Web search activé. Vision produit documentée (8 dimensions, 3 modes, 4 piliers). Discussion modèle commercial (packs). Principes intelligence collective + collaboration inter-Rayas établis.
+**~55 tâches.** Phase 5D-2 à 5G complètes. Phase 7 complète (16 tâches). Phase 8 complète (5 tâches). 5 refactorings majeurs. 9 fixes. Admin panel CRUD tenants. Web search activé. Vision produit documentée (8 dimensions, 3 modes, 4 piliers). Discussion modèle commercial (packs). Principes intelligence collective + collaboration inter-Rayas établis. Décision : priorité au compte Guillaume opérationnel avant Charlotte.
 
 Commits clés : `af3e7762` (Gmail), `cc75f24f` (monitoring+WhatsApp), `b15f928f` (refactor scheduler), `ba6da00f` (anomalies), `ba5602ad` (observer), `712c83a3` (collab inter-Rayas).
 
@@ -96,4 +136,5 @@ Commits clés : `af3e7762` (Gmail), `cc75f24f` (monitoring+WhatsApp), `b15f928f`
 - `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `SCHEDULER_GMAIL_ENABLED=true`
 - `RAYA_WEB_SEARCH_ENABLED=true`, `ELEVENLABS_SPEED=1.2`
 - `SCHEDULER_ANOMALY_ENABLED=false`, `SCHEDULER_OBSERVER_ENABLED=false`
+- `ODOO_URL`, `ODOO_API_KEY`, `ODOO_DB`, `ODOO_LOGIN`, `ODOO_PASSWORD`
 - URL webhook Twilio : `https://[domaine].railway.app/webhook/twilio` (POST)
