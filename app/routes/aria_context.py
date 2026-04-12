@@ -301,6 +301,19 @@ def build_system_prompt(
         conv_context  = ""
         via_rag       = False
 
+    # 5B-4 : dédupliquer le contexte conversationnel
+    # Si le RAG retourne des conversations qui sont déjà dans l'historique récent,
+    # on les supprime pour éviter d'injecter les mêmes données deux fois.
+    if conv_context and db_ctx.get("history"):
+        recent_inputs = {h.get("user_input", "")[:80].lower() for h in db_ctx["history"] if h.get("user_input")}
+        filtered_parts = []
+        for block in conv_context.split("\n---\n"):
+            # Vérifie si ce bloc RAG contient du texte déjà dans l'historique récent
+            block_lower = block.lower()
+            if not any(inp and inp in block_lower for inp in recent_inputs):
+                filtered_parts.append(block)
+        conv_context = "\n---\n".join(filtered_parts) if filtered_parts else ""
+
     theme_context_block = ""
     if session_theme:
         try:
