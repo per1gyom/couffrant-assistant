@@ -1,9 +1,9 @@
 """
 Dashboard service — regroupement et priorisation des mails.
 
-Toute la logique de groupement et de priorité business est pilotée
-par les règles Aria (catégorie regroupement) via rule_engine.
-Aria fait évoluer ces règles via LEARN/FORGET.
+Toute la logique de groupement et de priorite business est pilotee
+par les regles Aria (categorie regroupement) via rule_engine.
+Aria fait evoluer ces regles via LEARN/FORGET.
 """
 
 import json
@@ -28,37 +28,28 @@ def normalize_text(text: str) -> str:
 
 
 def build_group_key(item: dict, regroupement_rules: list[str]) -> str:
-    """
-    Construit la clé de regroupement depuis les règles Aria.
-    Chaque règle de regroupement peut définir un groupe spécifique.
-    """
     title = normalize_text(item.get("display_title", ""))
     category = item.get("category", "autre")
     sender = (item.get("from_email") or "").lower()
     combined = f"{title} {sender} {category}"
 
-    # Cherche une règle de regroupement spécifique
     for rule in regroupement_rules:
         rule_l = rule.lower()
         if "regrouper" not in rule_l:
             continue
-        # Extrait les termes clés de la règle
         import re
         kw_part = re.sub(r"regrouper (les mails |les |)d[e']?", "", rule_l)
-        kw_part = kw_part.split("=>")[0].split("→")[0].strip()
+        kw_part = kw_part.split("=>")[0].split("\u2192")[0].strip()
         keywords = [k.strip().strip("',") for k in kw_part.split(",")]
         if any(kw and len(kw) > 2 and kw in combined for kw in keywords):
-            # Utilise la règle comme clé de groupe
             return f"rule|{kw_part[:40].strip()}"
 
-    # Regroupement générique
     if category == "notification":
         return f"notification|{sender}"
     return f"{category}|{normalize_text(item.get('display_title', ''))}"
 
 
 def choose_group_title(items: list[dict], regroupement_rules: list[str]) -> str:
-    """Titre du groupe, enrichi par les règles si disponible."""
     first = items[0]
     title = normalize_text(first.get("display_title", ""))
     sender = (first.get("from_email") or "").lower()
@@ -70,10 +61,9 @@ def choose_group_title(items: list[dict], regroupement_rules: list[str]) -> str:
             continue
         import re
         kw_part = re.sub(r"regrouper (les mails |les |)d[e']?", "", rule_l)
-        kw_part = kw_part.split("=>")[0].split("→")[0].strip()
+        kw_part = kw_part.split("=>")[0].split("\u2192")[0].strip()
         keywords = [k.strip().strip("',") for k in kw_part.split(",")]
         if any(kw and len(kw) > 2 and kw in combined for kw in keywords):
-            # Titre propre : capitalize chaque mot significatif
             return " ".join(w.capitalize() for w in kw_part.split() if len(w) > 2)[:50]
 
     if first.get("category") == "notification":
@@ -92,10 +82,10 @@ def choose_group_reason(items: list[dict]) -> str:
     if len(items) == 1: return items[0].get("reason", "")
     cats = {item.get("category") for item in items}
     if "raccordement" in cats:
-        return f"{len(items)} mails liés à un même sujet de raccordement."
+        return f"{len(items)} mails lies a un meme sujet de raccordement."
     if cats == {"notification"}:
-        return f"{len(items)} notifications regroupées."
-    return f"{len(items)} mails liés au même sujet."
+        return f"{len(items)} notifications regroupees."
+    return f"{len(items)} mails lies au meme sujet."
 
 
 def choose_group_action(items: list[dict]) -> str:
@@ -103,7 +93,7 @@ def choose_group_action(items: list[dict]) -> str:
     categories = [item.get("category") for item in items]
     if "haute" in priorities: return "Traiter rapidement"
     if "raccordement" in categories: return "Analyser et suivre"
-    if "reunion" in categories: return "Vérifier et planifier"
+    if "reunion" in categories: return "Verifier et planifier"
     if all(cat == "notification" for cat in categories): return "Classer ou ignorer"
     return "Lire et qualifier"
 
@@ -117,10 +107,6 @@ def build_summary(items: list[dict]) -> str:
 
 
 def get_dashboard(days: int = 2, username: str = 'guillaume') -> dict:
-    """
-    Tableau de bord — piloté par les règles de regroupement d'Aria.
-    Chaque utilisateur voit uniquement ses propres mails.
-    """
     conn = get_pg_conn()
     c = conn.cursor()
     start_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
@@ -137,7 +123,6 @@ def get_dashboard(days: int = 2, username: str = 'guillaume') -> dict:
     rows = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()
 
-    # Règles de regroupement d'Aria
     regroupement_rules = get_rules_by_category(username, "regroupement")
 
     groups = defaultdict(list)
@@ -194,3 +179,124 @@ def get_dashboard(days: int = 2, username: str = 'guillaume') -> dict:
         "low": low,
         "all": grouped_items,
     }
+
+
+def get_costs_dashboard(tenant_id: str = None, days: int = 30) -> dict:
+    """
+    Retourne les donnees de couts LLM pour le dashboard admin (5F-1).
+    Si tenant_id fourni, filtre sur ce tenant. Sinon, tous les tenants.
+
+    Retourne :
+    {
+        "period_days": int,
+        "total_cost_usd": float,
+        "total_input_tokens": int,
+        "total_output_tokens": int,
+        "by_model": [{"model": str, "calls": int, "tokens": int, "cost_usd": float}],
+        "by_user": [{"username": str, "calls": int, "tokens": int, "cost_usd": float}],
+        "by_purpose": [{"purpose": str, "calls": int, "tokens": int, "cost_usd": float}],
+        "by_day": [{"date": str, "calls": int, "cost_usd": float}],
+    }
+    """
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+
+        # Filtre tenant optionnel
+        tenant_filter = "AND tenant_id = %s" if tenant_id else ""
+        params_base = [days]
+        if tenant_id:
+            params_base.append(tenant_id)
+
+        # Totaux
+        c.execute(f"""
+            SELECT
+                COUNT(*) AS calls,
+                COALESCE(SUM(input_tokens), 0) AS total_input,
+                COALESCE(SUM(output_tokens), 0) AS total_output,
+                COALESCE(SUM(COALESCE(cost_usd_estimate, 0)), 0) AS total_cost
+            FROM llm_usage
+            WHERE created_at > NOW() - INTERVAL '%s days'
+            {tenant_filter}
+        """, params_base)
+        row = c.fetchone()
+        total_calls, total_input, total_output, total_cost = row
+
+        # Par modele
+        c.execute(f"""
+            SELECT model, COUNT(*) AS calls,
+                   COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
+                   COALESCE(SUM(COALESCE(cost_usd_estimate, 0)), 0) AS cost
+            FROM llm_usage
+            WHERE created_at > NOW() - INTERVAL '%s days'
+            {tenant_filter}
+            GROUP BY model ORDER BY cost DESC
+        """, params_base)
+        by_model = [
+            {"model": r[0], "calls": r[1], "tokens": r[2], "cost_usd": float(r[3])}
+            for r in c.fetchall()
+        ]
+
+        # Par utilisateur
+        c.execute(f"""
+            SELECT username, COUNT(*) AS calls,
+                   COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
+                   COALESCE(SUM(COALESCE(cost_usd_estimate, 0)), 0) AS cost
+            FROM llm_usage
+            WHERE created_at > NOW() - INTERVAL '%s days'
+            {tenant_filter}
+            GROUP BY username ORDER BY cost DESC
+        """, params_base)
+        by_user = [
+            {"username": r[0], "calls": r[1], "tokens": r[2], "cost_usd": float(r[3])}
+            for r in c.fetchall()
+        ]
+
+        # Par purpose
+        c.execute(f"""
+            SELECT COALESCE(purpose, 'unknown'), COUNT(*) AS calls,
+                   COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
+                   COALESCE(SUM(COALESCE(cost_usd_estimate, 0)), 0) AS cost
+            FROM llm_usage
+            WHERE created_at > NOW() - INTERVAL '%s days'
+            {tenant_filter}
+            GROUP BY COALESCE(purpose, 'unknown') ORDER BY cost DESC
+        """, params_base)
+        by_purpose = [
+            {"purpose": r[0], "calls": r[1], "tokens": r[2], "cost_usd": float(r[3])}
+            for r in c.fetchall()
+        ]
+
+        # Par jour
+        c.execute(f"""
+            SELECT DATE(created_at) AS day, COUNT(*) AS calls,
+                   COALESCE(SUM(COALESCE(cost_usd_estimate, 0)), 0) AS cost
+            FROM llm_usage
+            WHERE created_at > NOW() - INTERVAL '%s days'
+            {tenant_filter}
+            GROUP BY DATE(created_at) ORDER BY day DESC
+        """, params_base)
+        by_day = [
+            {"date": str(r[0]), "calls": r[1], "cost_usd": float(r[2])}
+            for r in c.fetchall()
+        ]
+
+        return {
+            "period_days": days,
+            "total_calls": int(total_calls),
+            "total_cost_usd": float(total_cost),
+            "total_input_tokens": int(total_input),
+            "total_output_tokens": int(total_output),
+            "by_model": by_model,
+            "by_user": by_user,
+            "by_purpose": by_purpose,
+            "by_day": by_day,
+        }
+    except Exception as e:
+        return {"error": str(e)[:200], "period_days": days,
+                "total_cost_usd": 0.0, "total_input_tokens": 0,
+                "total_output_tokens": 0, "by_model": [], "by_user": [],
+                "by_purpose": [], "by_day": []}
+    finally:
+        if conn: conn.close()

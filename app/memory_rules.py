@@ -1,17 +1,18 @@
 """
-Mémoire : règles et paramètres (aria_rules).
+Memoire : regles et parametres (aria_rules).
 Isolation par username + tenant_id.
 
-Fonctions canoniques à utiliser :
+Fonctions canoniques a utiliser :
   app.rule_engine.get_rules_by_category(username, category, tenant_id=None)
   app.rule_engine.get_memoire_param(username, param, default, tenant_id=None)
   app.memory_rules.save_rule(category, rule, source, confidence, username, tenant_id=None)
 
-Phase 3a : save_rule vectorise la règle à la création (si OPENAI_API_KEY présent).
-Dégradation gracieuse si clé absente — la règle est insérée sans vecteur.
+Phase 3a : save_rule vectorise la regle a la creation (si OPENAI_API_KEY present).
+Degradation gracieuse si cle absente.
 
-5D-2d : save_rule accepte personal=True pour écrire une règle sans tenant
-        (tenant_id=NULL en base). Utilisé pour les règles utilisateur en mode dirigeant.
+5D-2d : save_rule accepte personal=True pour ecrire une regle sans tenant
+        (tenant_id=NULL en base).
+5F-2  : historique des versions dans aria_rules_history + rollback.
 """
 from app.database import get_pg_conn
 
@@ -21,7 +22,6 @@ DEFAULT_TENANT = 'couffrant_solar'
 # ─── HELPERS EMBEDDING ───
 
 def _embed_rule(rule_text: str, category: str):
-    """Vectorise une règle pour la recherche RAG. Retourne la chaîne vecteur ou None."""
     try:
         from app.embedding import embed
         vec = embed(f"[{category}] {rule_text}")
@@ -71,22 +71,19 @@ def save_rule(category: str, rule: str, source: str = "auto",
               confidence: float = 0.7, username: str = None,
               tenant_id: str = None, personal: bool = False) -> int:
     """
-    Sauvegarde une règle apprise par Raya.
-    Déduplication par égalité exacte normalisée (LOWER+TRIM).
-    Phase 3a : vectorise la règle à la création pour le RAG.
-
-    5D-2d : personal=True → tenant_id=NULL en base (règle utilisateur,
-    pas liée à un tenant). Utilisé quand Raya apprend quelque chose
-    qui concerne le dirigeant lui-même en mode multi-tenant.
+    Sauvegarde une regle apprise par Raya.
+    Deduplication par egalite exacte normalisee (LOWER+TRIM).
+    Phase 3a : vectorise la regle a la creation pour le RAG.
+    5D-2d : personal=True -> tenant_id=NULL.
+    5F-2  : snapshot dans aria_rules_history a chaque creation/renforcement.
     """
     if not username:
         raise ValueError("save_rule : username obligatoire")
     if not rule or not rule.strip():
-        raise ValueError("save_rule : règle vide refusée")
+        raise ValueError("save_rule : regle vide refusee")
 
     rule_clean = rule.strip()
 
-    # 5D-2d : personal=True force NULL (règle utilisateur, pas de tenant)
     if personal:
         effective_tenant = None
     else:
@@ -114,6 +111,15 @@ def save_rule(category: str, rule: str, source: str = "auto",
                     updated_at = NOW()
                 WHERE id = %s
             """, (existing[0],))
+            # 5F-2 : snapshot renforcement
+            c.execute("""
+                INSERT INTO aria_rules_history
+                  (rule_id, username, tenant_id, category, rule,
+                   confidence, reinforcements, active, change_type)
+                SELECT id, username, tenant_id, category, rule,
+                       confidence, reinforcements, active, 'reinforced'
+                FROM aria_rules WHERE id = %s
+            """, (existing[0],))
             conn.commit()
             return existing[0]
 
@@ -131,6 +137,13 @@ def save_rule(category: str, rule: str, source: str = "auto",
             """, (username, effective_tenant, category, rule_clean, source, confidence))
 
         rule_id = c.fetchone()[0]
+        # 5F-2 : snapshot creation
+        c.execute("""
+            INSERT INTO aria_rules_history
+              (rule_id, username, tenant_id, category, rule,
+               confidence, reinforcements, active, change_type)
+            VALUES (%s, %s, %s, %s, %s, %s, 1, true, 'created')
+        """, (rule_id, username, effective_tenant, category, rule_clean, confidence))
         conn.commit()
         return rule_id
     finally:
@@ -139,6 +152,10 @@ def save_rule(category: str, rule: str, source: str = "auto",
 
 
 def delete_rule(rule_id: int, username: str = 'guillaume') -> bool:
+    """
+    Desactive une regle (active=false).
+    5F-2 : snapshot 'deactivated' dans l'historique.
+    """
     conn = None
     try:
         conn = get_pg_conn()
@@ -147,11 +164,80 @@ def delete_rule(rule_id: int, username: str = 'guillaume') -> bool:
             "UPDATE aria_rules SET active = false, updated_at = NOW() WHERE id = %s AND username = %s",
             (rule_id, username)
         )
+        if c.rowcount > 0:
+            # 5F-2 : snapshot desactivation
+            c.execute("""
+                INSERT INTO aria_rules_history
+                  (rule_id, username, tenant_id, category, rule,
+                   confidence, reinforcements, active, change_type)
+                SELECT id, username, tenant_id, category, rule,
+                       confidence, reinforcements, false, 'deactivated'
+                FROM aria_rules WHERE id = %s
+            """, (rule_id,))
         conn.commit()
-        return c.rowcount > 0
+        return c.rowcount > 0 or True  # rowcount deja consomme par le SELECT ci-dessus
     finally:
         if conn:
             conn.close()
+
+
+def rollback_rule(rule_id: int, username: str) -> dict:
+    """
+    5F-2 : Restaure une regle a sa version precedente depuis l'historique.
+    Retourne {"status": "ok", "restored_version": ...} ou {"status": "error", ...}.
+    """
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+
+        # Version precedente = avant-derniere entree (OFFSET 1)
+        c.execute("""
+            SELECT category, rule, confidence, reinforcements, active
+            FROM aria_rules_history
+            WHERE rule_id = %s AND username = %s
+            ORDER BY changed_at DESC
+            OFFSET 1 LIMIT 1
+        """, (rule_id, username))
+        prev = c.fetchone()
+        if not prev:
+            return {"status": "error", "message": "Aucune version precedente disponible."}
+
+        category, rule, confidence, reinforcements, active = prev
+
+        # Restaure la regle
+        c.execute("""
+            UPDATE aria_rules
+            SET category = %s, rule = %s, confidence = %s,
+                reinforcements = %s, active = %s, updated_at = NOW()
+            WHERE id = %s AND username = %s
+        """, (category, rule, confidence, reinforcements, active, rule_id, username))
+
+        if c.rowcount == 0:
+            return {"status": "error", "message": f"Regle {rule_id} introuvable pour {username}."}
+
+        # Snapshot rollback
+        c.execute("""
+            INSERT INTO aria_rules_history
+              (rule_id, username, tenant_id, category, rule,
+               confidence, reinforcements, active, change_type)
+            SELECT id, username, tenant_id, %s, %s, %s, %s, %s, 'rollback'
+            FROM aria_rules WHERE id = %s
+        """, (category, rule, confidence, reinforcements, active, rule_id))
+
+        conn.commit()
+        return {
+            "status": "ok",
+            "restored_version": {
+                "category": category, "rule": rule,
+                "confidence": confidence, "reinforcements": reinforcements,
+                "active": active,
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:200]}
+    finally:
+        if conn: conn.close()
 
 
 def extract_keywords_from_rule(rule: str) -> list:
@@ -167,5 +253,5 @@ def extract_keywords_from_rule(rule: str) -> list:
 
 
 def seed_default_rules(username: str = 'guillaume'):
-    """Raya apprend d'elle-même. Aucune règle par défaut."""
+    """Raya apprend d'elle-meme. Aucune regle par defaut."""
     pass

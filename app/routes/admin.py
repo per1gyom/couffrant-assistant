@@ -18,6 +18,7 @@ from app.routes.deps import (
     get_session_tenant_id, assert_same_tenant,
 )
 from app.admin_audit import log_admin_action
+from app.dashboard_service import get_costs_dashboard
 
 router = APIRouter(tags=["admin"])
 
@@ -106,6 +107,23 @@ def admin_unlock_user(
     result = unlock_account(target)
     log_admin_action(admin["username"], "unlock_user", target)
     return result
+
+
+# ─── COUTS LLM (5F-1) ───
+
+@router.get("/admin/costs")
+def admin_costs(
+    request: Request,
+    days: int = 30,
+    user: dict = Depends(require_admin),
+):
+    """
+    Dashboard des couts LLM.
+    super_admin : toutes les donnees (pas de filtre tenant).
+    admin : filtre sur son propre tenant.
+    """
+    tenant_filter = None if user.get("scope") == "super_admin" else user.get("tenant_id")
+    return get_costs_dashboard(tenant_id=tenant_filter, days=days)
 
 
 # ─── CONFIG SHAREPOINT ───
@@ -264,7 +282,6 @@ def update_tenant_endpoint(
 
 @router.get("/admin/panel", response_class=HTMLResponse)
 def admin_panel(request: Request):
-    """Page HTML — redirige vers login si non-admin (navigation navigateur)."""
     try:
         require_admin(request)
     except HTTPException:
@@ -337,11 +354,6 @@ def admin_users_reset_password(
     username: str,
     admin: dict = Depends(require_admin),
 ):
-    """
-    Génère un mot de passe temporaire aléatoire de 12 caractères pour l'utilisateur.
-    Hash et stocke immédiatement. Force le changement à la prochaine connexion.
-    Retourne le mot de passe en clair — à communiquer à l'utilisateur directement.
-    """
     import secrets
     import string
     alphabet = string.ascii_letters + string.digits
@@ -364,7 +376,7 @@ def admin_users_reset_password(
             "status": "ok",
             "username": username,
             "temp_password": temp_password,
-            "message": f"Mot de passe temporaire généré. L'utilisateur devra en choisir un nouveau à la connexion.",
+            "message": f"Mot de passe temporaire genere. L'utilisateur devra en choisir un nouveau a la connexion.",
         }
     except HTTPException:
         raise
