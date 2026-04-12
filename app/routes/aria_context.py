@@ -5,8 +5,6 @@ Isole la lecture DB, les mails live, l'agenda et la construction du prompt syste
 Phase 3a : memoire injectee via RAG (recherche semantique).
 Phase 3b : session_theme (B8) — si un sujet coherent est detecte,
            le contexte RAG est enrichi avec tout ce qui concerne ce sujet.
-5D-2e    : mode dirigeant multi-tenant. Si l'utilisateur a plusieurs tenants,
-           le RAG cherche dans tous, et le prompt indique les societes gerees.
 Fallback automatique si OPENAI_API_KEY absent.
 
 Les appels reseau sont lances en parallele depuis raya_endpoint().
@@ -24,39 +22,39 @@ from app.memory_loader import (
     get_hot_summary, get_contact_card, get_style_examples,
 )
 from app.feedback_store import get_global_instructions
-from app.capabilities import get_capabilities_prompt
+from app.capabilities import get_capabilities_prompt, get_user_capabilities_prompt
 import app.cache as cache
 
 
 GUARDRAILS = """GARDE-FOUS DE SECURITE (absolus, en code, non negociables) :
-\u2022 Toute action sensible (envoi mail/Teams, deplacement Drive, RDV avec participants)
+• Toute action sensible (envoi mail/Teams, deplacement Drive, RDV avec participants)
   est mise en QUEUE automatiquement. Tu n'as PAS a demander confirmation avant de generer l'action.
   Le code s'en charge. Tu generes normalement, le systeme met en attente.
-\u2022 DELETE (corbeille) = action directe, pas de queue. C'est recuperable.
-\u2022 Quand l'utilisateur dit \"vas-y\", \"envoie\", \"confirme\", \"valide\", \"oui\" en reponse a une action
+• DELETE (corbeille) = action directe, pas de queue. C'est recuperable.
+• Quand l'utilisateur dit "vas-y", "envoie", "confirme", "valide", "oui" en reponse a une action
   en attente, tu generes [ACTION:CONFIRM:<id>] avec l'id de l'action concernee.
-\u2022 Quand il dit \"annule\", \"non\", \"laisse tomber\", tu generes [ACTION:CANCEL:<id>].
-\u2022 Tu NE confirmes JAMAIS une action que l'utilisateur ne t'a pas explicitement validee.
+• Quand il dit "annule", "non", "laisse tomber", tu generes [ACTION:CANCEL:<id>].
+• Tu NE confirmes JAMAIS une action que l'utilisateur ne t'a pas explicitement validee.
 
-PRECISION FACTUELLE (non negociable \u2014 la confiance de l'utilisateur en depend) :
-\u2022 Ne jamais inventer une information que tu ne connais pas.
-\u2022 Si l'utilisateur mentionne une entite (email, personne, fichier, dossier, nom d'entreprise)
+PRECISION FACTUELLE (non negociable — la confiance de l'utilisateur en depend) :
+• Ne jamais inventer une information que tu ne connais pas.
+• Si l'utilisateur mentionne une entite (email, personne, fichier, dossier, nom d'entreprise)
   qui ressemble a quelque chose de connu dans ton contexte mais avec une variation
   (faute de frappe, orthographe approchante, abreviation) :
-  \u2014 Soit tu reconnais la ressemblance et tu proposes la version connue :
-    \"Tu veux dire X@couffrant-solar.fr ?\" ou \"Il s'agit de X, c'est ca ?\"
-  \u2014 Soit tu admets clairement que tu ne trouves pas exactement cette entite dans ton contexte.
-\u2022 Ne jamais affirmer qu'une variante existe ou n'existe pas si tu n'en es pas certaine.
-\u2022 Ne jamais completer, extrapoler ou \"corriger\" une entite sans le signaler explicitement.
-\u2022 La precision factuelle prime sur la fluidite.
+  — Soit tu reconnais la ressemblance et tu proposes la version connue :
+    "Tu veux dire X@couffrant-solar.fr ?" ou "Il s'agit de X, c'est ca ?"
+  — Soit tu admets clairement que tu ne trouves pas exactement cette entite dans ton contexte.
+• Ne jamais affirmer qu'une variante existe ou n'existe pas si tu n'en es pas certaine.
+• Ne jamais completer, extrapoler ou "corriger" une entite sans le signaler explicitement.
+• La precision factuelle prime sur la fluidite.
 
 QUALITE DES APPRENTISSAGES (non negociable) :
-\u2022 Une regle = une seule idee. Si tu dois apprendre plusieurs choses, genere plusieurs
-  [ACTION:LEARN] separes \u2014 jamais deux concepts dans la meme regle.
-\u2022 Exemple correct :
+• Une regle = une seule idee. Si tu dois apprendre plusieurs choses, genere plusieurs
+  [ACTION:LEARN] separes — jamais deux concepts dans la meme regle.
+• Exemple correct :
     [ACTION:LEARN:comportement|Mise a la corbeille = action directe sans confirmation]
     [ACTION:LEARN:comportement|Regrouper plusieurs suppressions en un seul message]
-\u2022 Exemple interdit :
+• Exemple interdit :
     [ACTION:LEARN:comportement|Corbeille = direct ET regrouper les suppressions]"""
 
 
@@ -206,6 +204,7 @@ def build_actions_prompt(domains: list[str], tools: dict) -> str:
     """Construit le bloc actions en n'incluant que les domaines pertinents."""
     sections = []
 
+    # Toujours inclus : workflow + interactif
     sections.append("""=== ACTIONS DISPONIBLES ===
 Confirmation des actions en attente :
   [ACTION:CONFIRM:id]  -> execute une action sensible mise en queue
@@ -226,19 +225,19 @@ Filtre mails :
 
     if "drive" in domains:
         drive_write_lines = "\n  [ACTION:CREATEFOLDER:parent|nom] [ACTION:MOVEDRIVE:item|dest|nom] [ACTION:COPYFILE:source|dest|nom]" if tools.get("drive_write") else ""
-        sections.append(f"""Drive (1_Photovoltaique) \u2014 resultat : lien cliquable :
+        sections.append(f"""Drive (1_Photovoltaique) — resultat : lien cliquable :
   [ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:id] [ACTION:READDRIVE:id] [ACTION:SEARCHDRIVE:mot]{drive_write_lines}""")
 
     if "teams" in domains:
-        sections.append("""Teams \u2014 lecture (immediat) :
+        sections.append("""Teams — lecture (immediat) :
   [ACTION:TEAMS_LIST:]  [ACTION:TEAMS_CHANNEL:team_id|channel_id]
   [ACTION:TEAMS_CHATS:] [ACTION:TEAMS_READCHAT:chat_id]
-Teams \u2014 envoi (mise en queue, confirmation requise) :
+Teams — envoi (mise en queue, confirmation requise) :
   [ACTION:TEAMS_MSG:email|texte]
   [ACTION:TEAMS_REPLYCHAT:chat_id|texte]
   [ACTION:TEAMS_SENDCHANNEL:team_id|channel_id|texte]
   [ACTION:TEAMS_GROUPE:email1,email2|sujet|texte]
-Teams \u2014 memoire (immediat) :
+Teams — memoire (immediat) :
   [ACTION:TEAMS_SYNC:chat_id|label?|type?]
   [ACTION:TEAMS_HISTORY:chat_id|label?|type?]
   [ACTION:TEAMS_MARK:chat_id|message_id|label?|type?]""")
@@ -250,8 +249,6 @@ Teams \u2014 memoire (immediat) :
     if "memory" in domains:
         sections.append("""Memoire (immediat) :
   [ACTION:LEARN:ta_categorie|ta_regle]   <- UNE SEULE IDEE PAR REGLE
-  [ACTION:LEARN:ta_categorie|ta_regle|tenant_id]  <- ecrit sur un tenant specifique
-  [ACTION:LEARN:ta_categorie|ta_regle|_user]       <- regle personnelle (pas liee a une societe)
   [ACTION:INSIGHT:sujet|observation]
   [ACTION:FORGET:id]  <- UNIQUEMENT si l'utilisateur demande EXPLICITEMENT d'oublier.
                          JAMAIS sur une correction. Corriger = [ACTION:LEARN] avec la nouvelle valeur.
@@ -277,16 +274,11 @@ def build_system_prompt(
     pending_actions: list = None,
     session_theme: str | None = None,
     domains: list[str] | None = None,
-    user_tenants: list[dict] | None = None,
 ) -> str:
     display_name = username.capitalize()
     if domains is None:
         domains = ["mail", "drive", "teams", "calendar", "memory", "workflow"]
     query_lower = query.lower()
-
-    # 5D-2e : mode dirigeant multi-tenant
-    is_multi = user_tenants and len(user_tenants) > 1
-    all_tenant_ids = [t["tenant_id"] for t in user_tenants] if is_multi else None
 
     cache_key_hot = f"hot_summary:{username}"
     hot_summary = cache.get(cache_key_hot)
@@ -296,10 +288,7 @@ def build_system_prompt(
 
     try:
         from app.rag import retrieve_context
-        if is_multi:
-            rag_ctx = retrieve_context(query, username, tenant_ids=all_tenant_ids)
-        else:
-            rag_ctx = retrieve_context(query, username, tenant_id)
+        rag_ctx = retrieve_context(query, username, tenant_id)
         aria_rules    = rag_ctx["rules_text"]
         aria_insights = rag_ctx["insights_text"]
         conv_context  = rag_ctx["conv_text"]
@@ -312,11 +301,14 @@ def build_system_prompt(
         conv_context  = ""
         via_rag       = False
 
-    # 5B-4 : dedupliquer le contexte conversationnel
+    # 5B-4 : dédupliquer le contexte conversationnel
+    # Si le RAG retourne des conversations qui sont déjà dans l'historique récent,
+    # on les supprime pour éviter d'injecter les mêmes données deux fois.
     if conv_context and db_ctx.get("history"):
         recent_inputs = {h.get("user_input", "")[:80].lower() for h in db_ctx["history"] if h.get("user_input")}
         filtered_parts = []
         for block in conv_context.split("\n---\n"):
+            # Vérifie si ce bloc RAG contient du texte déjà dans l'historique récent
             block_lower = block.lower()
             if not any(inp and inp in block_lower for inp in recent_inputs):
                 filtered_parts.append(block)
@@ -326,10 +318,7 @@ def build_system_prompt(
     if session_theme:
         try:
             from app.rag import retrieve_theme_context
-            if is_multi:
-                theme_ctx = retrieve_theme_context(session_theme, username, tenant_ids=all_tenant_ids)
-            else:
-                theme_ctx = retrieve_theme_context(session_theme, username, tenant_id)
+            theme_ctx = retrieve_theme_context(session_theme, username, tenant_id)
             extra_rules    = theme_ctx.get("extra_rules", "")
             extra_insights = theme_ctx.get("extra_insights", "")
             theme_parts = [p for p in [extra_rules, extra_insights] if p]
@@ -346,25 +335,13 @@ def build_system_prompt(
     if not mail_filter_summary:
         mail_filter_summary = load_mail_filter_summary(username)
 
-    # 5D-2e : contacts multi-tenant
     contact_card = ""
-    if is_multi:
-        for tid in all_tenant_ids:
-            kw = get_contacts_keywords(username=username, tenant_id=tid)
-            for name in kw:
-                if name in query_lower:
-                    contact_card = get_contact_card(name, tenant_id=tid)
-                    if contact_card:
-                        break
+    known_contacts = get_contacts_keywords(username=username, tenant_id=tenant_id)
+    for name in known_contacts:
+        if name in query_lower:
+            contact_card = get_contact_card(name, tenant_id=tenant_id)
             if contact_card:
                 break
-    else:
-        known_contacts = get_contacts_keywords(username=username, tenant_id=tenant_id)
-        for name in known_contacts:
-            if name in query_lower:
-                contact_card = get_contact_card(name, tenant_id=tenant_id)
-                if contact_card:
-                    break
 
     style_examples = get_style_examples(
         context=query[:100] if any(w in query_lower for w in ["repond", "redige", "ecris", "mail"]) else "",
@@ -394,36 +371,16 @@ def build_system_prompt(
             + "S'il l'annule, genere [ACTION:CANCEL:id]."
         )
 
-    capabilities_block = "\n\n" + get_capabilities_prompt()
+    capabilities_block = "\n\n" + get_user_capabilities_prompt(username, tools)
 
-    # 5D-2e : bloc societes pour mode dirigeant
-    tenants_block = ""
-    if is_multi:
-        tenant_lines = "\n".join(
-            f"  - {t['tenant_name']} (id: {t['tenant_id']}, role: {t['role']})"
-            for t in user_tenants
-        )
-        tenants_block = (
-            f"\n\n=== TES SOCIETES ===\n"
-            f"Tu geres {len(user_tenants)} societes pour {display_name} :\n"
-            f"{tenant_lines}\n\n"
-            f"Quand tu apprends une regle, PRECISE le tenant concerne :\n"
-            f"  [ACTION:LEARN:categorie|regle|tenant_id]\n"
-            f"Si la regle concerne {display_name} personnellement (pas une societe) :\n"
-            f"  [ACTION:LEARN:categorie|regle|_user]\n"
-            f"IMPORTANT : les donnees d'un tenant ne doivent JAMAIS etre partagees\n"
-            f"avec les collaborateurs d'un autre tenant. Toi tu vois tout pour {display_name},\n"
-            f"mais chaque societe est etanche pour ses propres collaborateurs."
-        )
-
-    return f"""Tu es Raya \u2014 l'assistante personnelle et evolutive de {display_name}.
+    return f"""Tu es Raya — l'assistante personnelle et evolutive de {display_name}.
 Tu es Claude avec une memoire persistante. Tu n'as pas de comportement impose de l'exterieur.
 Tu observes, tu apprends, tu t'organises librement. Tu parles au feminin.
 
 {GUARDRAILS}
 {capabilities_block}
 
-{f"=== CE QUE TU SAIS SUR {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"=== PREMIERE CONVERSATION ==={chr(10)}Tu ne connais pas encore {display_name}. Commence a observer et memoriser."}{tenants_block}
+{f"=== CE QUE TU SAIS SUR {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"=== PREMIERE CONVERSATION ==={chr(10)}Tu ne connais pas encore {display_name}. Commence a observer et memoriser."}
 
 {f"=== TA MEMOIRE (pertinente pour cette question) ==={chr(10)}{aria_rules}" if aria_rules else "Ta memoire est vide. Tu peux commencer a construire via [ACTION:LEARN]."}
 
@@ -433,8 +390,8 @@ Tu observes, tu apprends, tu t'organises librement. Tu parles au feminin.
 
 {f"=== STYLE DE {display_name.upper()} ==={chr(10)}{style_examples}" if style_examples else ""}
 
-=== AUJOURD'HUI \u2014 {datetime.now().strftime('%A %d %B %Y')} ===
-{"Microsoft 365 connecte." if outlook_token else f"Microsoft non connecte \u2014 {display_name} doit se reconnecter via /login."}{odoo_line}{mailboxes_line}
+=== AUJOURD'HUI — {datetime.now().strftime('%A %d %B %Y')} ===
+{"Microsoft 365 connecte." if outlook_token else f"Microsoft non connecte — {display_name} doit se reconnecter via /login."}{odoo_line}{mailboxes_line}
 Agenda : {json.dumps(agenda, ensure_ascii=False, default=str) if agenda else "Aucun RDV."}
 Inbox ({len(live_mails)}) : {json.dumps(live_mails, ensure_ascii=False, default=str) if live_mails else "Aucun."}
 Memoire mails : {json.dumps(db_ctx['mails_from_db'], ensure_ascii=False, default=str)}
