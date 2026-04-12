@@ -75,7 +75,27 @@ def root():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "app": "Raya", "memory_module": MEMORY_OK}
+    checks = {"app": "Raya", "memory_module": MEMORY_OK}
+    # Vérifie la connexion DB
+    try:
+        from app.database import get_pg_conn
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("SELECT 1")
+        conn.close()
+        checks["database"] = "ok"
+    except Exception as e:
+        checks["database"] = f"error: {str(e)[:100]}"
+        checks["status"] = "degraded"
+    # Vérifie que la clé Anthropic est configurée
+    try:
+        from app.config import ANTHROPIC_API_KEY
+        checks["llm"] = "ok" if ANTHROPIC_API_KEY else "missing_key"
+    except Exception:
+        checks["llm"] = "error"
+    if "status" not in checks:
+        checks["status"] = "ok"
+    return checks
 
 
 @app.get("/sw.js")
