@@ -3,6 +3,7 @@ Endpoints Raya : /speak, /raya, /token-status, /raya/feedback, /raya/why/{id}.
 
 Phase 3b (B8) : detection de session thematique via detect_session_theme().
 Phase 5B-1    : injection dynamique des actions par domaine via detect_query_domains().
+5D-2f         : charge les tenants de l'utilisateur et les passe au prompt builder.
 """
 import json
 import os
@@ -31,6 +32,7 @@ from app.feedback import (
     save_response_metadata, get_response_metadata,
     process_positive_feedback, process_negative_feedback,
 )
+from app.tenant_manager import get_user_tenants
 
 from app.routes.aria_context import (
     load_user_tools, load_db_context, load_live_mails,
@@ -70,7 +72,7 @@ def token_status(request: Request, user: dict = Depends(require_user)):
         if not token:
             warnings.append({
                 "provider": "Microsoft 365",
-                "message": "Token expire — mails, Teams et agenda inaccessibles.",
+                "message": "Token expire \u2014 mails, Teams et agenda inaccessibles.",
                 "action": "Se reconnecter",
                 "action_url": "/login",
                 "severity": "error",
@@ -117,7 +119,7 @@ def raya_endpoint(
     tenant_id = user["tenant_id"]
     if not check_rate_limit(username):
         return {
-            "answer": "⚠️ Trop de messages en peu de temps. Attends un moment avant de continuer.",
+            "answer": "\u26a0\ufe0f Trop de messages en peu de temps. Attends un moment avant de continuer.",
             "actions": [], "pending_actions": [],
             "aria_memory_id": None, "model_tier": "smart",
             "ask_choice": None,
@@ -129,7 +131,7 @@ def raya_endpoint(
             return future.result(timeout=30)
     except concurrent.futures.TimeoutError:
         return {
-            "answer": "⚠️ Raya est momentanément surchargée. Réessaie dans quelques secondes.",
+            "answer": "\u26a0\ufe0f Raya est momentan\u00e9ment surcharg\u00e9e. R\u00e9essaie dans quelques secondes.",
             "actions": [], "pending_actions": [],
             "aria_memory_id": None, "model_tier": "smart",
             "ask_choice": None,
@@ -138,7 +140,7 @@ def raya_endpoint(
         tb = traceback.format_exc()
         print(f"[Raya] ERREUR ENDPOINT pour {username}:\n{tb}")
         return {
-            "answer": "⚠️ Une erreur interne est survenue. L'incident a ete logue.",
+            "answer": "\u26a0\ufe0f Une erreur interne est survenue. L'incident a ete logue.",
             "actions": [], "pending_actions": [],
             "aria_memory_id": None, "model_tier": "smart",
             "ask_choice": None,
@@ -190,6 +192,9 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     instructions = get_global_instructions(tenant_id=tenant_id)
     outlook_token = get_valid_microsoft_token(username)
 
+    # 5D-2f : charger les tenants de l'utilisateur
+    user_tenants = get_user_tenants(username)
+
     # 2. Appels reseau en PARALLELE
     live_mails, agenda, teams_ctx, mail_filter = [], [], "", ""
     pool = _SHARED_POOL
@@ -226,7 +231,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     if session_theme:
         print(f"[Raya] Session thematique detectee pour {username} : '{session_theme}'")
 
-    # 4b. Détection des domaines pertinents pour injection dynamique des actions
+    # 4b. Detection des domaines pertinents pour injection dynamique des actions
     domains = detect_query_domains(payload.query or "")
 
     # 5. Construction du prompt systeme
@@ -239,6 +244,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         pending_actions=pending_list,
         session_theme=session_theme,
         domains=domains,
+        user_tenants=user_tenants,
     )
 
     # 6. Appel LLM
@@ -276,7 +282,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         else:
             actions_confirmed.append(item)
 
-    # 9. Reponse propre — retire les balises [ACTION:...] du texte affiche
+    # 9. Reponse propre \u2014 retire les balises [ACTION:...] du texte affiche
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', raya_response).strip()
     if actions_confirmed:
         clean_response += "\n\n" + "\n\n".join(actions_confirmed)
@@ -329,7 +335,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         "pending_actions": updated_pending,
         "aria_memory_id":  aria_memory_id,
         "model_tier":      model_tier,
-        "ask_choice":      ask_choice,  # C3 : boutons de choix interactifs
+        "ask_choice":      ask_choice,
     }
 
 
