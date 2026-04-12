@@ -30,9 +30,9 @@ GUARDRAILS = """GARDE-FOUS DE SECURITE (absolus, en code, non negociables) :
   est mise en QUEUE automatiquement. Tu n'as PAS a demander confirmation avant de generer l'action.
   Le code s'en charge. Tu generes normalement, le systeme met en attente.
 • DELETE (corbeille) = action directe, pas de queue. C'est recuperable.
-• Quand l'utilisateur dit "vas-y", "envoie", "confirme", "valide", "oui" en reponse a une action
+• Quand l'utilisateur dit \"vas-y\", \"envoie\", \"confirme\", \"valide\", \"oui\" en reponse a une action
   en attente, tu generes [ACTION:CONFIRM:<id>] avec l'id de l'action concernee.
-• Quand il dit "annule", "non", "laisse tomber", tu generes [ACTION:CANCEL:<id>].
+• Quand il dit \"annule\", \"non\", \"laisse tomber\", tu generes [ACTION:CANCEL:<id>].
 • Tu NE confirmes JAMAIS une action que l'utilisateur ne t'a pas explicitement validee.
 
 PRECISION FACTUELLE (non negociable — la confiance de l'utilisateur en depend) :
@@ -185,6 +185,65 @@ def load_mail_filter_summary(username: str) -> str:
         return ""
 
 
+def build_actions_prompt(domains: list[str], tools: dict) -> str:
+    """Construit le bloc actions en n'incluant que les domaines pertinents."""
+    sections = []
+
+    # Toujours inclus : workflow + interactif
+    sections.append("""=== ACTIONS DISPONIBLES ===
+Confirmation des actions en attente :
+  [ACTION:CONFIRM:id]  -> execute une action sensible mise en queue
+  [ACTION:CANCEL:id]   -> annule une action sensible mise en queue
+Interactif (immediat) :
+  [ACTION:ASK_CHOICE:question|option1|option2|option3]
+  -> affiche des boutons de choix cliquables dans le chat (2 a 4 options)""")
+
+    if "mail" in domains:
+        delete_line = "\n  [ACTION:DELETE:id] -> corbeille recuperable (direct, pas de confirmation)" if tools.get("mail_can_delete") else ""
+        sections.append(f"""Mails :
+  [ACTION:ARCHIVE:id] [ACTION:READ:id] [ACTION:READBODY:id]
+  [ACTION:REPLY:id:texte] [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
+  [ACTION:CREATE_TASK:titre]{delete_line}
+Filtre mails :
+  [ACTION:LEARN:mail_filter|autoriser: email@domaine.fr]
+  [ACTION:LEARN:mail_filter|bloquer: promo@xyz.fr]""")
+
+    if "drive" in domains:
+        drive_write_lines = "\n  [ACTION:CREATEFOLDER:parent|nom] [ACTION:MOVEDRIVE:item|dest|nom] [ACTION:COPYFILE:source|dest|nom]" if tools.get("drive_write") else ""
+        sections.append(f"""Drive (1_Photovoltaique) — resultat : lien cliquable :
+  [ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:id] [ACTION:READDRIVE:id] [ACTION:SEARCHDRIVE:mot]{drive_write_lines}""")
+
+    if "teams" in domains:
+        sections.append("""Teams — lecture (immediat) :
+  [ACTION:TEAMS_LIST:]  [ACTION:TEAMS_CHANNEL:team_id|channel_id]
+  [ACTION:TEAMS_CHATS:] [ACTION:TEAMS_READCHAT:chat_id]
+Teams — envoi (mise en queue, confirmation requise) :
+  [ACTION:TEAMS_MSG:email|texte]
+  [ACTION:TEAMS_REPLYCHAT:chat_id|texte]
+  [ACTION:TEAMS_SENDCHANNEL:team_id|channel_id|texte]
+  [ACTION:TEAMS_GROUPE:email1,email2|sujet|texte]
+Teams — memoire (immediat) :
+  [ACTION:TEAMS_SYNC:chat_id|label?|type?]
+  [ACTION:TEAMS_HISTORY:chat_id|label?|type?]
+  [ACTION:TEAMS_MARK:chat_id|message_id|label?|type?]""")
+
+    if "calendar" in domains:
+        sections.append("""Calendrier :
+  [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]""")
+
+    if "memory" in domains:
+        sections.append("""Memoire (immediat) :
+  [ACTION:LEARN:ta_categorie|ta_regle]   <- UNE SEULE IDEE PAR REGLE
+  [ACTION:INSIGHT:sujet|observation]
+  [ACTION:FORGET:id]  <- UNIQUEMENT si l'utilisateur demande EXPLICITEMENT d'oublier.
+                         JAMAIS sur une correction. Corriger = [ACTION:LEARN] avec la nouvelle valeur.
+  [ACTION:SYNTH:]
+Onboarding :
+  [ACTION:RESTART_ONBOARDING:] -> relance le questionnaire de configuration initiale""")
+
+    return "\n".join(sections)
+
+
 def build_system_prompt(
     username: str,
     tenant_id: str,
@@ -199,8 +258,11 @@ def build_system_prompt(
     mail_filter_summary: str = "",
     pending_actions: list = None,
     session_theme: str | None = None,
+    domains: list[str] | None = None,
 ) -> str:
     display_name = username.capitalize()
+    if domains is None:
+        domains = ["mail", "drive", "teams", "calendar", "memory", "workflow"]
     query_lower = query.lower()
 
     hot_summary = get_hot_summary(username)
@@ -253,10 +315,6 @@ def build_system_prompt(
         username=username
     )
 
-    delete_line = "\n  [ACTION:DELETE:id] -> corbeille recuperable (direct, pas de confirmation)" if tools["mail_can_delete"] else ""
-    drive_write_lines = ""
-    if tools["drive_write"]:
-        drive_write_lines = "\n  [ACTION:CREATEFOLDER:parent|nom] [ACTION:MOVEDRIVE:item|dest|nom] [ACTION:COPYFILE:source|dest|nom]"
     odoo_line = ""
     if tools["odoo_enabled"]:
         if tools["odoo_access"] == 'full':
@@ -306,41 +364,5 @@ Inbox ({len(live_mails)}) : {json.dumps(live_mails, ensure_ascii=False, default=
 Memoire mails : {json.dumps(db_ctx['mails_from_db'], ensure_ascii=False, default=str)}
 Consignes : {chr(10).join(instructions) if instructions else "Aucune."}
 
-=== ACTIONS DISPONIBLES ===
-Confirmation des actions en attente :
-  [ACTION:CONFIRM:id]  -> execute une action sensible mise en queue
-  [ACTION:CANCEL:id]   -> annule une action sensible mise en queue
-Interactif (immediat) :
-  [ACTION:ASK_CHOICE:question|option1|option2|option3]
-  -> affiche des boutons de choix cliquables dans le chat (2 a 4 options)
-  -> utiliser quand une question a plusieurs reponses possibles bien definies
-Mails :
-  [ACTION:ARCHIVE:id] [ACTION:READ:id] [ACTION:READBODY:id]
-  [ACTION:REPLY:id:texte] [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
-  [ACTION:CREATE_TASK:titre]{delete_line}
-Drive (1_Photovoltaique) — resultat : lien cliquable :
-  [ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:id] [ACTION:READDRIVE:id] [ACTION:SEARCHDRIVE:mot]{drive_write_lines}
-Teams — lecture (immediat) :
-  [ACTION:TEAMS_LIST:]  [ACTION:TEAMS_CHANNEL:team_id|channel_id]
-  [ACTION:TEAMS_CHATS:] [ACTION:TEAMS_READCHAT:chat_id]
-Teams — envoi (mise en queue, confirmation requise) :
-  [ACTION:TEAMS_MSG:email|texte]
-  [ACTION:TEAMS_REPLYCHAT:chat_id|texte]
-  [ACTION:TEAMS_SENDCHANNEL:team_id|channel_id|texte]
-  [ACTION:TEAMS_GROUPE:email1,email2|sujet|texte]
-Teams — memoire (immediat) :
-  [ACTION:TEAMS_SYNC:chat_id|label?|type?]
-  [ACTION:TEAMS_HISTORY:chat_id|label?|type?]
-  [ACTION:TEAMS_MARK:chat_id|message_id|label?|type?]
-Filtre mails :
-  [ACTION:LEARN:mail_filter|autoriser: email@domaine.fr]
-  [ACTION:LEARN:mail_filter|bloquer: promo@xyz.fr]
-Memoire (immediat) :
-  [ACTION:LEARN:ta_categorie|ta_regle]   <- UNE SEULE IDEE PAR REGLE
-  [ACTION:INSIGHT:sujet|observation]
-  [ACTION:FORGET:id]  <- UNIQUEMENT si l'utilisateur demande EXPLICITEMENT d'oublier.
-                         JAMAIS sur une correction. Corriger = [ACTION:LEARN] avec la nouvelle valeur.
-  [ACTION:SYNTH:]
-Onboarding :
-  [ACTION:RESTART_ONBOARDING:] -> relance le questionnaire de configuration initiale
+{build_actions_prompt(domains, tools)}
 """
