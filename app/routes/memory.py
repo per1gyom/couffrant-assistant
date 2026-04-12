@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Request, Body, Depends
 from fastapi.responses import RedirectResponse
 from app.database import get_pg_conn
-from app.ai_client import client
-from app.config import ANTHROPIC_MODEL_SMART
+from app.llm_client import llm_complete
 from app.memory_loader import (
     MEMORY_OK, rebuild_hot_summary, rebuild_contacts,
     load_sent_mails_to_style, get_all_contact_cards,
@@ -221,14 +220,15 @@ def build_style_profile(request: Request, user: dict = Depends(require_user)):
         f"Sujet : {r['subject']}\nDestinataire : {r['to_email']}\nContenu : {r['body_preview']}"
         for r in rows
     ])
-    response = client.messages.create(
-        model=ANTHROPIC_MODEL_SMART, max_tokens=2048,
+    result = llm_complete(
         messages=[{"role": "user", "content":
             f"Analyse ces {len(rows)} emails envoyés par {display_name}.\n\n{mails_text}\n\n"
             "Produis un profil de son style rédactionnel."
-        }]
+        }],
+        model_tier="smart",
+        max_tokens=2048,
     )
-    profile_text = response.content[0].text
+    profile_text = result["text"]
     conn = None
     try:
         conn = get_pg_conn()
