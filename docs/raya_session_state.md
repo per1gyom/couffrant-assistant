@@ -34,29 +34,45 @@ Guillaume possède plusieurs sociétés. Raya fait le lien entre elles : vision 
 
 **3. Intelligence de workflow.** Raya observe COMMENT l'utilisateur travaille à travers TOUS ses outils : séquences apprises (mail → Drive → Odoo → réponse), anticipation des prochaines étapes, détection d'oublis ("tu n'as pas mis à jour Odoo comme d'habitude"), proposition d'améliorations ("tu fais ça 3x/semaine, je peux automatiser"), détection d'anomalies cross-outils ("le devis Odoo dit 12k€ mais le mail dit 15k€").
 
-**4. Mémoire narrative des dossiers.** Pas juste des règles — l'HISTOIRE d'un dossier. "Le projet Dupont a commencé en janvier, 3 retards, dernier devis 15k€, relation tendue depuis le dépassement de mars." Quand Guillaume parle de Dupont, Raya a toute l'histoire en tête.
+**4. Mémoire narrative des dossiers.** Pas juste des règles — l'HISTOIRE d'un dossier. "Le projet Dupont a commencé en janvier, 3 retards, dernier devis 15k€, relation tendue depuis le dépassement de mars."
 
-**5. Préparation anticipée.** Raya voit une réunion demain dans le calendrier. Sans qu'on lui demande : derniers mails, statut chantier Odoo, documents Drive, points en suspens. Briefing WhatsApp le matin même.
+**5. Préparation anticipée.** Réunion demain dans le calendrier → Raya prépare : derniers mails, statut Odoo, documents Drive, points en suspens. Briefing WhatsApp le matin même.
 
-**6. Intelligence d'équipe.** Raya comprend l'équipe à travers les échanges observés. "Pierre gère les raccordements, Marie l'administratif." Quand un mail arrive : "Ce raccordement → d'habitude Pierre s'en charge, je lui transfère ?"
+**6. Intelligence d'équipe.** Raya comprend l'équipe à travers les échanges. "Pierre gère les raccordements, Marie l'administratif." Mail raccordement → "D'habitude Pierre s'en charge, je lui transfère ?"
 
-**7. Conscience du rythme business.** Fin de mois = factures. Fin de trimestre = reporting. Été = ralentissement. Raya intègre ces cycles dans son évaluation et ses propositions. "On est le 28, 3 factures en retard totalisant 24k€."
+**7. Conscience du rythme business.** Fin de mois = factures. Fin de trimestre = reporting. "On est le 28, 3 factures en retard totalisant 24k€."
 
-**8. Méta-apprentissage.** Raya apprend de ses propres erreurs au niveau systémique. "Je me trompe souvent sur les sujets financiers → je dois être plus prudente et confirmer davantage dans ce domaine."
+**8. Méta-apprentissage.** Raya apprend de ses propres erreurs. "Je me trompe souvent sur le financier → je confirme davantage dans ce domaine."
 
-### Deux niveaux de Jarvis sur le même moteur
+### Les 3 modes d'utilisation de Raya
 
-**Jarvis personnel (Mode Utilisateur)** — Raya comprend MON workflow, anticipe MES besoins, agit dans MES limites. Chaque collaborateur a sa propre Raya qui apprend de lui.
+Il faut bien distinguer le dirigeant multi-tenant et l'admin managérial d'un tenant. Ce sont deux rôles différents, parfois portés par la même personne.
 
-**Jarvis managérial (Mode Admin/Dirigeant)** — Le gérant d'un tenant a une vision sur TOUTE son équipe via Raya :
-- Voir comment chaque collaborateur travaille (statistiques, métriques)
-- Identifier les méthodes de travail les plus efficaces
-- Croiser les techniques : si Pierre traite un dossier en 3 étapes là où Marie en fait 5, Raya le détecte
-- Proposer les meilleures pratiques à ceux qui en ont besoin (pas du flicage — de l'intelligence collective)
-- Tableau de bord d'efficacité de l'équipe (temps de traitement, taux de réponse, processus suivis)
-- Raya suggère à Marie : "j'ai remarqué une approche plus rapide pour les raccordements" Et à Guillaume : "l'efficacité sur les raccordements a progressé de 20% ce mois"
+**Mode 1 — Raya personnelle du dirigeant (multi-tenant)**
+Guillaume voit TOUTES ses sociétés (Couffrant Solar, Juillet, etc.) + ses comptes perso (mails perso, données perso s'il le souhaite). Vision transversale totale. Personne d'autre ne voit cette vue. C'est son cerveau privé. Techniquement : user avec plusieurs entrées dans `user_tenant_access` + un espace personnel (tenant_id=NULL).
 
-Le cloisonnement reste absolu : un collaborateur ne voit que ses propres données. Seul l'admin du tenant voit la vue d'ensemble.
+**Mode 2 — Raya professionnelle du collaborateur (mono-tenant)**
+Pierre chez Couffrant Solar a accès à Raya pour son travail. Il ne voit que le tenant Couffrant Solar. Raya apprend ses habitudes de travail, l'aide dans ses tâches pro. L'admin du tenant (Guillaume) peut voir des MÉTRIQUES sur comment Pierre travaille (supervision managériale) — mais PAS lire ses conversations avec Raya ni ses données personnelles.
+
+**Mode 3 — Raya perso du collaborateur (avantage en nature)**
+Guillaume peut décider d'offrir à Pierre un accès PERSONNEL à Raya — comme un avantage en nature (mutuelle, véhicule de fonction). Pierre peut alors connecter ses mails perso, son agenda perso. Cet espace est 100% PRIVÉ : Guillaume ne le voit PAS, même en tant qu'admin. Zéro supervision sur l'espace perso. Activé par l'admin via un flag "personal_space_enabled" par utilisateur.
+
+Ce 3e mode est un levier commercial puissant :
+- Augmente l'engagement (usage pro + perso = indispensable)
+- Fidélise les collaborateurs (c'est un vrai bénéfice)
+- Accélère l'apprentissage de Raya (plus d'interactions = plus de données)
+- Effet de réseau : plus les gens l'utilisent, plus la valeur augmente
+
+### Supervision managériale (admin d'un tenant)
+
+L'admin d'un tenant (souvent le gérant) a accès à une couche de supervision :
+- Statistiques par collaborateur : activité, temps de traitement, processus suivis
+- Identification des meilleures pratiques : si Pierre fait en 3 étapes ce que Marie fait en 5
+- Transfert de compétences : Raya suggère à Marie une meilleure méthode observée chez Pierre
+- Tableau de bord d'efficacité de l'équipe : tendances, progrès, points de friction
+- Rapport Guillaume : "L'efficacité sur les raccordements a progressé de 20% ce mois"
+
+Frontière stricte : l'admin voit les MÉTRIQUES et PATTERNS, jamais le CONTENU des conversations ni les données personnelles (Mode 3).
 
 ---
 
@@ -140,7 +156,7 @@ activity_log, séquences cross-outils, détection d'oublis, proposition d'améli
 Historique vivant par dossier/contact, briefings automatiques avant réunions, conscience du rythme business.
 
 **Pilier 4 — Supervision managériale**
-Vue admin sur l'équipe : métriques par collaborateur, identification des meilleures pratiques, proposition de transfert de compétences, tableau de bord d'efficacité. Le tout dans le respect du cloisonnement (chaque user ne voit que ses données).
+Vue admin sur l'équipe : métriques par collaborateur, meilleures pratiques, transfert de compétences, tableau de bord d'efficacité. Cloisonnement strict : métriques oui, contenu conversations non.
 
 ### Priorités immédiates
 
