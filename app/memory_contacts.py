@@ -59,33 +59,6 @@ def get_all_contact_cards(tenant_id: str = DEFAULT_TENANT) -> list:
         if conn: conn.close()
 
 
-def get_contacts_keywords(username: str = 'guillaume', tenant_id: str = DEFAULT_TENANT) -> list:
-    keywords = []
-    conn = None
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("SELECT name, email FROM aria_contacts WHERE tenant_id = %s ORDER BY last_seen DESC LIMIT 50",
-                  (tenant_id,))
-        for name, email in c.fetchall():
-            if name:
-                keywords.extend([n.strip().lower() for n in name.split() if len(n.strip()) > 2])
-            if email:
-                local = email.split('@')[0].lower()
-                if len(local) > 2:
-                    keywords.append(local)
-    except Exception:
-        pass
-    finally:
-        if conn: conn.close()
-
-    from app.memory_rules import get_rules_by_category
-    for rule in get_rules_by_category('contacts_cles', username):
-        parts = [p.strip().lower() for p in rule.replace("'", "").split(',')]
-        keywords.extend([p for p in parts if len(p) > 2])
-    return list(dict.fromkeys(keywords))
-
-
 def rebuild_contacts(tenant_id: str = DEFAULT_TENANT) -> int:
     conn = None
     try:
