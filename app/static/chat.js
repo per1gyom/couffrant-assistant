@@ -9,7 +9,7 @@ const triageBar = document.getElementById('triageBar');
 const micStatus = document.getElementById('micStatus');
 const inputWrapper = document.getElementById('inputWrapper');
 
-let speakSpeed = 1.2; // Vitesse de lecture ElevenLabs (0.5-2.5)
+let speakSpeed = 1.2;
 let isListening=false, currentAudio=null, speakAborted=false, currentSpeakBtn=null;
 let triageQueue=[], triageCurrent=null, silenceTimer=null;
 let finalTextBase='';
@@ -278,7 +278,7 @@ function openShortcuts() { pendingShortcuts = [...getShortcuts()]; renderShortcu
 function closeShortcuts() { document.getElementById('modalShortcuts').classList.remove('open'); }
 function renderShortcutList() {
   document.getElementById('shortcutList').innerHTML = pendingShortcuts.map((s,i) =>
-    `<div class="shortcut-item"><span>${s.icon||''} ${s.label}</span><button class="shortcut-del" onclick="removePendingShortcut(${i})">\u2715</button></div>`
+    `<div class="shortcut-item"><span>${s.icon||''} ${s.label}</span><button class="shortcut-del" onclick="removePendingShortcut(${i})">✕</button></div>`
   ).join('');
 }
 function removePendingShortcut(i) { pendingShortcuts.splice(i,1); renderShortcutList(); }
@@ -313,7 +313,7 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
   if (welcome) welcome.remove();
   const row = document.createElement('div'); row.className = 'message-row ' + type;
   const avatar = document.createElement('div'); avatar.className = 'avatar ' + type + '-avatar';
-  avatar.textContent = type === 'raya' ? '❆' : (currentUser ? currentUser[0].toUpperCase() : 'G');
+  avatar.textContent = type === 'raya' ? '✦' : (currentUser ? currentUser[0].toUpperCase() : 'G');
   const bubble = document.createElement('div'); bubble.className = 'bubble';
   if (fileInfo && fileInfo.type && fileInfo.type.startsWith('image/')) {
     const img = document.createElement('img'); img.className = 'attached-image';
@@ -358,7 +358,7 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
 
 function addLoading() {
   const row = document.createElement('div'); row.className = 'message-row raya';
-  const avatar = document.createElement('div'); avatar.className = 'avatar raya-avatar'; avatar.textContent = '❆';
+  const avatar = document.createElement('div'); avatar.className = 'avatar raya-avatar'; avatar.textContent = '✦';
   const bubble = document.createElement('div'); bubble.className = 'bubble loading-bubble';
   bubble.innerHTML = '<div class="dot-anim"></div><div class="dot-anim"></div><div class="dot-anim"></div>';
   row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row); scrollToBottom(); return row;
