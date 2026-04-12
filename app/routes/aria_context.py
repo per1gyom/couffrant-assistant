@@ -23,6 +23,7 @@ from app.memory_loader import (
 )
 from app.feedback_store import get_global_instructions
 from app.capabilities import get_capabilities_prompt
+import app.cache as cache
 
 
 GUARDRAILS = """GARDE-FOUS DE SECURITE (absolus, en code, non negociables) :
@@ -140,6 +141,11 @@ def load_agenda(outlook_token: str) -> list:
 
 
 def load_teams_context(username: str) -> str:
+    cache_key = f"teams_ctx:{username}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         from app.memory_teams import get_teams_context_summary
         markers_summary = get_teams_context_summary(username)
@@ -164,10 +170,17 @@ def load_teams_context(username: str) -> str:
     finally:
         if conn: conn.close()
     parts = [p for p in [markers_summary, teams_insights] if p]
-    return "\n".join(parts) if parts else ""
+    result = "\n".join(parts) if parts else ""
+    cache.set(cache_key, result)
+    return result
 
 
 def load_mail_filter_summary(username: str) -> str:
+    cache_key = f"mail_filter:{username}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         from app.rule_engine import get_rules_by_category
         rules = get_rules_by_category(username, 'mail_filter')
@@ -180,7 +193,9 @@ def load_mail_filter_summary(username: str) -> str:
             parts.append(f"Whitelist ({len(whitelist)}) : " + ", ".join(w[10:].strip() for w in whitelist[:5]))
         if blacklist:
             parts.append(f"Blacklist ({len(blacklist)}) : " + ", ".join(b[8:].strip() for b in blacklist[:5]))
-        return "\n".join(parts)
+        result = "\n".join(parts)
+        cache.set(cache_key, result)
+        return result
     except Exception:
         return ""
 
@@ -265,7 +280,12 @@ def build_system_prompt(
         domains = ["mail", "drive", "teams", "calendar", "memory", "workflow"]
     query_lower = query.lower()
 
-    hot_summary = get_hot_summary(username)
+    cache_key_hot = f"hot_summary:{username}"
+    hot_summary = cache.get(cache_key_hot)
+    if hot_summary is None:
+        hot_summary = get_hot_summary(username)
+        cache.set(cache_key_hot, hot_summary)
+
     try:
         from app.rag import retrieve_context
         rag_ctx = retrieve_context(query, username, tenant_id)
