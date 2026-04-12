@@ -6,9 +6,11 @@ de maintenance sans bloquer le serveur FastAPI.
 
 Variables d'environnement pour désactiver un job individuellement
 (filet de sécurité — couper un job sans toucher au code) :
-  SCHEDULER_EXPIRE_ENABLED=false  → désactive expire_pending
-  SCHEDULER_DECAY_ENABLED=false   → désactive confidence_decay
-  SCHEDULER_AUDIT_ENABLED=false   → désactive opus_audit
+  SCHEDULER_EXPIRE_ENABLED=false   → désactive expire_pending
+  SCHEDULER_DECAY_ENABLED=false    → désactive confidence_decay
+  SCHEDULER_AUDIT_ENABLED=false    → désactive opus_audit
+  SCHEDULER_WEBHOOK_ENABLED=false  → désactive webhook_setup + webhook_renewal
+  SCHEDULER_TOKEN_ENABLED=false    → désactive token_refresh
 
 Valeur par défaut : true (tous les jobs actifs).
 Exemple Railway : ajouter SCHEDULER_AUDIT_ENABLED=false pour couper l'audit
@@ -18,6 +20,9 @@ Jobs :
   expire_pending   : toutes les heures          — expire les pending_actions trop vieilles
   confidence_decay : hebdomadaire lundi 02h00   — décroissance de confiance (B6)
   opus_audit       : hebdomadaire dimanche 03h00 — audit de cohérence Opus (B5)
+  webhook_setup    : 30s après démarrage (une fois) — setup initial des webhooks Microsoft
+  webhook_renewal  : toutes les 6 heures            — renouvellement des webhooks Microsoft
+  token_refresh    : toutes les 45 minutes           — refresh des tokens Microsoft
 
 [à venir]
   proactivity_scan : toutes les 30 min          — alertes et rappels intelligents (B10)
@@ -119,6 +124,39 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         print("[Scheduler] Job DÉSACTIVÉ : opus_audit (SCHEDULER_AUDIT_ENABLED=false)")
 
+    if _job_enabled("SCHEDULER_WEBHOOK_ENABLED"):
+        from datetime import datetime, timedelta
+        scheduler.add_job(
+            func=_job_webhook_setup,
+            trigger="date",
+            run_date=datetime.now() + timedelta(seconds=30),
+            id="webhook_setup",
+            name="Setup initial webhooks Microsoft",
+            replace_existing=True,
+        )
+        scheduler.add_job(
+            func=_job_webhook_renewal,
+            trigger=IntervalTrigger(hours=6),
+            id="webhook_renewal",
+            name="Renouvellement webhooks Microsoft",
+            replace_existing=True,
+        )
+        print("[Scheduler] Jobs enregistrés : webhook_setup (30s) + webhook_renewal (6h)")
+    else:
+        print("[Scheduler] Jobs DÉSACTIVÉS : webhook (SCHEDULER_WEBHOOK_ENABLED=false)")
+
+    if _job_enabled("SCHEDULER_TOKEN_ENABLED"):
+        scheduler.add_job(
+            func=_job_token_refresh,
+            trigger=IntervalTrigger(minutes=45),
+            id="token_refresh",
+            name="Refresh tokens Microsoft",
+            replace_existing=True,
+        )
+        print("[Scheduler] Job enregistré : token_refresh (45 min)")
+    else:
+        print("[Scheduler] Job DÉSACTIVÉ : token_refresh (SCHEDULER_TOKEN_ENABLED=false)")
+
 
 # ─── FONCTIONS JOB ───
 
@@ -215,6 +253,48 @@ def _job_opus_audit():
 
     except Exception as e:
         print(f"[Scheduler] ERREUR opus_audit : {e}")
+
+
+def _job_webhook_setup():
+    """Setup initial des webhooks Microsoft — exécuté une seule fois 30s après démarrage."""
+    try:
+        from app.connectors.microsoft_webhook import ensure_all_subscriptions
+        ensure_all_subscriptions()
+        print("[Scheduler] webhook_setup : OK")
+    except Exception as e:
+        print(f"[Scheduler] ERREUR webhook_setup : {e}")
+
+
+def _job_webhook_renewal():
+    """Renouvellement des webhooks Microsoft toutes les 6h."""
+    try:
+        from app.connectors.microsoft_webhook import ensure_all_subscriptions
+        ensure_all_subscriptions()
+        print("[Scheduler] webhook_renewal : OK")
+    except Exception as e:
+        print(f"[Scheduler] ERREUR webhook_renewal : {e}")
+
+
+def _job_token_refresh():
+    """Refresh des tokens Microsoft toutes les 45 min."""
+    try:
+        from app.token_manager import get_valid_microsoft_token, get_all_users_with_tokens
+        for username in get_all_users_with_tokens():
+            try:
+                token = get_valid_microsoft_token(username)
+                if not token:
+                    print(f"[Scheduler] token_refresh ECHEC {username}")
+                    try:
+                        from app.connectors.microsoft_webhook import _send_revoked_alert
+                        _send_revoked_alert(username)
+                    except Exception:
+                        pass
+                else:
+                    print(f"[Scheduler] token_refresh {username}: OK")
+            except Exception as e:
+                print(f"[Scheduler] token_refresh erreur {username}: {e}")
+    except Exception as e:
+        print(f"[Scheduler] ERREUR token_refresh : {e}")
 
 
 def _audit_one(tenant_id: str, username: str, nb_rules: int):
