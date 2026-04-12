@@ -129,3 +129,37 @@ def ensure_default_tenant():
         "sharepoint_folder": "1_Photovoltaïque",
         "custom_tools": [],
     })
+
+
+def get_user_tenants(username: str) -> list[dict]:
+    """
+    Retourne tous les tenants auxquels un utilisateur a accès.
+    JOIN sur `tenants` pour récupérer le nom.
+    Retourne : [{"tenant_id": str, "role": str, "tenant_name": str}]
+    Trié par rôle (owner > admin > user) puis par tenant_name.
+    Si aucun résultat, retourne [].
+    """
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT uta.tenant_id, uta.role, t.name AS tenant_name
+            FROM user_tenant_access uta
+            JOIN tenants t ON t.id = uta.tenant_id
+            WHERE uta.username = %s
+            ORDER BY CASE uta.role
+                WHEN 'owner' THEN 1
+                WHEN 'admin' THEN 2
+                ELSE 3
+            END, t.name
+        """, (username,))
+        return [
+            {"tenant_id": r[0], "role": r[1], "tenant_name": r[2]}
+            for r in c.fetchall()
+        ]
+    except Exception:
+        return []
+    finally:
+        if conn:
+            conn.close()
