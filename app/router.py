@@ -5,6 +5,7 @@ Centralise tous les micro-appels Haiku de classification :
   - route_query_tier()      : SIMPLE → smart (Sonnet) / COMPLEXE → deep (Opus)
   - route_mail_action()     : IGNORER / STOCKER / ANALYSER (pour webhook)
   - detect_session_theme()  : détecte si les échanges portent sur un sujet cohérent (B8)
+  - detect_query_domains()  : détecte les domaines pertinents par mots-clés (5B-1)
 
 Garde-fou économique :
   Le nombre d'appels Opus par user par jour est limité (configurable via
@@ -124,6 +125,53 @@ def detect_session_theme(history: list) -> str | None:
         return theme[:60] if len(theme) > 3 else None
     except Exception:
         return None
+
+
+def detect_query_domains(query: str) -> list[str]:
+    """
+    Détecte les domaines pertinents dans la question de l'utilisateur.
+    Retourne une liste parmi : mail, drive, teams, calendar, memory, workflow.
+    Si aucun domaine détecté → retourne tous (fallback sûr).
+    Gratuit (mots-clés, pas d'appel LLM).
+    """
+    if not query or len(query.strip()) < 3:
+        return ["mail", "drive", "teams", "calendar", "memory", "workflow"]
+
+    q = query.lower()
+    domains = set()
+
+    _DOMAIN_KEYWORDS = {
+        "mail": ["mail", "email", "e-mail", "courrier", "inbox", "boîte", "boite",
+                 "répondre", "repondre", "envoyer", "transférer", "transferer",
+                 "archiver", "supprimer le mail", "corbeille", "pièce jointe"],
+        "drive": ["drive", "fichier", "dossier", "sharepoint", "document",
+                  "onedrive", "pdf", "excel", "devis", "facture fichier",
+                  "chercher dans", "trouver le"],
+        "teams": ["teams", "chat", "canal", "channel", "conversation teams",
+                  "message teams", "groupe teams", "appel teams"],
+        "calendar": ["calendrier", "agenda", "rdv", "rendez-vous", "réunion",
+                     "reunion", "événement", "evenement", "planning", "créneau",
+                     "creneau", "dispo"],
+        "memory": ["apprends", "retiens", "oublie", "règle", "regle", "mémoire",
+                   "memoire", "synthèse", "synthese", "insight"],
+    }
+
+    for domain, keywords in _DOMAIN_KEYWORDS.items():
+        if any(kw in q for kw in keywords):
+            domains.add(domain)
+
+    # Workflow (confirm/cancel) toujours si actions en attente mentionnées
+    if any(w in q for w in ["confirme", "annule", "valide", "action", "en attente"]):
+        domains.add("workflow")
+
+    # Fallback : si rien détecté, tout injecter (sûr)
+    if not domains:
+        return ["mail", "drive", "teams", "calendar", "memory", "workflow"]
+
+    # Toujours inclure memory (Raya peut apprendre de n'importe quel échange)
+    domains.add("memory")
+
+    return list(domains)
 
 
 def route_mail_action(sender: str, subject: str, preview: str) -> str:
