@@ -417,6 +417,29 @@ def init_postgres():
     c.execute("CREATE INDEX IF NOT EXISTS idx_activity_user_date ON activity_log (username, created_at DESC)")
     c.execute("CREATE INDEX IF NOT EXISTS idx_activity_type ON activity_log (username, action_type, created_at DESC)")
 
+    # Mémoire narrative des dossiers (7-NAR)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS dossier_narratives (
+            id SERIAL PRIMARY KEY,
+            username TEXT NOT NULL,
+            tenant_id TEXT,
+            entity_type TEXT NOT NULL,
+            entity_key TEXT NOT NULL,
+            narrative TEXT NOT NULL,
+            key_facts JSONB DEFAULT '[]',
+            last_event_date TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT NOW(),
+            created_at TIMESTAMP DEFAULT NOW(),
+            UNIQUE(username, tenant_id, entity_type, entity_key),
+            CONSTRAINT entity_type_check CHECK (
+                entity_type IN ('contact', 'project', 'company', 'topic')
+            )
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_narratives_user ON dossier_narratives (username, entity_type)")
+    c.execute("ALTER TABLE dossier_narratives ADD COLUMN IF NOT EXISTS embedding vector(1536)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_narratives_embedding ON dossier_narratives USING hnsw (embedding vector_cosine_ops)")
+
     conn.commit()
     conn.close()
 
@@ -456,7 +479,7 @@ def init_postgres():
         "ALTER TABLE sent_mail_memory DROP CONSTRAINT IF EXISTS sent_mail_msg_user_unique",
         "ALTER TABLE sent_mail_memory ADD CONSTRAINT sent_mail_msg_user_unique UNIQUE (message_id, username)",
         "ALTER TABLE aria_contacts DROP CONSTRAINT IF EXISTS aria_contacts_email_key",
-        """INSERT INTO tenants (id, name, settings) VALUES ('couffrant_solar', 'Couffrant Solar', '{"email_provider": "microsoft", "sharepoint_folder": "1_Photovoltaïque"}') ON CONFLICT (id) DO NOTHING""",
+        """INSERT INTO tenants (id, name, settings) VALUES ('couffrant_solar', 'Couffrant Solar', '{"email_provider": "microsoft", "sharepoint_folder": "1_Photovolta\u00efque"}') ON CONFLICT (id) DO NOTHING""",
         "CREATE EXTENSION IF NOT EXISTS vector",
         "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS embedding vector(1536)",
         "ALTER TABLE aria_insights ADD COLUMN IF NOT EXISTS embedding vector(1536)",
