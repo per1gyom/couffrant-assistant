@@ -3,6 +3,7 @@ Raya
 Point d'entree principal.
 """
 import os
+import time
 
 from fastapi import FastAPI, Request
 from fastapi.responses import RedirectResponse, FileResponse
@@ -31,6 +32,10 @@ from app.routes.onboarding import router as onboarding_router
 from app.routes.elicitation import router as elicitation_router
 
 
+# Inactivité (secondes) avant déconnexion automatique. Défaut : 2h.
+SESSION_INACTIVITY_TIMEOUT = int(os.getenv("SESSION_INACTIVITY_TIMEOUT", "7200"))
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
@@ -50,13 +55,45 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class InactivityTimeoutMiddleware(BaseHTTPMiddleware):
+    """
+    Déconnecte l'utilisateur après SESSION_INACTIVITY_TIMEOUT secondes
+    d'inactivité (défaut 2h). Met à jour last_activity à chaque requête.
+    Ignore les routes publiques.
+    """
+    _PUBLIC = (
+        "/login-app", "/logout", "/health", "/webhook/",
+        "/static/", "/sw.js", "/forgot-password",
+        "/reset-password", "/forced-reset",
+    )
+
+    async def dispatch(self, request: Request, call_next):
+        if any(request.url.path.startswith(p) for p in self._PUBLIC):
+            return await call_next(request)
+
+        user = request.session.get("user")
+        if user:
+            last_activity = request.session.get("last_activity", 0)
+            now = time.time()
+            if last_activity and (now - last_activity) > SESSION_INACTIVITY_TIMEOUT:
+                request.session.clear()
+                from fastapi.responses import RedirectResponse as _Redir
+                return _Redir("/login-app")
+            request.session["last_activity"] = now
+
+        return await call_next(request)
+
+
 app = FastAPI(title="Raya")
 
 setup_logging()
 logger = get_logger("raya.main")
 
+# Ordre d'ajout : inversé par Starlette → SecurityHeaders s'exécute en dernier,
+# InactivityTimeout au milieu, SessionMiddleware en premier.
 app.add_middleware(SecurityHeadersMiddleware)
-app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=7 * 24 * 3600)
+app.add_middleware(InactivityTimeoutMiddleware)
+app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=24 * 3600)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
@@ -80,7 +117,6 @@ def root():
 @app.get("/health")
 def health():
     checks = {"app": "Raya", "memory_module": MEMORY_OK}
-    # Vérifie la connexion DB
     try:
         from app.database import get_pg_conn
         conn = get_pg_conn()
@@ -91,7 +127,6 @@ def health():
     except Exception as e:
         checks["database"] = f"error: {str(e)[:100]}"
         checks["status"] = "degraded"
-    # Vérifie que la clé Anthropic est configurée
     try:
         from app.config import ANTHROPIC_API_KEY
         checks["llm"] = "ok" if ANTHROPIC_API_KEY else "missing_key"

@@ -1,3 +1,5 @@
+import time
+
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import RedirectResponse, HTMLResponse
 from app.auth import build_msal_app
@@ -62,6 +64,7 @@ async def login_app_post(
         request.session["user"] = username_clean
         request.session["scope"] = scope
         request.session["tenant_id"] = tenant_id
+        request.session["last_activity"] = time.time()  # SECURITY-TIMEOUT
         # Redéfinition MDP obligatoire ?
         if must_reset_password_check(username_clean):
             request.session["must_reset"] = True
@@ -97,7 +100,6 @@ def chat(request: Request):
     if not request.session.get("user"):
         return RedirectResponse("/login-app")
     username = request.session.get("user")
-    # Vérification en base (si flag activé pendant la session)
     if must_reset_password_check(username):
         request.session["must_reset"] = True
         return RedirectResponse("/forced-reset")
