@@ -4,60 +4,35 @@
 
 ---
 
-## ⭐ ÂME DU PROJET — LIRE EN PREMIER
-
-(Voir sections complètes dans les versions précédentes de ce fichier — la vision,
-les 8 dimensions, les 3 modes d'utilisation, la supervision managériale.
-Le prochain Opus doit lire l'historique git de ce fichier si ces sections manquent.)
-
-Résumé : Raya = cerveau supplémentaire Jarvis pour dirigeant. Vision transversale
-multi-sociétés. Intelligence de workflow (séquences, oublis, améliorations).
-Mémoire narrative des dossiers. Préparation anticipée. Intelligence d'équipe.
-3 modes : dirigeant multi-tenant / collaborateur pro / collaborateur perso (avantage en nature).
-Supervision managériale (métriques oui, contenu conversations jamais).
-
----
+## ⭐ ÂME DU PROJET
+Raya = cerveau supplémentaire Jarvis pour dirigeant. 8 dimensions (compréhension cumulative, vision transversale, intelligence workflow, mémoire narrative, préparation anticipée, intelligence d'équipe, rythme business, méta-apprentissage). 3 modes (dirigeant multi-tenant / collaborateur pro / collaborateur perso avantage en nature). Supervision managériale (métriques oui, contenu conversations jamais). Voir commits précédents pour le détail complet de la vision.
 
 ## 0. CONSIGNES
-- Vocabulaire : « Terminal ». Concis. Langage simple.
-- **Règle d'or : aucune écriture sans « ok vas-y » explicite.**
-- **Prompts pour Sonnet : directement dans le chat, entre barres de code.**
-- **Opus ne code PAS, ne pousse PAS de commits. Sonnet exécute.**
-- **JAMAIS push_files pour du code Python** (corrompt les \\n).
+- **Opus = architecte, Sonnet = exécutant. Opus ne code PAS.**
+- **Prompts directement dans le chat, entre barres de code.**
+- **JAMAIS push_files pour du code Python.**
+- **Aucune écriture sans ok explicite de Guillaume.**
 
 ## 1. Stack
 FastAPI Python 3.13, Railway, PostgreSQL+pgvector, Anthropic 3 tiers, OpenAI embeddings.
 Repo `github.com/per1gyom/couffrant-assistant` main.
 
-## 2. État 12/04/2026 soir
-**PHASES 5 : TERMINÉES ✅** | **PHASE 7 EN COURS (3/10+)**
+## 2. État
+**PHASES 5 : TERMINÉES ✅** | **PHASE 7 EN COURS (6/10+)**
 
 | Fait Phase 7 | Détail |
 |---|---|
-| **urgency_model.py ✅** | Score 0-100, 4 étages (règles→contacts→patterns→Haiku), certitude, niveaux silent/normal/important/critical |
-| **Shadow mode ✅** | shadow_mode + shadow_mode_until sur users, alertes [SHADOW] dans le chat, pas de WhatsApp |
-| **Heartbeat matinal ✅** | Job APScheduler 7h00, résumé WhatsApp (mails/alertes/stats), preuve de vie |
-
-Reste Phase 7 :
-- 7-1 Multi-mailbox (Gmail)
-- 7-3 WhatsApp structuré (options de réponse)
-- 7-5 Préférences de sollicitation
-- 7-NEW Activity log + workflow patterns
-- 7-NEW Mémoire narrative des dossiers
-- 7-NEW Préparation anticipée (briefings avant réunions)
-- 7-4 Appel vocal (futur)
-- 7-7 Monitoring + fallbacks (futur)
-- 7-8 Réponse par WhatsApp (futur)
+| urgency_model ✅ | Score 0-100, 4 étages, certitude, niveaux |
+| Shadow mode ✅ | Alertes [SHADOW] en chat, pas de WhatsApp tant qu'actif |
+| Heartbeat matinal ✅ | Job 7h00, résumé WhatsApp quotidien |
+| Notification prefs ✅ | Plages silencieuses, VIP emails/domaines, boost urgence, calendar_aware |
+| WhatsApp structuré ✅ | Messages formatés avec 4 options de réponse rapide |
+| Activity log ✅ | Table + log dans 4 handlers (mail/drive/teams/memory) + conversations |
 
 ## 3. PROCHAINE ÉTAPE
-
-1. **7-5 Préférences de sollicitation** — plages horaires, VIP, seuils personnalisés
-2. **7-3 WhatsApp structuré** — messages avec résumé + boutons de réponse rapide
-3. **7-NEW Activity log** — table + logging des actions pour intelligence de workflow
+- 7-NAR : Mémoire narrative des dossiers
+- 7-BRIEF : Préparation anticipée (briefings avant réunions)
+- 7-1 : Multi-mailbox Gmail (infrastructure)
 
 ## 4. Reprise
 « Bonjour Opus. Projet Raya, Guillaume. On se tutoie, en français, vocabulaire Terminal, concis. Lis `docs/raya_session_state.md` puis `docs/raya_roadmap_v2.md` sur `per1gyom/couffrant-assistant` main via GitHub MCP. Règle d'or : aucune écriture sans mon ok. Reprends où on en était. »
-
-## 5. Variables Railway
-- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`
-- `NOTIFICATION_PHONE_GUILLAUME=+33xxxxxxxxx`
