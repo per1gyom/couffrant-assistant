@@ -3,11 +3,9 @@ Raya
 Point d'entree principal.
 """
 import os
-import threading
-import time
 
 from fastapi import FastAPI, Request
-from fastapi.responses import Response, RedirectResponse, FileResponse
+from fastapi.responses import RedirectResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -16,7 +14,6 @@ from app.config import SESSION_SECRET
 from app.database import init_postgres
 from app.feedback_store import init_db
 from app.mail_memory_store import init_mail_db
-from app.token_manager import get_valid_microsoft_token, get_all_users_with_tokens
 from app.app_security import init_default_user
 from app.memory_loader import MEMORY_OK
 import app.scheduler as job_scheduler
@@ -122,52 +119,6 @@ def startup_event():
         job_scheduler.start()
     except Exception as e:
         print(f"[Scheduler] Erreur demarrage: {e}")
-
-    def setup_webhooks():
-        time.sleep(30)
-        try:
-            from app.connectors.microsoft_webhook import ensure_all_subscriptions
-            ensure_all_subscriptions()
-        except Exception as e:
-            print(f"[Webhook] Erreur setup initial: {e}")
-
-    threading.Thread(target=setup_webhooks, daemon=True).start()
-
-    def webhook_renewal_loop():
-        time.sleep(60)
-        while True:
-            try:
-                time.sleep(6 * 3600)
-                from app.connectors.microsoft_webhook import ensure_all_subscriptions
-                ensure_all_subscriptions()
-            except Exception as e:
-                print(f"[Webhook] Erreur renouvellement: {e}")
-
-    threading.Thread(target=webhook_renewal_loop, daemon=True).start()
-
-    def token_refresh_loop():
-        time.sleep(120)
-        while True:
-            try:
-                for username in get_all_users_with_tokens():
-                    try:
-                        token = get_valid_microsoft_token(username)
-                        if not token:
-                            print(f"[Token] ECHEC refresh {username}")
-                            try:
-                                from app.connectors.microsoft_webhook import _send_revoked_alert
-                                _send_revoked_alert(username)
-                            except Exception:
-                                pass
-                        else:
-                            print(f"[Token] Refresh {username}: OK")
-                    except Exception as e:
-                        print(f"[Token] Erreur {username}: {e}")
-            except Exception as e:
-                print(f"[Token] Erreur generale: {e}")
-            time.sleep(45 * 60)
-
-    threading.Thread(target=token_refresh_loop, daemon=True).start()
 
 
 @app.on_event("shutdown")
