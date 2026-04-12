@@ -6,6 +6,7 @@ Phase 3a : memoire injectee via RAG (recherche semantique).
 Phase 3b : session_theme (B8) — si un sujet coherent est detecte,
            le contexte RAG est enrichi avec tout ce qui concerne ce sujet.
 5G-3    : maturity_block — comportement adaptatif selon la phase relationnelle.
+5G-5    : patterns_block — patterns comportementaux detectes (consolidation+maturity).
 Fallback automatique si OPENAI_API_KEY absent.
 
 Les appels reseau sont lances en parallele depuis raya_endpoint().
@@ -146,7 +147,6 @@ def load_teams_context(username: str) -> str:
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
-
     try:
         from app.memory_teams import get_teams_context_summary
         markers_summary = get_teams_context_summary(username)
@@ -181,7 +181,6 @@ def load_mail_filter_summary(username: str) -> str:
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
-
     try:
         from app.rule_engine import get_rules_by_category
         rules = get_rules_by_category(username, 'mail_filter')
@@ -202,9 +201,7 @@ def load_mail_filter_summary(username: str) -> str:
 
 
 def build_actions_prompt(domains: list[str], tools: dict) -> str:
-    """Construit le bloc actions en n'incluant que les domaines pertinents."""
     sections = []
-
     sections.append("""=== ACTIONS DISPONIBLES ===
 Confirmation des actions en attente :
   [ACTION:CONFIRM:id]  -> execute une action sensible mise en queue
@@ -288,6 +285,7 @@ def build_system_prompt(
 
     # 5G-3 : comportement adaptatif selon la maturite
     maturity_block = ""
+    adaptive = {}
     try:
         from app.maturity import get_adaptive_params
         adaptive = get_adaptive_params(username)
@@ -327,6 +325,39 @@ Tu connais {display_name} en profondeur. Comportement attendu :
 - Confirme UNIQUEMENT sur les sujets inedits ou les actions a haut risque
 - Sois proactive : anticipe les besoins avant qu'il les exprime"""
 
+    except Exception:
+        pass
+
+    # 5G-5 : injection des patterns (consolidation + maturity)
+    patterns_block = ""
+    try:
+        if maturity_block:  # maturity a ete calcule
+            from app.database import get_pg_conn as _pg
+            _conn = _pg()
+            _c = _conn.cursor()
+            _c.execute("""
+                SELECT pattern_type, description, confidence, occurrences
+                FROM aria_patterns
+                WHERE username = %s AND active = true AND confidence >= 0.4
+                ORDER BY confidence DESC, occurrences DESC
+                LIMIT 8
+            """, (username,))
+            pattern_rows = _c.fetchall()
+            _conn.close()
+
+            if pattern_rows:
+                lines = [f"  [{r[0]}] {r[1]} (confiance: {r[2]:.0%}, vu {r[3]}x)"
+                         for r in pattern_rows]
+                patterns_block = (
+                    "\n\n=== PATTERNS DETECTES ===\n"
+                    "Comportements recurrents que tu as observes :\n"
+                    + "\n".join(lines)
+                )
+                if adaptive.get("phase") == "maturity":
+                    patterns_block += (
+                        "\nUtilise ces patterns pour ANTICIPER les besoins. "
+                        "Propose des automatisations concretes basees sur ces habitudes."
+                    )
     except Exception:
         pass
 
@@ -445,7 +476,7 @@ Tu observes, tu apprends, tu t'organises librement. Tu parles au feminin.
 {GUARDRAILS}
 {capabilities_block}
 
-{f"=== CE QUE TU SAIS SUR {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"=== PREMIERE CONVERSATION ==={chr(10)}Tu ne connais pas encore {display_name}. Commence a observer et memoriser."}{maturity_block}
+{f"=== CE QUE TU SAIS SUR {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"=== PREMIERE CONVERSATION ==={chr(10)}Tu ne connais pas encore {display_name}. Commence a observer et memoriser."}{maturity_block}{patterns_block}
 
 {f"=== TA MEMOIRE (pertinente pour cette question) ==={chr(10)}{aria_rules}" if aria_rules else "Ta memoire est vide. Tu peux commencer a construire via [ACTION:LEARN]."}
 
