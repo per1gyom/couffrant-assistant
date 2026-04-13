@@ -9,6 +9,7 @@ Variables d'environnement OBLIGATOIRES pour activer Gmail :
   GMAIL_REDIRECT_URI   : https://[domaine-railway].railway.app/auth/gmail/callback
 
 Les tokens sont stockés dans la table gmail_tokens (un enregistrement par user).
+HOTFIX-GMAIL-TOKENS : _save_refreshed_credentials() gère l'absence de updated_at.
 """
 import os
 import json
@@ -36,7 +37,6 @@ def is_configured() -> bool:
 def get_gmail_auth_url() -> str:
     """
     Génère l'URL d'autorisation Google OAuth2 pour Gmail.
-    Retourne l'URL vers laquelle rediriger l'utilisateur.
     Lève une RuntimeError si GMAIL_REDIRECT_URI est manquante.
     """
     if not GMAIL_REDIRECT_URI:
@@ -57,7 +57,6 @@ def get_gmail_auth_url() -> str:
     try:
         from google_auth_oauthlib.flow import Flow
     except ImportError:
-        # Fallback manuel si google-auth-oauthlib n'est pas installé
         logger.warning("[Gmail] google-auth-oauthlib absent, génération URL manuelle")
         import urllib.parse
         params = {
@@ -95,7 +94,6 @@ def exchange_code_for_tokens(code: str) -> dict:
     """
     Échange le code OAuth2 contre des tokens Google.
     Retourne {"access_token", "refresh_token", "email"}.
-    Stocke les tokens dans la table gmail_tokens.
     """
     if not is_configured() or not GMAIL_REDIRECT_URI:
         raise RuntimeError("Gmail non configuré (CLIENT_ID / CLIENT_SECRET / REDIRECT_URI manquants)")
@@ -123,7 +121,6 @@ def exchange_code_for_tokens(code: str) -> dict:
     flow.fetch_token(code=code)
     creds = flow.credentials
 
-    # Récupérer l'email de l'utilisateur Google
     email = ""
     try:
         id_info = id_token.verify_oauth2_token(
@@ -163,7 +160,7 @@ def get_gmail_service(username: str):
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
-            SELECT access_token, refresh_token, updated_at
+            SELECT access_token, refresh_token
             FROM gmail_tokens WHERE username = %s
         """, (username,))
         row = c.fetchone()
@@ -186,14 +183,13 @@ def get_gmail_service(username: str):
                 row = (
                     cred_data.get("token", ""),
                     cred_data.get("refresh_token", ""),
-                    None,
                 )
             else:
                 return None
         except Exception:
             return None
 
-    access_token, refresh_token, _ = row
+    access_token, refresh_token = row
     if not refresh_token:
         return None
 
@@ -206,7 +202,6 @@ def get_gmail_service(username: str):
         scopes=GMAIL_SCOPES,
     )
 
-    # Refresh si expiré
     if creds.expired and creds.refresh_token:
         try:
             from google.auth.transport.requests import Request
@@ -224,19 +219,36 @@ def get_gmail_service(username: str):
 
 
 def _save_refreshed_credentials(username: str, creds) -> None:
-    """Sauvegarde les credentials rafraîchis dans gmail_tokens."""
+    """
+    Sauvegarde les credentials rafraîchis dans gmail_tokens.
+    Robuste si updated_at n'existe pas encore (avant migration HOTFIX-GMAIL-TOKENS) :
+    - Tente d'abord avec updated_at = NOW()
+    - Fallback sans updated_at si la colonne est absente
+    """
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("""
-            INSERT INTO gmail_tokens (username, access_token, refresh_token)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (username) DO UPDATE
-            SET access_token = EXCLUDED.access_token,
-                updated_at = NOW()
-        """, (username, creds.token, creds.refresh_token))
+        try:
+            # Version avec updated_at (après migration)
+            c.execute("""
+                INSERT INTO gmail_tokens (username, access_token, refresh_token, updated_at)
+                VALUES (%s, %s, %s, NOW())
+                ON CONFLICT (username) DO UPDATE
+                SET access_token = EXCLUDED.access_token,
+                    updated_at   = NOW()
+            """, (username, creds.token, creds.refresh_token))
+        except Exception:
+            # Fallback : updated_at absent (avant migration)
+            conn.rollback()
+            c.execute("""
+                INSERT INTO gmail_tokens (username, access_token, refresh_token)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (username) DO UPDATE
+                SET access_token = EXCLUDED.access_token
+            """, (username, creds.token, creds.refresh_token))
         conn.commit()
+        logger.debug(f"[Gmail] Credentials rafraîchis sauvegardés pour {username}")
     except Exception as e:
         logger.error(f"[Gmail] Erreur sauvegarde credentials {username}: {e}")
     finally:
