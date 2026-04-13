@@ -103,16 +103,30 @@ def admin_diag(request: Request, _: dict = Depends(require_admin)):
     except Exception as e:
         result["microsoft"] = {"status": "error", "detail": str(e)[:120]}
 
-    # ── Gmail ──
+    # ── Gmail — robuste si updated_at absent (HOTFIX-GMAIL-TOKENS) ──
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("""
-            SELECT username, updated_at FROM gmail_tokens
-            ORDER BY updated_at DESC LIMIT 1
-        """)
-        row = c.fetchone()
+        row = None
+        detail_date = ""
+        try:
+            # Tentative avec updated_at (disponible après migration)
+            c.execute("""
+                SELECT username, updated_at FROM gmail_tokens
+                ORDER BY updated_at DESC LIMIT 1
+            """)
+            row = c.fetchone()
+            if row:
+                detail_date = f", mis à jour: {str(row[1])[:10]}" if row[1] else ""
+        except Exception:
+            # Fallback : colonne updated_at absente (avant migration)
+            conn.rollback()
+            c.execute("SELECT username FROM gmail_tokens LIMIT 1")
+            raw = c.fetchone()
+            row = (raw[0], None) if raw else None
+            detail_date = " (migration updated_at en attente)"
         conn.close()
+
         if not row:
             result["gmail"] = {"status": "not_configured", "detail": "Aucun token Gmail en base"}
         else:
@@ -125,7 +139,7 @@ def admin_diag(request: Request, _: dict = Depends(require_admin)):
             else:
                 result["gmail"] = {
                     "status": "ok",
-                    "detail": f"Tokens présents (user: {row[0]}, mis à jour: {str(row[1])[:10]})"
+                    "detail": f"Tokens présents (user: {row[0]}{detail_date})"
                 }
     except Exception as e:
         result["gmail"] = {"status": "error", "detail": str(e)[:120]}
@@ -134,8 +148,6 @@ def admin_diag(request: Request, _: dict = Depends(require_admin)):
     try:
         odoo_url = os.getenv("ODOO_URL", "").strip()
         odoo_db = os.getenv("ODOO_DB", "").strip()
-        odoo_user = os.getenv("ODOO_USER", "").strip()
-        odoo_password = os.getenv("ODOO_PASSWORD", "").strip()
         if not odoo_url or not odoo_db:
             result["odoo"] = {"status": "not_configured", "detail": "ODOO_URL / ODOO_DB manquants"}
         else:
