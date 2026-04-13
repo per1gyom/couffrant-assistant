@@ -1,74 +1,52 @@
 """
-Endpoint de téléchargement de fichiers générés par Raya. (TOOL-CREATE-FILES)
-
-GET /download/{file_id}
-  - Vérifie que l'utilisateur est connecté (session["user"])
-  - Cherche /tmp/{file_id}.* (glob)
-  - Retourne le fichier avec le bon Content-Type et Content-Disposition
-  - 404 si fichier introuvable ou expiré
+Endpoint de téléchargement de fichiers générés par Raya.
+GET /download/{file_id} → sert le fichier depuis /tmp/
 """
-import glob
 import os
+import glob
+from fastapi import APIRouter, Request, HTTPException
+from fastapi.responses import FileResponse
+from app.logging_config import get_logger
 
-from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, JSONResponse
+logger = get_logger("raya.downloads")
 
 router = APIRouter(tags=["downloads"])
 
+# Content-types par extension
 _CONTENT_TYPES = {
-    ".pdf":  "application/pdf",
+    ".pdf": "application/pdf",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    ".xls":  "application/vnd.ms-excel",
-    ".csv":  "text/csv",
-    ".txt":  "text/plain",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".csv": "text/csv",
 }
 
 
 @router.get("/download/{file_id}")
-def download_file(file_id: str, request: Request):
-    """
-    Sert un fichier généré par Raya (PDF, Excel, …).
+def download_file(request: Request, file_id: str):
+    """Sert un fichier généré depuis /tmp/{file_id}.*"""
+    user = request.session.get("user")
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentification requise")
 
-    Sécurité :
-      - L'utilisateur doit être connecté (session["user"]).
-      - Le file_id ne peut contenir que des caractères UUID valides
-        (protection contre les path traversal).
-      - Les fichiers sont dans /tmp/ — éphémères, supprimés au redémarrage.
-    """
-    # 1. Authentification obligatoire
-    if not request.session.get("user"):
-        return JSONResponse(
-            {"error": "Non authentifié. Connectez-vous pour télécharger ce fichier."},
-            status_code=401,
-        )
+    # Sécurité : file_id ne doit contenir que des caractères UUID
+    if not all(c in "0123456789abcdef-" for c in file_id):
+        raise HTTPException(status_code=400, detail="ID invalide")
 
-    # 2. Validation du file_id (UUID uniquement — anti path traversal)
-    import re
-    if not re.match(r'^[0-9a-f\-]{32,36}$', file_id):
-        return JSONResponse({"error": "Identifiant de fichier invalide."}, status_code=400)
-
-    # 3. Recherche du fichier dans /tmp/
-    pattern = f"/tmp/{file_id}.*"
-    matches = glob.glob(pattern)
-
+    # Chercher le fichier par son UUID
+    matches = glob.glob(f"/tmp/{file_id}.*")
     if not matches:
-        return JSONResponse(
-            {"error": "Fichier expiré ou introuvable. Demandez à Raya de le régénérer."},
-            status_code=404,
-        )
+        raise HTTPException(status_code=404, detail="Fichier expiré ou introuvable")
 
     filepath = matches[0]
     ext = os.path.splitext(filepath)[1].lower()
     content_type = _CONTENT_TYPES.get(ext, "application/octet-stream")
-    filename = os.path.basename(filepath)
+
+    logger.info(f"[Download] {user} télécharge {os.path.basename(filepath)}")
 
     return FileResponse(
         path=filepath,
         media_type=content_type,
-        filename=filename,
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
-            "Cache-Control": "no-store",
-        },
+        filename=os.path.basename(filepath),
     )
