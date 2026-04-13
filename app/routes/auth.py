@@ -15,7 +15,7 @@ from app.security_auth import (
     check_user_lockout, record_user_failed, clear_user_attempts,
     is_account_locked_db,
 )
-from app.security_users import must_reset_password_check
+from app.security_users import must_reset_password_check, resolve_username
 from app.database import get_pg_conn
 from app.logging_config import get_logger
 
@@ -36,7 +36,10 @@ async def login_app_post(
     request: Request, username: str = Form(...), password: str = Form(...)
 ):
     ip = request.client.host if request.client else "unknown"
-    username_clean = username.strip()
+    login_input = username.strip()  # peut être un email ou un username
+
+    # Résoudre le vrai username (login par email ou identifiant)
+    real_username = resolve_username(login_input) or login_input
 
     # 1. Rate limit IP (anti-bot)
     allowed, msg_ip = check_rate_limit(ip)
@@ -45,39 +48,40 @@ async def login_app_post(
             error_block=f'<div class="error">{msg_ip}</div>'
         ))
 
-    # 2. Compte définitivement bloqué (DB)
-    if is_account_locked_db(username_clean):
+    # 2. Compte définitivement bloqué (DB) — on vérifie sur le vrai username
+    if is_account_locked_db(real_username):
         return HTMLResponse(LOGIN_PAGE_HTML.format(
             error_block='<div class="error">Ce compte est bloqué. Contactez votre administrateur.</div>'
         ))
 
     # 3. Verrouillage temporaire en cours (mémoire)
-    ok, msg_lock, permanent = check_user_lockout(username_clean)
+    ok, msg_lock, permanent = check_user_lockout(real_username)
     if not ok:
         return HTMLResponse(LOGIN_PAGE_HTML.format(
             error_block=f'<div class="error">{msg_lock}</div>'
         ))
 
-    # 4. Authentification
-    if authenticate(username_clean, password):
+    # 4. Authentification (authenticate accepte username OU email)
+    if authenticate(login_input, password):
         clear_attempts(ip)
-        clear_user_attempts(username_clean)
-        update_last_login(username_clean)
-        scope = get_user_scope(username_clean)
-        tenant_id = get_tenant_id(username_clean)
-        request.session["user"] = username_clean
+        clear_user_attempts(real_username)
+        update_last_login(real_username)
+        scope = get_user_scope(real_username)
+        tenant_id = get_tenant_id(real_username)
+        # Toujours stocker le vrai username (pas l'email) en session
+        request.session["user"] = real_username
         request.session["scope"] = scope
         request.session["tenant_id"] = tenant_id
         request.session["last_activity"] = time.time()  # SECURITY-TIMEOUT
         # Redéfinition MDP obligatoire ?
-        if must_reset_password_check(username_clean):
+        if must_reset_password_check(real_username):
             request.session["must_reset"] = True
             return RedirectResponse("/forced-reset", status_code=303)
         return RedirectResponse("/chat", status_code=303)
 
     # 5. Échec — enregistrer et appliquer le blocage progressif
     record_failed_attempt(ip)
-    result = record_user_failed(username_clean, ip)
+    result = record_user_failed(real_username, ip)
 
     if result.get("permanent"):
         error_msg = "Compte bloqué définitivement après trop de tentatives. Contactez votre administrateur."
@@ -144,7 +148,6 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
 @router.get("/login/gmail")
 def login_gmail(request: Request):
     """Démarre le flux OAuth2 Gmail. Redirige vers Google pour autorisation."""
-    # Vérification GMAIL_REDIRECT_URI en amont — log explicite si manquant
     gmail_redirect = os.getenv("GMAIL_REDIRECT_URI", "").strip()
     if not gmail_redirect:
         logger.error(
@@ -184,11 +187,7 @@ def login_gmail(request: Request):
 
 @router.get("/auth/gmail/callback")
 def auth_gmail_callback(request: Request, code: str | None = None, error: str | None = None):
-    """
-    Callback Google OAuth2.
-    Échange le code contre des tokens, sauvegarde, redirige vers /chat.
-    """
-    # Erreur retournée par Google (ex: accès refusé)
+    """Callback Google OAuth2. Échange le code, sauvegarde, redirige vers /chat."""
     if error:
         logger.warning(f"[Gmail] Callback erreur Google: {error}")
         return RedirectResponse(f"/chat?gmail_error={error}")
@@ -223,5 +222,4 @@ def auth_gmail_callback(request: Request, code: str | None = None, error: str | 
     except Exception as e:
         logger.error(f"[Gmail] Erreur sauvegarde tokens {username}: {e}")
 
-    # ✅ Redirection vers /chat (pas un dict JSON)
     return RedirectResponse("/chat?gmail_connected=1")
