@@ -1,0 +1,5 @@
+/* FIX-MARKDOWN — tableaux dans .markdown-content */
+.markdown-content table { width:100%; border-collapse:collapse; margin:12px 0; font-size:13px; }
+.markdown-content th { background:rgba(0,0,0,0.05); font-weight:600; text-align:left; padding:8px 12px; border:1px solid rgba(0,0,0,0.1); }
+.markdown-content td { padding:8px 12px; border:1px solid rgba(0,0,0,0.1); }
+.markdown-content tr:nth-child(even) { background:rgba(0,0,0,0.02); }
