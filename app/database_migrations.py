@@ -141,5 +141,7 @@ MIGRATIONS = [
     "UPDATE aria_hot_summary SET content = REPLACE(content, 'Jarvis', 'Raya') WHERE content ILIKE '%jarvis%'",
     "UPDATE aria_hot_summary SET content = REPLACE(content, 'jarvis', 'Raya') WHERE content ILIKE '%jarvis%'",
     "UPDATE dossier_narratives SET narrative = REPLACE(narrative, 'Jarvis', 'Raya') WHERE narrative ILIKE '%jarvis%'",
+    # ── HOTFIX-GMAIL-TOKENS : colonne updated_at manquante dans gmail_tokens ──
+    "ALTER TABLE gmail_tokens ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
     # ── Ajouter les nouvelles migrations sous cette ligne ──
 ]
