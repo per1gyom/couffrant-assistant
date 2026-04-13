@@ -1,4 +1,4 @@
-"""
+""" 
 Raya
 Point d'entree principal.
 """
@@ -35,10 +35,10 @@ from app.routes.downloads import router as downloads_router
 from app.routes.chat_history import router as chat_history_router
 
 
-# Inactivité (secondes) avant déconnexion automatique. Défaut : 2h.
+# Inactivite (secondes) avant deconnexion automatique. Defaut : 2h.
 SESSION_INACTIVITY_TIMEOUT = int(os.getenv("SESSION_INACTIVITY_TIMEOUT", "7200"))
 
-# Cache des icônes PNG générées (évite de recalculer à chaque requête)
+# Cache des icones PNG generees
 _PNG_CACHE: dict = {}
 
 
@@ -54,7 +54,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
             "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
             "font-src 'self' https://fonts.gstatic.com; "
-            "img-src 'self' data: https://couffrant-solar.fr; "
+            "img-src 'self' data: https://couffrant-solar.fr https://oaidalleapiprodscus.blob.core.windows.net; "
             "connect-src 'self' https://api.anthropic.com; "
             "media-src 'self' blob:"
         )
@@ -62,16 +62,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 
 class InactivityTimeoutMiddleware(BaseHTTPMiddleware):
-    """
-    Déconnecte l'utilisateur après SESSION_INACTIVITY_TIMEOUT secondes
-    d'inactivité (défaut 2h). Met à jour last_activity à chaque requête.
-    Ignore les routes publiques.
-    """
     _PUBLIC = (
         "/login-app", "/logout", "/health", "/webhook/",
         "/static/", "/sw.js", "/forgot-password",
         "/reset-password", "/forced-reset",
-        "/pwa/",  # icônes PWA publiques
+        "/pwa/",
     )
 
     async def dispatch(self, request: Request, call_next):
@@ -96,8 +91,6 @@ app = FastAPI(title="Raya")
 setup_logging()
 logger = get_logger("raya.main")
 
-# Ordre d'ajout : inversé par Starlette → SecurityHeaders s'exécute en dernier,
-# InactivityTimeout au milieu, SessionMiddleware en premier.
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(InactivityTimeoutMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=24 * 3600)
@@ -157,15 +150,15 @@ def service_worker():
 
 def _generate_raya_png(size: int) -> bytes:
     """
-    Génère un PNG carré arrondi violet (#6366f1) avec un éclair blanc centré.
-    Utilise Pillow. Résultat mis en cache par taille.
+    Genere un PNG carre OPAQUE violet (#6366f1) avec un eclair blanc centre.
+    IMPORTANT: RGB (pas RGBA) — iOS Safari refuse les icones transparentes.
+    iOS ajoute automatiquement ses propres coins arrondis.
     """
     if size in _PNG_CACHE:
         return _PNG_CACHE[size]
     try:
         from PIL import Image, ImageDraw
     except ImportError:
-        # Pillow absent → PNG 1x1 transparent de secours
         _PNG_CACHE[size] = (
             b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
             b'\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f'
@@ -173,15 +166,12 @@ def _generate_raya_png(size: int) -> bytes:
         )
         return _PNG_CACHE[size]
 
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    # Fond opaque violet — pas de transparence
+    color = (99, 102, 241)  # #6366f1
+    img = Image.new("RGB", (size, size), color)
     draw = ImageDraw.Draw(img)
 
-    # Fond violet arrondi
-    radius = size // 5
-    color = (99, 102, 241, 255)  # #6366f1
-    draw.rounded_rectangle([0, 0, size - 1, size - 1], radius=radius, fill=color)
-
-    # Éclair blanc (polygone simplifié)
+    # Eclair blanc (polygone)
     s = size
     bolt = [
         (s * 0.58, s * 0.10),
@@ -191,7 +181,7 @@ def _generate_raya_png(size: int) -> bytes:
         (s * 0.65, s * 0.48),
         (s * 0.48, s * 0.48),
     ]
-    draw.polygon(bolt, fill=(255, 255, 255, 255))
+    draw.polygon(bolt, fill=(255, 255, 255))
 
     buf = io.BytesIO()
     img.save(buf, format="PNG", optimize=True)
@@ -202,7 +192,6 @@ def _generate_raya_png(size: int) -> bytes:
 
 @app.get("/pwa/icon-180.png")
 def pwa_icon_180():
-    """Icône Apple touch icon 180x180 pour iPhone (PWA)."""
     png = _generate_raya_png(180)
     return Response(
         content=png,
@@ -213,7 +202,6 @@ def pwa_icon_180():
 
 @app.get("/pwa/icon-192.png")
 def pwa_icon_192():
-    """Icône PWA 192x192 pour Android / manifest."""
     png = _generate_raya_png(192)
     return Response(
         content=png,
@@ -224,7 +212,6 @@ def pwa_icon_192():
 
 @app.get("/pwa/icon-512.png")
 def pwa_icon_512():
-    """Icône PWA 512x512 pour splash screen."""
     png = _generate_raya_png(512)
     return Response(
         content=png,
@@ -234,20 +221,13 @@ def pwa_icon_512():
 
 
 def _init_heartbeats():
-    """
-    FIX-MONITOR-SPAM : initialise les heartbeats au démarrage pour éviter
-    que les composants soient marqués 'stale' dès le premier scan du monitor.
-    """
     try:
         from app.database import get_pg_conn
         conn = get_pg_conn()
         c = conn.cursor()
         components = [
-            "scheduler",
-            "proactivity_scan",
-            "heartbeat_morning",
-            "webhook_microsoft",
-            "gmail_polling",
+            "scheduler", "proactivity_scan", "heartbeat_morning",
+            "webhook_microsoft", "gmail_polling",
         ]
         for component in components:
             c.execute("""
@@ -259,7 +239,7 @@ def _init_heartbeats():
             """, (component,))
         conn.commit()
         conn.close()
-        logger.info(f"[Heartbeat] {len(components)} composants initialisés au démarrage")
+        logger.info(f"[Heartbeat] {len(components)} composants initialises au demarrage")
     except Exception as e:
         logger.warning(f"[Heartbeat] Erreur init heartbeats: {e}")
 
