@@ -147,7 +147,11 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
 
 @router.get("/login/gmail")
 def login_gmail(request: Request):
-    """Démarre le flux OAuth2 Gmail. Redirige vers Google pour autorisation."""
+    """
+    Démarre le flux OAuth2 Gmail. Redirige vers Google pour autorisation.
+    HOTFIX-GMAIL-PKCE : get_gmail_auth_url() retourne (url, code_verifier) ;
+    le code_verifier est stocké en session pour être récupéré au callback.
+    """
     gmail_redirect = os.getenv("GMAIL_REDIRECT_URI", "").strip()
     if not gmail_redirect:
         logger.error(
@@ -175,7 +179,18 @@ def login_gmail(request: Request):
         )
 
     try:
-        auth_url = get_gmail_auth_url()
+        # HOTFIX-GMAIL-PKCE : get_gmail_auth_url() retourne (auth_url, code_verifier)
+        auth_url, code_verifier = get_gmail_auth_url()
+
+        # Sauvegarder le code_verifier en session pour le retrouver au callback
+        if code_verifier:
+            request.session["gmail_code_verifier"] = code_verifier
+            logger.debug("[Gmail] PKCE code_verifier sauvegardé en session")
+        else:
+            # Pas de PKCE (fallback URL manuelle) — nettoyer toute valeur résiduelle
+            request.session.pop("gmail_code_verifier", None)
+            logger.debug("[Gmail] Pas de code_verifier PKCE à stocker")
+
         return RedirectResponse(auth_url)
     except Exception as e:
         logger.error(f"[Gmail] Erreur génération URL auth: {e}")
@@ -187,7 +202,12 @@ def login_gmail(request: Request):
 
 @router.get("/auth/gmail/callback")
 def auth_gmail_callback(request: Request, code: str | None = None, error: str | None = None):
-    """Callback Google OAuth2. Échange le code, sauvegarde, redirige vers /chat."""
+    """
+    Callback Google OAuth2. Échange le code, sauvegarde, redirige vers /chat.
+    HOTFIX-GMAIL-PKCE : récupère le code_verifier depuis la session et le passe
+    à exchange_code_for_tokens() pour corriger l'erreur "(invalid_grant) Missing
+    code verifier".
+    """
     if error:
         logger.warning(f"[Gmail] Callback erreur Google: {error}")
         return RedirectResponse(f"/chat?gmail_error={error}")
@@ -199,8 +219,19 @@ def auth_gmail_callback(request: Request, code: str | None = None, error: str | 
     from app.connectors.gmail_connector import exchange_code_for_tokens
     username = request.session.get("user", "guillaume")
 
+    # HOTFIX-GMAIL-PKCE : extraire (et supprimer) le code_verifier de la session
+    code_verifier = request.session.pop("gmail_code_verifier", None)
+    if code_verifier:
+        logger.debug("[Gmail] code_verifier PKCE récupéré depuis la session")
+    else:
+        logger.warning(
+            "[Gmail] Aucun code_verifier en session — l'échange peut échouer si "
+            "Google requiert PKCE (invalid_grant)"
+        )
+
     try:
-        tokens = exchange_code_for_tokens(code)
+        # HOTFIX-GMAIL-PKCE : passer le code_verifier à exchange_code_for_tokens
+        tokens = exchange_code_for_tokens(code, code_verifier=code_verifier)
     except Exception as e:
         logger.error(f"[Gmail] Erreur exchange_code_for_tokens: {e}")
         return HTMLResponse(
