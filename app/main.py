@@ -32,6 +32,7 @@ from app.routes.forced_reset import router as forced_reset_router
 from app.routes.onboarding import router as onboarding_router
 from app.routes.elicitation import router as elicitation_router
 from app.routes.downloads import router as downloads_router
+from app.routes.chat_history import router as chat_history_router
 
 
 # Inactivité (secondes) avant déconnexion automatique. Défaut : 2h.
@@ -114,6 +115,7 @@ app.include_router(forced_reset_router)
 app.include_router(onboarding_router)
 app.include_router(elicitation_router)
 app.include_router(downloads_router)
+app.include_router(chat_history_router)
 
 
 @app.get("/")
