@@ -1,6 +1,6 @@
 """ 
-Raya
-Point d'entree principal.
+Raya — Point d'entree principal.
+PWA-ICON : icones generees depuis app/static/5AEA8C3F-2F59-4ED0-8AAA-3B324C3498DF.png
 """
 import os
 import time
@@ -34,12 +34,7 @@ from app.routes.elicitation import router as elicitation_router
 from app.routes.downloads import router as downloads_router
 from app.routes.chat_history import router as chat_history_router
 
-
-# Inactivite (secondes) avant deconnexion automatique. Defaut : 2h.
 SESSION_INACTIVITY_TIMEOUT = int(os.getenv("SESSION_INACTIVITY_TIMEOUT", "7200"))
-
-# Cache des icones PNG generees
-_PNG_CACHE: dict = {}
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -65,14 +60,12 @@ class InactivityTimeoutMiddleware(BaseHTTPMiddleware):
     _PUBLIC = (
         "/login-app", "/logout", "/health", "/webhook/",
         "/static/", "/sw.js", "/forgot-password",
-        "/reset-password", "/forced-reset",
-        "/pwa/",
+        "/reset-password", "/forced-reset", "/pwa/",
     )
 
     async def dispatch(self, request: Request, call_next):
         if any(request.url.path.startswith(p) for p in self._PUBLIC):
             return await call_next(request)
-
         user = request.session.get("user")
         if user:
             last_activity = request.session.get("last_activity", 0)
@@ -82,19 +75,16 @@ class InactivityTimeoutMiddleware(BaseHTTPMiddleware):
                 from fastapi.responses import RedirectResponse as _Redir
                 return _Redir("/login-app")
             request.session["last_activity"] = now
-
         return await call_next(request)
 
 
 app = FastAPI(title="Raya")
-
 setup_logging()
 logger = get_logger("raya.main")
 
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(InactivityTimeoutMiddleware)
 app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET, max_age=24 * 3600)
-
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 app.include_router(auth_router)
@@ -121,14 +111,10 @@ def health():
     checks = {"app": "Raya", "memory_module": MEMORY_OK}
     try:
         from app.database import get_pg_conn
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("SELECT 1")
-        conn.close()
+        conn = get_pg_conn(); c = conn.cursor(); c.execute("SELECT 1"); conn.close()
         checks["database"] = "ok"
     except Exception as e:
-        checks["database"] = f"error: {str(e)[:100]}"
-        checks["status"] = "degraded"
+        checks["database"] = f"error: {str(e)[:100]}"; checks["status"] = "degraded"
     try:
         from app.config import ANTHROPIC_API_KEY
         checks["llm"] = "ok" if ANTHROPIC_API_KEY else "missing_key"
@@ -151,88 +137,52 @@ def service_worker():
     )
 
 
-def _generate_raya_png(size: int) -> bytes:
+def _generate_raya_png(size: int) -> Response:
     """
-    Genere un PNG carre OPAQUE violet (#6366f1) avec un eclair blanc centre.
-    IMPORTANT: RGB (pas RGBA) — iOS Safari refuse les icones transparentes.
-    iOS ajoute automatiquement ses propres coins arrondis.
+    PWA-ICON : charge le logo Raya depuis app/static/ et le redimensionne.
+    Fallback : carre violet #6366f1 si l'image est absente.
     """
-    if size in _PNG_CACHE:
-        return _PNG_CACHE[size]
+    from PIL import Image
+
     try:
-        from PIL import Image, ImageDraw
-    except ImportError:
-        _PNG_CACHE[size] = (
-            b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
-            b'\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f'
-            b'\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82'
-        )
-        return _PNG_CACHE[size]
+        src = Image.open(
+            "app/static/5AEA8C3F-2F59-4ED0-8AAA-3B324C3498DF.png"
+        ).convert("RGB")
+    except Exception:
+        src = Image.new("RGB", (512, 512), (99, 102, 241))
 
-    # Fond opaque violet — pas de transparence
-    color = (99, 102, 241)  # #6366f1
-    img = Image.new("RGB", (size, size), color)
-    draw = ImageDraw.Draw(img)
-
-    # Eclair blanc (polygone)
-    s = size
-    bolt = [
-        (s * 0.58, s * 0.10),
-        (s * 0.35, s * 0.52),
-        (s * 0.52, s * 0.52),
-        (s * 0.42, s * 0.90),
-        (s * 0.65, s * 0.48),
-        (s * 0.48, s * 0.48),
-    ]
-    draw.polygon(bolt, fill=(255, 255, 255))
-
+    resized = src.resize((size, size), Image.LANCZOS)
     buf = io.BytesIO()
-    img.save(buf, format="PNG", optimize=True)
-    result = buf.getvalue()
-    _PNG_CACHE[size] = result
-    return result
+    resized.save(buf, format="PNG")
+    buf.seek(0)
+    return Response(
+        content=buf.getvalue(),
+        media_type="image/png",
+        headers={"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"},
+    )
 
 
 @app.get("/pwa/icon-180.png")
 def pwa_icon_180():
-    png = _generate_raya_png(180)
-    return Response(
-        content=png,
-        media_type="image/png",
-        headers={"Cache-Control": "public, max-age=604800"},
-    )
+    return _generate_raya_png(180)
 
 
 @app.get("/pwa/icon-192.png")
 def pwa_icon_192():
-    png = _generate_raya_png(192)
-    return Response(
-        content=png,
-        media_type="image/png",
-        headers={"Cache-Control": "public, max-age=604800"},
-    )
+    return _generate_raya_png(192)
 
 
 @app.get("/pwa/icon-512.png")
 def pwa_icon_512():
-    png = _generate_raya_png(512)
-    return Response(
-        content=png,
-        media_type="image/png",
-        headers={"Cache-Control": "public, max-age=604800"},
-    )
+    return _generate_raya_png(512)
 
 
 def _init_heartbeats():
     try:
         from app.database import get_pg_conn
-        conn = get_pg_conn()
-        c = conn.cursor()
-        components = [
-            "scheduler", "proactivity_scan", "heartbeat_morning",
-            "webhook_microsoft", "gmail_polling",
-        ]
-        for component in components:
+        conn = get_pg_conn(); c = conn.cursor()
+        for component in ["scheduler", "proactivity_scan", "heartbeat_morning",
+                          "webhook_microsoft", "gmail_polling"]:
             c.execute("""
                 INSERT INTO system_heartbeat (component, last_seen_at, status)
                 VALUES (%s, NOW(), 'ok')
@@ -240,23 +190,19 @@ def _init_heartbeats():
                 DO UPDATE SET last_seen_at = NOW(), status = 'ok'
                 WHERE system_heartbeat.status != 'disabled'
             """, (component,))
-        conn.commit()
-        conn.close()
-        logger.info(f"[Heartbeat] {len(components)} composants initialises au demarrage")
+        conn.commit(); conn.close()
+        logger.info("[Heartbeat] Composants initialises au demarrage")
     except Exception as e:
-        logger.warning(f"[Heartbeat] Erreur init heartbeats: {e}")
+        logger.warning(f"[Heartbeat] Erreur init: {e}")
 
 
 @app.on_event("startup")
 def startup_event():
-    init_postgres()
-    init_db()
-    init_mail_db()
+    init_postgres(); init_db(); init_mail_db()
     try:
         init_default_user()
     except Exception as e:
         logger.error(f"[Raya] Erreur init_default_user: {e}")
-
     try:
         from app.seeding import seed_tenant, is_tenant_seeded
         admin_username = os.getenv("APP_USERNAME", "guillaume").strip()
@@ -268,18 +214,15 @@ def startup_event():
             logger.info(f"[Raya] {admin_username} deja seede, skip")
     except Exception as e:
         logger.error(f"[Raya] Erreur seeding: {e}")
-
     try:
         from app.tools_registry import seed_tools_registry
         seed_tools_registry()
     except Exception as e:
         logger.error(f"[ToolsRegistry] Erreur seed: {e}")
-
     try:
         job_scheduler.start()
     except Exception as e:
         logger.error(f"[Scheduler] Erreur demarrage: {e}")
-
     _init_heartbeats()
 
 
