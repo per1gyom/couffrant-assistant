@@ -1,9 +1,204 @@
+"""
+Routes de réinitialisation de mot de passe.
+  GET  /forgot-password  → formulaire self-service (ou info si SMTP absent)
+  POST /forgot-password  → traitement avec rate-limit
+  GET  /reset-password   → formulaire nouveau mot de passe (via token)
+  POST /reset-password   → application du nouveau mot de passe
+
+FORGOT-PASSWORD : self-service avec protection :
+  - Rate limit 3 tentatives / IP / heure (in-memory)
+  - Réponse identique qu'un compte existe ou non (anti-énumération)
+  - Log de chaque tentative (IP + identifiant tenté)
+  - Délai constant en cas d'absence pour éviter le timing attack
+  - Désactivé si SMTP non configuré
+"""
+import os
+import time
+import asyncio
+from collections import defaultdict
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import HTMLResponse, RedirectResponse
 from app.app_security import validate_reset_token, consume_reset_token
 from app.config import SUPPORT_EMAIL
 
 router = APIRouter(tags=["reset"])
+
+# ─── Rate limiter léger (in-memory, oublié au redémarrage) ───
+# Structure : {ip: [timestamp, timestamp, ...]} — on garde les 3h récentes max.
+_FORGOT_ATTEMPTS: dict = defaultdict(list)
+_FORGOT_MAX_ATTEMPTS = 3     # par IP
+_FORGOT_WINDOW_SEC  = 3600   # 1 heure
+
+
+def _check_forgot_rate_limit(ip: str) -> tuple[bool, str]:
+    """Retourne (allowed, message). Expurge les entrées périmées."""
+    now = time.time()
+    recent = [t for t in _FORGOT_ATTEMPTS[ip] if now - t < _FORGOT_WINDOW_SEC]
+    _FORGOT_ATTEMPTS[ip] = recent
+    if len(recent) >= _FORGOT_MAX_ATTEMPTS:
+        remaining = int(_FORGOT_WINDOW_SEC - (now - recent[0]))
+        mins = max(1, remaining // 60)
+        return False, (
+            f"Trop de tentatives. Réessayez dans {mins} minute(s) "
+            f"ou contactez <a href='mailto:{SUPPORT_EMAIL}'>{SUPPORT_EMAIL}</a>."
+        )
+    _FORGOT_ATTEMPTS[ip].append(now)
+    return True, ""
+
+
+def _smtp_configured() -> bool:
+    """Retourne True si SMTP est configuré dans les variables d'environnement."""
+    return bool(
+        os.getenv("SMTP_HOST", "").strip()
+        and os.getenv("SMTP_USER", "").strip()
+        and os.getenv("SMTP_PASS", "").strip()
+    )
+
+
+def _find_user_by_login_or_email(login: str) -> dict | None:
+    """
+    Cherche un utilisateur par identifiant (exact) OU par email (case-insensitive).
+    Retourne {"username": str, "email": str|None} ou None.
+    """
+    from app.database import get_pg_conn
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        login_clean = login.strip()
+        c.execute("""
+            SELECT username, email
+            FROM users
+            WHERE username = %s
+               OR (email IS NOT NULL AND lower(email) = lower(%s))
+            LIMIT 1
+        """, (login_clean, login_clean))
+        row = c.fetchone()
+        if not row:
+            return None
+        return {"username": row[0], "email": row[1]}
+    except Exception as e:
+        print(f"[ForgotPassword] Erreur lookup: {e}")
+        return None
+    finally:
+        if conn: conn.close()
+
+
+# ─── HTML ───────────────────────────────────────────────────────────────────
+
+_BASE_STYLE = """
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #f5f7fa; --surface: #ffffff; --border: #dde2ec;
+  --text: #111827; --text-muted: #6b7280;
+  --accent: #6366f1; --accent-hover: #5558e8;
+  --red: #ef4444; --green: #22c55e;
+  --shadow: 0 4px 24px rgba(0,0,0,0.08);
+}
+html, body { height: 100%; background: var(--bg); color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 15px; }
+.page { min-height: 100vh; display: flex; align-items: center;
+  justify-content: center; padding: 24px; }
+.card { background: var(--surface); border: 1px solid var(--border);
+  border-radius: 16px; padding: 40px; width: 100%; max-width: 420px;
+  box-shadow: var(--shadow); }
+.logo { font-size: 28px; font-weight: 800; letter-spacing: -0.5px;
+  margin-bottom: 4px; text-align: center; }
+.logo span { color: var(--accent); }
+.subtitle { font-size: 13px; color: var(--text-muted); margin-bottom: 32px;
+  text-align: center; }
+h2 { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+.desc { font-size: 13px; color: var(--text-muted); line-height: 1.6;
+  margin-bottom: 24px; }
+label { display: block; font-size: 11px; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+input[type=text], input[type=email] {
+  width: 100%; padding: 13px 16px;
+  background: #f9fafb; border: 1px solid var(--border);
+  border-radius: 10px; color: var(--text); font-size: 15px;
+  margin-bottom: 22px; outline: none; transition: border-color 0.15s; }
+input:focus { border-color: var(--accent); background: #fff; }
+button[type=submit] { width: 100%; padding: 14px;
+  background: var(--accent); color: #fff; border: none;
+  border-radius: 10px; font-size: 15px; font-weight: 600; cursor: pointer;
+  transition: background 0.15s; }
+button[type=submit]:hover { background: var(--accent-hover); }
+button[type=submit]:disabled { opacity: 0.6; cursor: not-allowed; }
+.msg { padding: 12px 16px; border-radius: 8px; font-size: 13px;
+  margin-bottom: 20px; line-height: 1.5; }
+.msg.ok  { background: rgba(34,197,94,0.08); border: 1px solid rgba(34,197,94,0.25);
+  color: #16a34a; }
+.msg.err { background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.25);
+  color: var(--red); }
+.msg.info { background: rgba(99,102,241,0.07); border: 1px solid rgba(99,102,241,0.2);
+  color: #4338ca; }
+.back { display: block; text-align: center; margin-top: 24px;
+  font-size: 13px; color: var(--text-muted); text-decoration: none; }
+.back:hover { color: var(--accent); }
+"""
+
+# Page quand SMTP n'est pas configuré
+_PAGE_SMTP_MISSING = f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Raya — Mot de passe oublié</title>
+<style>{_BASE_STYLE}</style></head>
+<body><div class="page"><div class="card">
+  <div class="logo">⚡ Ra<span>ya</span></div>
+  <p class="subtitle">Couffrant Solar — Assistant IA</p>
+  <h2>Mot de passe oublié ?</h2>
+  <div class="msg info">
+    La réinitialisation par email n'est pas encore activée.<br>
+    Contactez votre administrateur :
+    <strong><a href="mailto:{{support_email}}" style="color:#4338ca">{{support_email}}</a></strong>
+  </div>
+  <a href="/login-app" class="back">← Retour au login</a>
+</div></div></body></html>"""
+
+# Formulaire self-service
+_PAGE_FORM = f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Raya — Mot de passe oublié</title>
+<style>{_BASE_STYLE}</style></head>
+<body><div class="page"><div class="card">
+  <div class="logo">⚡ Ra<span>ya</span></div>
+  <p class="subtitle">Couffrant Solar — Assistant IA</p>
+  <h2>Mot de passe oublié ?</h2>
+  <p class="desc">
+    Entrez votre identifiant ou adresse email. Si un compte correspondant
+    est trouvé, vous recevrez un lien de réinitialisation valable 24 h.
+  </p>
+  {{msg_block}}
+  <form method="post" action="/forgot-password">
+    <label>Identifiant ou adresse email</label>
+    <input type="text" name="login" placeholder="ex : guillaume ou mon@email.fr"
+           autocomplete="username" required autofocus value="{{prefill}}">
+    <button type="submit">Envoyer le lien de réinitialisation</button>
+  </form>
+  <a href="/login-app" class="back">← Retour au login</a>
+</div></div></body></html>"""
+
+# Réponse identique quelle que soit la situation (anti-énumération)
+_PAGE_SENT = f"""<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Raya — Lien envoyé</title>
+<style>{_BASE_STYLE}</style></head>
+<body><div class="page"><div class="card">
+  <div class="logo">⚡ Ra<span>ya</span></div>
+  <p class="subtitle">Couffrant Solar — Assistant IA</p>
+  <h2>Vérifiez votre boîte mail</h2>
+  <div class="msg ok">
+    Si un compte existe avec ces informations, un email de réinitialisation
+    vient d'être envoyé. Le lien est valable 24 heures.<br><br>
+    Pensez à vérifier vos spams.
+  </div>
+  <a href="/login-app" class="back">← Retour au login</a>
+</div></div></body></html>"""
+
+# ─── Page de réinitialisation du mot de passe (token) ───────────────────────
 
 RESET_HTML = """
 <!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
@@ -33,71 +228,80 @@ button{{width:100%;padding:14px;background:#1565c0;color:white;border:none;borde
 </div></body></html>
 """
 
-FORGOT_HTML = """<!DOCTYPE html>
-<html lang="fr">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Raya — Mot de passe oublié</title>
-<style>
-*, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-:root {{
-  --bg: #f5f7fa; --surface: #ffffff; --border: #dde2ec;
-  --text: #111827; --text-muted: #6b7280;
-  --accent: #6366f1; --accent-hover: #5558e8;
-  --shadow: 0 4px 24px rgba(0,0,0,0.08);
-}}
-html, body {{ height: 100%; background: var(--bg); color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  font-size: 15px; }}
-.page {{ min-height: 100vh; display: flex; align-items: center;
-  justify-content: center; padding: 24px; }}
-.card {{ background: var(--surface); border: 1px solid var(--border);
-  border-radius: 16px; padding: 40px; width: 100%; max-width: 400px;
-  box-shadow: var(--shadow); text-align: center; }}
-.logo {{ font-size: 28px; font-weight: 800; letter-spacing: -0.5px;
-  margin-bottom: 6px; }}
-.logo span {{ color: var(--accent); }}
-.subtitle {{ font-size: 13px; color: var(--text-muted); margin-bottom: 32px; }}
-.icon {{ font-size: 40px; margin-bottom: 16px; }}
-h2 {{ font-size: 20px; font-weight: 700; margin-bottom: 12px; }}
-.message {{ font-size: 14px; color: var(--text-muted); line-height: 1.6;
-  margin-bottom: 8px; }}
-.email-link {{ color: var(--accent); font-weight: 600; text-decoration: none; }}
-.email-link:hover {{ text-decoration: underline; }}
-.back-btn {{ display: inline-block; margin-top: 28px; background: var(--accent);
-  color: #fff; border: none; border-radius: 10px; padding: 12px 24px;
-  font-size: 14px; font-weight: 600; text-decoration: none;
-  transition: background 0.15s; cursor: pointer; }}
-.back-btn:hover {{ background: var(--accent-hover); }}
-</style>
-</head>
-<body>
-<div class="page">
-  <div class="card">
-    <div class="logo">⚡ Ra<span>ya</span></div>
-    <p class="subtitle">Couffrant Solar — Assistant IA</p>
-    <div class="icon">🔑</div>
-    <h2>Mot de passe oublié ?</h2>
-    <p class="message">
-      Pour réinitialiser votre mot de passe, contactez votre administrateur :
-    </p>
-    <p class="message" style="margin-top: 10px;">
-      <a href="mailto:{support_email}" class="email-link">{support_email}</a>
-    </p>
-    <p class="message" style="margin-top: 16px; font-size: 13px;">
-      Il vous générera un nouveau mot de passe temporaire.
-    </p>
-    <a href="/login-app" class="back-btn">Retour au login</a>
-  </div>
-</div>
-</body>
-</html>"""
-
+# ─── Routes ─────────────────────────────────────────────────────────────────
 
 @router.get("/forgot-password", response_class=HTMLResponse)
 def forgot_password_page():
-    return HTMLResponse(FORGOT_HTML.format(support_email=SUPPORT_EMAIL))
+    if not _smtp_configured():
+        return HTMLResponse(
+            _PAGE_SMTP_MISSING.replace("{support_email}", SUPPORT_EMAIL)
+                              .replace("{support_email}", SUPPORT_EMAIL)
+        )
+    return HTMLResponse(
+        _PAGE_FORM.format(msg_block="", prefill="")
+    )
+
+
+@router.post("/forgot-password", response_class=HTMLResponse)
+async def forgot_password_submit(
+    request: Request,
+    login: str = Form(...),
+):
+    ip = request.client.host if request.client else "unknown"
+    login_clean = login.strip()
+
+    # 0. SMTP toujours requis
+    if not _smtp_configured():
+        return HTMLResponse(
+            _PAGE_SMTP_MISSING.replace("{support_email}", SUPPORT_EMAIL)
+                              .replace("{support_email}", SUPPORT_EMAIL)
+        )
+
+    # 1. Rate limit (3 tentatives / IP / heure)
+    allowed, rl_msg = _check_forgot_rate_limit(ip)
+    if not allowed:
+        print(f"[ForgotPassword] Rate limit dépassé — IP:{ip} login:{login_clean!r}")
+        return HTMLResponse(
+            _PAGE_FORM.format(
+                msg_block=f'<div class="msg err">{rl_msg}</div>',
+                prefill=login_clean,
+            )
+        )
+
+    print(f"[ForgotPassword] Tentative — IP:{ip} login:{login_clean!r}")
+
+    # 2. Chercher l'utilisateur (nom OU email)
+    user = _find_user_by_login_or_email(login_clean)
+
+    # 3. Toujours attendre le même temps (anti-timing attack)
+    #    On fait la vraie opération si possible, sinon on simule le délai.
+    if user and user.get("email"):
+        # Cas nominal : envoyer le mail
+        try:
+            from app.security_users import generate_reset_token
+            generate_reset_token(user["username"])
+            print(
+                f"[ForgotPassword] Lien envoyé → {user['username']} "
+                f"({user['email']}) depuis IP:{ip}"
+            )
+        except Exception as e:
+            print(f"[ForgotPassword] Erreur generate_reset_token: {e}")
+        # Pas de délai supplémentaire nécessaire (appel réseau a déjà pris du temps)
+    else:
+        # Cas : user absent ou sans email → on simule le temps de traitement
+        # pour éviter de révéler par timing si le compte existe.
+        await asyncio.sleep(0.4)
+        if user:
+            # User trouvé mais sans email : on log seulement en interne
+            print(
+                f"[ForgotPassword] Compte sans email → {user['username']} "
+                f"(impossible d'envoyer le lien) IP:{ip}"
+            )
+        else:
+            print(f"[ForgotPassword] Compte introuvable → login:{login_clean!r} IP:{ip}")
+
+    # 4. Réponse TOUJOURS identique (anti-énumération)
+    return HTMLResponse(_PAGE_SENT)
 
 
 @router.get("/reset-password", response_class=HTMLResponse)
@@ -111,14 +315,14 @@ def reset_password_page(token: str = ""):
     if not info:
         return HTMLResponse(RESET_HTML.format(
             sub="Ce lien est expiré ou déjà utilisé.",
-            msg_block='<div class="msg err">Lien invalide, expiré ou déjà utilisé. Demandez un nouveau lien à votre administrateur.</div>',
+            msg_block='<div class="msg err">Lien invalide, expiré ou déjà utilisé. Demandez un nouveau lien.</div>',
             form_block=""))
     form = f"""
     <p style="font-size:13px;color:#888;margin-bottom:20px">Compte : <strong style="color:#ccc">{info['username']}</strong></p>
     <form method="post" action="/reset-password">
       <input type="hidden" name="token" value="{token}">
       <label>Nouveau mot de passe</label>
-      <input type="password" name="password" placeholder="8 caractères minimum" required>
+      <input type="password" name="password" placeholder="12 caractères min, maj, chiffre, spécial" required>
       <label>Confirmer</label>
       <input type="password" name="confirm" placeholder="Répéter" required>
       <button type="submit">Mettre à jour →</button>
