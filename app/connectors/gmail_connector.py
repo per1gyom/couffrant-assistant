@@ -9,12 +9,15 @@ Variables d'environnement OBLIGATOIRES pour activer Gmail :
   GMAIL_REDIRECT_URI   : https://[domaine-railway].railway.app/auth/gmail/callback
 
 Les tokens sont stockés dans la table gmail_tokens (un enregistrement par user).
-HOTFIX-GMAIL-TOKENS : _save_refreshed_credentials() gère l'absence de updated_at.
-HOTFIX-GMAIL-PKCE   : get_gmail_auth_url() retourne (auth_url, code_verifier).
-                      exchange_code_for_tokens() accepte code_verifier pour PKCE.
+
+HOTFIX-GMAIL-PKCE v2 : contourne PKCE en construisant l'URL manuellement.
+  Les web apps avec client_secret n'ont pas besoin de PKCE.
+  L'échange de tokens se fait aussi par requête directe (pas via Flow).
 """
 import os
 import json
+import urllib.parse
+import requests as http_requests
 from app.database import get_pg_conn
 from app.logging_config import get_logger
 
@@ -36,77 +39,34 @@ def is_configured() -> bool:
     return bool(GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET)
 
 
-def get_gmail_auth_url() -> tuple:
+def get_gmail_auth_url() -> str:
     """
     Génère l'URL d'autorisation Google OAuth2 pour Gmail.
+    Retourne juste l'URL (string), pas de tuple.
 
-    HOTFIX-GMAIL-PKCE : retourne un tuple (auth_url, code_verifier).
-    Le code_verifier doit être conservé (ex: en session) et passé à
-    exchange_code_for_tokens() pour satisfaire le flux PKCE de Google.
-    Si google_auth_oauthlib est absent (fallback URL manuelle), code_verifier=None.
-
-    Lève une RuntimeError si GMAIL_REDIRECT_URI est manquante.
+    PKCE désactivé volontairement : on est une web app avec client_secret,
+    pas besoin de PKCE. Ça évite le bug "(invalid_grant) Missing code verifier".
     """
     if not GMAIL_REDIRECT_URI:
-        logger.error(
-            "[Gmail] GMAIL_REDIRECT_URI manquant ! "
-            "Configurez GMAIL_REDIRECT_URI=https://[domaine].railway.app/auth/gmail/callback "
-            "dans les variables Railway."
-        )
         raise RuntimeError(
             "GMAIL_REDIRECT_URI non configuré. "
             "Ajoutez cette variable dans Railway : "
             "GMAIL_REDIRECT_URI=https://[votre-domaine].railway.app/auth/gmail/callback"
         )
     if not is_configured():
-        logger.error("[Gmail] GMAIL_CLIENT_ID ou GMAIL_CLIENT_SECRET manquant")
         raise RuntimeError("GMAIL_CLIENT_ID et GMAIL_CLIENT_SECRET doivent être configurés.")
 
-    try:
-        from google_auth_oauthlib.flow import Flow
-    except ImportError:
-        # Fallback manuel sans PKCE si google-auth-oauthlib absent
-        logger.warning("[Gmail] google-auth-oauthlib absent, génération URL manuelle (pas de PKCE)")
-        import urllib.parse
-        params = {
-            "client_id": GMAIL_CLIENT_ID,
-            "redirect_uri": GMAIL_REDIRECT_URI,
-            "response_type": "code",
-            "scope": " ".join(GMAIL_SCOPES),
-            "access_type": "offline",
-            "prompt": "consent",
-        }
-        url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
-        return url, None  # pas de code_verifier dans ce cas
-
-    flow = Flow.from_client_config(
-        {
-            "web": {
-                "client_id": GMAIL_CLIENT_ID,
-                "client_secret": GMAIL_CLIENT_SECRET,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [GMAIL_REDIRECT_URI],
-            }
-        },
-        scopes=GMAIL_SCOPES,
-    )
-    flow.redirect_uri = GMAIL_REDIRECT_URI
-    auth_url, _ = flow.authorization_url(
-        access_type="offline",
-        prompt="consent",
-        include_granted_scopes="true",
-    )
-
-    # HOTFIX-GMAIL-PKCE : récupérer le code_verifier généré par le Flow PKCE.
-    # flow._code_verifier est défini après authorization_url() si PKCE est actif.
-    code_verifier = getattr(flow, "_code_verifier", None)
-    if code_verifier:
-        logger.debug("[Gmail] PKCE code_verifier récupéré")
-    else:
-        logger.debug("[Gmail] Pas de code_verifier PKCE (Flow sans PKCE)")
-
-    return auth_url, code_verifier
+    params = {
+        "client_id": GMAIL_CLIENT_ID,
+        "redirect_uri": GMAIL_REDIRECT_URI,
+        "response_type": "code",
+        "scope": " ".join(GMAIL_SCOPES),
+        "access_type": "offline",
+        "prompt": "consent",
+    }
+    url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
+    logger.info(f"[Gmail] URL auth générée (sans PKCE) → redirect_uri={GMAIL_REDIRECT_URI}")
+    return url
 
 
 def exchange_code_for_tokens(code: str, code_verifier: str = None) -> dict:
@@ -114,59 +74,57 @@ def exchange_code_for_tokens(code: str, code_verifier: str = None) -> dict:
     Échange le code OAuth2 contre des tokens Google.
     Retourne {"access_token", "refresh_token", "email"}.
 
-    HOTFIX-GMAIL-PKCE : code_verifier doit être passé s'il a été généré lors
-    de get_gmail_auth_url(), sinon Google retourne "(invalid_grant) Missing
-    code verifier". Si code_verifier est None, tente l'échange sans (compat.).
+    Utilise une requête HTTP directe (pas Flow) pour éviter les problèmes PKCE.
     """
     if not is_configured() or not GMAIL_REDIRECT_URI:
         raise RuntimeError("Gmail non configuré (CLIENT_ID / CLIENT_SECRET / REDIRECT_URI manquants)")
 
-    try:
-        from google_auth_oauthlib.flow import Flow
-        from google.oauth2 import id_token
-        from google.auth.transport import requests as g_requests
-    except ImportError:
-        raise RuntimeError("google-auth-oauthlib non installé. Ajoutez-le dans requirements.txt")
+    # Requête directe à Google token endpoint — pas de PKCE
+    token_data = {
+        "code": code,
+        "client_id": GMAIL_CLIENT_ID,
+        "client_secret": GMAIL_CLIENT_SECRET,
+        "redirect_uri": GMAIL_REDIRECT_URI,
+        "grant_type": "authorization_code",
+    }
 
-    flow = Flow.from_client_config(
-        {
-            "web": {
-                "client_id": GMAIL_CLIENT_ID,
-                "client_secret": GMAIL_CLIENT_SECRET,
-                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "redirect_uris": [GMAIL_REDIRECT_URI],
-            }
-        },
-        scopes=GMAIL_SCOPES,
+    resp = http_requests.post(
+        "https://oauth2.googleapis.com/token",
+        data=token_data,
+        timeout=15,
     )
-    flow.redirect_uri = GMAIL_REDIRECT_URI
 
-    # HOTFIX-GMAIL-PKCE : transmettre le code_verifier au fetch_token si disponible
-    fetch_kwargs = {"code": code}
-    if code_verifier:
-        fetch_kwargs["code_verifier"] = code_verifier
-        logger.debug("[Gmail] exchange_code_for_tokens avec PKCE code_verifier")
-    else:
-        logger.debug("[Gmail] exchange_code_for_tokens sans code_verifier")
+    if resp.status_code != 200:
+        error_detail = resp.text[:300]
+        logger.error(f"[Gmail] Token exchange failed: {resp.status_code} — {error_detail}")
+        raise RuntimeError(f"Google token exchange failed: {error_detail}")
 
-    flow.fetch_token(**fetch_kwargs)
-    creds = flow.credentials
+    token_json = resp.json()
+    access_token = token_json.get("access_token", "")
+    refresh_token = token_json.get("refresh_token", "")
+    id_token_raw = token_json.get("id_token", "")
 
+    # Extraire l'email depuis l'id_token (JWT décodé basique)
     email = ""
-    try:
-        id_info = id_token.verify_oauth2_token(
-            creds.id_token, g_requests.Request(), GMAIL_CLIENT_ID
-        )
-        email = id_info.get("email", "")
-    except Exception as e:
-        logger.warning(f"[Gmail] Impossible de lire l'email depuis id_token: {e}")
+    if id_token_raw:
+        try:
+            import base64
+            # id_token est un JWT : header.payload.signature
+            payload_b64 = id_token_raw.split(".")[1]
+            # Ajouter le padding manquant
+            payload_b64 += "=" * (4 - len(payload_b64) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+            email = payload.get("email", "")
+        except Exception as e:
+            logger.warning(f"[Gmail] Impossible de décoder id_token: {e}")
+
+    logger.info(f"[Gmail] Tokens obtenus — email={email}, refresh={'oui' if refresh_token else 'non'}")
 
     return {
-        "access_token": creds.token or "",
-        "refresh_token": creds.refresh_token or "",
+        "access_token": access_token,
+        "refresh_token": refresh_token,
         "email": email,
-        "expiry": creds.expiry.isoformat() if creds.expiry else None,
+        "expiry": None,
     }
 
 
@@ -174,8 +132,6 @@ def get_gmail_service(username: str):
     """
     Retourne un service Gmail authentifié pour l'utilisateur.
     Rafraîchit automatiquement le token si expiré.
-    Lit les credentials depuis la table gmail_tokens.
-    Retourne None si pas de credentials ou si non configuré.
     """
     if not is_configured():
         return None
@@ -184,7 +140,7 @@ def get_gmail_service(username: str):
         from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
     except ImportError:
-        logger.warning("[Gmail] google-auth-oauthlib / google-api-python-client non installés")
+        logger.warning("[Gmail] google-api-python-client non installé")
         return None
 
     conn = None
@@ -251,10 +207,7 @@ def get_gmail_service(username: str):
 
 
 def _save_refreshed_credentials(username: str, creds) -> None:
-    """
-    Sauvegarde les credentials rafraîchis dans gmail_tokens.
-    Robuste si updated_at n'existe pas encore (avant migration HOTFIX-GMAIL-TOKENS).
-    """
+    """Sauvegarde les credentials rafraîchis dans gmail_tokens."""
     conn = None
     try:
         conn = get_pg_conn()
@@ -276,7 +229,6 @@ def _save_refreshed_credentials(username: str, creds) -> None:
                 SET access_token = EXCLUDED.access_token
             """, (username, creds.token, creds.refresh_token))
         conn.commit()
-        logger.debug(f"[Gmail] Credentials rafraîchis sauvegardés pour {username}")
     except Exception as e:
         logger.error(f"[Gmail] Erreur sauvegarde credentials {username}: {e}")
     finally:
@@ -284,11 +236,7 @@ def _save_refreshed_credentials(username: str, creds) -> None:
 
 
 def fetch_new_messages(username: str, max_results: int = 20) -> list:
-    """
-    Récupère les nouveaux mails Gmail depuis le dernier polling.
-    Utilise historyId pour le polling incrémental.
-    Retourne une liste de dicts {message_id, sender, subject, preview, received_at}.
-    """
+    """Récupère les nouveaux mails Gmail depuis le dernier polling."""
     service = get_gmail_service(username)
     if not service:
         return []
