@@ -156,6 +156,25 @@
       <div class="d-btn" onclick="drawerAction(this,'/onboarding/restart','onb-restart');closeDrawer()"><span class="d-btn-icon">🔁</span><div class="d-btn-body"><span class="d-btn-label">Relancer l'onboarding</span><span class="d-btn-desc">Recommencer la configuration initiale du profil Raya.</span><div class="d-btn-result" id="result-onb-restart"></div></div></div>
     </div>
     <div class="d-sep"></div>
+    <!-- GMAIL-FIX : bouton connexion Gmail -->
+    <div class="d-group">
+      <div class="d-group-title">📧 Connexions</div>
+      <div class="d-btn nav" onclick="window.location.href='/login/gmail'">
+        <span class="d-btn-icon">✉️</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Connecter Gmail</span>
+          <span class="d-btn-desc">Autoriser Raya à lire tes mails Gmail via OAuth2 Google. Tu seras redirigé vers Google puis revenu ici automatiquement.</span>
+        </div>
+      </div>
+      <div class="d-btn nav" onclick="window.location.href='/login'">
+        <span class="d-btn-icon">🔵</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Reconnecter Microsoft 365</span>
+          <span class="d-btn-desc">Renouveler l'autorisation Microsoft si le token a expiré.</span>
+        </div>
+      </div>
+    </div>
+    <div class="d-sep"></div>
     <div class="d-group">
       <div class="d-group-title">🔗 Navigation</div>
       <div class="d-btn nav" onclick="window.open('/admin/panel','_blank')"><span class="d-btn-icon">🖥️</span><div class="d-btn-body"><span class="d-btn-label">Panel admin complet</span><span class="d-btn-desc">Gestion des utilisateurs, règles, insights, actions avancées.</span></div></div>
@@ -182,6 +201,23 @@
         .catch(err => console.warn('[SW] Enregistrement échoué:', err));
     });
   }
+
+  // Toast si retour du callback Gmail
+  (function(){
+    const params = new URLSearchParams(window.location.search);
+    if(params.get('gmail_connected')==='1'){
+      window.history.replaceState({}, '', '/chat');
+      setTimeout(()=>{
+        if(typeof showToast === 'function') showToast('✅ Gmail connecté avec succès !');
+      }, 800);
+    }
+    if(params.get('gmail_error')){
+      window.history.replaceState({}, '', '/chat');
+      setTimeout(()=>{
+        if(typeof showToast === 'function') showToast('❌ Connexion Gmail refusée : ' + params.get('gmail_error'));
+      }, 800);
+    }
+  })();
 </script>
 </body>
 </html>
