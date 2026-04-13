@@ -1,5 +1,9 @@
 """
 Gestion des utilisateurs : CRUD, auth, reset MDP, forçage redéfinition MDP.
+
+USER-PHONE  : champ phone en base + get_user_phone(username) centralisé.
+LOGIN-EMAIL : authenticate() accepte username OU email.
+              resolve_username() retourne le vrai username depuis un login quelconque.
 """
 import os
 import secrets
@@ -87,11 +91,42 @@ def get_users_in_tenant(tenant_id: str) -> list:
         if conn: conn.close()
 
 
-def authenticate(username: str, password: str) -> bool:
+# ─── LOGIN PAR EMAIL (USER-PHONE / LOGIN-EMAIL) ───
+
+def resolve_username(login: str) -> str | None:
+    """
+    Retourne le vrai username à partir d'un identifiant qui peut être
+    soit le username exact, soit l'adresse email (case-insensitive).
+    Utilisé pour le login par email.
+    """
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("SELECT password_hash FROM users WHERE username = %s", (username.strip(),))
+        c.execute("""
+            SELECT username FROM users
+            WHERE username = %s OR lower(email) = lower(%s)
+            LIMIT 1
+        """, (login.strip(), login.strip()))
+        row = c.fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+    finally:
+        if conn: conn.close()
+
+
+def authenticate(username: str, password: str) -> bool:
+    """
+    Vérifie le mot de passe. Accepte username OU email comme identifiant.
+    Retourne True si les credentials sont valides, False sinon.
+    """
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("""
+            SELECT password_hash FROM users
+            WHERE username = %s OR lower(email) = lower(%s)
+        """, (username.strip(), username.strip()))
         row = c.fetchone()
         if not row: return False
         return verify_password(password, row[0])
@@ -115,13 +150,53 @@ def get_user_scope(username: str) -> str:
         if conn: conn.close()
 
 
+# ─── TÉLÉPHONE UTILISATEUR (USER-PHONE) ───
+
+def get_user_phone(username: str) -> str:
+    """
+    Retourne le numéro de téléphone de l'utilisateur.
+    Cherche d'abord dans la colonne phone de la table users,
+    puis se rabat sur les variables d'environnement (compatibilité).
+
+    Priorité des variables d'env :
+      NOTIFICATION_PHONE_{USERNAME}
+      NOTIFICATION_PHONE_ADMIN
+      NOTIFICATION_PHONE_GUILLAUME
+      NOTIFICATION_PHONE_DEFAULT
+    """
+    # 1. Chercher en base (priorité)
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("SELECT phone FROM users WHERE username = %s", (username.strip(),))
+        row = c.fetchone()
+        if row and row[0] and row[0].strip():
+            return row[0].strip()
+    except Exception:
+        pass
+    finally:
+        if conn: conn.close()
+
+    # 2. Fallback variables d'environnement (compatibilité ascendante)
+    phone = os.getenv(f"NOTIFICATION_PHONE_{username.upper()}", "").strip()
+    if not phone:
+        phone = os.getenv("NOTIFICATION_PHONE_ADMIN", "").strip()
+    if not phone:
+        phone = os.getenv("NOTIFICATION_PHONE_GUILLAUME", "").strip()
+    if not phone:
+        phone = os.getenv("NOTIFICATION_PHONE_DEFAULT", "").strip()
+    return phone
+
+
 def create_user(username: str, password: str, scope: str = SCOPE_USER,
                 tools: list = None, tenant_id: str = DEFAULT_TENANT,
-                email: str = None, force_reset: bool = True) -> dict:
+                email: str = None, phone: str = None,
+                force_reset: bool = True) -> dict:
     """
     Crée un utilisateur.
     force_reset=True (défaut) : l'utilisateur devra changer son mot de passe à la première connexion.
     Après création, insère dans user_tenant_access (BUG 1).
+    phone : numéro de téléphone pour les notifications WhatsApp/SMS (optionnel).
     """
     if not username or not password:
         return {"status": "error", "message": "Identifiant et mot de passe requis."}
@@ -134,10 +209,10 @@ def create_user(username: str, password: str, scope: str = SCOPE_USER,
     try:
         conn = get_pg_conn(); c = conn.cursor()
         c.execute("""
-            INSERT INTO users (username, password_hash, email, scope, tenant_id, must_reset_password)
-            VALUES (%s, %s, %s, %s, %s, %s)
+            INSERT INTO users (username, password_hash, email, phone, scope, tenant_id, must_reset_password)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (username.strip(), hash_password(password), email or None,
-               scope, effective_tenant, force_reset))
+               phone or None, scope, effective_tenant, force_reset))
         conn.commit()
     except Exception as e:
         if "unique" in str(e).lower():
@@ -177,7 +252,8 @@ def create_user(username: str, password: str, scope: str = SCOPE_USER,
 
 
 def update_user(username: str, email: str = None, scope: str = None,
-                display_name: str = None) -> dict:
+                display_name: str = None, phone: str = None) -> dict:
+    """Met à jour email, scope et/ou phone d'un utilisateur."""
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -185,6 +261,8 @@ def update_user(username: str, email: str = None, scope: str = None,
             c.execute("UPDATE users SET email=%s WHERE username=%s", (email or None, username))
         if scope is not None and scope in ALL_SCOPES:
             c.execute("UPDATE users SET scope=%s WHERE username=%s", (scope, username))
+        if phone is not None:
+            c.execute("UPDATE users SET phone=%s WHERE username=%s", (phone or None, username))
         conn.commit()
         return {"status": "ok"}
     except Exception as e:
@@ -267,13 +345,15 @@ def list_users() -> list:
         conn = get_pg_conn(); c = conn.cursor()
         c.execute("""
             SELECT username, email, scope, tenant_id, last_login, created_at,
-                   COALESCE(account_locked, false), COALESCE(must_reset_password, false)
+                   COALESCE(account_locked, false), COALESCE(must_reset_password, false),
+                   phone
             FROM users ORDER BY tenant_id, created_at
         """)
         return [{
             "username": r[0], "email": r[1], "scope": r[2], "tenant_id": r[3],
             "last_login": str(r[4]) if r[4] else None, "created_at": str(r[5]),
-            "account_locked": bool(r[6]), "must_reset_password": bool(r[7])
+            "account_locked": bool(r[6]), "must_reset_password": bool(r[7]),
+            "phone": r[8] or "",
         } for r in c.fetchall()]
     except Exception:
         return []
