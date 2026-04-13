@@ -1,224 +1,131 @@
 """
-Création de fichiers PDF et Excel à la demande de l'utilisateur. (TOOL-CREATE-FILES)
-
-Fonctions exportées :
-  create_pdf(title, content, username)         → dict {file_id, filename, path}
-  create_excel(title, data, headers, username) → dict {file_id, filename, path}
-
-Les fichiers sont générés dans /tmp/{uuid}.{ext} et servis via GET /download/{file_id}.
-Durée de vie : les fichiers /tmp sont supprimés au redémarrage Railway (éphémère).
+Générateur de fichiers PDF et Excel pour Raya.
+Utilisé par les actions CREATE_PDF et CREATE_EXCEL.
 """
 import os
-import re
 import uuid
-from datetime import date
+import re
+from datetime import datetime
+from app.logging_config import get_logger
+
+logger = get_logger("raya.file_creator")
 
 
 def _slugify(text: str) -> str:
-    """Convertit un titre en nom de fichier safe."""
+    """Transforme un titre en nom de fichier propre."""
     text = text.lower().strip()
-    text = re.sub(r'[àáâãäå]', 'a', text)
+    text = re.sub(r'[àáâãä]', 'a', text)
     text = re.sub(r'[èéêë]', 'e', text)
     text = re.sub(r'[ìíîï]', 'i', text)
     text = re.sub(r'[òóôõö]', 'o', text)
     text = re.sub(r'[ùúûü]', 'u', text)
-    text = re.sub(r'[ç]', 'c', text)
-    text = re.sub(r'[^a-z0-9]', '_', text)
-    text = re.sub(r'_+', '_', text).strip('_')
-    return text[:50] or "fichier"
+    text = re.sub(r'[^a-z0-9]+', '_', text)
+    return text.strip('_')[:50]
 
 
-def create_pdf(title: str, content: str, username: str) -> dict:
+def create_pdf(title: str, content: str, username: str = "") -> dict:
     """
-    Génère un PDF professionnel avec ReportLab.
-
-    content : texte libre avec \\n pour les sauts de ligne.
-               Les lignes au format "col1|col2|col3" sont rendues comme tableaux.
-
-    Retourne {"file_id": str, "filename": str, "path": str}.
-    Lève RuntimeError si reportlab n'est pas installé.
+    Crée un PDF avec titre et contenu texte.
+    Retourne {"file_id", "filename", "path"}.
     """
     try:
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.units import cm
-        from reportlab.lib import colors
-        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.units import mm
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.colors import HexColor
     except ImportError:
-        raise RuntimeError(
-            "reportlab non installé. Ajoutez 'reportlab' dans requirements.txt."
-        )
+        return {"error": "reportlab non installé"}
 
     file_id = str(uuid.uuid4())
-    slug = _slugify(title)
-    filename = f"{slug}.pdf"
+    filename = f"{_slugify(title)}.pdf"
     path = f"/tmp/{file_id}.pdf"
 
-    doc = SimpleDocTemplate(
-        path,
-        pagesize=A4,
-        rightMargin=2 * cm, leftMargin=2 * cm,
-        topMargin=2 * cm, bottomMargin=2 * cm,
-    )
+    doc = SimpleDocTemplate(path, pagesize=A4,
+                            leftMargin=25*mm, rightMargin=25*mm,
+                            topMargin=20*mm, bottomMargin=20*mm)
     styles = getSampleStyleSheet()
 
+    # Style en-tête
     header_style = ParagraphStyle(
-        'RayaHeader',
-        parent=styles['Heading1'],
-        fontSize=16,
-        textColor=colors.HexColor('#6366f1'),
-        spaceAfter=4,
-    )
-    meta_style = ParagraphStyle(
-        'RayaMeta',
-        parent=styles['Normal'],
-        fontSize=9,
-        textColor=colors.grey,
-        spaceAfter=14,
-    )
-    body_style = ParagraphStyle(
-        'RayaBody',
-        parent=styles['Normal'],
-        fontSize=10,
-        leading=15,
+        'RayaHeader', parent=styles['Heading1'],
+        fontSize=16, textColor=HexColor('#6366f1'),
         spaceAfter=6,
     )
+    date_style = ParagraphStyle(
+        'RayaDate', parent=styles['Normal'],
+        fontSize=9, textColor=HexColor('#6b7280'),
+        spaceAfter=16,
+    )
+    body_style = ParagraphStyle(
+        'RayaBody', parent=styles['Normal'],
+        fontSize=11, leading=16, spaceAfter=8,
+    )
 
-    story = []
+    elements = []
+    elements.append(Paragraph(f"⚡ Raya — {title}", header_style))
+    elements.append(Paragraph(datetime.now().strftime("%d/%m/%Y %H:%M"), date_style))
+    elements.append(Spacer(1, 8))
 
-    # En-tête : logo texte, titre, date + auteur
-    story.append(Paragraph(f"\u26a1 Raya \u2014 {title}", header_style))
-    story.append(Paragraph(
-        f"Généré le {date.today().strftime('%d/%m/%Y')}\u00a0\u00b7\u00a0{username}",
-        meta_style,
-    ))
-    story.append(Spacer(1, 0.3 * cm))
-
-    # Corps : détection automatique des blocs tableau (lignes avec |)
-    lines = content.split('\n')
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        if '|' in line:
-            # Collecte toutes les lignes consécutives avec | → bloc tableau
-            table_lines = []
-            while i < len(lines) and '|' in lines[i]:
-                row = [c.strip() for c in lines[i].split('|')]
-                table_lines.append(row)
-                i += 1
-            if table_lines:
-                col_count = max(len(r) for r in table_lines)
-                # Normalise la largeur de chaque ligne
-                data = [r + [''] * (col_count - len(r)) for r in table_lines]
-                t = Table(data, repeatRows=1)
-                t.setStyle(TableStyle([
-                    ('BACKGROUND',     (0, 0), (-1, 0),  colors.HexColor('#1e3a5f')),
-                    ('TEXTCOLOR',      (0, 0), (-1, 0),  colors.white),
-                    ('FONTNAME',       (0, 0), (-1, 0),  'Helvetica-Bold'),
-                    ('FONTSIZE',       (0, 0), (-1, -1), 9),
-                    ('GRID',           (0, 0), (-1, -1), 0.5, colors.HexColor('#cccccc')),
-                    ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f5f7fa')]),
-                    ('TOPPADDING',     (0, 0), (-1, -1), 5),
-                    ('BOTTOMPADDING',  (0, 0), (-1, -1), 5),
-                    ('LEFTPADDING',    (0, 0), (-1, -1), 7),
-                    ('RIGHTPADDING',   (0, 0), (-1, -1), 7),
-                ]))
-                story.append(t)
-                story.append(Spacer(1, 0.4 * cm))
-        elif line.strip():
-            story.append(Paragraph(line.strip(), body_style))
-            i += 1
+    for line in content.split('\n'):
+        line = line.strip()
+        if not line:
+            elements.append(Spacer(1, 6))
         else:
-            story.append(Spacer(1, 0.25 * cm))
-            i += 1
+            # Échapper les caractères HTML
+            safe = line.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+            elements.append(Paragraph(safe, body_style))
 
-    doc.build(story)
-
-    return {
-        "file_id": file_id,
-        "filename": filename,
-        "path": path,
-    }
+    doc.build(elements)
+    logger.info(f"[FileCreator] PDF créé: {filename} ({path})")
+    return {"file_id": file_id, "filename": filename, "path": path}
 
 
-def create_excel(title: str, data: list, headers: list, username: str) -> dict:
+def create_excel(title: str, data: list, headers: list, username: str = "") -> dict:
     """
-    Génère un fichier Excel stylisé avec openpyxl.
-
-    headers : liste de noms de colonnes (première ligne, en-têtes).
-    data    : liste de lignes, chaque ligne est une liste de valeurs.
-
-    Retourne {"file_id": str, "filename": str, "path": str}.
-    Lève RuntimeError si openpyxl n'est pas installé.
+    Crée un fichier Excel avec en-têtes et données.
+    data = liste de listes (lignes).
+    headers = liste de strings (en-têtes).
+    Retourne {"file_id", "filename", "path"}.
     """
     try:
-        import openpyxl
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-        from openpyxl.utils import get_column_letter
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment
     except ImportError:
-        raise RuntimeError(
-            "openpyxl non installé. Ajoutez 'openpyxl' dans requirements.txt."
-        )
+        return {"error": "openpyxl non installé"}
 
     file_id = str(uuid.uuid4())
-    slug = _slugify(title)
-    filename = f"{slug}.xlsx"
+    filename = f"{_slugify(title)}.xlsx"
     path = f"/tmp/{file_id}.xlsx"
 
-    wb = openpyxl.Workbook()
+    wb = Workbook()
     ws = wb.active
-    ws.title = title[:31]  # Excel : nom de feuille limité à 31 caractères
+    ws.title = title[:31]  # max 31 chars pour le nom d'onglet Excel
 
-    # ── Styles ──
-    header_font  = Font(bold=True, color="FFFFFF", size=11)
-    header_fill  = PatternFill("solid", fgColor="1E3A5F")  # bleu foncé Raya
-    header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-    thin         = Side(style='thin', color='CCCCCC')
-    thin_border  = Border(left=thin, right=thin, top=thin, bottom=thin)
-    alt_fill     = PatternFill("solid", fgColor="F5F7FA")  # gris très clair
+    # Style en-têtes
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    header_fill = PatternFill(start_color="6366F1", end_color="6366F1", fill_type="solid")
 
-    # ── Ligne titre (row 1) ──
-    title_cell = ws.cell(row=1, column=1, value=f"\u26a1 Raya \u2014 {title}")
-    title_cell.font = Font(bold=True, size=13, color="6366F1")
-    title_cell.alignment = Alignment(horizontal="left", vertical="center")
-    ws.row_dimensions[1].height = 26
-    if headers:
-        ws.merge_cells(
-            start_row=1, start_column=1,
-            end_row=1, end_column=max(len(headers), 1)
-        )
-
-    # ── En-têtes (row 2) ──
     for col_idx, header in enumerate(headers, 1):
-        cell = ws.cell(row=2, column=col_idx, value=str(header))
-        cell.font   = header_font
-        cell.fill   = header_fill
-        cell.alignment = header_align
-        cell.border = thin_border
-    ws.row_dimensions[2].height = 22
+        cell = ws.cell(row=1, column=col_idx, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center")
 
-    # ── Données (à partir de row 3) ──
-    for row_idx, row in enumerate(data, 3):
-        for col_idx, value in enumerate(row, 1):
-            cell = ws.cell(row=row_idx, column=col_idx, value=value)
-            cell.border    = thin_border
-            cell.alignment = Alignment(vertical="center")
-            if row_idx % 2 == 1:   # alternance gris sur lignes impaires (données)
-                cell.fill = alt_fill
+    # Données
+    for row_idx, row_data in enumerate(data, 2):
+        for col_idx, value in enumerate(row_data, 1):
+            ws.cell(row=row_idx, column=col_idx, value=value)
 
-    # ── Auto-largeur des colonnes ──
-    for col_idx, header in enumerate(headers, 1):
-        col_letter = get_column_letter(col_idx)
-        max_w = len(str(header))
-        for row in data:
-            if col_idx - 1 < len(row):
-                max_w = max(max_w, len(str(row[col_idx - 1])))
-        ws.column_dimensions[col_letter].width = min(max(max_w + 4, 10), 50)
+    # Auto-largeur colonnes
+    for col_idx in range(1, len(headers) + 1):
+        max_len = len(str(headers[col_idx - 1]))
+        for row_idx in range(2, len(data) + 2):
+            cell_val = ws.cell(row=row_idx, column=col_idx).value
+            if cell_val and len(str(cell_val)) > max_len:
+                max_len = len(str(cell_val))
+        ws.column_dimensions[chr(64 + col_idx) if col_idx <= 26 else 'A'].width = min(max_len + 4, 40)
 
     wb.save(path)
-
-    return {
-        "file_id": file_id,
-        "filename": filename,
-        "path": path,
-    }
+    logger.info(f"[FileCreator] Excel créé: {filename} ({path})")
+    return {"file_id": file_id, "filename": filename, "path": path}
