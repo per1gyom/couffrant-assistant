@@ -53,6 +53,36 @@ async function loadMailCount() {
   } catch(e) {}
 }
 
+// --- HISTORIQUE (CHAT-HISTORY) ---
+async function loadHistory() {
+  try {
+    const r = await fetch('/chat/history?limit=20');
+    if (!r.ok) return;
+    const history = await r.json();
+    if (!Array.isArray(history) || history.length === 0) return;
+
+    // Supprimer le message de bienvenue s'il est encore là
+    const welcome = messagesEl.querySelector('.welcome');
+    if (welcome) welcome.remove();
+
+    // Afficher chaque échange de la session précédente
+    history.forEach(item => {
+      if (item.user) addMessage(item.user, 'user');
+      if (item.raya) addMessage(item.raya, 'raya', null, item.id);
+    });
+
+    // Séparateur visuel entre l'historique et la session courante
+    const sep = document.createElement('div');
+    sep.className = 'history-sep';
+    sep.textContent = '— conversation précédente —';
+    messagesEl.appendChild(sep);
+
+    scrollToBottom(false);
+  } catch(e) {
+    // Silencieux — l'historique est optionnel, ne pas casser le chat si l'endpoint échoue
+  }
+}
+
 // --- INIT ---
 async function init() {
   renderQuickActions();
@@ -60,6 +90,7 @@ async function init() {
   loadUserInfo();
   loadMailCount();
   checkTokenStatus();
+  await loadHistory();   // CHAT-HISTORY : charger avant l'onboarding
   checkOnboarding();
   document.getElementById('autoSpeakBtn').classList.add('active');
   messagesEl.addEventListener('scroll', onMessagesScroll);
@@ -141,7 +172,7 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
       thumbUp.onclick = () => sendFeedback(ariaMemoryId, 'positive', thumbUp); actions.appendChild(thumbUp);
       const thumbDown = document.createElement('button'); thumbDown.className = 'feedback-btn'; thumbDown.title = 'À améliorer'; thumbDown.textContent = '👎';
       thumbDown.onclick = () => openFeedbackDialog(ariaMemoryId, thumbDown); actions.appendChild(thumbDown);
-      const whyBtn = document.createElement('button'); whyBtn.className = 'feedback-btn why-btn'; whyBtn.title = 'Pourquoi cette réponse ?'; whyBtn.textContent = '💡';
+      const whyBtn = document.createElement('button'); whyBtn.className = 'feedback-btn why-btn'; whyBtn.title = 'Pourquoi cette réponse ?'; whyBtn.textContent = '💡';
       whyBtn.onclick = () => showWhy(ariaMemoryId, whyBtn); actions.appendChild(whyBtn);
     }
     bubble.appendChild(actions);
