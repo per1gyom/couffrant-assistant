@@ -6,6 +6,7 @@ Centralise tous les micro-appels Haiku de classification :
   - route_mail_action()     : IGNORER / STOCKER / ANALYSER (pour webhook)
   - detect_session_theme()  : détecte si les échanges portent sur un sujet cohérent (B8)
   - detect_query_domains()  : détecte les domaines pertinents par mots-clés (5B-1)
+  - execute_create_action() : ACTION:CREATE_PDF / ACTION:CREATE_EXCEL (TOOL-CREATE-FILES)
 
 Garde-fou économique :
   Le nombre d'appels Opus par user par jour est limité (configurable via
@@ -15,6 +16,7 @@ Garde-fou économique :
 Tous les futurs micro-appels de classification Haiku doivent passer par ce module.
 Pas de duplication d'appels Haiku ailleurs dans le code.
 """
+import os
 from app.llm_client import llm_complete
 
 # Prompt système partagé pour tous les routages — compact et déterministe
@@ -83,22 +85,10 @@ def detect_session_theme(history: list) -> str | None:
 
     Si oui → retourne le thème en 3-5 mots (ex: "chantier Dupont raccordement").
     Sinon  → retourne None.
-
-    Le thème est ensuite utilisé par build_system_prompt pour enrichir le RAG
-    avec tout ce qui concerne ce sujet, pas seulement la dernière question.
-
-    Args:
-        history : liste de dicts {user_input, aria_response} (ordre chronologique)
-
-    Returns:
-        str  : sujet cohérent détecté (3-5 mots max)
-        None : échanges disparates ou trop peu d'échanges
     """
-    # Pas assez d'échanges pour détecter un thème
     if len(history) < 3:
         return None
 
-    # Prend les 5 derniers échanges max pour le contexte
     recent = history[-5:]
     exchanges = "\n".join([
         f"Q: {h.get('user_input', '')[:100]}\nR: {h.get('aria_response', '')[:60]}"
@@ -120,7 +110,6 @@ def detect_session_theme(history: list) -> str | None:
         verdict = result["text"].strip()
         if not verdict or "AUCUN" in verdict.upper() or len(verdict) < 4:
             return None
-        # Nettoie le résultat (supprime ponctuation parasite)
         theme = verdict.strip('."\'')
         return theme[:60] if len(theme) > 3 else None
     except Exception:
@@ -160,24 +149,19 @@ def detect_query_domains(query: str) -> list[str]:
         if any(kw in q for kw in keywords):
             domains.add(domain)
 
-    # Workflow (confirm/cancel) toujours si actions en attente mentionnées
     if any(w in q for w in ["confirme", "annule", "valide", "action", "en attente"]):
         domains.add("workflow")
 
-    # Fallback : si rien détecté, tout injecter (sûr)
     if not domains:
         return ["mail", "drive", "teams", "calendar", "memory", "workflow"]
 
-    # Toujours inclure memory (Raya peut apprendre de n'importe quel échange)
     domains.add("memory")
-
     return list(domains)
 
 
 def route_mail_action(sender: str, subject: str, preview: str) -> str:
     """
     Triage mail via Haiku : IGNORER / STOCKER_SIMPLE / ANALYSER.
-    Réservé pour la Phase 3b — pas encore branché dans webhook.py.
     """
     try:
         result = llm_complete(
@@ -201,6 +185,96 @@ def route_mail_action(sender: str, subject: str, preview: str) -> str:
         return "ANALYSER"
     except Exception:
         return "ANALYSER"
+
+
+# ─── CRÉATION DE FICHIERS (TOOL-CREATE-FILES) ───
+
+def execute_create_action(action_str: str, username: str, tenant_id: str) -> str:
+    """
+    Traite les actions de création de fichiers générés par Raya.
+
+    Formats supportés :
+      ACTION:CREATE_PDF:titre|contenu
+        → Génère un PDF et retourne un lien Markdown de téléchargement.
+        → contenu peut contenir \\n et des lignes "col1|col2" pour des tableaux.
+
+      ACTION:CREATE_EXCEL:titre|headers|lignes
+        → Génère un Excel et retourne un lien Markdown de téléchargement.
+        → headers : colonnes séparées par ;
+        → lignes  : lignes séparées par \\n, colonnes par ;
+
+    Retourne un lien Markdown cliquable ou un message d'erreur.
+    """
+    base_url = os.getenv("APP_BASE_URL", "https://app.raya-ia.fr").rstrip("/")
+
+    # Parsing du format ACTION:TYPE:params
+    parts = action_str.split(":", 2)
+    if len(parts) < 3:
+        return "❌ Action de création malformée."
+
+    action_type = parts[1].upper()   # CREATE_PDF ou CREATE_EXCEL
+    params_raw  = parts[2]           # tout ce qui suit le 2e ":"
+
+    # ── CREATE_PDF ──
+    if action_type == "CREATE_PDF":
+        # Format : titre|contenu  (le contenu peut contenir des |)
+        sep = params_raw.find("|")
+        if sep == -1:
+            title   = params_raw.strip()
+            content = ""
+        else:
+            title   = params_raw[:sep].strip()
+            content = params_raw[sep + 1:].strip()
+
+        if not title:
+            return "❌ Titre manquant pour la création du PDF."
+
+        try:
+            from app.connectors.file_creator import create_pdf
+            result = create_pdf(title=title, content=content, username=username)
+            file_id  = result["file_id"]
+            filename = result["filename"]
+            url = f"{base_url}/download/{file_id}"
+            return f"[📄 Télécharger {filename}]({url})"
+        except Exception as e:
+            return f"❌ Erreur création PDF : {str(e)[:120]}"
+
+    # ── CREATE_EXCEL ──
+    if action_type == "CREATE_EXCEL":
+        # Format : titre|headers_csv|lignes
+        # headers séparés par ;, lignes séparées par \n, colonnes par ;
+        sub_parts = params_raw.split("|", 2)
+        title        = sub_parts[0].strip() if len(sub_parts) > 0 else ""
+        headers_raw  = sub_parts[1].strip() if len(sub_parts) > 1 else ""
+        rows_raw     = sub_parts[2].strip() if len(sub_parts) > 2 else ""
+
+        if not title:
+            return "❌ Titre manquant pour la création de l'Excel."
+
+        headers = [h.strip() for h in headers_raw.split(";") if h.strip()]
+        data: list = []
+        if rows_raw:
+            for line in rows_raw.split("\n"):
+                line = line.strip()
+                if line:
+                    data.append([c.strip() for c in line.split(";")])
+
+        try:
+            from app.connectors.file_creator import create_excel
+            result = create_excel(
+                title=title,
+                data=data,
+                headers=headers,
+                username=username,
+            )
+            file_id  = result["file_id"]
+            filename = result["filename"]
+            url = f"{base_url}/download/{file_id}"
+            return f"[📊 Télécharger {filename}]({url})"
+        except Exception as e:
+            return f"❌ Erreur création Excel : {str(e)[:120]}"
+
+    return f"❌ Type de création inconnu : {action_type}"
 
 
 # ─── GARDE-FOU ÉCONOMIQUE ───
@@ -261,7 +335,7 @@ def get_routing_stats(username: str, tenant_id: str) -> dict:
         rows = c.fetchall()
         conn.close()
         return {
-            "quota_limit":     _opus_daily_limit(username),
+            "quota_limit":      _opus_daily_limit(username),
             "opus_calls_today": _opus_calls_today(username, tenant_id),
             "by_model": [{"model": r[0], "calls": r[1], "tokens": r[2]} for r in rows],
         }
