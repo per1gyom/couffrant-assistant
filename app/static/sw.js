@@ -1,36 +1,48 @@
 /**
  * Service Worker Raya — PWA offline + cache
  *
- * Stratégie : Cache-First pour les assets statiques (CSS, JS, icônes).
- * Network-First pour les appels API (/raya, /onboarding, etc.).
- * Si réseau indisponible sur une page HTML → affiche la page offline.
+ * IMPORTANT : incrémenter CACHE_VERSION à chaque déploiement
+ * pour forcer le rechargement des assets modifiés.
+ *
+ * Stratégie :
+ * - Nos fichiers (CSS/JS) → Network-First (prend le frais, cache en fallback)
+ * - CDN (marked.js, DOMPurify) → Cache-First (rarement change)
+ * - API → Network only
+ * - Navigation HTML → Network-First avec fallback cache
  */
 
-const CACHE_NAME = 'raya-v1';
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 3;
+const CACHE_NAME = 'raya-v' + CACHE_VERSION;
 
 // Assets mis en cache à l'installation
 const PRECACHE_ASSETS = [
   '/chat',
   '/static/chat.css',
   '/static/onboarding.css',
+  '/static/mobile.css',
   '/static/chat.js',
+  '/static/chat-onboarding.js',
+  '/static/chat-shortcuts.js',
+  '/static/chat-voice.js',
+  '/static/chat-feedback.js',
+  '/static/chat-triage.js',
+  '/static/chat-admin.js',
   '/static/manifest.json',
   'https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js',
   'https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js',
 ];
 
-// Routes API — toujours réseau, pas de cache
+// Routes API — toujours réseau, jamais de cache
 const API_ROUTES = [
-  '/raya',
-  '/onboarding',
-  '/feedback',
-  '/token-status',
-  '/memory',
-  '/admin',
+  '/raya', '/onboarding', '/feedback', '/token-status',
+  '/memory', '/admin', '/chat/history', '/health',
+  '/profile', '/download',
 ];
 
-// ─── INSTALL : précache des assets statiques ───
+// Nos fichiers qui changent souvent → Network-First
+const OWN_ASSETS_PREFIX = '/static/';
+
+// ─── INSTALL : précache + skip waiting immédiat ───
 self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
@@ -50,11 +62,11 @@ self.addEventListener('activate', event => {
   );
 });
 
-// ─── FETCH : stratégie selon le type de requête ───
+// ─── FETCH ───
 self.addEventListener('fetch', event => {
   const url = new URL(event.request.url);
 
-  // API → Network-First, pas de cache
+  // API → Network only, pas de cache
   if (API_ROUTES.some(r => url.pathname.startsWith(r))) {
     event.respondWith(
       fetch(event.request).catch(() =>
@@ -67,11 +79,23 @@ self.addEventListener('fetch', event => {
     return;
   }
 
-  // Assets statiques → Cache-First
-  if (event.request.destination === 'script' ||
-      event.request.destination === 'style' ||
-      event.request.destination === 'image' ||
-      event.request.destination === 'font') {
+  // Nos propres fichiers statiques → Network-First (prend le frais du serveur)
+  if (url.pathname.startsWith(OWN_ASSETS_PREFIX) && url.origin === location.origin) {
+    event.respondWith(
+      fetch(event.request)
+        .then(response => {
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+          return response;
+        })
+        .catch(() => caches.match(event.request))
+    );
+    return;
+  }
+
+  // CDN (marked.js, DOMPurify) → Cache-First (stable, rarement change)
+  if (url.origin !== location.origin &&
+      (event.request.destination === 'script' || event.request.destination === 'style')) {
     event.respondWith(
       caches.match(event.request).then(cached =>
         cached || fetch(event.request).then(response => {
