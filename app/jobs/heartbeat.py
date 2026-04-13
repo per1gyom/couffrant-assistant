@@ -1,5 +1,6 @@
 """
 Job heartbeat matinal — prépare le rapport du jour et envoie un ping. (7-6R)
+USER-PHONE : utilise get_user_phone(username) pour la résolution du numéro.
 """
 import os
 import json
@@ -108,12 +109,23 @@ def _prepare_daily_report(username: str):
 
 
 def _send_report_ping(username: str):
-    """Envoie un PING léger pour prévenir que le rapport est prêt."""
-    phone = os.getenv(f"NOTIFICATION_PHONE_{username.upper()}", "").strip()
-    if not phone:
-        phone = os.getenv("NOTIFICATION_PHONE_DEFAULT", "").strip()
+    """
+    Envoie un PING léger pour prévenir que le rapport est prêt.
+    Utilise get_user_phone() pour trouver le numéro en base ou
+    dans les variables d'environnement (USER-PHONE).
+    """
+    try:
+        from app.security_users import get_user_phone
+        phone = get_user_phone(username)
+    except Exception:
+        # Fallback direct si security_users non disponible
+        phone = os.getenv(f"NOTIFICATION_PHONE_{username.upper()}", "").strip()
+        if not phone:
+            phone = os.getenv("NOTIFICATION_PHONE_DEFAULT", "").strip()
+
     if not phone:
         return
+
     try:
         from app.notification_prefs import should_notify
         if not should_notify(username, "normal"):

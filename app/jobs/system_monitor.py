@@ -1,5 +1,6 @@
 """
 Job de monitoring système — vérifie les composants + alerte WhatsApp/SMS. (7-7)
+USER-PHONE : utilise get_user_phone(admin) pour la résolution du numéro.
 """
 import os
 from app.logging_config import get_logger
@@ -43,12 +44,23 @@ def _job_system_monitor():
 
 
 def _send_monitor_alert(stale_components: list):
-    """Envoie une alerte monitoring via WhatsApp (fallback SMS). (7-7)"""
-    phone = os.getenv("NOTIFICATION_PHONE_ADMIN", "").strip()
-    if not phone:
-        phone = os.getenv("NOTIFICATION_PHONE_GUILLAUME", "").strip()
-    if not phone:
-        phone = os.getenv("NOTIFICATION_PHONE_DEFAULT", "").strip()
+    """
+    Envoie une alerte monitoring via WhatsApp (fallback SMS). (7-7)
+    Utilise get_user_phone() pour trouver le numéro de l'admin en base
+    ou dans les variables d'environnement (USER-PHONE).
+    """
+    admin_username = os.getenv("APP_USERNAME", "guillaume").strip()
+    try:
+        from app.security_users import get_user_phone
+        phone = get_user_phone(admin_username)
+    except Exception:
+        # Fallback direct si security_users non disponible
+        phone = os.getenv("NOTIFICATION_PHONE_ADMIN", "").strip()
+        if not phone:
+            phone = os.getenv("NOTIFICATION_PHONE_GUILLAUME", "").strip()
+        if not phone:
+            phone = os.getenv("NOTIFICATION_PHONE_DEFAULT", "").strip()
+
     if not phone:
         return
 
