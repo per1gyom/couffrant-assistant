@@ -1,3 +1,4 @@
+import os
 import time
 
 from fastapi import APIRouter, Request, Form
@@ -16,6 +17,9 @@ from app.security_auth import (
 )
 from app.security_users import must_reset_password_check
 from app.database import get_pg_conn
+from app.logging_config import get_logger
+
+logger = get_logger("raya.auth")
 
 router = APIRouter(tags=["auth"])
 
@@ -135,24 +139,89 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     return RedirectResponse(state or "/chat")
 
 
+# ─── GMAIL OAuth2 ───
+
 @router.get("/login/gmail")
-def login_gmail():
-    from app.connectors.gmail_connector import get_gmail_auth_url
-    return RedirectResponse(get_gmail_auth_url())
+def login_gmail(request: Request):
+    """Démarre le flux OAuth2 Gmail. Redirige vers Google pour autorisation."""
+    # Vérification GMAIL_REDIRECT_URI en amont — log explicite si manquant
+    gmail_redirect = os.getenv("GMAIL_REDIRECT_URI", "").strip()
+    if not gmail_redirect:
+        logger.error(
+            "[Gmail] GMAIL_REDIRECT_URI non configuré. "
+            "Ajoutez cette variable Railway : "
+            "GMAIL_REDIRECT_URI=https://[domaine].railway.app/auth/gmail/callback"
+        )
+        return HTMLResponse(
+            "<h2>Erreur configuration Gmail</h2>"
+            "<p>La variable <code>GMAIL_REDIRECT_URI</code> n'est pas configurée sur Railway.</p>"
+            "<p>Valeur attendue : <code>https://[votre-domaine].railway.app/auth/gmail/callback</code></p>"
+            "<p><a href='/chat'>← Retour au chat</a></p>",
+            status_code=500,
+        )
+
+    from app.connectors.gmail_connector import get_gmail_auth_url, is_configured
+    if not is_configured():
+        logger.error("[Gmail] GMAIL_CLIENT_ID ou GMAIL_CLIENT_SECRET manquant")
+        return HTMLResponse(
+            "<h2>Erreur configuration Gmail</h2>"
+            "<p>Les variables <code>GMAIL_CLIENT_ID</code> et/ou <code>GMAIL_CLIENT_SECRET</code> "
+            "ne sont pas configurées sur Railway.</p>"
+            "<p><a href='/chat'>← Retour au chat</a></p>",
+            status_code=500,
+        )
+
+    try:
+        auth_url = get_gmail_auth_url()
+        return RedirectResponse(auth_url)
+    except Exception as e:
+        logger.error(f"[Gmail] Erreur génération URL auth: {e}")
+        return HTMLResponse(
+            f"<h2>Erreur Gmail</h2><p>{e}</p><p><a href='/chat'>← Retour</a></p>",
+            status_code=500,
+        )
 
 
 @router.get("/auth/gmail/callback")
-def auth_gmail_callback(request: Request, code: str | None = None):
+def auth_gmail_callback(request: Request, code: str | None = None, error: str | None = None):
+    """
+    Callback Google OAuth2.
+    Échange le code contre des tokens, sauvegarde, redirige vers /chat.
+    """
+    # Erreur retournée par Google (ex: accès refusé)
+    if error:
+        logger.warning(f"[Gmail] Callback erreur Google: {error}")
+        return RedirectResponse(f"/chat?gmail_error={error}")
+
     if not code:
-        return HTMLResponse("Code manquant", status_code=400)
+        logger.error("[Gmail] Callback reçu sans code")
+        return HTMLResponse("Code OAuth manquant", status_code=400)
+
     from app.connectors.gmail_connector import exchange_code_for_tokens
-    tokens = exchange_code_for_tokens(code)
     username = request.session.get("user", "guillaume")
+
+    try:
+        tokens = exchange_code_for_tokens(code)
+    except Exception as e:
+        logger.error(f"[Gmail] Erreur exchange_code_for_tokens: {e}")
+        return HTMLResponse(
+            f"<h2>Erreur connexion Gmail</h2>"
+            f"<p>{e}</p>"
+            f"<p><a href='/chat'>← Retour au chat</a></p>",
+            status_code=500,
+        )
+
     email = tokens.get("email", f"{username}@gmail.com")
-    save_google_token(
-        username=username,
-        access_token=tokens.get("access_token", ""),
-        refresh_token=tokens.get("refresh_token", ""),
-        email=email,
-    )
-    return {"status": "ok", "message": f"Google connecté pour {username} ({email}) !"}
+    try:
+        save_google_token(
+            username=username,
+            access_token=tokens.get("access_token", ""),
+            refresh_token=tokens.get("refresh_token", ""),
+            email=email,
+        )
+        logger.info(f"[Gmail] Tokens sauvegardés pour {username} ({email})")
+    except Exception as e:
+        logger.error(f"[Gmail] Erreur sauvegarde tokens {username}: {e}")
+
+    # ✅ Redirection vers /chat (pas un dict JSON)
+    return RedirectResponse("/chat?gmail_connected=1")
