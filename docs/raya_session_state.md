@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 13/04/2026 nuit** — Opus
+**Dernière mise à jour : 14/04/2026 nuit** — Opus
 
 ---
 
@@ -8,8 +8,9 @@
 
 1. Opus = architecte, Sonnet = exécutant. Opus ne code PAS.
 2. ⚠️ COMMITS COURTS : 1 fichier par commit max. Les gros commits timeout le MCP.
-3. Cache-bust : bumper ?v=N dans aria_chat.html à chaque modif CSS/JS.
+3. Cache-bust : bumper ?v=N dans aria_chat.html à chaque modif CSS/JS (actuellement v=3).
 4. Aucune écriture sans ok explicite de Guillaume.
+5. JAMAIS push_files pour du code Python — corrompt les \n.
 
 ---
 
@@ -26,19 +27,37 @@ Microsoft 365, Gmail, Odoo, Twilio/WhatsApp, ElevenLabs — tous opérationnels.
 
 ## 3. PROMPTS EN ATTENTE
 
-Aucun. Zéro dette.
+- TOOL-READ-PDF 3/3 — modification chirurgicale de raya.py (prompt prêt)
 
 ## 4. PROCHAINES ÉTAPES
 
-### Prochaine session
-- [ ] TOOL-DALLE (génération d'images)
-- [ ] Icône PWA personnalisée (design)
-- [ ] PDF preview : ouvrir dans Safari au lieu de naviguer dans la PWA
-- [ ] Audio mobile : vérifier bouton "Écouter" sur iPhone
-- [ ] Tester Gmail : tiroir admin → "Connecter Gmail" (PKCE corrigé)
+### Immédiat (cette session / demain matin)
+- [ ] TOOL-READ-PDF 3/3 — injection texte PDF dans contexte LLM (raya.py)
+- [ ] Icône PWA — stocker le smiley vert dans app/static/raya_icon.png + update endpoint
+- [ ] Signature email — HTML Helvetica + image bandeau Couffrant Solar
+- [ ] Tester création PDF/Excel/DALL-E
+- [ ] Tester safe-area iPhone 16 Pro Max
 
-### Priorité 2 — Beta Charlotte + Tenant DEMO
-### Priorité 3 — UI ergonomie + audit performance
+### Specs signature email (validées par Guillaume)
+- Police : Helvetica partout
+- "Solairement," → regular
+- "Guillaume Perrin" → bold (seul élément en gras)
+- "📞 06 49 43 09 17" → regular
+- "🌐 couffrant-solar.fr" → regular, lien cliquable vers https://couffrant-solar.fr
+- Image bandeau Couffrant Solar en dessous
+- Largeur image = ~3× la ligne de texte la plus large (~500px)
+- Images sources dans la conversation Opus du 13-14/04/2026
+
+### Priorité 2
+- [ ] PDF preview mobile (ouvrir dans Safari, pas dans la PWA)
+- [ ] Audio "Écouter" sur iPhone
+- [ ] Tester Gmail OAuth (PKCE corrigé)
+- [ ] Beta Charlotte (tenant, cloisonnement, onboarding)
+
+### Priorité 3
+- [ ] Tenant DEMO (5 profils sectoriels — voir docs/raya_roadmap_demo.md)
+- [ ] UI/Design refonte
+- [ ] RGPD + facturation Stripe
 
 ## 5. PRINCIPES
 
@@ -46,15 +65,15 @@ Aucun. Zéro dette.
 - Imports lazy, fichiers < 15k, commits courts
 - Cache-bust ?v=N sur tous les assets statiques
 - SW v3 Network-First pour nos fichiers, Cache-First pour CDN
-- Voir `docs/raya_maintenance.md` pour le plan de maintenance
+- Voir docs/raya_maintenance.md et docs/raya_roadmap_demo.md
 
 ## 6. HISTORIQUE
 
-### Session 13/04/2026 nuit (UI + outils)
-~35 commits. TOOL-CREATE-FILES (PDF + Excel complets). CHAT-HISTORY. FIX-SAFE-AREA (iPhone 16 Pro Max). Service Worker v3 (Network-First). Cache-bust ?v=3 sur tous les assets. PWA icon opaque + manifest. FIX-SW-CACHE (no-store sur sw.js). Capabilities PDF/Excel. Plan de maintenance créé. Règle commits courts.
+### Session 13-14/04/2026 nuit (marathon outils + UI)
+~45 commits. TOOL-CREATE-FILES (PDF+Excel). TOOL-DALLE (images). TOOL-READ-PDF (2/3, reste raya.py). Capabilities PDF/Excel/DALL-E. CHAT-HISTORY. FIX-SAFE-AREA. SW v3 Network-First. Cache-bust ?v=3. FIX-SW-CACHE. PWA icon opaque + manifest. Plan maintenance. Roadmap démo 5 profils. Roadmap fichiers. Logo design validé (smiley vert clin d'oeil). Signature email spécifiée.
 
 ### Session 13/04/2026 (après-midi + soir)
-~20 tâches. Connectivité 5/5. Gmail PKCE. WhatsApp Raya. Twilio. DNS app.raya-ia.fr. USER-PHONE. FIX-MONITOR-SPAM. FORGOT-PASSWORD. FIX-CAPABILITIES.
+~20 tâches. Connectivité 5/5. Gmail PKCE. WhatsApp. Twilio. DNS. USER-PHONE. FIX-MONITOR-SPAM. FORGOT-PASSWORD. FIX-CAPABILITIES.
 
 ### Session 12-13/04/2026 (marathon)
 ~55 tâches. Phase 7+8 complètes. 5 refactorings. Admin panel. Web search.
