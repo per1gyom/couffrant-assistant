@@ -1,35 +1,30 @@
 /* ─── PWA + MOBILE — styles spécifiques ─── */
 
-/* Viewport safe-area (iPhone Dynamic Island + barre home) */
+/* Viewport : 100dvh gère correctement la hauteur sur iOS */
 .app {
-  padding-top: env(safe-area-inset-top);
-  padding-left: env(safe-area-inset-left);
-  padding-right: env(safe-area-inset-right);
-  /* NE PAS mettre padding-bottom ici — on le met sur input-zone */
+  height: 100dvh !important;
 }
 
-/* Header : toujours sous le Dynamic Island */
+/* Header : FORCE le safe-area pour le Dynamic Island — écrase le shorthand de chat.css */
 .header {
-  padding-top: max(8px, env(safe-area-inset-top));
+  padding-top: max(10px, env(safe-area-inset-top)) !important;
 }
 
-/* Zone de saisie : toujours au-dessus de la barre home */
+/* Zone de saisie : FORCE le safe-area pour la barre home iOS */
 .input-zone {
-  padding-bottom: max(12px, env(safe-area-inset-bottom));
+  padding-bottom: max(16px, env(safe-area-inset-bottom)) !important;
 }
 
 /* En mode standalone PWA (plein écran, pas de barre Safari) */
 @media (display-mode: standalone) {
   .h-btn.danger { display: none !important; }
   
-  /* Plus d'espace en haut pour le Dynamic Island */
   .header {
-    padding-top: max(16px, env(safe-area-inset-top));
+    padding-top: max(20px, calc(env(safe-area-inset-top) + 6px)) !important;
   }
   
-  /* Plus d'espace en bas pour la barre home iOS */
   .input-zone {
-    padding-bottom: max(20px, env(safe-area-inset-bottom));
+    padding-bottom: max(24px, calc(env(safe-area-inset-bottom) + 8px)) !important;
   }
 }
 
@@ -37,49 +32,38 @@
 @media (max-width: 640px) {
   .app { max-width: 100%; }
   
-  /* Header compact */
   .header { padding-left: 12px; padding-right: 12px; gap: 6px; }
   .logo { font-size: 15px; }
   .header-user { display: none; }
   .h-btn { padding: 4px 8px; font-size: 11px; }
   .h-btn.danger { display: none; }
 
-  /* Raccourcis défilants */
   .quick-row { padding: 6px 10px; }
   .quick-btn { padding: 4px 10px; font-size: 12px; }
 
-  /* Bulles plus larges */
   .bubble { max-width: 90%; font-size: 14px; }
 
-  /* Input zone */
   .input-zone { padding-left: 12px; padding-right: 12px; }
   .input-wrapper { border-radius: 12px; }
-  textarea#input { font-size: 16px; } /* évite le zoom iOS au focus */
+  textarea#input { font-size: 16px; }
   .icon-btn { width: 38px; height: 38px; }
 
-  /* Feedback buttons un peu plus grands au touch */
   .feedback-btn { font-size: 16px; padding: 4px 6px; opacity: 0.5; }
 
-  /* Onboarding overlay full screen sur mobile */
   .onboarding-overlay { padding: 0; align-items: flex-end; }
   .onboarding-modal { border-radius: 16px 16px 0 0; max-height: 92vh; }
 
-  /* Tiroir admin pleine largeur */
   .drawer { width: 100%; }
 
-  /* Panel "Pourquoi ?" pleine largeur */
   .why-panel, .feedback-dialog { margin-left: 0; max-width: 100%; }
 
-  /* Pending actions zone */
   .pending-actions-zone { margin: 0 8px 8px; }
 }
 
-/* Zone de messages : scroll ne dépasse jamais le header ni l'input */
 .messages-wrap {
   -webkit-overflow-scrolling: touch;
 }
 
-/* Petit contrôle d'installation PWA */
 .pwa-install-banner {
   display: none;
   position: fixed;
