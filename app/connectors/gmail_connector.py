@@ -10,6 +10,8 @@ Variables d'environnement OBLIGATOIRES pour activer Gmail :
 
 Les tokens sont stockés dans la table gmail_tokens (un enregistrement par user).
 HOTFIX-GMAIL-TOKENS : _save_refreshed_credentials() gère l'absence de updated_at.
+HOTFIX-GMAIL-PKCE   : get_gmail_auth_url() retourne (auth_url, code_verifier).
+                      exchange_code_for_tokens() accepte code_verifier pour PKCE.
 """
 import os
 import json
@@ -34,9 +36,15 @@ def is_configured() -> bool:
     return bool(GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET)
 
 
-def get_gmail_auth_url() -> str:
+def get_gmail_auth_url() -> tuple:
     """
     Génère l'URL d'autorisation Google OAuth2 pour Gmail.
+
+    HOTFIX-GMAIL-PKCE : retourne un tuple (auth_url, code_verifier).
+    Le code_verifier doit être conservé (ex: en session) et passé à
+    exchange_code_for_tokens() pour satisfaire le flux PKCE de Google.
+    Si google_auth_oauthlib est absent (fallback URL manuelle), code_verifier=None.
+
     Lève une RuntimeError si GMAIL_REDIRECT_URI est manquante.
     """
     if not GMAIL_REDIRECT_URI:
@@ -57,7 +65,8 @@ def get_gmail_auth_url() -> str:
     try:
         from google_auth_oauthlib.flow import Flow
     except ImportError:
-        logger.warning("[Gmail] google-auth-oauthlib absent, génération URL manuelle")
+        # Fallback manuel sans PKCE si google-auth-oauthlib absent
+        logger.warning("[Gmail] google-auth-oauthlib absent, génération URL manuelle (pas de PKCE)")
         import urllib.parse
         params = {
             "client_id": GMAIL_CLIENT_ID,
@@ -67,7 +76,8 @@ def get_gmail_auth_url() -> str:
             "access_type": "offline",
             "prompt": "consent",
         }
-        return "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
+        url = "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
+        return url, None  # pas de code_verifier dans ce cas
 
     flow = Flow.from_client_config(
         {
@@ -87,13 +97,26 @@ def get_gmail_auth_url() -> str:
         prompt="consent",
         include_granted_scopes="true",
     )
-    return auth_url
+
+    # HOTFIX-GMAIL-PKCE : récupérer le code_verifier généré par le Flow PKCE.
+    # flow._code_verifier est défini après authorization_url() si PKCE est actif.
+    code_verifier = getattr(flow, "_code_verifier", None)
+    if code_verifier:
+        logger.debug("[Gmail] PKCE code_verifier récupéré")
+    else:
+        logger.debug("[Gmail] Pas de code_verifier PKCE (Flow sans PKCE)")
+
+    return auth_url, code_verifier
 
 
-def exchange_code_for_tokens(code: str) -> dict:
+def exchange_code_for_tokens(code: str, code_verifier: str = None) -> dict:
     """
     Échange le code OAuth2 contre des tokens Google.
     Retourne {"access_token", "refresh_token", "email"}.
+
+    HOTFIX-GMAIL-PKCE : code_verifier doit être passé s'il a été généré lors
+    de get_gmail_auth_url(), sinon Google retourne "(invalid_grant) Missing
+    code verifier". Si code_verifier est None, tente l'échange sans (compat.).
     """
     if not is_configured() or not GMAIL_REDIRECT_URI:
         raise RuntimeError("Gmail non configuré (CLIENT_ID / CLIENT_SECRET / REDIRECT_URI manquants)")
@@ -118,7 +141,16 @@ def exchange_code_for_tokens(code: str) -> dict:
         scopes=GMAIL_SCOPES,
     )
     flow.redirect_uri = GMAIL_REDIRECT_URI
-    flow.fetch_token(code=code)
+
+    # HOTFIX-GMAIL-PKCE : transmettre le code_verifier au fetch_token si disponible
+    fetch_kwargs = {"code": code}
+    if code_verifier:
+        fetch_kwargs["code_verifier"] = code_verifier
+        logger.debug("[Gmail] exchange_code_for_tokens avec PKCE code_verifier")
+    else:
+        logger.debug("[Gmail] exchange_code_for_tokens sans code_verifier")
+
+    flow.fetch_token(**fetch_kwargs)
     creds = flow.credentials
 
     email = ""
@@ -221,16 +253,13 @@ def get_gmail_service(username: str):
 def _save_refreshed_credentials(username: str, creds) -> None:
     """
     Sauvegarde les credentials rafraîchis dans gmail_tokens.
-    Robuste si updated_at n'existe pas encore (avant migration HOTFIX-GMAIL-TOKENS) :
-    - Tente d'abord avec updated_at = NOW()
-    - Fallback sans updated_at si la colonne est absente
+    Robuste si updated_at n'existe pas encore (avant migration HOTFIX-GMAIL-TOKENS).
     """
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         try:
-            # Version avec updated_at (après migration)
             c.execute("""
                 INSERT INTO gmail_tokens (username, access_token, refresh_token, updated_at)
                 VALUES (%s, %s, %s, NOW())
@@ -239,7 +268,6 @@ def _save_refreshed_credentials(username: str, creds) -> None:
                     updated_at   = NOW()
             """, (username, creds.token, creds.refresh_token))
         except Exception:
-            # Fallback : updated_at absent (avant migration)
             conn.rollback()
             c.execute("""
                 INSERT INTO gmail_tokens (username, access_token, refresh_token)
