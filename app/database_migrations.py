@@ -143,5 +143,7 @@ MIGRATIONS = [
     "UPDATE dossier_narratives SET narrative = REPLACE(narrative, 'Jarvis', 'Raya') WHERE narrative ILIKE '%jarvis%'",
     # ── HOTFIX-GMAIL-TOKENS : colonne updated_at manquante dans gmail_tokens ──
     "ALTER TABLE gmail_tokens ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
+    # ── USER-PHONE : numéro de téléphone par utilisateur ──
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT",
     # ── Ajouter les nouvelles migrations sous cette ligne ──
 ]
