@@ -4,9 +4,10 @@ Point d'entree principal.
 """
 import os
 import time
+import io
 
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse, FileResponse
+from fastapi.responses import RedirectResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -34,6 +35,9 @@ from app.routes.elicitation import router as elicitation_router
 
 # Inactivité (secondes) avant déconnexion automatique. Défaut : 2h.
 SESSION_INACTIVITY_TIMEOUT = int(os.getenv("SESSION_INACTIVITY_TIMEOUT", "7200"))
+
+# Cache des icônes PNG générées (évite de recalculer à chaque requête)
+_PNG_CACHE: dict = {}
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -65,6 +69,7 @@ class InactivityTimeoutMiddleware(BaseHTTPMiddleware):
         "/login-app", "/logout", "/health", "/webhook/",
         "/static/", "/sw.js", "/forgot-password",
         "/reset-password", "/forced-reset",
+        "/pwa/",  # icônes PWA publiques
     )
 
     async def dispatch(self, request: Request, call_next):
@@ -143,6 +148,84 @@ def service_worker():
         "app/static/sw.js",
         media_type="application/javascript",
         headers={"Service-Worker-Allowed": "/"},
+    )
+
+
+def _generate_raya_png(size: int) -> bytes:
+    """
+    Génère un PNG carré arrondi violet (#6366f1) avec un éclair blanc centré.
+    Utilise Pillow. Résultat mis en cache par taille.
+    """
+    if size in _PNG_CACHE:
+        return _PNG_CACHE[size]
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError:
+        # Pillow absent → PNG 1x1 transparent de secours
+        _PNG_CACHE[size] = (
+            b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01'
+            b'\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f'
+            b'\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82'
+        )
+        return _PNG_CACHE[size]
+
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    # Fond violet arrondi
+    radius = size // 5
+    color = (99, 102, 241, 255)  # #6366f1
+    draw.rounded_rectangle([0, 0, size - 1, size - 1], radius=radius, fill=color)
+
+    # Éclair blanc (polygone simplifié)
+    s = size
+    bolt = [
+        (s * 0.58, s * 0.10),   # haut droite
+        (s * 0.35, s * 0.52),   # milieu gauche
+        (s * 0.52, s * 0.52),   # milieu centre
+        (s * 0.42, s * 0.90),   # bas gauche
+        (s * 0.65, s * 0.48),   # milieu droite
+        (s * 0.48, s * 0.48),   # milieu centre 2
+    ]
+    draw.polygon(bolt, fill=(255, 255, 255, 255))
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG", optimize=True)
+    result = buf.getvalue()
+    _PNG_CACHE[size] = result
+    return result
+
+
+@app.get("/pwa/icon-180.png")
+def pwa_icon_180():
+    """Icône Apple touch icon 180x180 pour iPhone (PWA)."""
+    png = _generate_raya_png(180)
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=604800"},
+    )
+
+
+@app.get("/pwa/icon-192.png")
+def pwa_icon_192():
+    """Icône PWA 192x192 pour Android / manifest."""
+    png = _generate_raya_png(192)
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=604800"},
+    )
+
+
+@app.get("/pwa/icon-512.png")
+def pwa_icon_512():
+    """Icône PWA 512x512 pour splash screen."""
+    png = _generate_raya_png(512)
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=604800"},
     )
 
 
