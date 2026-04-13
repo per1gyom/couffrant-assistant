@@ -15,6 +15,8 @@ consommé par le webhook Microsoft ET le polling Gmail.
 
 7-7 : heartbeat webhook_microsoft après traitement réussi.
 7-8 : endpoint POST /webhook/twilio (WhatsApp entrant).
+USER-PHONE : _resolve_user_by_phone cherche d'abord en base (colonne phone),
+             puis tombe sur les variables d'env pour la compatibilité.
 """
 import re
 import threading
@@ -384,9 +386,33 @@ async def webhook_twilio(request: Request):
 
 
 def _resolve_user_by_phone(phone: str) -> str | None:
-    """Retrouve le username à partir du numéro de téléphone. (7-8)"""
+    """
+    Retrouve le username à partir du numéro de téléphone. (7-8 + USER-PHONE)
+    Cherche d'abord dans la colonne phone de la table users (DB),
+    puis tombe sur les variables d'environnement pour la compatibilité.
+    """
     import os
+    from app.database import get_pg_conn
+
     phone_clean = phone.replace("+", "").replace(" ", "")
+
+    # 1. Chercher en base (colonne users.phone — USER-PHONE)
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT username FROM users
+            WHERE REPLACE(REPLACE(COALESCE(phone, ''), '+', ''), ' ', '') = %s
+            LIMIT 1
+        """, (phone_clean,))
+        row = c.fetchone()
+        conn.close()
+        if row:
+            return row[0]
+    except Exception as e:
+        print(f"[Twilio] Erreur lookup phone DB: {e}")
+
+    # 2. Fallback variables d'environnement (compatibilité ascendante)
     for key, value in os.environ.items():
         if key.startswith("NOTIFICATION_PHONE_"):
             val_clean = value.strip().replace("+", "").replace(" ", "")
