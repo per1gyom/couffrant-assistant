@@ -3,11 +3,12 @@ Connecteur Gmail — Phase 7 (7-1a).
 Utilise l'API Google Gmail pour récupérer les mails.
 Polling incrémental via historyId (pas de webhook).
 
-Variables d'environnement :
-  GMAIL_CLIENT_ID     : Client ID Google OAuth2
-  GMAIL_CLIENT_SECRET : Client Secret Google OAuth2
+Variables d'environnement OBLIGATOIRES pour activer Gmail :
+  GMAIL_CLIENT_ID      : Client ID Google OAuth2
+  GMAIL_CLIENT_SECRET  : Client Secret Google OAuth2
+  GMAIL_REDIRECT_URI   : https://[domaine-railway].railway.app/auth/gmail/callback
 
-Les credentials utilisateur sont stockés dans users.gmail_credentials (JSONB).
+Les tokens sont stockés dans la table gmail_tokens (un enregistrement par user).
 """
 import os
 import json
@@ -18,18 +19,133 @@ logger = get_logger("raya.gmail")
 
 GMAIL_CLIENT_ID = os.getenv("GMAIL_CLIENT_ID", "").strip()
 GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET", "").strip()
-GMAIL_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+GMAIL_REDIRECT_URI = os.getenv("GMAIL_REDIRECT_URI", "").strip()
+
+GMAIL_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "openid",
+]
 
 
 def is_configured() -> bool:
-    """True si les clés OAuth2 Gmail sont présentes."""
+    """True si les clés OAuth2 Gmail sont présentes dans les variables d'env."""
     return bool(GMAIL_CLIENT_ID and GMAIL_CLIENT_SECRET)
+
+
+def get_gmail_auth_url() -> str:
+    """
+    Génère l'URL d'autorisation Google OAuth2 pour Gmail.
+    Retourne l'URL vers laquelle rediriger l'utilisateur.
+    Lève une RuntimeError si GMAIL_REDIRECT_URI est manquante.
+    """
+    if not GMAIL_REDIRECT_URI:
+        logger.error(
+            "[Gmail] GMAIL_REDIRECT_URI manquant ! "
+            "Configurez GMAIL_REDIRECT_URI=https://[domaine].railway.app/auth/gmail/callback "
+            "dans les variables Railway."
+        )
+        raise RuntimeError(
+            "GMAIL_REDIRECT_URI non configuré. "
+            "Ajoutez cette variable dans Railway : "
+            "GMAIL_REDIRECT_URI=https://[votre-domaine].railway.app/auth/gmail/callback"
+        )
+    if not is_configured():
+        logger.error("[Gmail] GMAIL_CLIENT_ID ou GMAIL_CLIENT_SECRET manquant")
+        raise RuntimeError("GMAIL_CLIENT_ID et GMAIL_CLIENT_SECRET doivent être configurés.")
+
+    try:
+        from google_auth_oauthlib.flow import Flow
+    except ImportError:
+        # Fallback manuel si google-auth-oauthlib n'est pas installé
+        logger.warning("[Gmail] google-auth-oauthlib absent, génération URL manuelle")
+        import urllib.parse
+        params = {
+            "client_id": GMAIL_CLIENT_ID,
+            "redirect_uri": GMAIL_REDIRECT_URI,
+            "response_type": "code",
+            "scope": " ".join(GMAIL_SCOPES),
+            "access_type": "offline",
+            "prompt": "consent",
+        }
+        return "https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params)
+
+    flow = Flow.from_client_config(
+        {
+            "web": {
+                "client_id": GMAIL_CLIENT_ID,
+                "client_secret": GMAIL_CLIENT_SECRET,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [GMAIL_REDIRECT_URI],
+            }
+        },
+        scopes=GMAIL_SCOPES,
+    )
+    flow.redirect_uri = GMAIL_REDIRECT_URI
+    auth_url, _ = flow.authorization_url(
+        access_type="offline",
+        prompt="consent",
+        include_granted_scopes="true",
+    )
+    return auth_url
+
+
+def exchange_code_for_tokens(code: str) -> dict:
+    """
+    Échange le code OAuth2 contre des tokens Google.
+    Retourne {"access_token", "refresh_token", "email"}.
+    Stocke les tokens dans la table gmail_tokens.
+    """
+    if not is_configured() or not GMAIL_REDIRECT_URI:
+        raise RuntimeError("Gmail non configuré (CLIENT_ID / CLIENT_SECRET / REDIRECT_URI manquants)")
+
+    try:
+        from google_auth_oauthlib.flow import Flow
+        from google.oauth2 import id_token
+        from google.auth.transport import requests as g_requests
+    except ImportError:
+        raise RuntimeError("google-auth-oauthlib non installé. Ajoutez-le dans requirements.txt")
+
+    flow = Flow.from_client_config(
+        {
+            "web": {
+                "client_id": GMAIL_CLIENT_ID,
+                "client_secret": GMAIL_CLIENT_SECRET,
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [GMAIL_REDIRECT_URI],
+            }
+        },
+        scopes=GMAIL_SCOPES,
+    )
+    flow.redirect_uri = GMAIL_REDIRECT_URI
+    flow.fetch_token(code=code)
+    creds = flow.credentials
+
+    # Récupérer l'email de l'utilisateur Google
+    email = ""
+    try:
+        id_info = id_token.verify_oauth2_token(
+            creds.id_token, g_requests.Request(), GMAIL_CLIENT_ID
+        )
+        email = id_info.get("email", "")
+    except Exception as e:
+        logger.warning(f"[Gmail] Impossible de lire l'email depuis id_token: {e}")
+
+    return {
+        "access_token": creds.token or "",
+        "refresh_token": creds.refresh_token or "",
+        "email": email,
+        "expiry": creds.expiry.isoformat() if creds.expiry else None,
+    }
 
 
 def get_gmail_service(username: str):
     """
     Retourne un service Gmail authentifié pour l'utilisateur.
     Rafraîchit automatiquement le token si expiré.
+    Lit les credentials depuis la table gmail_tokens.
     Retourne None si pas de credentials ou si non configuré.
     """
     if not is_configured():
@@ -46,21 +162,44 @@ def get_gmail_service(username: str):
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT gmail_credentials FROM users WHERE username = %s", (username,))
+        c.execute("""
+            SELECT access_token, refresh_token, updated_at
+            FROM gmail_tokens WHERE username = %s
+        """, (username,))
         row = c.fetchone()
     except Exception as e:
-        logger.error(f"[Gmail] Erreur lecture credentials {username}: {e}")
+        logger.error(f"[Gmail] Erreur lecture gmail_tokens {username}: {e}")
         return None
     finally:
         if conn: conn.close()
 
-    if not row or not row[0]:
+    if not row:
+        # Fallback : essayer users.gmail_credentials pour compatibilité
+        try:
+            conn = get_pg_conn()
+            c = conn.cursor()
+            c.execute("SELECT gmail_credentials FROM users WHERE username = %s", (username,))
+            row2 = c.fetchone()
+            conn.close()
+            if row2 and row2[0]:
+                cred_data = row2[0]
+                row = (
+                    cred_data.get("token", ""),
+                    cred_data.get("refresh_token", ""),
+                    None,
+                )
+            else:
+                return None
+        except Exception:
+            return None
+
+    access_token, refresh_token, _ = row
+    if not refresh_token:
         return None
 
-    cred_data = row[0]
     creds = Credentials(
-        token=cred_data.get("token"),
-        refresh_token=cred_data.get("refresh_token"),
+        token=access_token,
+        refresh_token=refresh_token,
         token_uri="https://oauth2.googleapis.com/token",
         client_id=GMAIL_CLIENT_ID,
         client_secret=GMAIL_CLIENT_SECRET,
@@ -72,7 +211,7 @@ def get_gmail_service(username: str):
         try:
             from google.auth.transport.requests import Request
             creds.refresh(Request())
-            _save_credentials(username, creds)
+            _save_refreshed_credentials(username, creds)
         except Exception as e:
             logger.error(f"[Gmail] Erreur refresh {username}: {e}")
             return None
@@ -84,20 +223,19 @@ def get_gmail_service(username: str):
         return None
 
 
-def _save_credentials(username: str, creds) -> None:
-    """Sauvegarde les credentials rafraîchis en base."""
+def _save_refreshed_credentials(username: str, creds) -> None:
+    """Sauvegarde les credentials rafraîchis dans gmail_tokens."""
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        cred_json = json.dumps({
-            "token": creds.token,
-            "refresh_token": creds.refresh_token,
-            "expiry": creds.expiry.isoformat() if creds.expiry else None,
-        })
         c.execute("""
-            UPDATE users SET gmail_credentials = %s::jsonb WHERE username = %s
-        """, (cred_json, username))
+            INSERT INTO gmail_tokens (username, access_token, refresh_token)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (username) DO UPDATE
+            SET access_token = EXCLUDED.access_token,
+                updated_at = NOW()
+        """, (username, creds.token, creds.refresh_token))
         conn.commit()
     except Exception as e:
         logger.error(f"[Gmail] Erreur sauvegarde credentials {username}: {e}")
@@ -133,7 +271,6 @@ def fetch_new_messages(username: str, max_results: int = 20) -> list:
 
     try:
         if last_history_id:
-            # Polling incrémental via historyId
             try:
                 history = service.users().history().list(
                     userId="me",
@@ -159,13 +296,11 @@ def fetch_new_messages(username: str, max_results: int = 20) -> list:
 
             except Exception as e:
                 if "404" in str(e) or "historyid" in str(e).lower():
-                    # historyId invalide (trop vieux) — full fetch
                     logger.warning(f"[Gmail] historyId invalide pour {username}, full fetch")
                     messages = _full_fetch(service, username, max_results)
                 else:
                     raise
         else:
-            # Premier fetch
             messages = _full_fetch(service, username, max_results)
 
     except Exception as e:
@@ -187,7 +322,6 @@ def _full_fetch(service, username: str, max_results: int) -> list:
             if msg:
                 messages.append(msg)
 
-        # Sauvegarder le historyId courant
         profile = service.users().getProfile(userId="me").execute()
         _update_history_id(username, profile.get("historyId"))
 
