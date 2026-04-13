@@ -1,13 +1,14 @@
 """
-Registre statique des capacites UI et fonctionnelles de Raya.
+Registre des capacites UI et fonctionnelles de Raya.
 
 Injecte dans chaque prompt systeme pour que Raya ne mente jamais
 sur ce qu'elle peut ou ne peut pas faire.
 
-Exemple de mauvaise reponse corrigee par ce module :
-  AVANT : "je suis limitee au texte brut" (FAUX)
-  APRES : Raya consulte ce registre et repond correctement
+FIX-CAPABILITIES :
+  - Suppression de la limitation "pas_acces_web_libre" (FAUSSE — web_search est actif)
+  - Ajout dynamique : WhatsApp, recherche web, ElevenLabs dans get_user_capabilities_prompt()
 """
+import os
 
 CAPABILITIES = {
     "interface_utilisateur": {
@@ -36,10 +37,6 @@ CAPABILITIES = {
     },
     "limitations_reelles": {
         "pas_generation_images": "Je ne genere pas d'images.",
-        "pas_acces_web_libre": (
-            "Je n'ai pas acces a Internet en dehors de mes outils connectes "
-            "(Microsoft 365, Odoo, SharePoint)."
-        ),
         "pas_streaming": "Je reponds en un bloc complet, pas mot par mot.",
     },
 }
@@ -74,10 +71,10 @@ def get_user_capabilities_prompt(username: str, tools: dict) -> str:
                Cles : drive_write, drive_can_delete, mail_can_delete, mail_extra_boxes,
                       odoo_enabled, odoo_access, odoo_shared_user
     """
-    # Bloc statique (identique a get_capabilities_prompt)
+    # Bloc statique (capacites UI)
     static_block = get_capabilities_prompt()
 
-    # Bloc dynamique : outils reellement connectes
+    # ─── Outils connectes statiques ───
     drive_level = "lecture + ecriture" if tools.get("drive_write") else "lecture seule"
 
     if tools.get("odoo_enabled"):
@@ -93,6 +90,31 @@ def get_user_capabilities_prompt(username: str, tools: dict) -> str:
     extra_boxes = tools.get("mail_extra_boxes", [])
     boites_supp = ", ".join(extra_boxes) if extra_boxes else "aucune"
 
+    # ─── Capacites dynamiques (FIX-CAPABILITIES) ───
+
+    # WhatsApp : verifie si l'utilisateur a un numero en base
+    whatsapp_status = "non configure (pas de numero de telephone)"
+    try:
+        from app.security_users import get_user_phone
+        phone = get_user_phone(username)
+        if phone:
+            whatsapp_status = (
+                f"actif ({phone}) — notifications + reponses bidirectionnelles. "
+                "Je peux envoyer des alertes par WhatsApp et l'utilisateur peut me repondre."
+            )
+    except Exception:
+        pass
+
+    # Recherche web : variable d'environnement
+    web_search_enabled = os.getenv("RAYA_WEB_SEARCH_ENABLED", "true").strip().lower()
+    web_search_line = ""
+    if web_search_enabled not in ("false", "0", "no", "off"):
+        web_search_line = "  - Recherche web : active (je peux chercher sur Internet en temps reel)\n"
+
+    # ElevenLabs TTS
+    elevenlabs_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
+    elevenlabs_status = "active (ElevenLabs)" if elevenlabs_key else "non configuree"
+
     tools_block = (
         f"Outils connectes pour {username} :\n"
         f"  - Mails Outlook : actif (lecture + envoi)\n"
@@ -101,6 +123,9 @@ def get_user_capabilities_prompt(username: str, tools: dict) -> str:
         f"  - Calendrier Outlook : actif\n"
         f"  - Odoo : {odoo_status}\n"
         f"  - Boites supplementaires : {boites_supp}\n"
+        f"  - WhatsApp : {whatsapp_status}\n"
+        f"{web_search_line}"
+        f"  - Lecture vocale : {elevenlabs_status}\n"
         "\n"
         "IMPORTANT : Ne propose JAMAIS une action sur un outil non connecte.\n"
         "Si l'utilisateur demande quelque chose d'impossible, explique-lui pourquoi "
