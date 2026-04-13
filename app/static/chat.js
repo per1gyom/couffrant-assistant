@@ -156,7 +156,11 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
       content.innerHTML = cleanHtml;
       content.classList.add('markdown-content');
       content.querySelectorAll('a').forEach(a => { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer'); });
-    } catch(e) { content.style.whiteSpace = 'pre-wrap'; content.textContent = text; }
+    } catch(e) {
+      console.error('[Raya] Erreur rendu markdown:', e, 'marked:', typeof marked);
+      content.style.whiteSpace = 'pre-wrap';
+      content.textContent = text;
+    }
   } else {
     content.style.whiteSpace = 'pre-wrap'; content.textContent = text;
   }
