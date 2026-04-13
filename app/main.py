@@ -31,6 +31,7 @@ from app.routes.webhook import router as webhook_router
 from app.routes.forced_reset import router as forced_reset_router
 from app.routes.onboarding import router as onboarding_router
 from app.routes.elicitation import router as elicitation_router
+from app.routes.downloads import router as downloads_router
 
 
 # Inactivité (secondes) avant déconnexion automatique. Défaut : 2h.
@@ -112,6 +113,7 @@ app.include_router(webhook_router)
 app.include_router(forced_reset_router)
 app.include_router(onboarding_router)
 app.include_router(elicitation_router)
+app.include_router(downloads_router)
 
 
 @app.get("/")
@@ -233,9 +235,6 @@ def _init_heartbeats():
     """
     FIX-MONITOR-SPAM : initialise les heartbeats au démarrage pour éviter
     que les composants soient marqués 'stale' dès le premier scan du monitor.
-
-    Composants actifs (seuil 15 min) : scheduler, proactivity_scan, heartbeat_morning
-    Composants passifs (seuil 60 min) : webhook_microsoft, gmail_polling
     """
     try:
         from app.database import get_pg_conn
@@ -296,8 +295,6 @@ def startup_event():
     except Exception as e:
         logger.error(f"[Scheduler] Erreur demarrage: {e}")
 
-    # FIX-MONITOR-SPAM : heartbeats initiaux — les composants ne seront pas
-    # considérés comme stale dès le premier scan du monitor (10 min après démarrage)
     _init_heartbeats()
 
 
