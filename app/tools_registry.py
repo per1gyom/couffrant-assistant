@@ -244,6 +244,31 @@ _TOOLS = [
      "description": "Annule une action sensible mise en queue",
      "functional_description": "Annuler une action en attente avant qu'elle soit executee. L'utilisateur a change d'avis ou a detecte une erreur.",
      "is_sensitive": False, "requires_confirmation": False, "default_enabled": True},
+
+    # —— CRÉATION DE FICHIERS (TOOL-CREATE-FILES) ——
+    {"name": "CREATE_PDF",
+     "label": "Créer un PDF",
+     "category": "creation",
+     "action_code": "ACTION:CREATE_PDF:titre|contenu",
+     "description": "Crée un document PDF téléchargeable",
+     "functional_description": (
+         "Générer un PDF professionnel (récap chantier, rapport, mémo, compte-rendu). "
+         "L'utilisateur reçoit un lien de téléchargement directement dans le chat. "
+         "Le contenu peut inclure des tableaux (format col1|col2 par ligne)."
+     ),
+     "is_sensitive": False, "requires_confirmation": False, "default_enabled": True},
+
+    {"name": "CREATE_EXCEL",
+     "label": "Créer un fichier Excel",
+     "category": "creation",
+     "action_code": "ACTION:CREATE_EXCEL:titre|headers|lignes",
+     "description": "Crée un fichier Excel téléchargeable",
+     "functional_description": (
+         "Créer un tableau Excel structuré (suivi chantier, liste factures, planning, inventaire). "
+         "L'utilisateur reçoit un lien de téléchargement dans le chat. "
+         "Headers séparés par ; — lignes séparées par \\n, colonnes par ;."
+     ),
+     "is_sensitive": False, "requires_confirmation": False, "default_enabled": True},
 ]
 
 
