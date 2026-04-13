@@ -22,6 +22,7 @@ Endpoints super_admin — gestion globale (utilisateurs, tenants, outils, mémoi
   GET    /admin/user-tools/{target}
   POST   /admin/user-tools/{target}/{tool}
   DELETE /admin/user-tools/{target}/{tool}
+  GET    /admin/diag
   GET    /init-db
   GET    /test-elevenlabs
 """
@@ -68,6 +69,128 @@ def admin_costs(
 ):
     tenant_filter = None if user.get("scope") == "super_admin" else user.get("tenant_id")
     return get_costs_dashboard(tenant_id=tenant_filter, days=days)
+
+
+# ─── DIAGNOSTIC CONNECTEURS (DIAG-ENDPOINTS) ───
+
+@router.get("/admin/diag")
+def admin_diag(request: Request, _: dict = Depends(require_admin)):
+    """
+    Teste la connectivité réelle de chaque service externe.
+    Timeout 5s par test. Chaque test est indépendant.
+    """
+    import os
+
+    result = {}
+
+    # ── Microsoft 365 ──
+    try:
+        admin_username = os.getenv("APP_USERNAME", "guillaume").strip()
+        from app.token_manager import get_valid_microsoft_token
+        token = get_valid_microsoft_token(admin_username)
+        if token:
+            result["microsoft"] = {"status": "ok", "detail": f"Token valide pour {admin_username}"}
+        else:
+            conn = get_pg_conn()
+            c = conn.cursor()
+            c.execute("SELECT COUNT(*) FROM oauth_tokens WHERE provider='microsoft'")
+            count = c.fetchone()[0]
+            conn.close()
+            if count == 0:
+                result["microsoft"] = {"status": "not_configured", "detail": "Aucun token Microsoft en base"}
+            else:
+                result["microsoft"] = {"status": "error", "detail": f"Token expiré pour {admin_username}"}
+    except Exception as e:
+        result["microsoft"] = {"status": "error", "detail": str(e)[:120]}
+
+    # ── Gmail ──
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT username, updated_at FROM gmail_tokens
+            ORDER BY updated_at DESC LIMIT 1
+        """)
+        row = c.fetchone()
+        conn.close()
+        if not row:
+            result["gmail"] = {"status": "not_configured", "detail": "Aucun token Gmail en base"}
+        else:
+            from app.connectors.gmail_connector import is_configured
+            if not is_configured():
+                result["gmail"] = {
+                    "status": "not_configured",
+                    "detail": "GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET manquants"
+                }
+            else:
+                result["gmail"] = {
+                    "status": "ok",
+                    "detail": f"Tokens présents (user: {row[0]}, mis à jour: {str(row[1])[:10]})"
+                }
+    except Exception as e:
+        result["gmail"] = {"status": "error", "detail": str(e)[:120]}
+
+    # ── Odoo ──
+    try:
+        odoo_url = os.getenv("ODOO_URL", "").strip()
+        odoo_db = os.getenv("ODOO_DB", "").strip()
+        odoo_user = os.getenv("ODOO_USER", "").strip()
+        odoo_password = os.getenv("ODOO_PASSWORD", "").strip()
+        if not odoo_url or not odoo_db:
+            result["odoo"] = {"status": "not_configured", "detail": "ODOO_URL / ODOO_DB manquants"}
+        else:
+            try:
+                from app.connectors.odoo_connector import odoo_authenticate
+                uid = odoo_authenticate()
+                if uid:
+                    result["odoo"] = {"status": "ok", "detail": f"Authentifié (uid={uid}) sur {odoo_url}"}
+                else:
+                    result["odoo"] = {"status": "error", "detail": "Authentification Odoo échouée (uid=False)"}
+            except Exception as e:
+                result["odoo"] = {"status": "error", "detail": str(e)[:120]}
+    except Exception as e:
+        result["odoo"] = {"status": "error", "detail": str(e)[:120]}
+
+    # ── Twilio ──
+    try:
+        account_sid = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
+        auth_token = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
+        from_number = os.getenv("TWILIO_FROM_NUMBER", "").strip()
+        if not account_sid or not auth_token or not from_number:
+            missing = [k for k, v in {
+                "TWILIO_ACCOUNT_SID": account_sid,
+                "TWILIO_AUTH_TOKEN": auth_token,
+                "TWILIO_FROM_NUMBER": from_number
+            }.items() if not v]
+            result["twilio"] = {
+                "status": "not_configured",
+                "detail": f"Variables manquantes : {', '.join(missing)}"
+            }
+        else:
+            result["twilio"] = {
+                "status": "ok",
+                "detail": f"Configuré (SID: {account_sid[:8]}…, from: {from_number})"
+            }
+    except Exception as e:
+        result["twilio"] = {"status": "error", "detail": str(e)[:120]}
+
+    # ── ElevenLabs ──
+    try:
+        api_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
+        voice_id = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
+        if not api_key:
+            result["elevenlabs"] = {"status": "not_configured", "detail": "ELEVENLABS_API_KEY manquant"}
+        elif not voice_id:
+            result["elevenlabs"] = {"status": "not_configured", "detail": "ELEVENLABS_VOICE_ID manquant"}
+        else:
+            result["elevenlabs"] = {
+                "status": "ok",
+                "detail": f"Clé présente ({len(api_key)} chars), voice_id: {voice_id}"
+            }
+    except Exception as e:
+        result["elevenlabs"] = {"status": "error", "detail": str(e)[:120]}
+
+    return result
 
 
 # ─── CONFIG SHAREPOINT ───
