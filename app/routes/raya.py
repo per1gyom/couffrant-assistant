@@ -7,6 +7,7 @@ Phase 5B-1    : injection dynamique des actions par domaine via detect_query_dom
 7-6D          : marquage automatique du rapport matinal livré via le chat.
 WEB-SEARCH    : activation de la recherche web Anthropic via RAYA_WEB_SEARCH_ENABLED.
 SPEAK-SPEED   : vitesse de lecture ElevenLabs dynamique via payload.speed.
+TOOL-READ-PDF : extraction texte pdfplumber injectée dans le contexte LLM (commit 3/3).
 """
 import json
 import os
@@ -92,7 +93,6 @@ def speak_text(payload: dict = Body(...)):
     if not api_key or not voice_id:
         return {"error": "Cles ElevenLabs manquantes"}
     text = payload.get("text", "")
-    # Vitesse dynamique (0.5-2.5) — défaut ELEVENLABS_SPEED ou 1.2
     speed = payload.get("speed", float(os.getenv("ELEVENLABS_SPEED", "1.2")))
     speed = max(0.5, min(2.5, float(speed)))
     clean = re.sub(r'#{1,6}\s+', '', text)
@@ -381,12 +381,25 @@ def _build_user_content(payload: RayaQuery):
                       "text": f"[Image jointe{file_name_info}]\n{payload.query}"
                       if payload.query else f"[Image jointe{file_name_info}] Analyse ce document."})
     elif payload.file_type == "application/pdf":
+        # TOOL-READ-PDF : extraction texte via pdfplumber + injection dans le contexte LLM
+        enriched = payload.query or ""
+        try:
+            import base64 as _b64
+            from app.connectors.pdf_reader import extract_text_from_pdf
+            pdf_bytes = _b64.b64decode(payload.file_data)
+            r = extract_text_from_pdf(pdf_bytes)
+            if "error" in r:
+                enriched += f"\n\n[Erreur PDF: {r['error']}]"
+            else:
+                enriched += f"\n\n--- PDF '{payload.file_name or 'doc.pdf'}' ({r['pages']}p) ---\n{r['text']}"
+        except Exception as e:
+            print(f"[Raya] PDF error: {e}")
         parts.append({"type": "document",
                       "source": {"type": "base64", "media_type": "application/pdf",
                                  "data": payload.file_data}})
         parts.append({"type": "text",
-                      "text": f"[PDF joint{file_name_info}]\n{payload.query}"
-                      if payload.query else f"[PDF joint{file_name_info}] Analyse ce document."})
+                      "text": f"[PDF joint{file_name_info}]\n{enriched}"
+                      if enriched else f"[PDF joint{file_name_info}] Analyse ce document."})
     else:
         parts.append({"type": "text",
                       "text": f"[Fichier joint{file_name_info}]\n{payload.query}"})
