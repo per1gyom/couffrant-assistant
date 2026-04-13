@@ -11,7 +11,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
-<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+<!-- PNG 180x180 généré côté serveur — requis par Safari iPhone -->
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png">
+<link rel="apple-touch-icon" href="/pwa/icon-192.png">
 
 <!-- CSS -->
 <link rel="stylesheet" href="/static/chat.css">
@@ -53,7 +55,7 @@
     <div class="messages" id="messages">
       <div class="welcome" id="welcomeMsg">
         <div class="welcome-icon">✦</div>
-        <h2 id="welcomeTitle">Bonjour !</h2>
+        <h2 id="welcomeTitle">Bonjour !</h2>
         <p>Je suis Raya, ton assistante personnelle.<br>Je surveille tes mails, ton agenda et ton activité.</p>
       </div>
     </div>
@@ -139,7 +141,7 @@
     <div class="d-group">
       <div class="d-group-title">⚠️ Actions sensibles</div>
       <div class="d-btn" onclick="drawerAction(this,'/purge-memory','purge')"><span class="d-btn-icon">🗓️</span><div class="d-btn-body"><span class="d-btn-label">Purger les vieux mails</span><span class="d-btn-desc">Supprime les mails de plus de 90 jours. Règles et conversations conservées.</span><div class="d-btn-result" id="result-purge"></div></div></div>
-      <div class="d-btn danger" onclick="drawerShowConfirm('confirm-rebuild')"><span class="d-btn-icon">⛔</span><div class="d-btn-body"><span class="d-btn-label">Vider l'historique mails</span><span class="d-btn-desc">Efface tous les mails en base. Règles et insights préservés.</span><div class="d-confirm" id="confirm-rebuild"><div class="d-confirm-text">⚠️ Tous les mails en base seront supprimés. Confirmer ?</div><div class="d-confirm-btns"><button class="d-confirm-yes" onclick="drawerConfirmAction(event,'/rebuild-memory','rebuild')">Oui, vider</button><button class="d-confirm-no" onclick="drawerHideConfirm(event,'confirm-rebuild')">Annuler</button></div></div><div class="d-btn-result" id="result-rebuild"></div></div></div>
+      <div class="d-btn danger" onclick="drawerShowConfirm('confirm-rebuild')"><span class="d-btn-icon">⛔</span><div class="d-btn-body"><span class="d-btn-label">Vider l'historique mails</span><span class="d-btn-desc">Efface tous les mails en base. Règles et insights préservés.</span><div class="d-confirm" id="confirm-rebuild"><div class="d-confirm-text">⚠️ Tous les mails en base seront supprimés. Confirmer ?</div><div class="d-confirm-btns"><button class="d-confirm-yes" onclick="drawerConfirmAction(event,'/rebuild-memory','rebuild')">Oui, vider</button><button class="d-confirm-no" onclick="drawerHideConfirm(event,'confirm-rebuild')">Annuler</button></div></div><div class="d-btn-result" id="result-rebuild"></div></div></div>
     </div>
     <div class="d-sep"></div>
     <div class="d-group">
@@ -172,10 +174,11 @@
 <script src="/static/chat.js"></script>
 
 <script>
-  // Enregistrement du Service Worker (PWA)
+  // Enregistrement du Service Worker à la racine (PWA)
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/static/sw.js', { scope: '/' })
+      navigator.serviceWorker.register('/sw.js', { scope: '/' })
+        .then(reg => console.log('[SW] Enregistré, scope:', reg.scope))
         .catch(err => console.warn('[SW] Enregistrement échoué:', err));
     });
   }
