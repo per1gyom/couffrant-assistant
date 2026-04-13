@@ -69,6 +69,19 @@ def execute_actions(
         except Exception as e:
             confirmed.append(f"❌ Erreur création fichier : {str(e)[:80]}")
 
+    # TOOL-DALLE : génération d'images avec DALL-E 3
+    create_image_matches = re.findall(r'\[ACTION:CREATE_IMAGE:([^\]]*)\]', raya_response)
+    for prompt_text in create_image_matches:
+        try:
+            from app.connectors.dalle_connector import generate_image
+            result = generate_image(prompt_text.strip())
+            if "error" in result:
+                confirmed.append(f"❌ {result['error']}")
+            else:
+                confirmed.append(f"![Image générée]({result['url']})")
+        except Exception as e:
+            confirmed.append(f"❌ Erreur DALL-E: {str(e)[:100]}")
+
     confirmed += _handle_ask_choice(raya_response)
 
     return confirmed
