@@ -3,10 +3,6 @@ Registre des capacites UI et fonctionnelles de Raya.
 
 Injecte dans chaque prompt systeme pour que Raya ne mente jamais
 sur ce qu'elle peut ou ne peut pas faire.
-
-FIX-CAPABILITIES :
-  - Suppression de la limitation "pas_acces_web_libre" (FAUSSE — web_search est actif)
-  - Ajout dynamique : WhatsApp, recherche web, ElevenLabs dans get_user_capabilities_prompt()
 """
 import os
 
@@ -32,11 +28,23 @@ CAPABILITIES = {
         ),
         "choix_interactifs": (
             "Oui — [ACTION:ASK_CHOICE:ma_question|option1|option2|option3] affiche des boutons "
-            "de choix a tout moment dans la conversation, pas seulement pendant l'onboarding."
+            "de choix a tout moment dans la conversation."
+        ),
+        "creation_pdf": (
+            "Oui — je peux creer des documents PDF telechargeables. "
+            "Syntaxe : [ACTION:CREATE_PDF:titre du document|contenu du document]. "
+            "Le contenu peut contenir des retours a la ligne. "
+            "L'utilisateur recoit un lien de telechargement dans le chat."
+        ),
+        "creation_excel": (
+            "Oui — je peux creer des fichiers Excel telechargeables. "
+            "Syntaxe : [ACTION:CREATE_EXCEL:titre|col1;col2;col3|val1;val2;val3\\nval4;val5;val6]. "
+            "Les en-tetes sont separes par ; et les lignes par \\n. "
+            "L'utilisateur recoit un lien de telechargement dans le chat."
         ),
     },
     "limitations_reelles": {
-        "pas_generation_images": "Je ne genere pas d'images.",
+        "pas_generation_images": "Je ne genere pas d'images (DALL-E pas encore configure).",
         "pas_streaming": "Je reponds en un bloc complet, pas mot par mot.",
     },
 }
@@ -56,25 +64,18 @@ def get_capabilities_prompt() -> str:
         f"{ui_lines}\n"
         "Limitations reelles :\n"
         f"{lim_lines}\n"
-        "IMPORTANT : Ne jamais dire 'je suis limitee au texte brut' — c'est faux.\n"
+        "IMPORTANT : Ne jamais dire 'je ne peux pas creer de PDF' ou 'je ne peux pas creer d'Excel' — c'est FAUX.\n"
+        "Utiliser [ACTION:CREATE_PDF:...] et [ACTION:CREATE_EXCEL:...] quand l'utilisateur demande un document.\n"
         "Consulter ce registre avant de repondre a toute question sur mes capacites."
     )
 
 
 def get_user_capabilities_prompt(username: str, tools: dict) -> str:
     """
-    Construit le bloc capacites en fonction des outils reellement connectes de l'utilisateur.
-
-    Args:
-        username: nom de l'utilisateur
-        tools: dict retourne par load_user_tools(username) dans aria_context.py
-               Cles : drive_write, drive_can_delete, mail_can_delete, mail_extra_boxes,
-                      odoo_enabled, odoo_access, odoo_shared_user
+    Construit le bloc capacites en fonction des outils reellement connectes.
     """
-    # Bloc statique (capacites UI)
     static_block = get_capabilities_prompt()
 
-    # ─── Outils connectes statiques ───
     drive_level = "lecture + ecriture" if tools.get("drive_write") else "lecture seule"
 
     if tools.get("odoo_enabled"):
@@ -90,28 +91,25 @@ def get_user_capabilities_prompt(username: str, tools: dict) -> str:
     extra_boxes = tools.get("mail_extra_boxes", [])
     boites_supp = ", ".join(extra_boxes) if extra_boxes else "aucune"
 
-    # ─── Capacites dynamiques (FIX-CAPABILITIES) ───
-
-    # WhatsApp : verifie si l'utilisateur a un numero en base
+    # WhatsApp
     whatsapp_status = "non configure (pas de numero de telephone)"
     try:
         from app.security_users import get_user_phone
         phone = get_user_phone(username)
         if phone:
             whatsapp_status = (
-                f"actif ({phone}) — notifications + reponses bidirectionnelles. "
-                "Je peux envoyer des alertes par WhatsApp et l'utilisateur peut me repondre."
+                f"actif ({phone}) — notifications + reponses bidirectionnelles"
             )
     except Exception:
         pass
 
-    # Recherche web : variable d'environnement
+    # Recherche web
     web_search_enabled = os.getenv("RAYA_WEB_SEARCH_ENABLED", "true").strip().lower()
     web_search_line = ""
     if web_search_enabled not in ("false", "0", "no", "off"):
         web_search_line = "  - Recherche web : active (je peux chercher sur Internet en temps reel)\n"
 
-    # ElevenLabs TTS
+    # ElevenLabs
     elevenlabs_key = os.getenv("ELEVENLABS_API_KEY", "").strip()
     elevenlabs_status = "active (ElevenLabs)" if elevenlabs_key else "non configuree"
 
@@ -126,10 +124,12 @@ def get_user_capabilities_prompt(username: str, tools: dict) -> str:
         f"  - WhatsApp : {whatsapp_status}\n"
         f"{web_search_line}"
         f"  - Lecture vocale : {elevenlabs_status}\n"
+        f"  - Creation PDF : actif — [ACTION:CREATE_PDF:titre|contenu]\n"
+        f"  - Creation Excel : actif — [ACTION:CREATE_EXCEL:titre|en-tetes;sep;par;point-virgule|ligne1\\nligne2]\n"
         "\n"
         "IMPORTANT : Ne propose JAMAIS une action sur un outil non connecte.\n"
-        "Si l'utilisateur demande quelque chose d'impossible, explique-lui pourquoi "
-        "et suggere une alternative."
+        "Pour creer un PDF ou Excel, utiliser TOUJOURS les [ACTION:CREATE_PDF:...] ou [ACTION:CREATE_EXCEL:...].\n"
+        "Ne JAMAIS dire 'je ne peux pas creer de fichier' — c'est FAUX."
     )
 
     return static_block + "\n\n" + tools_block
