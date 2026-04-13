@@ -17,6 +17,8 @@ consommé par le webhook Microsoft ET le polling Gmail.
 7-8 : endpoint POST /webhook/twilio (WhatsApp entrant).
 USER-PHONE : _resolve_user_by_phone cherche d'abord en base (colonne phone),
              puis tombe sur les variables d'env pour la compatibilité.
+WHATSAPP-RAYA : texte libre WhatsApp → vraie réponse LLM de Raya (Sonnet,
+                max 512 tokens), sauvegardée dans aria_memory.
 """
 import re
 import threading
@@ -423,6 +425,83 @@ def _resolve_user_by_phone(phone: str) -> str | None:
     return None
 
 
+def _whatsapp_raya_response(username: str, message: str, tenant_id: str) -> str:
+    """
+    WHATSAPP-RAYA : appel LLM léger pour répondre au texte libre WhatsApp.
+
+    Contexte minimal : hot_summary + règles comportement/style.
+    Modèle : smart (Sonnet). Max 512 tokens → réponse courte, sans markdown.
+    Sauvegarde l'échange dans aria_memory (partagé avec le chat).
+    Log les coûts via log_llm_usage.
+
+    Lève une exception si le LLM échoue — l'appelant applique un fallback.
+    """
+    from app.llm_client import llm_complete, log_llm_usage
+    from app.database import get_pg_conn
+    from app.rule_engine import get_rules_as_text
+    from app.memory_synthesis import get_hot_summary
+
+    # 1. Contexte léger : hot_summary (mémoire opérationnelle)
+    hot_summary = ""
+    try:
+        hot_summary = (get_hot_summary(username) or "")[:800]
+    except Exception:
+        pass
+
+    # 2. Règles de comportement et style
+    rules_text = ""
+    try:
+        rules_text = get_rules_as_text(username, ["comportement", "style", "memoire"])
+    except Exception:
+        pass
+
+    # 3. Prompt système minimal adapté WhatsApp
+    context_block = f"\n\nMémoire active (résumé) :\n{hot_summary}" if hot_summary else ""
+    rules_block = f"\n\nRègles de comportement :\n{rules_text[:600]}" if rules_text else ""
+
+    system_prompt = (
+        f"Tu es Raya, l'assistante IA personnelle de {username.capitalize()}. "
+        f"Tu réponds via WhatsApp — sois concise, directe et vraiment utile. "
+        f"Maximum 3-4 phrases. Pas de markdown, pas d'astérisques, pas de titres. "
+        f"Réponds en français."
+        f"{context_block}{rules_block}"
+    )
+
+    # 4. Appel LLM (Sonnet, 512 tokens max)
+    result = llm_complete(
+        messages=[{"role": "user", "content": message}],
+        model_tier="smart",
+        max_tokens=512,
+        system=system_prompt,
+    )
+    response_text = (result.get("text") or "").strip()
+
+    # 5. Tronquer à 1500 chars (limite WhatsApp pratique)
+    if len(response_text) > 1500:
+        response_text = response_text[:1497] + "…"
+
+    # 6. Sauvegarder dans aria_memory (historique partagé chat + WhatsApp)
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO aria_memory (username, tenant_id, user_input, aria_response)
+            VALUES (%s, %s, %s, %s)
+        """, (username, tenant_id, message, response_text))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[WhatsApp] Erreur sauvegarde aria_memory: {e}")
+
+    # 7. Log des coûts LLM
+    try:
+        log_llm_usage(result, username=username, tenant_id=tenant_id, purpose="whatsapp_raya")
+    except Exception:
+        pass
+
+    return response_text
+
+
 def _handle_whatsapp_command(username: str, message: str, phone: str):
     """
     Traite une commande WhatsApp entrante. (7-8)
@@ -432,7 +511,7 @@ def _handle_whatsapp_command(username: str, message: str, phone: str):
       "3" / "rappel" / "1h" → créer un rappel dans 1h
       "4" / "ignorer" → dismiss l'alerte
       "rapport" → livrer le rapport matinal
-      Texte libre → accusé de réception
+      Texte libre → vraie réponse Raya via LLM (WHATSAPP-RAYA)
     """
     from app.connectors.twilio_connector import send_whatsapp
     from app.app_security import get_tenant_id
@@ -511,13 +590,19 @@ def _handle_whatsapp_command(username: str, message: str, phone: str):
             send_whatsapp(phone, "Erreur lors de la récupération du rapport.")
         return
 
-    # Texte libre — accusé de réception
-    send_whatsapp(phone, "📩 Message reçu. Connecte-toi au chat pour une réponse complète de Raya.")
+    # ─── TEXTE LIBRE → vraie réponse Raya (WHATSAPP-RAYA) ───
+    try:
+        response = _whatsapp_raya_response(username, message, tenant_id)
+        send_whatsapp(phone, response)
+    except Exception as e:
+        print(f"[WhatsApp] Erreur LLM réponse libre: {e}")
+        # Fallback sur l'accusé de réception si le LLM échoue
+        send_whatsapp(phone, "📩 Message reçu. Connecte-toi au chat pour une réponse complète de Raya.")
 
     # Logger l'activité
     try:
         from app.activity_log import log_activity
-        log_activity(username, "whatsapp_command", message[:100], phone, tenant_id)
+        log_activity(username, "whatsapp_raya", message[:100], phone, tenant_id)
     except Exception:
         pass
 
