@@ -11,9 +11,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
-<!-- PNG 180x180 généré côté serveur — requis par Safari iPhone -->
-<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png">
-<link rel="apple-touch-icon" href="/pwa/icon-192.png">
+<!-- PNG opaque 180x180 — requis par Safari iPhone -->
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=2">
 
 <!-- CSS -->
 <link rel="stylesheet" href="/static/chat.css">
@@ -156,14 +155,13 @@
       <div class="d-btn" onclick="drawerAction(this,'/onboarding/restart','onb-restart');closeDrawer()"><span class="d-btn-icon">🔁</span><div class="d-btn-body"><span class="d-btn-label">Relancer l'onboarding</span><span class="d-btn-desc">Recommencer la configuration initiale du profil Raya.</span><div class="d-btn-result" id="result-onb-restart"></div></div></div>
     </div>
     <div class="d-sep"></div>
-    <!-- GMAIL-FIX : bouton connexion Gmail -->
     <div class="d-group">
       <div class="d-group-title">📧 Connexions</div>
       <div class="d-btn nav" onclick="window.location.href='/login/gmail'">
         <span class="d-btn-icon">✉️</span>
         <div class="d-btn-body">
           <span class="d-btn-label">Connecter Gmail</span>
-          <span class="d-btn-desc">Autoriser Raya à lire tes mails Gmail via OAuth2 Google. Tu seras redirigé vers Google puis revenu ici automatiquement.</span>
+          <span class="d-btn-desc">Autoriser Raya à lire tes mails Gmail via OAuth2 Google.</span>
         </div>
       </div>
       <div class="d-btn nav" onclick="window.location.href='/login'">
@@ -183,7 +181,7 @@
   </div>
 </div>
 
-<!-- Modules JS (ordre important : les dépendances avant chat.js) -->
+<!-- Modules JS -->
 <script src="/static/chat-onboarding.js"></script>
 <script src="/static/chat-shortcuts.js"></script>
 <script src="/static/chat-voice.js"></script>
@@ -193,7 +191,6 @@
 <script src="/static/chat.js"></script>
 
 <script>
-  // Enregistrement du Service Worker à la racine (PWA)
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('/sw.js', { scope: '/' })
@@ -201,21 +198,15 @@
         .catch(err => console.warn('[SW] Enregistrement échoué:', err));
     });
   }
-
-  // Toast si retour du callback Gmail
   (function(){
     const params = new URLSearchParams(window.location.search);
     if(params.get('gmail_connected')==='1'){
       window.history.replaceState({}, '', '/chat');
-      setTimeout(()=>{
-        if(typeof showToast === 'function') showToast('✅ Gmail connecté avec succès !');
-      }, 800);
+      setTimeout(()=>{ if(typeof showToast === 'function') showToast('✅ Gmail connecté avec succès !'); }, 800);
     }
     if(params.get('gmail_error')){
       window.history.replaceState({}, '', '/chat');
-      setTimeout(()=>{
-        if(typeof showToast === 'function') showToast('❌ Connexion Gmail refusée : ' + params.get('gmail_error'));
-      }, 800);
+      setTimeout(()=>{ if(typeof showToast === 'function') showToast('❌ Connexion Gmail refusée : ' + params.get('gmail_error')); }, 800);
     }
   })();
 </script>
