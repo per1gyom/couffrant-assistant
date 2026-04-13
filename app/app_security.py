@@ -17,6 +17,7 @@ from app.security_users import (  # noqa
     get_user_scope, get_tenant_id, get_users_in_tenant, update_last_login,
     init_default_user, generate_reset_token, validate_reset_token,
     consume_reset_token, must_reset_password_check, set_must_reset_password,
+    resolve_username, get_user_phone,
 )
 
 # ─── PAGE DE CONNEXION ───
@@ -82,8 +83,8 @@ input:focus {{ border-color: var(--accent);
     {error_block}
     <form method="post" action="/login-app">
       <div class="form-group">
-        <label>Identifiant</label>
-        <input type="text" name="username" placeholder="votre identifiant"
+        <label>Email ou identifiant</label>
+        <input type="text" name="username" placeholder="email ou identifiant"
                autocomplete="username" autofocus required>
       </div>
       <div class="form-group">
