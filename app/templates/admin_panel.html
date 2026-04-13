@@ -72,7 +72,7 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 .modal-title { font-family: var(--mono); font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 20px; }
 .form-group { margin-bottom: 16px; }
 label { display: block; font-family: var(--mono); font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
-input[type=text], input[type=password], input[type=email], select, textarea { width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; color: var(--text); font-family: var(--mono); font-size: 13px; padding: 10px 12px; outline: none; transition: border-color 0.15s; }
+input[type=text], input[type=password], input[type=email], input[type=tel], select, textarea { width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; color: var(--text); font-family: var(--mono); font-size: 13px; padding: 10px 12px; outline: none; transition: border-color 0.15s; }
 textarea { resize: vertical; min-height: 80px; }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); }
 select option { background: var(--bg3); }
@@ -235,10 +235,9 @@ tr.row-locked td { background: rgba(255,82,82,0.04) !important; }
     <div class="action-card"><div class="action-card-title">📤 Ingéstion envoyés</div><div class="action-card-desc">Ingèste les mails envoyés pour enrichir le style rédactionnel.</div><button class="btn btn-accent" onclick="quickAction('/learn-sent-mails','sent-result')">Lancer</button><div class="action-result" id="sent-result"></div></div>
     <div class="action-card"><div class="action-card-title">🗑️ Purge mémoire</div><div class="action-card-desc">Supprime les mails en base de plus de 90 jours.</div><button class="btn btn-danger" onclick="quickAction('/purge-memory','purge-result')">Lancer</button><div class="action-result" id="purge-result"></div></div>
     <div class="action-card"><div class="action-card-title">⚙️ Init base de données</div><div class="action-card-desc">Crée les tables manquantes et exécute les migrations.</div><button class="btn btn-ghost" onclick="quickAction('/init-db','initdb-result')">Lancer</button><div class="action-result" id="initdb-result"></div></div>
-    <!-- DIAG-ENDPOINTS : carte diagnostic connecteurs (toute la largeur) -->
     <div class="action-card" style="grid-column:1/-1">
       <div class="action-card-title">🔍 Diagnostic connecteurs</div>
-      <div class="action-card-desc">Vérifie la connectivité réelle de chaque service externe. Pastille verte = OK, rouge = erreur, grise = non configuré.</div>
+      <div class="action-card-desc">Vérifie la connectivité réelle de chaque service externe. Pastille verte = OK, rouge = erreur, grise = non configuré.</div>
       <button class="btn btn-accent" onclick="runDiag(this)">Tester les connecteurs</button>
       <div id="diag-result" style="margin-top:14px"></div>
     </div>
@@ -267,7 +266,7 @@ tr.row-locked td { background: rgba(255,82,82,0.04) !important; }
   </div>
   <div class="profile-card">
     <div class="profile-section-title">🔑 Changer le mot de passe</div>
-    <div class="profile-info">Critères : 12 caractères min · majuscule · minuscule · chiffre · caractère spécial.</div>
+    <div class="profile-info">Critères : 12 caractères min · majuscule · minuscule · chiffre · caractère spécial.</div>
     <div id="password-alert" class="alert"></div>
     <div class="form-group"><label>Mot de passe actuel</label><input type="password" id="current-password" placeholder="Votre mot de passe actuel" autocomplete="current-password"></div>
     <div class="form-group"><label>Nouveau mot de passe</label><input type="password" id="new-password" placeholder="12 caract. min + maj + chiffre + spécial" autocomplete="new-password"></div>
@@ -278,17 +277,26 @@ tr.row-locked td { background: rgba(255,82,82,0.04) !important; }
 
 </main>
 
-<!-- MODAL CRÉATION USER -->
+<!-- MODAL CRÉATION USER — USER-PHONE : email obligatoire + champ téléphone -->
 <div class="modal-overlay" id="modal-create-user">
   <div class="modal">
     <div class="modal-title">Créer un utilisateur</div>
     <div id="create-user-alert" class="alert"></div>
     <div class="form-group"><label>Identifiant</label><input type="text" id="new-username" placeholder="ex: arlene" autocomplete="off"></div>
-    <div class="form-group"><label>Email</label><input type="email" id="new-email" placeholder="prenom@societe.fr"></div>
+    <div class="form-group">
+      <label>Email * (identifiant de connexion)</label>
+      <input type="email" id="new-email" placeholder="prenom@societe.fr" required>
+      <div class="field-hint">Obligatoire. Permet aussi de se connecter à la place de l'identifiant.</div>
+    </div>
+    <div class="form-group">
+      <label>Téléphone (optionnel)</label>
+      <input type="tel" id="new-phone" placeholder="+33 6 12 34 56 78">
+      <div class="field-hint">Format international. Utilisé pour les alertes WhatsApp/SMS.</div>
+    </div>
     <div class="form-group">
       <label>Mot de passe temporaire</label>
       <input type="password" id="new-password-user" placeholder="8 caractères min">
-      <div style="font-family:var(--mono);font-size:10px;color:var(--text3);margin-top:5px">L'utilisateur sera invité à définir un mot de passe robuste à sa première connexion.</div>
+      <div class="field-hint">L'utilisateur sera invité à définir un mot de passe robuste à sa première connexion.</div>
     </div>
     <div class="form-group"><label>Rôle</label><select id="new-scope"><option value="user">Utilisateur</option><option value="tenant_admin">Admin société</option><option value="admin">Super-admin</option></select></div>
     <div class="modal-footer">
@@ -298,12 +306,17 @@ tr.row-locked td { background: rgba(255,82,82,0.04) !important; }
   </div>
 </div>
 
-<!-- MODAL ÉDITION USER -->
+<!-- MODAL ÉDITION USER — USER-PHONE : champ téléphone ajouté -->
 <div class="modal-overlay" id="modal-edit-user">
   <div class="modal">
     <div class="modal-title" id="edit-modal-title">Éditer l'utilisateur</div>
     <div id="edit-user-alert" class="alert"></div>
     <div class="form-group"><label>Email</label><input type="email" id="edit-email" placeholder="prenom@domaine.fr"></div>
+    <div class="form-group">
+      <label>Téléphone (optionnel)</label>
+      <input type="tel" id="edit-phone" placeholder="+33 6 12 34 56 78">
+      <div class="field-hint">Format international. Utilisé pour les alertes WhatsApp/SMS.</div>
+    </div>
     <div class="form-group"><label>Rôle</label><select id="edit-scope"><option value="user">Utilisateur</option><option value="tenant_admin">Admin société</option><option value="admin">Super-admin</option></select></div>
     <hr class="divider">
     <p style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:10px">RÉINITIALISATION MOT DE PASSE</p>
@@ -328,7 +341,7 @@ tr.row-locked td { background: rgba(255,82,82,0.04) !important; }
   </div>
 </div>
 
-<!-- MODAL CRÉATION TENANT — informations légales uniquement -->
+<!-- MODAL CRÉATION TENANT -->
 <div class="modal-overlay" id="modal-create-tenant">
   <div class="modal">
     <div class="modal-title">🏢 Créer une société</div>
@@ -336,7 +349,7 @@ tr.row-locked td { background: rgba(255,82,82,0.04) !important; }
     <div class="form-group">
       <label>Identifiant unique (ID) *</label>
       <input type="text" id="tenant-new-id" placeholder="ex: juillet_solar ou Juillet Solar" autocomplete="off" oninput="this.value=normalizeTenantId(this.value)">
-      <div class="field-hint">Converti automatiquement (ex : Juillet Solar → juillet_solar). Non modifiable après création.</div>
+      <div class="field-hint">Converti automatiquement (ex : Juillet Solar → juillet_solar). Non modifiable après création.</div>
     </div>
     <div class="form-group"><label>Nom de la société *</label><input type="text" id="tenant-new-name" placeholder="ex: Juillet Solar SAS"></div>
     <div class="form-group">
@@ -387,7 +400,7 @@ tr.row-locked td { background: rgba(255,82,82,0.04) !important; }
   <div class="modal">
     <div class="modal-title">🗑️ Supprimer la société</div>
     <div id="delete-tenant-alert" class="alert"></div>
-    <p style="color:var(--text2);font-size:13px;line-height:1.6;margin-bottom:12px">Vous êtes sur le point de supprimer :<br><strong id="delete-tenant-label" style="color:var(--red);font-family:var(--mono)"></strong></p>
+    <p style="color:var(--text2);font-size:13px;line-height:1.6;margin-bottom:12px">Vous êtes sur le point de supprimer :<br><strong id="delete-tenant-label" style="color:var(--red);font-family:var(--mono)"></strong></p>
     <p style="color:var(--yellow);font-family:var(--mono);font-size:11px;margin-bottom:20px">⚠️ Cette action est irréversible. Les utilisateurs ne seront pas supprimés mais perdront leur accès.</p>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('delete-tenant')">Annuler</button>
@@ -425,8 +438,8 @@ function switchTab(name){
 }
 
 const fmt=n=>(n||0).toLocaleString('fr-FR');
-const fmtDate=d=>d?new Date(d).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'}):'\u2014';
-const fmtDateShort=d=>{if(!d)return'\u2014';const dt=new Date(d);return dt.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'})+' '+dt.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});};
+const fmtDate=d=>d?new Date(d).toLocaleDateString('fr-FR',{day:'2-digit',month:'short',year:'numeric'}):'—';
+const fmtDateShort=d=>{if(!d)return'—';const dt=new Date(d);return dt.toLocaleDateString('fr-FR',{day:'2-digit',month:'short'})+' '+dt.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});};
 
 function normalizeTenantId(value){
   const withoutAccents=value.normalize('NFD').replace(/[\u0300-\u036f]/g,'');
@@ -440,10 +453,10 @@ async function loadMemoryStatus(){
     <div class="stat-card"><div class="stat-label">Utilisateurs</div><div class="stat-value accent">${data.length}</div></div>
     <div class="stat-card"><div class="stat-label">Mails</div><div class="stat-value">${fmt(tot('mails'))}</div></div>
     <div class="stat-card"><div class="stat-label">Conversations</div><div class="stat-value">${fmt(tot('conv')||tot('conversations'))}</div></div>
-    <div class="stat-card"><div class="stat-label">R\u00e8gles</div><div class="stat-value green">${fmt(tot('rules'))}</div></div>
+    <div class="stat-card"><div class="stat-label">Règles</div><div class="stat-value green">${fmt(tot('rules'))}</div></div>
     <div class="stat-card"><div class="stat-label">Insights</div><div class="stat-value">${fmt(tot('insights'))}</div></div>`;
   document.getElementById('memory-tbody').innerHTML=data.map(u=>`
-    <tr><td><strong class="mono">${u.username}</strong></td><td style="font-size:12px;color:var(--text2)">${u.email||'\u2014'}</td>
+    <tr><td><strong class="mono">${u.username}</strong></td><td style="font-size:12px;color:var(--text2)">${u.email||'—'}</td>
     <td><span class="badge ${u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope||'user'}</span></td>
     <td class="mono">${fmt(u.conv||u.conversations||0)}</td>
     <td><span class="badge badge-green">${fmt(u.rules||0)}</span></td>
@@ -455,19 +468,19 @@ async function loadUsers(){
   const data=await(await fetch('/admin/users')).json();
   const locked=data.filter(u=>u.account_locked).length;
   const lcEl=document.getElementById('locked-count');
-  lcEl.textContent=locked>0?`\u26a0\ufe0f ${locked} compte(s) bloqu\u00e9(s)`:'';
+  lcEl.textContent=locked>0?`⚠️ ${locked} compte(s) bloqué(s)`:'';
   lcEl.style.color=locked>0?'var(--red)':'';
   document.getElementById('users-tbody').innerHTML=data.map(u=>`
     <tr class="${u.account_locked?'row-locked':''}">
-      <td><strong class="mono">${u.username}</strong>${u.account_locked?'<span class="badge badge-red" style="margin-left:7px;font-size:9px">\ud83d\udd12 BLOQU\u00c9</span>':''}${u.must_reset_password&&!u.account_locked?'<span class="badge badge-yellow" style="margin-left:7px;font-size:9px">\u26a0\ufe0f Reset MDP</span>':''}</td>
-      <td style="font-size:12px;color:var(--text2)">${u.email||'\u2014'}</td>
+      <td><strong class="mono">${u.username}</strong>${u.account_locked?'<span class="badge badge-red" style="margin-left:7px;font-size:9px">🔒 BLOQUÉ</span>':''}${u.must_reset_password&&!u.account_locked?'<span class="badge badge-yellow" style="margin-left:7px;font-size:9px">⚠️ Reset MDP</span>':''}</td>
+      <td style="font-size:12px;color:var(--text2)">${u.email||'—'}</td>
       <td><span class="badge ${u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope||'user'}</span></td>
       <td class="mono" style="font-size:11px;color:var(--text2)">${fmtDateShort(u.last_login)}</td>
       <td class="mono" style="font-size:11px;color:var(--text3)">${fmtDate(u.created_at)}</td>
       <td style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="showTools('${u.username}')">Outils</button>
-        <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope||'user'}')">Modifier</button>
-        ${u.account_locked?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unlockUser('${u.username}')">🔓 D\u00e9bloquer</button>`:''}
+        <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope||'user'}','${u.phone||''}')">Modifier</button>
+        ${u.account_locked?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unlockUser('${u.username}')">🔓 Débloquer</button>`:''}
         ${u.scope!=='admin'?`<button class="btn btn-danger" style="padding:4px 9px;font-size:11px" onclick="askDeleteUser('${u.username}')">Suppr.</button>`:''}
       </td>
     </tr>`).join('');
@@ -478,297 +491,217 @@ async function showTools(username){
   grid.innerHTML='<span class="loader"></span>';section.style.display='block';
   section.scrollIntoView({behavior:'smooth',block:'nearest'});
   const tools=await(await fetch(`/admin/user-tools/${username}`)).json();
-  if(!tools.length){grid.innerHTML='<p style="color:var(--text3);font-family:var(--mono);font-size:12px">Aucun outil configur\u00e9.</p>';return;}
+  if(!tools.length){grid.innerHTML='<p style="color:var(--text3);font-family:var(--mono);font-size:12px">Aucun outil configuré.</p>';return;}
   grid.innerHTML=tools.map(t=>`<div class="tool-card"><div class="tool-name">${t.tool}</div><div class="tool-meta">Niveau : <span class="badge ${t.access_level==='full'?'badge-green':t.access_level==='write'?'badge-blue':'badge-gray'}">${t.access_level}</span></div><div class="tool-meta">Actif : <span class="badge ${t.enabled?'badge-green':'badge-red'}">${t.enabled?'oui':'non'}</span></div>${Object.keys(t.config||{}).length?`<div class="tool-meta" style="margin-top:6px;font-size:10px;color:var(--text3)">${JSON.stringify(t.config)}</div>`:''}</div>`).join('');
 }
 function hideTools(){document.getElementById('tools-section').style.display='none';}
 
 async function unlockUser(username){
-  if(!confirm(`D\u00e9bloquer le compte "${username}" ?\n\nAssurez-vous d'avoir v\u00e9rifi\u00e9 l'identit\u00e9.`)) return;
+  if(!confirm(`Débloquer le compte "${username}" ?\n\nAssurez-vous d'avoir vérifié l'identité.`)) return;
   const d=await(await fetch(`/admin/unlock-user/${username}`,{method:'POST'})).json();
-  if(d.status==='ok'){setAlert('user-alert','\ud83d\udd13 '+d.message,'ok');loadUsers();}
-  else{setAlert('user-alert','\u274c '+(d.message||d.error),'err');}
+  if(d.status==='ok'){setAlert('user-alert','🔓 '+d.message,'ok');loadUsers();}
+  else{setAlert('user-alert','❌ '+(d.message||d.error),'err');}
 }
 
-// \u2500 DIAGNOSTIC CONNECTEURS (DIAG-ENDPOINTS) \u2500
+// ─ DIAGNOSTIC CONNECTEURS ─
 async function runDiag(btn){
   const el=document.getElementById('diag-result');
-  el.innerHTML='<span class="loader"></span> Test en cours\u2026 (5s max par connecteur)';
+  el.innerHTML='<span class="loader"></span> Test en cours… (5s max par connecteur)';
   if(btn) btn.disabled=true;
   try{
     const d=await(await fetch('/admin/diag')).json();
-    const icons={ok:'\ud83d\udfe2', error:'\ud83d\udd34', not_configured:'\u26ab'};
+    const icons={ok:'🟢', error:'🔴', not_configured:'⚫'};
     const labels={microsoft:'Microsoft 365',gmail:'Gmail',odoo:'Odoo',twilio:'Twilio',elevenlabs:'ElevenLabs'};
     el.innerHTML='<div class="diag-grid">'+Object.entries(d).map(([key,v])=>`
       <div class="diag-item">
-        <div class="diag-item-name">${icons[v.status]||'\u26ab'} ${labels[key]||key}</div>
+        <div class="diag-item-name">${icons[v.status]||'⚫'} ${labels[key]||key}</div>
         <div class="diag-item-detail">${v.detail||''}</div>
       </div>`).join('')+'</div>';
-  }catch(e){el.textContent='\u274c Erreur: '+e.message;}
+  }catch(e){el.textContent='❌ Erreur: '+e.message;}
   if(btn){btn.disabled=false;}
 }
 
-// \u2500 SOCI\u00c9T\u00c9S \u2500
+// ─ SOCIÉTÉS ─
 async function loadCompanies(){
   document.getElementById('companies-list').innerHTML='<div style="color:var(--text3);font-family:var(--mono);font-size:12px"><span class="loader"></span> Chargement...</div>';
   document.getElementById('companies-alert').className='alert';
   try{
     const tenants=await(await fetch('/admin/tenants-overview')).json();
-    document.getElementById('companies-count').textContent=`${tenants.length} soci\u00e9t\u00e9(s)`;
-    if(!tenants.length){document.getElementById('companies-list').innerHTML='<div style="color:var(--text3);font-family:var(--mono);font-size:12px">Aucune soci\u00e9t\u00e9.</div>';return;}
+    document.getElementById('companies-count').textContent=`${tenants.length} société(s)`;
+    if(!tenants.length){document.getElementById('companies-list').innerHTML='<div style="color:var(--text3);font-family:var(--mono);font-size:12px">Aucune société.</div>';return;}
     document.getElementById('companies-list').innerHTML=tenants.map((t,i)=>{
-      const msBar=t.user_count>0?`${t.ms_connected_count}/${t.user_count} MS connect\u00e9s`:'\u2014';
-      const spSite=t.sharepoint_site||'Commun';
-      const spFolder=t.sharepoint_folder||'1_Photovolta\u00efque';
-      const spDrive=t.sharepoint_drive||'Documents';
+      const msBar=t.user_count>0?`${t.ms_connected_count}/${t.user_count} MS connectés`:'—';
+      const spSite=t.sharepoint_site||'Commun';const spFolder=t.sharepoint_folder||'1_Photovoltaïque';const spDrive=t.sharepoint_drive||'Documents';
       const settingsEscaped=JSON.stringify(t.settings||{}).replace(/'/g,"&apos;").replace(/"/g,'&quot;');
-      const legalForm=(t.settings||{}).legal_form||'';
-      const siret=(t.settings||{}).siret||'';
+      const legalForm=(t.settings||{}).legal_form||'';const siret=(t.settings||{}).siret||'';
       return `<div class="tenant-card">
         <div class="tenant-header" onclick="toggleTenant(${i})">
-          <span class="tenant-toggle" id="toggle-${i}">\u203a</span>
-          <span class="tenant-name">\ud83c\udfe2 ${t.name}${legalForm?' <span style="font-size:11px;color:var(--text3);font-weight:400">'+legalForm+'</span>':''}</span>
-          <div class="tenant-meta"><span>\ud83d\udc65 ${t.user_count} collaborateur(s)</span><span>\ud83d\udcec ${fmt(t.total_mails)} mails</span><span>\ud83d��� ${fmt(t.total_conv)} conversations</span><span>\ud83d��� ${msBar}</span>${siret?`<span style="color:var(--text3)">SIRET: ${siret}</span>`:''}</div>
+          <span class="tenant-toggle" id="toggle-${i}">›</span>
+          <span class="tenant-name">🏢 ${t.name}${legalForm?' <span style="font-size:11px;color:var(--text3);font-weight:400">'+legalForm+'</span>':''}</span>
+          <div class="tenant-meta"><span>👥 ${t.user_count} collaborateur(s)</span><span>📬 ${fmt(t.total_mails)} mails</span><span>💬 ${fmt(t.total_conv)} conversations</span><span>🔗 ${msBar}</span>${siret?`<span style="color:var(--text3)">SIRET: ${siret}</span>`:''}</div>
         </div>
         <div class="tenant-body" id="body-${i}">
-          <table><thead><tr><th>Identifiant</th><th>Email</th><th>R\u00f4le</th><th>MS</th><th>Mails</th><th>Conv.</th><th>Derni\u00e8re connexion</th><th>Actions</th></tr></thead>
+          <table><thead><tr><th>Identifiant</th><th>Email</th><th>Rôle</th><th>MS</th><th>Mails</th><th>Conv.</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
           <tbody>${t.users.map(u=>`<tr class="${u.account_locked?'row-locked':''}">
-            <td><strong class="mono">${u.username}</strong>${u.account_locked?'<span class="badge badge-red" style="margin-left:6px;font-size:9px">\ud83d\udd12</span>':''}${u.must_reset_password&&!u.account_locked?'<span class="badge badge-yellow" style="margin-left:6px;font-size:9px">\u26a0\ufe0f</span>':''}</td>
-            <td style="font-size:12px;color:var(--text2)">${u.email||'\u2014'}</td>
+            <td><strong class="mono">${u.username}</strong>${u.account_locked?'<span class="badge badge-red" style="margin-left:6px;font-size:9px">🔒</span>':''}${u.must_reset_password&&!u.account_locked?'<span class="badge badge-yellow" style="margin-left:6px;font-size:9px">⚠️</span>':''}</td>
+            <td style="font-size:12px;color:var(--text2)">${u.email||'—'}</td>
             <td><span class="badge ${u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope}</span></td>
-            <td><span class="badge ${u.ms_connected?'badge-ms-ok':'badge-red'}">${u.ms_connected?'\u2705 OK':'\u274c Non'}</span></td>
+            <td><span class="badge ${u.ms_connected?'badge-ms-ok':'badge-red'}">${u.ms_connected?'✅ OK':'❌ Non'}</span></td>
             <td class="mono">${fmt(u.mails)}</td><td class="mono">${fmt(u.conv)}</td>
             <td class="mono" style="font-size:11px;color:var(--text2)">${fmtDateShort(u.last_login)}</td>
             <td style="display:flex;gap:5px;flex-wrap:wrap">
-              <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope}')">Modifier</button>
+              <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope}','${u.phone||''}')">Modifier</button>
               ${u.account_locked?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unlockUser('${u.username}')">🔓</button>`:''}
             </td></tr>`).join('')}</tbody></table>
           <div class="sp-config-panel">
             <div class="sp-config-title">⚙️ Configuration SharePoint (optionnel)</div>
             <div class="sp-config-grid">
               <div><label>Site SharePoint</label><input type="text" id="sp-site-${i}" value="${spSite}" placeholder="Commun"></div>
-              <div><label>Dossier racine</label><input type="text" id="sp-folder-${i}" value="${spFolder}" placeholder="1_Photovolta\u00efque"></div>
-              <div><label>Biblioth\u00e8que</label><input type="text" id="sp-drive-${i}" value="${spDrive}" placeholder="Documents"></div>
+              <div><label>Dossier racine</label><input type="text" id="sp-folder-${i}" value="${spFolder}" placeholder="1_Photovoltaïque"></div>
+              <div><label>Bibliothèque</label><input type="text" id="sp-drive-${i}" value="${spDrive}" placeholder="Documents"></div>
               <div><button class="btn btn-accent" onclick="saveSharePointConfig('${t.tenant_id}',${i})">💾 Enregistrer</button></div>
-            </div>
-            <div class="sp-result" id="sp-result-${i}"></div>
+            </div><div class="sp-result" id="sp-result-${i}"></div>
           </div>
           ${isSuperAdmin?`<div class="tenant-admin-bar">
             <button class="btn btn-accent" style="font-size:11px;padding:5px 12px" onclick="openEditTenant('${t.tenant_id}','${t.name.replace(/'/g,"\\'")}','${settingsEscaped}','${spSite}','${spFolder}')">✏️ Modifier</button>
-            <button class="btn btn-danger" style="font-size:11px;padding:5px 12px" onclick="openDeleteTenant('${t.tenant_id}','${t.name.replace(/'/g,"\\'")}')">\ud83d\uddd1\ufe0f Supprimer</button>
-            <span class="tenant-id-tag">ID\u00a0: ${t.tenant_id}</span></div>`:''}
+            <button class="btn btn-danger" style="font-size:11px;padding:5px 12px" onclick="openDeleteTenant('${t.tenant_id}','${t.name.replace(/'/g,"\\'")}')">🗑️ Supprimer</button>
+            <span class="tenant-id-tag">ID : ${t.tenant_id}</span></div>`:''}
         </div></div>`;
     }).join('');
-  }catch(e){document.getElementById('companies-list').innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:12px">\u274c Erreur: ${e.message}</div>`;}
+  }catch(e){document.getElementById('companies-list').innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:12px">❌ Erreur: ${e.message}</div>`;}
 }
 function toggleTenant(i){document.getElementById('body-'+i).classList.toggle('open');document.getElementById('toggle-'+i).classList.toggle('open');}
 async function saveSharePointConfig(tenantId,i){
-  const site=document.getElementById(`sp-site-${i}`).value.trim();
-  const folder=document.getElementById(`sp-folder-${i}`).value.trim();
-  const drive=document.getElementById(`sp-drive-${i}`).value.trim()||'Documents';
-  const result=document.getElementById(`sp-result-${i}`);
-  if(!site||!folder){result.className='sp-result err';result.textContent='\u274c Site et dossier requis.';return;}
-  result.className='sp-result';result.textContent='\u23f3 Enregistrement...';
-  try{
-    const d=await(await fetch(`/admin/tenants/${tenantId}/sharepoint`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({sharepoint_site:site,sharepoint_folder:folder,sharepoint_drive:drive})})).json();
-    if(d.status==='ok'){result.className='sp-result ok';result.textContent='\u2705 Config mise \u00e0 jour.';}
-    else{result.className='sp-result err';result.textContent='\u274c '+(d.message||'Erreur');}
-  }catch(e){result.className='sp-result err';result.textContent='\u274c '+e.message;}
+  const site=document.getElementById(`sp-site-${i}`).value.trim();const folder=document.getElementById(`sp-folder-${i}`).value.trim();const drive=document.getElementById(`sp-drive-${i}`).value.trim()||'Documents';
+  const result=document.getElementById(`sp-result-${i}`);if(!site||!folder){result.className='sp-result err';result.textContent='❌ Site et dossier requis.';return;}
+  result.className='sp-result';result.textContent='⏳ Enregistrement...';
+  try{const d=await(await fetch(`/admin/tenants/${tenantId}/sharepoint`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({sharepoint_site:site,sharepoint_folder:folder,sharepoint_drive:drive})})).json();
+    if(d.status==='ok'){result.className='sp-result ok';result.textContent='✅ Config mise à jour.';}else{result.className='sp-result err';result.textContent='❌ '+(d.message||'Erreur');}
+  }catch(e){result.className='sp-result err';result.textContent='❌ '+e.message;}
 }
-
 async function createTenant(){
-  const id=normalizeTenantId(document.getElementById('tenant-new-id').value);
-  const name=document.getElementById('tenant-new-name').value.trim();
-  const legalForm=document.getElementById('tenant-new-legal-form').value;
-  const siret=document.getElementById('tenant-new-siret').value.replace(/\D/g,'');
-  const address=document.getElementById('tenant-new-address').value.trim();
+  const id=normalizeTenantId(document.getElementById('tenant-new-id').value);const name=document.getElementById('tenant-new-name').value.trim();
+  const legalForm=document.getElementById('tenant-new-legal-form').value;const siret=document.getElementById('tenant-new-siret').value.replace(/\D/g,'');const address=document.getElementById('tenant-new-address').value.trim();
   if(!id){setAlert('create-tenant-alert','Veuillez saisir un identifiant.','err');return;}
-  if(!name){setAlert('create-tenant-alert','Le nom de la soci\u00e9t\u00e9 est requis.','err');return;}
+  if(!name){setAlert('create-tenant-alert','Le nom de la société est requis.','err');return;}
   if(siret&&!/^\d{14}$/.test(siret)){setAlert('create-tenant-alert','SIRET doit faire 14 chiffres.','err');return;}
-  const settings={};
-  if(legalForm) settings.legal_form=legalForm;
-  if(siret) settings.siret=siret;
-  if(address) settings.address=address;
-  try{
-    const d=await(await fetch('/admin/tenants',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,name,settings})})).json();
-    if(d.status==='ok'||d.tenant_id){
-      setAlert('companies-alert',`\u2705 Soci\u00e9t\u00e9 "${name}" cr\u00e9\u00e9e (ID\u00a0: ${d.tenant_id||id}). Configurez les outils depuis la fiche soci\u00e9t\u00e9.`,'ok');
-      closeModal('create-tenant');
-      ['tenant-new-id','tenant-new-name','tenant-new-siret','tenant-new-address'].forEach(id=>document.getElementById(id).value='');
-      document.getElementById('tenant-new-legal-form').value='';
-      loadCompanies();
-    }else{setAlert('create-tenant-alert','\u274c '+(d.message||d.detail||'Erreur lors de la cr\u00e9ation.'),'err');}
-  }catch(e){setAlert('create-tenant-alert','\u274c '+e.message,'err');}
+  const settings={};if(legalForm) settings.legal_form=legalForm;if(siret) settings.siret=siret;if(address) settings.address=address;
+  try{const d=await(await fetch('/admin/tenants',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,name,settings})})).json();
+    if(d.status==='ok'||d.tenant_id){setAlert('companies-alert',`✅ Société "${name}" créée (ID : ${d.tenant_id||id}). Configurez les outils depuis la fiche société.`,'ok');closeModal('create-tenant');['tenant-new-id','tenant-new-name','tenant-new-siret','tenant-new-address'].forEach(id=>document.getElementById(id).value='');document.getElementById('tenant-new-legal-form').value='';loadCompanies();}
+    else{setAlert('create-tenant-alert','❌ '+(d.message||d.detail||'Erreur lors de la création.'),'err');}
+  }catch(e){setAlert('create-tenant-alert','❌ '+e.message,'err');}
 }
 function openEditTenant(id,name,settingsStr,spSite,spFolder){
-  currentEditTenantId=id;
-  document.getElementById('edit-tenant-modal-title').textContent='\u270f\ufe0f Modifier \u2014 '+name;
-  document.getElementById('tenant-edit-id-display').value=id;
-  document.getElementById('tenant-edit-name').value=name;
-  document.getElementById('tenant-edit-sp-site').value=spSite||'';
-  document.getElementById('tenant-edit-sp-folder').value=spFolder||'';
-  let settings={};
-  try{const decoded=settingsStr.replace(/&quot;/g,'"').replace(/&apos;/g,"'");settings=JSON.parse(decoded);}catch(e){}
-  document.getElementById('tenant-edit-email-provider').value=settings.email_provider||'microsoft';
-  document.getElementById('tenant-edit-settings').value=JSON.stringify(settings,null,2);
-  document.getElementById('edit-tenant-alert').className='alert';
-  openModal('edit-tenant');
+  currentEditTenantId=id;document.getElementById('edit-tenant-modal-title').textContent='✏️ Modifier — '+name;document.getElementById('tenant-edit-id-display').value=id;document.getElementById('tenant-edit-name').value=name;
+  document.getElementById('tenant-edit-sp-site').value=spSite||'';document.getElementById('tenant-edit-sp-folder').value=spFolder||'';
+  let settings={};try{const decoded=settingsStr.replace(/&quot;/g,'"').replace(/&apos;/g,"'");settings=JSON.parse(decoded);}catch(e){}
+  document.getElementById('tenant-edit-email-provider').value=settings.email_provider||'microsoft';document.getElementById('tenant-edit-settings').value=JSON.stringify(settings,null,2);
+  document.getElementById('edit-tenant-alert').className='alert';openModal('edit-tenant');
 }
 async function saveTenant(){
-  if(!currentEditTenantId) return;
-  const name=document.getElementById('tenant-edit-name').value.trim();
-  const spSite=document.getElementById('tenant-edit-sp-site').value.trim();
-  const spFolder=document.getElementById('tenant-edit-sp-folder').value.trim();
-  const emailProvider=document.getElementById('tenant-edit-email-provider').value;
+  if(!currentEditTenantId) return;const name=document.getElementById('tenant-edit-name').value.trim();const spSite=document.getElementById('tenant-edit-sp-site').value.trim();const spFolder=document.getElementById('tenant-edit-sp-folder').value.trim();const emailProvider=document.getElementById('tenant-edit-email-provider').value;
   if(!name){setAlert('edit-tenant-alert','Le nom est requis.','err');return;}
-  let settings={};
-  try{settings=JSON.parse(document.getElementById('tenant-edit-settings').value||'{}');}
-  catch(e){setAlert('edit-tenant-alert','JSON settings invalide.','err');return;}
-  settings.email_provider=emailProvider;
-  if(spFolder) settings.sharepoint_folder=spFolder;
-  if(spSite) settings.sharepoint_site=spSite;
-  try{
-    const d=await(await fetch(`/admin/tenants/${currentEditTenantId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,settings})})).json();
-    if(d.status==='ok'||d.tenant_id){setAlert('companies-alert','\u2705 Soci\u00e9t\u00e9 mise \u00e0 jour.','ok');closeModal('edit-tenant');loadCompanies();}
-    else{setAlert('edit-tenant-alert','\u274c '+(d.message||d.detail||'Erreur'),'err');}
-  }catch(e){setAlert('edit-tenant-alert','\u274c '+e.message,'err');}
+  let settings={};try{settings=JSON.parse(document.getElementById('tenant-edit-settings').value||'{}');}catch(e){setAlert('edit-tenant-alert','JSON settings invalide.','err');return;}
+  settings.email_provider=emailProvider;if(spFolder) settings.sharepoint_folder=spFolder;if(spSite) settings.sharepoint_site=spSite;
+  try{const d=await(await fetch(`/admin/tenants/${currentEditTenantId}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name,settings})})).json();
+    if(d.status==='ok'||d.tenant_id){setAlert('companies-alert','✅ Société mise à jour.','ok');closeModal('edit-tenant');loadCompanies();}else{setAlert('edit-tenant-alert','❌ '+(d.message||d.detail||'Erreur'),'err');}
+  }catch(e){setAlert('edit-tenant-alert','❌ '+e.message,'err');}
 }
-function openDeleteTenant(id,name){
-  tenantToDelete=id;
-  document.getElementById('delete-tenant-label').textContent=`${name} (${id})`;
-  document.getElementById('delete-tenant-alert').className='alert';
-  openModal('delete-tenant');
-}
+function openDeleteTenant(id,name){tenantToDelete=id;document.getElementById('delete-tenant-label').textContent=`${name} (${id})`;document.getElementById('delete-tenant-alert').className='alert';openModal('delete-tenant');}
 async function confirmDeleteTenant(){
   if(!tenantToDelete) return;
-  try{
-    const d=await(await fetch(`/admin/tenants/${tenantToDelete}`,{method:'DELETE'})).json();
-    if(d.status==='ok'){setAlert('companies-alert','\u2705 Soci\u00e9t\u00e9 supprim\u00e9e.','ok');closeModal('delete-tenant');loadCompanies();}
-    else{setAlert('delete-tenant-alert','\u274c '+(d.message||d.detail||'Erreur lors de la suppression.'),'err');}
-  }catch(e){setAlert('delete-tenant-alert','\u274c '+e.message,'err');}
-  tenantToDelete=null;
+  try{const d=await(await fetch(`/admin/tenants/${tenantToDelete}`,{method:'DELETE'})).json();
+    if(d.status==='ok'){setAlert('companies-alert','✅ Société supprimée.','ok');closeModal('delete-tenant');loadCompanies();}else{setAlert('delete-tenant-alert','❌ '+(d.message||d.detail||'Erreur lors de la suppression.'),'err');}
+  }catch(e){setAlert('delete-tenant-alert','❌ '+e.message,'err');}tenantToDelete=null;
 }
 
 function openModal(name){document.getElementById('modal-'+name).classList.add('open');}
 function closeModal(name){document.getElementById('modal-'+name).classList.remove('open');}
 function setAlert(id,msg,type){const el=document.getElementById(id);el.className='alert '+type;el.textContent=msg;}
 
+// USER-PHONE : createUser envoie phone, email obligatoire
 async function createUser(){
   const username=document.getElementById('new-username').value.trim();
   const email=document.getElementById('new-email').value.trim();
+  const phone=document.getElementById('new-phone').value.trim();
   const password=document.getElementById('new-password-user').value;
   const scope=document.getElementById('new-scope').value;
   if(!username||!password){setAlert('create-user-alert','Identifiant et mot de passe requis.','err');return;}
-  const d=await(await fetch('/admin/create-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password,email,scope})})).json();
-  if(d.status==='ok'){setAlert('user-alert','\u2705 '+d.message,'ok');closeModal('create-user');document.getElementById('new-username').value='';document.getElementById('new-email').value='';document.getElementById('new-password-user').value='';loadUsers();}
-  else{setAlert('create-user-alert','\u274c '+(d.message||d.error),'err');}
+  if(!email){setAlert('create-user-alert','L\'email est obligatoire (identifiant de connexion).','err');return;}
+  const d=await(await fetch('/admin/create-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password,email,phone:phone||null,scope})})).json();
+  if(d.status==='ok'){setAlert('user-alert','✅ '+d.message,'ok');closeModal('create-user');['new-username','new-email','new-phone','new-password-user'].forEach(id=>document.getElementById(id).value='');loadUsers();}
+  else{setAlert('create-user-alert','❌ '+(d.message||d.error),'err');}
 }
-function editUser(username,email,scope){
+// USER-PHONE : editUser accepte phone, le pré-remplit dans la modale
+function editUser(username,email,scope,phone=''){
   currentEditUser=username;
-  document.getElementById('edit-modal-title').textContent='\u00c9diter \u2014 '+username;
+  document.getElementById('edit-modal-title').textContent='Éditer — '+username;
   document.getElementById('edit-email').value=email;
+  document.getElementById('edit-phone').value=phone||'';
   document.getElementById('edit-scope').value=scope;
   document.getElementById('edit-user-alert').className='alert';
   document.getElementById('reset-result').innerHTML='';
   openModal('edit-user');
 }
+// USER-PHONE : saveUser envoie phone
 async function saveUser(){
   const email=document.getElementById('edit-email').value.trim();
+  const phone=document.getElementById('edit-phone').value.trim();
   const scope=document.getElementById('edit-scope').value;
-  const d=await(await fetch(`/admin/update-user/${currentEditUser}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,scope})})).json();
-  if(d.status==='ok'){setAlert('user-alert','\u2705 Utilisateur mis \u00e0 jour.','ok');closeModal('edit-user');loadUsers();}
-  else{setAlert('edit-user-alert','\u274c '+(d.message||d.error),'err');}
+  const d=await(await fetch(`/admin/update-user/${currentEditUser}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,scope,phone:phone||null})})).json();
+  if(d.status==='ok'){setAlert('user-alert','✅ Utilisateur mis à jour.','ok');closeModal('edit-user');loadUsers();}
+  else{setAlert('edit-user-alert','❌ '+(d.message||d.error),'err');}
 }
 async function resetPassword(){
   const d=await(await fetch(`/admin/reset-password/${currentEditUser}`,{method:'POST'})).json();
-  if(d.status==='ok'){
-    const sent=d.email_sent?`Envoy\u00e9 \u00e0 ${d.email}`:'Copiez le lien ci-dessous';
-    document.getElementById('reset-result').innerHTML=`<div class="reset-box"><div style="font-family:var(--mono);font-size:11px;color:var(--green);margin-bottom:4px">\u2713 Lien g\u00e9n\u00e9r\u00e9 \u2014 ${sent}</div><div class="reset-link">${d.reset_url}</div><button class="btn btn-ghost" style="margin-top:8px;font-size:11px;padding:4px 10px" onclick="navigator.clipboard.writeText('${d.reset_url}').then(()=>this.textContent='Copi\u00e9 \u2713')">Copier</button></div>`;}
+  if(d.status==='ok'){const sent=d.email_sent?`Envoyé à ${d.email}`:'Copiez le lien ci-dessous';document.getElementById('reset-result').innerHTML=`<div class="reset-box"><div style="font-family:var(--mono);font-size:11px;color:var(--green);margin-bottom:4px">✓ Lien généré — ${sent}</div><div class="reset-link">${d.reset_url}</div><button class="btn btn-ghost" style="margin-top:8px;font-size:11px;padding:4px 10px" onclick="navigator.clipboard.writeText('${d.reset_url}').then(()=>this.textContent='Copié ✓')">Copier</button></div>`;}
 }
 function askDeleteUser(username){usernameToDelete=username;document.getElementById('delete-username-label').textContent=username;openModal('delete-user');}
 async function confirmDeleteUser(){
   const d=await(await fetch(`/admin/delete-user/${usernameToDelete}`,{method:'DELETE'})).json();
-  if(d.status==='ok'){setAlert('user-alert','\u2705 '+d.message,'ok');closeModal('delete-user');loadUsers();}
-  else{setAlert('user-alert','\u274c '+(d.message||d.error),'err');closeModal('delete-user');}
-  usernameToDelete=null;
+  if(d.status==='ok'){setAlert('user-alert','✅ '+d.message,'ok');closeModal('delete-user');loadUsers();}else{setAlert('user-alert','❌ '+(d.message||d.error),'err');closeModal('delete-user');}usernameToDelete=null;
 }
 async function populateUserFilters(){
   const users=await(await fetch('/admin/users')).json();
-  ['rules-user-filter','insights-user-filter'].forEach(id=>{
-    const sel=document.getElementById(id);
-    if(sel.options.length<=1) users.forEach(u=>{const o=document.createElement('option');o.value=u.username;o.textContent=u.username;sel.appendChild(o);});
-  });
+  ['rules-user-filter','insights-user-filter'].forEach(id=>{const sel=document.getElementById(id);if(sel.options.length<=1) users.forEach(u=>{const o=document.createElement('option');o.value=u.username;o.textContent=u.username;sel.appendChild(o);});});
 }
 async function loadRules(){
   document.getElementById('rules-tbody').innerHTML='<tr class="loading-row"><td colspan="7"><span class="loader"></span> Chargement...</td></tr>';
-  const user=document.getElementById('rules-user-filter').value;
-  allRules=await(await fetch(user?`/admin/rules?user=${user}`:'/admin/rules')).json();
-  filterRulesDisplay();
+  const user=document.getElementById('rules-user-filter').value;allRules=await(await fetch(user?`/admin/rules?user=${user}`:'/admin/rules')).json();filterRulesDisplay();
 }
 function filterRulesDisplay(){
-  const cat=document.getElementById('rules-cat-filter').value;
-  const active=document.getElementById('rules-active-filter').value;
-  let f=allRules;
-  if(cat) f=f.filter(r=>r.category===cat);
-  if(active==='true') f=f.filter(r=>r.active);
-  if(active==='false') f=f.filter(r=>!r.active);
-  document.getElementById('rules-count').textContent=`${f.length} r\u00e8gle(s)`;
-  document.getElementById('rules-tbody').innerHTML=f.length?f.map(r=>`
-    <tr><td class="mono" style="color:var(--text3);font-size:11px">${r.id}</td>
-    <td class="mono" style="font-size:12px">${r.username||'\u2014'}</td>
-    <td><span class="badge badge-gray" style="font-size:9px">${r.category}</span></td>
-    <td style="max-width:400px;font-size:12px;color:var(--text2)">${r.rule}</td>
-    <td class="mono" style="font-size:11px">${((r.confidence||0)*100).toFixed(0)}%</td>
-    <td class="mono" style="font-size:11px">${r.reinforcements||1}</td>
-    <td><span class="badge ${r.active?'badge-green':'badge-red'}">${r.active?'active':'inactive'}</span></td></tr>`).join('')
-  :'<tr class="loading-row"><td colspan="7" style="color:var(--text3)">Aucune r\u00e8gle.</td></tr>';
+  const cat=document.getElementById('rules-cat-filter').value;const active=document.getElementById('rules-active-filter').value;
+  let f=allRules;if(cat) f=f.filter(r=>r.category===cat);if(active==='true') f=f.filter(r=>r.active);if(active==='false') f=f.filter(r=>!r.active);
+  document.getElementById('rules-count').textContent=`${f.length} règle(s)`;
+  document.getElementById('rules-tbody').innerHTML=f.length?f.map(r=>`<tr><td class="mono" style="color:var(--text3);font-size:11px">${r.id}</td><td class="mono" style="font-size:12px">${r.username||'—'}</td><td><span class="badge badge-gray" style="font-size:9px">${r.category}</span></td><td style="max-width:400px;font-size:12px;color:var(--text2)">${r.rule}</td><td class="mono" style="font-size:11px">${((r.confidence||0)*100).toFixed(0)}%</td><td class="mono" style="font-size:11px">${r.reinforcements||1}</td><td><span class="badge ${r.active?'badge-green':'badge-red'}">${r.active?'active':'inactive'}</span></td></tr>`).join(''):'<tr class="loading-row"><td colspan="7" style="color:var(--text3)">Aucune règle.</td></tr>';
 }
 async function loadInsights(){
   document.getElementById('insights-tbody').innerHTML='<tr class="loading-row"><td colspan="4"><span class="loader"></span> Chargement...</td></tr>';
-  const user=document.getElementById('insights-user-filter').value;
-  allInsights=await(await fetch(user?`/admin/insights?user=${user}`:'/admin/insights')).json();
+  const user=document.getElementById('insights-user-filter').value;allInsights=await(await fetch(user?`/admin/insights?user=${user}`:'/admin/insights')).json();
   document.getElementById('insights-count').textContent=`${allInsights.length} insight(s)`;
-  document.getElementById('insights-tbody').innerHTML=allInsights.length?allInsights.map(i=>`
-    <tr><td class="mono" style="font-size:12px">${i.username||'\u2014'}</td>
-    <td><span class="badge badge-blue" style="font-size:10px">${i.topic}</span></td>
-    <td style="font-size:12px;color:var(--text2);max-width:500px">${i.insight}</td>
-    <td class="mono" style="font-size:11px">${i.reinforcements}</td></tr>`).join('')
-  :'<tr class="loading-row"><td colspan="4" style="color:var(--text3)">Aucun insight.</td></tr>';
+  document.getElementById('insights-tbody').innerHTML=allInsights.length?allInsights.map(i=>`<tr><td class="mono" style="font-size:12px">${i.username||'—'}</td><td><span class="badge badge-blue" style="font-size:10px">${i.topic}</span></td><td style="font-size:12px;color:var(--text2);max-width:500px">${i.insight}</td><td class="mono" style="font-size:11px">${i.reinforcements}</td></tr>`).join(''):'<tr class="loading-row"><td colspan="4" style="color:var(--text3)">Aucun insight.</td></tr>';
 }
 async function quickAction(url,id){
-  const el=document.getElementById(id);
-  el.className='action-result'; el.textContent='En cours...';
-  try{const d=await(await fetch(url)).json();el.textContent=JSON.stringify(d).replace(/[{}\"]/g,' ').trim().substring(0,120);}
+  const el=document.getElementById(id);el.className='action-result';el.textContent='En cours...';
+  try{const d=await(await fetch(url)).json();el.textContent=JSON.stringify(d).replace(/[{}"]/g,' ').trim().substring(0,120);}
   catch(e){el.textContent='Erreur: '+e.message;el.className='action-result err';}
 }
 async function loadProfile(){
-  try{const d=await(await fetch('/profile')).json();document.getElementById('profile-username').textContent=d.username||'\u2014';document.getElementById('profile-email').value=d.email||'';}
-  catch(e){}
+  try{const d=await(await fetch('/profile')).json();document.getElementById('profile-username').textContent=d.username||'—';document.getElementById('profile-email').value=d.email||'';}catch(e){}
 }
 async function initUserScope(){
-  try{
-    const d=await(await fetch('/profile')).json();
-    currentUserScope=d.scope||'';
-    isSuperAdmin=(currentUserScope==='admin');
-    if(isSuperAdmin) document.getElementById('btn-create-tenant').style.display='';
-  }catch(e){}
+  try{const d=await(await fetch('/profile')).json();currentUserScope=d.scope||'';isSuperAdmin=(currentUserScope==='admin');if(isSuperAdmin) document.getElementById('btn-create-tenant').style.display='';}catch(e){}
 }
 async function saveEmail(){
-  const email=document.getElementById('profile-email').value.trim();
-  const d=await(await fetch('/profile/email',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})})).json();
-  if(d.status==='ok') setAlert('profile-alert','\u2705 Email mis \u00e0 jour.','ok');
-  else setAlert('profile-alert','\u274c '+(d.message||d.error),'err');
-  setTimeout(()=>{document.getElementById('profile-alert').className='alert';},4000);
+  const email=document.getElementById('profile-email').value.trim();const d=await(await fetch('/profile/email',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})})).json();
+  if(d.status==='ok') setAlert('profile-alert','✅ Email mis à jour.','ok');else setAlert('profile-alert','❌ '+(d.message||d.error),'err');setTimeout(()=>{document.getElementById('profile-alert').className='alert';},4000);
 }
 async function changePassword(){
-  const current=document.getElementById('current-password').value;
-  const newPwd=document.getElementById('new-password').value;
-  const confirm=document.getElementById('confirm-password').value;
+  const current=document.getElementById('current-password').value;const newPwd=document.getElementById('new-password').value;const confirm=document.getElementById('confirm-password').value;
   if(!current||!newPwd||!confirm){setAlert('password-alert','Tous les champs sont requis.','err');return;}
   if(newPwd!==confirm){setAlert('password-alert','Les nouveaux mots de passe ne correspondent pas.','err');return;}
   const d=await(await fetch('/profile/password',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({current_password:current,new_password:newPwd})})).json();
-  if(d.status==='ok'){setAlert('password-alert','\u2705 Mot de passe mis \u00e0 jour avec succ\u00e8s.','ok');['current-password','new-password','confirm-password'].forEach(id=>document.getElementById(id).value='');}
-  else{setAlert('password-alert','\u274c '+(d.message||d.error),'err');}
+  if(d.status==='ok'){setAlert('password-alert','✅ Mot de passe mis à jour avec succès.','ok');['current-password','new-password','confirm-password'].forEach(id=>document.getElementById(id).value='');}else{setAlert('password-alert','❌ '+(d.message||d.error),'err');}
   setTimeout(()=>{document.getElementById('password-alert').className='alert';},5000);
 }
 
