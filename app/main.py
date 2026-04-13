@@ -180,12 +180,12 @@ def _generate_raya_png(size: int) -> bytes:
     # Éclair blanc (polygone simplifié)
     s = size
     bolt = [
-        (s * 0.58, s * 0.10),   # haut droite
-        (s * 0.35, s * 0.52),   # milieu gauche
-        (s * 0.52, s * 0.52),   # milieu centre
-        (s * 0.42, s * 0.90),   # bas gauche
-        (s * 0.65, s * 0.48),   # milieu droite
-        (s * 0.48, s * 0.48),   # milieu centre 2
+        (s * 0.58, s * 0.10),
+        (s * 0.35, s * 0.52),
+        (s * 0.52, s * 0.52),
+        (s * 0.42, s * 0.90),
+        (s * 0.65, s * 0.48),
+        (s * 0.48, s * 0.48),
     ]
     draw.polygon(bolt, fill=(255, 255, 255, 255))
 
@@ -229,6 +229,40 @@ def pwa_icon_512():
     )
 
 
+def _init_heartbeats():
+    """
+    FIX-MONITOR-SPAM : initialise les heartbeats au démarrage pour éviter
+    que les composants soient marqués 'stale' dès le premier scan du monitor.
+
+    Composants actifs (seuil 15 min) : scheduler, proactivity_scan, heartbeat_morning
+    Composants passifs (seuil 60 min) : webhook_microsoft, gmail_polling
+    """
+    try:
+        from app.database import get_pg_conn
+        conn = get_pg_conn()
+        c = conn.cursor()
+        components = [
+            "scheduler",
+            "proactivity_scan",
+            "heartbeat_morning",
+            "webhook_microsoft",
+            "gmail_polling",
+        ]
+        for component in components:
+            c.execute("""
+                INSERT INTO system_heartbeat (component, last_seen_at, status)
+                VALUES (%s, NOW(), 'ok')
+                ON CONFLICT (component)
+                DO UPDATE SET last_seen_at = NOW(), status = 'ok'
+                WHERE system_heartbeat.status != 'disabled'
+            """, (component,))
+        conn.commit()
+        conn.close()
+        logger.info(f"[Heartbeat] {len(components)} composants initialisés au démarrage")
+    except Exception as e:
+        logger.warning(f"[Heartbeat] Erreur init heartbeats: {e}")
+
+
 @app.on_event("startup")
 def startup_event():
     init_postgres()
@@ -261,6 +295,10 @@ def startup_event():
         job_scheduler.start()
     except Exception as e:
         logger.error(f"[Scheduler] Erreur demarrage: {e}")
+
+    # FIX-MONITOR-SPAM : heartbeats initiaux — les composants ne seront pas
+    # considérés comme stale dès le premier scan du monitor (10 min après démarrage)
+    _init_heartbeats()
 
 
 @app.on_event("shutdown")
