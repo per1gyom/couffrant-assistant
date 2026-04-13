@@ -36,7 +36,7 @@ async def login_app_post(
     request: Request, username: str = Form(...), password: str = Form(...)
 ):
     ip = request.client.host if request.client else "unknown"
-    login_input = username.strip()  # peut être un email ou un username
+    login_input = username.strip()
 
     # Résoudre le vrai username (login par email ou identifiant)
     real_username = resolve_username(login_input) or login_input
@@ -48,7 +48,7 @@ async def login_app_post(
             error_block=f'<div class="error">{msg_ip}</div>'
         ))
 
-    # 2. Compte définitivement bloqué (DB) — on vérifie sur le vrai username
+    # 2. Compte définitivement bloqué (DB)
     if is_account_locked_db(real_username):
         return HTMLResponse(LOGIN_PAGE_HTML.format(
             error_block='<div class="error">Ce compte est bloqué. Contactez votre administrateur.</div>'
@@ -61,25 +61,23 @@ async def login_app_post(
             error_block=f'<div class="error">{msg_lock}</div>'
         ))
 
-    # 4. Authentification (authenticate accepte username OU email)
+    # 4. Authentification (accepte username OU email)
     if authenticate(login_input, password):
         clear_attempts(ip)
         clear_user_attempts(real_username)
         update_last_login(real_username)
         scope = get_user_scope(real_username)
         tenant_id = get_tenant_id(real_username)
-        # Toujours stocker le vrai username (pas l'email) en session
         request.session["user"] = real_username
         request.session["scope"] = scope
         request.session["tenant_id"] = tenant_id
-        request.session["last_activity"] = time.time()  # SECURITY-TIMEOUT
-        # Redéfinition MDP obligatoire ?
+        request.session["last_activity"] = time.time()
         if must_reset_password_check(real_username):
             request.session["must_reset"] = True
             return RedirectResponse("/forced-reset", status_code=303)
         return RedirectResponse("/chat", status_code=303)
 
-    # 5. Échec — enregistrer et appliquer le blocage progressif
+    # 5. Échec
     record_failed_attempt(ip)
     result = record_user_failed(real_username, ip)
 
@@ -143,27 +141,18 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     return RedirectResponse(state or "/chat")
 
 
-# ─── GMAIL OAuth2 ───
+# ─── GMAIL OAuth2 (sans PKCE) ───
 
 @router.get("/login/gmail")
 def login_gmail(request: Request):
-    """
-    Démarre le flux OAuth2 Gmail. Redirige vers Google pour autorisation.
-    HOTFIX-GMAIL-PKCE : get_gmail_auth_url() retourne (url, code_verifier) ;
-    le code_verifier est stocké en session pour être récupéré au callback.
-    """
+    """Démarre le flux OAuth2 Gmail. Redirige vers Google."""
     gmail_redirect = os.getenv("GMAIL_REDIRECT_URI", "").strip()
     if not gmail_redirect:
-        logger.error(
-            "[Gmail] GMAIL_REDIRECT_URI non configuré. "
-            "Ajoutez cette variable Railway : "
-            "GMAIL_REDIRECT_URI=https://[domaine].railway.app/auth/gmail/callback"
-        )
+        logger.error("[Gmail] GMAIL_REDIRECT_URI non configuré")
         return HTMLResponse(
             "<h2>Erreur configuration Gmail</h2>"
             "<p>La variable <code>GMAIL_REDIRECT_URI</code> n'est pas configurée sur Railway.</p>"
-            "<p>Valeur attendue : <code>https://[votre-domaine].railway.app/auth/gmail/callback</code></p>"
-            "<p><a href='/chat'>← Retour au chat</a></p>",
+            "<p><a href='/chat'>\u2190 Retour au chat</a></p>",
             status_code=500,
         )
 
@@ -172,42 +161,25 @@ def login_gmail(request: Request):
         logger.error("[Gmail] GMAIL_CLIENT_ID ou GMAIL_CLIENT_SECRET manquant")
         return HTMLResponse(
             "<h2>Erreur configuration Gmail</h2>"
-            "<p>Les variables <code>GMAIL_CLIENT_ID</code> et/ou <code>GMAIL_CLIENT_SECRET</code> "
-            "ne sont pas configurées sur Railway.</p>"
-            "<p><a href='/chat'>← Retour au chat</a></p>",
+            "<p>GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET manquants dans Railway.</p>"
+            "<p><a href='/chat'>\u2190 Retour au chat</a></p>",
             status_code=500,
         )
 
     try:
-        # HOTFIX-GMAIL-PKCE : get_gmail_auth_url() retourne (auth_url, code_verifier)
-        auth_url, code_verifier = get_gmail_auth_url()
-
-        # Sauvegarder le code_verifier en session pour le retrouver au callback
-        if code_verifier:
-            request.session["gmail_code_verifier"] = code_verifier
-            logger.debug("[Gmail] PKCE code_verifier sauvegardé en session")
-        else:
-            # Pas de PKCE (fallback URL manuelle) — nettoyer toute valeur résiduelle
-            request.session.pop("gmail_code_verifier", None)
-            logger.debug("[Gmail] Pas de code_verifier PKCE à stocker")
-
+        auth_url = get_gmail_auth_url()
         return RedirectResponse(auth_url)
     except Exception as e:
         logger.error(f"[Gmail] Erreur génération URL auth: {e}")
         return HTMLResponse(
-            f"<h2>Erreur Gmail</h2><p>{e}</p><p><a href='/chat'>← Retour</a></p>",
+            f"<h2>Erreur Gmail</h2><p>{e}</p><p><a href='/chat'>\u2190 Retour</a></p>",
             status_code=500,
         )
 
 
 @router.get("/auth/gmail/callback")
 def auth_gmail_callback(request: Request, code: str | None = None, error: str | None = None):
-    """
-    Callback Google OAuth2. Échange le code, sauvegarde, redirige vers /chat.
-    HOTFIX-GMAIL-PKCE : récupère le code_verifier depuis la session et le passe
-    à exchange_code_for_tokens() pour corriger l'erreur "(invalid_grant) Missing
-    code verifier".
-    """
+    """Callback Google OAuth2. Échange le code, sauvegarde, redirige vers /chat."""
     if error:
         logger.warning(f"[Gmail] Callback erreur Google: {error}")
         return RedirectResponse(f"/chat?gmail_error={error}")
@@ -219,25 +191,14 @@ def auth_gmail_callback(request: Request, code: str | None = None, error: str | 
     from app.connectors.gmail_connector import exchange_code_for_tokens
     username = request.session.get("user", "guillaume")
 
-    # HOTFIX-GMAIL-PKCE : extraire (et supprimer) le code_verifier de la session
-    code_verifier = request.session.pop("gmail_code_verifier", None)
-    if code_verifier:
-        logger.debug("[Gmail] code_verifier PKCE récupéré depuis la session")
-    else:
-        logger.warning(
-            "[Gmail] Aucun code_verifier en session — l'échange peut échouer si "
-            "Google requiert PKCE (invalid_grant)"
-        )
-
     try:
-        # HOTFIX-GMAIL-PKCE : passer le code_verifier à exchange_code_for_tokens
-        tokens = exchange_code_for_tokens(code, code_verifier=code_verifier)
+        tokens = exchange_code_for_tokens(code)
     except Exception as e:
         logger.error(f"[Gmail] Erreur exchange_code_for_tokens: {e}")
         return HTMLResponse(
             f"<h2>Erreur connexion Gmail</h2>"
             f"<p>{e}</p>"
-            f"<p><a href='/chat'>← Retour au chat</a></p>",
+            f"<p><a href='/chat'>\u2190 Retour au chat</a></p>",
             status_code=500,
         )
 
