@@ -42,9 +42,17 @@ CAPABILITIES = {
             "Les en-tetes sont separes par ; et les lignes par \\n. "
             "L'utilisateur recoit un lien de telechargement dans le chat."
         ),
+        "creation_images": (
+            "Oui — je peux generer des images via DALL-E 3. "
+            "Syntaxe : [ACTION:CREATE_IMAGE:description detaillee de l'image]. "
+            "L'utilisateur recoit un lien vers l'image dans le chat."
+        ),
+        "lecture_pdf": (
+            "Oui — quand l'utilisateur uploade un PDF, j'extrais le texte automatiquement (pdfplumber) "
+            "et je peux l'analyser, le resumer, repondre a des questions dessus."
+        ),
     },
     "limitations_reelles": {
-        "pas_generation_images": "Je ne genere pas d'images (DALL-E pas encore configure).",
         "pas_streaming": "Je reponds en un bloc complet, pas mot par mot.",
     },
 }
@@ -66,6 +74,7 @@ def get_capabilities_prompt() -> str:
         f"{lim_lines}\n"
         "IMPORTANT : Ne jamais dire 'je ne peux pas creer de PDF' ou 'je ne peux pas creer d'Excel' — c'est FAUX.\n"
         "Utiliser [ACTION:CREATE_PDF:...] et [ACTION:CREATE_EXCEL:...] quand l'utilisateur demande un document.\n"
+        "Utiliser [ACTION:CREATE_IMAGE:...] quand l'utilisateur demande une image ou illustration.\n"
         "Consulter ce registre avant de repondre a toute question sur mes capacites."
     )
 
@@ -126,9 +135,11 @@ def get_user_capabilities_prompt(username: str, tools: dict) -> str:
         f"  - Lecture vocale : {elevenlabs_status}\n"
         f"  - Creation PDF : actif — [ACTION:CREATE_PDF:titre|contenu]\n"
         f"  - Creation Excel : actif — [ACTION:CREATE_EXCEL:titre|en-tetes;sep;par;point-virgule|ligne1\\nligne2]\n"
+        f"  - Generation images DALL-E : actif — [ACTION:CREATE_IMAGE:description detaillee]\n"
         "\n"
         "IMPORTANT : Ne propose JAMAIS une action sur un outil non connecte.\n"
         "Pour creer un PDF ou Excel, utiliser TOUJOURS les [ACTION:CREATE_PDF:...] ou [ACTION:CREATE_EXCEL:...].\n"
+        "Pour generer une image, utiliser [ACTION:CREATE_IMAGE:description].\n"
         "Ne JAMAIS dire 'je ne peux pas creer de fichier' — c'est FAUX."
     )
 
