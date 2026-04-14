@@ -61,26 +61,21 @@ async function loadHistory() {
     const history = await r.json();
     if (!Array.isArray(history) || history.length === 0) return;
 
-    // Supprimer le message de bienvenue s'il est encore là
     const welcome = messagesEl.querySelector('.welcome');
     if (welcome) welcome.remove();
 
-    // Afficher chaque échange de la session précédente
     history.forEach(item => {
       if (item.user) addMessage(item.user, 'user');
       if (item.raya) addMessage(item.raya, 'raya', null, item.id);
     });
 
-    // Séparateur visuel entre l'historique et la session courante
     const sep = document.createElement('div');
     sep.className = 'history-sep';
     sep.textContent = '— conversation précédente —';
     messagesEl.appendChild(sep);
 
     scrollToBottom(false);
-  } catch(e) {
-    // Silencieux — l'historique est optionnel, ne pas casser le chat si l'endpoint échoue
-  }
+  } catch(e) {}
 }
 
 // --- INIT ---
@@ -90,7 +85,7 @@ async function init() {
   loadUserInfo();
   loadMailCount();
   checkTokenStatus();
-  await loadHistory();   // CHAT-HISTORY : charger avant l'onboarding
+  await loadHistory();
   checkOnboarding();
   document.getElementById('autoSpeakBtn').classList.add('active');
   messagesEl.addEventListener('scroll', onMessagesScroll);
@@ -178,6 +173,10 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
       thumbDown.onclick = () => openFeedbackDialog(ariaMemoryId, thumbDown); actions.appendChild(thumbDown);
       const whyBtn = document.createElement('button'); whyBtn.className = 'feedback-btn why-btn'; whyBtn.title = 'Pourquoi cette réponse ?'; whyBtn.textContent = '💡';
       whyBtn.onclick = () => showWhy(ariaMemoryId, whyBtn); actions.appendChild(whyBtn);
+      // P1-4 : bouton bug report
+      const bugSep = document.createElement('span'); bugSep.className = 'bubble-actions-sep'; actions.appendChild(bugSep);
+      const bugBtn = document.createElement('button'); bugBtn.className = 'feedback-btn bug-btn'; bugBtn.title = 'Signaler un bug ou suggérer une amélioration'; bugBtn.textContent = '🐛';
+      bugBtn.onclick = () => openBugReportDialog(ariaMemoryId, text, row, bugBtn); actions.appendChild(bugBtn);
     }
     bubble.appendChild(actions);
   }
@@ -192,6 +191,94 @@ function addLoading() {
   const bubble = document.createElement('div'); bubble.className = 'bubble loading-bubble';
   bubble.innerHTML = '<div class="dot-anim"></div><div class="dot-anim"></div><div class="dot-anim"></div>';
   row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row); scrollToBottom(); return row;
+}
+
+// --- BUG REPORT (P1-4) ---
+function openBugReportDialog(ariaMemoryId, rayaText, msgRow, triggerBtn) {
+  // Récupère le texte utilisateur précédant ce message Raya
+  let userInput = '';
+  try {
+    const prev = msgRow.previousElementSibling;
+    if (prev && prev.classList.contains('message-row') && prev.classList.contains('user')) {
+      userInput = prev.querySelector('.bubble')?.textContent?.trim() || '';
+    }
+  } catch(_) {}
+
+  // Supprime tout dialog bug existant
+  document.querySelectorAll('.bug-report-dialog').forEach(el => el.remove());
+
+  const dialog = document.createElement('div');
+  dialog.className = 'feedback-dialog bug-report-dialog';
+  dialog.style.marginTop = '6px';
+
+  let selectedType = 'bug';
+
+  dialog.innerHTML = `
+    <div class="feedback-dialog-label">🐛 Signaler un bug ou suggérer une amélioration</div>
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <button class="bug-type-btn active" data-type="bug" style="flex:1;padding:6px;border-radius:6px;border:1px solid var(--danger);background:rgba(239,68,68,.1);color:var(--danger);cursor:pointer;font-size:13px;font-weight:600;">🐛 Bug</button>
+      <button class="bug-type-btn" data-type="amelioration" style="flex:1;padding:6px;border-radius:6px;border:1px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer;font-size:13px;font-weight:600;">💡 Amélioration</button>
+    </div>
+    <textarea class="feedback-dialog-input bug-desc" rows="3" placeholder="Décris le problème ou la suggestion…" style="width:100%;margin-bottom:8px;"></textarea>
+    <div class="feedback-dialog-btns">
+      <button class="feedback-dialog-send bug-submit">Envoyer</button>
+      <button class="feedback-dialog-cancel bug-cancel">Annuler</button>
+    </div>
+  `;
+
+  // Sélection du type
+  dialog.querySelectorAll('.bug-type-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedType = btn.dataset.type;
+      dialog.querySelectorAll('.bug-type-btn').forEach(b => {
+        b.classList.remove('active');
+        b.style.background = 'transparent';
+      });
+      btn.classList.add('active');
+      btn.style.background = selectedType === 'bug' ? 'rgba(239,68,68,.1)' : 'rgba(99,102,241,.1)';
+    });
+  });
+
+  // Annuler
+  dialog.querySelector('.bug-cancel').addEventListener('click', () => dialog.remove());
+
+  // Envoyer
+  dialog.querySelector('.bug-submit').addEventListener('click', async () => {
+    const desc = dialog.querySelector('.bug-desc').value.trim();
+    if (!desc) { showToast('Décris le problème avant d\'envoyer.', 'err', 2500); return; }
+    const submitBtn = dialog.querySelector('.bug-submit');
+    submitBtn.disabled = true; submitBtn.textContent = '⏳ Envoi…';
+    try {
+      const deviceInfo = (navigator.userAgent || '').slice(0, 200) + (window.innerWidth < 768 ? ' [mobile]' : ' [desktop]');
+      const r = await fetch('/raya/bug-report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          report_type: selectedType,
+          description: desc,
+          aria_memory_id: ariaMemoryId,
+          user_input: userInput.slice(0, 500),
+          raya_response: rayaText.slice(0, 2000),
+          device_info: deviceInfo,
+        }),
+      });
+      const data = await r.json();
+      dialog.remove();
+      if (data.ok) {
+        showToast('Merci ! Rapport envoyé (#' + data.id + ')', 'ok', 4000);
+        if (triggerBtn) { triggerBtn.style.opacity = '1'; triggerBtn.textContent = '✅'; }
+      } else {
+        showToast('Erreur envoi rapport : ' + (data.error || '?'), 'err', 4000);
+      }
+    } catch(e) {
+      showToast('Erreur réseau lors de l\'envoi.', 'err', 4000);
+      submitBtn.disabled = false; submitBtn.textContent = 'Envoyer';
+    }
+  });
+
+  // Insérer après la bulle
+  msgRow.insertAdjacentElement('afterend', dialog);
+  dialog.querySelector('.bug-desc').focus();
 }
 
 // --- ASK_CHOICE ---
@@ -253,7 +340,6 @@ async function sendMessage() {
     if (fileSnapshot) { body.file_data=fileSnapshot.data; body.file_type=fileSnapshot.type; body.file_name=fileSnapshot.name; }
     const response = await fetch('/raya',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const data = await response.json(); loading.remove();
-    // Détection commande vitesse
     if (data.answer) {
       const speedMatch = data.answer.match(/\[SPEAK_SPEED:([\d.]+)\]/);
       if (speedMatch) { setSpeakSpeed(parseFloat(speedMatch[1])); data.answer = data.answer.replace(/\[SPEAK_SPEED:[\d.]+\]/,'').trim(); }
@@ -303,6 +389,7 @@ document.addEventListener('keydown', e => {
     document.getElementById('modalShortcuts').classList.remove('open');
     closeOnboarding();
     _releaseMicFromFeedback();
+    document.querySelectorAll('.bug-report-dialog').forEach(el => el.remove());
   }
 });
 
