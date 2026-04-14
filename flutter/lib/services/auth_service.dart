@@ -18,6 +18,8 @@ class AuthService {
         ApiConfig.loginEndpoint,
         {'username': username, 'password': password},
       );
+
+      // Cas 1 : redirect 302/303 vers /chat (natif iOS)
       if (response.statusCode == 303 || response.statusCode == 302) {
         final location = response.headers['location']?.first ?? '';
         if (location.contains('/chat') || location.contains('/forced-reset')) {
@@ -26,12 +28,54 @@ class AuthService {
           return AuthResult(success: true);
         }
       }
-      if (response.statusCode == 401) {
-        return AuthResult(success: false, error: 'Identifiant ou mot de passe incorrect.');
+
+      // Cas 2 : 200 = le navigateur a suivi la redirection (web Chrome)
+      // Le backend renvoie le HTML de /chat si login OK
+      // ou le HTML de /login-app si login KO (avec status 200 parfois)
+      if (response.statusCode == 200) {
+        // Verifier si la session est active en appelant /health
+        try {
+          final healthCheck = await _api.get(ApiConfig.healthEndpoint);
+          if (healthCheck.statusCode == 200) {
+            _cachedUsername = username;
+            _isLoggedIn = true;
+            return AuthResult(success: true);
+          }
+        } catch (_) {}
+
+        // Si health check echoue, le login a probablement echoue aussi
+        // Verifier si la reponse contient "error" (page login avec erreur)
+        final body = response.data?.toString() ?? '';
+        if (body.contains('error') || body.contains('incorrect')) {
+          return AuthResult(
+            success: false,
+            error: 'Identifiant ou mot de passe incorrect.',
+          );
+        }
+
+        // Sinon on considere que c'est OK (redirect suivie)
+        _cachedUsername = username;
+        _isLoggedIn = true;
+        return AuthResult(success: true);
       }
-      return AuthResult(success: false, error: 'Erreur (${response.statusCode}).');
+
+      // Cas 3 : 401 explicite
+      if (response.statusCode == 401) {
+        return AuthResult(
+          success: false,
+          error: 'Identifiant ou mot de passe incorrect.',
+        );
+      }
+
+      return AuthResult(
+        success: false,
+        error: 'Erreur de connexion (${response.statusCode}).',
+      );
     } catch (e) {
-      return AuthResult(success: false, error: 'Impossible de joindre Raya.');
+      return AuthResult(
+        success: false,
+        error: 'Impossible de joindre Raya.',
+      );
     }
   }
 
