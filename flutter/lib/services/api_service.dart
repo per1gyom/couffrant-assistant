@@ -1,16 +1,17 @@
 import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:cookie_jar/cookie_jar.dart';
-import 'package:path_provider/path_provider.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import '../config/api_config.dart';
 
 /// Client HTTP singleton avec gestion des cookies de session.
 /// Le backend Raya utilise des cookies de session (pas JWT).
-/// On reproduit le comportement du navigateur web.
+/// Sur mobile : PersistCookieJar (survit aux redémarrages).
+/// Sur web : CookieJar en mémoire (le navigateur gère les cookies).
 class ApiService {
   static ApiService? _instance;
   late final Dio dio;
-  late final PersistCookieJar cookieJar;
+  CookieJar? cookieJar;
   bool _initialized = false;
 
   ApiService._();
@@ -23,18 +24,10 @@ class ApiService {
   Future<void> init() async {
     if (_initialized) return;
 
-    // Cookie jar persistant (survit aux redémarrages de l'app)
-    final dir = await getApplicationDocumentsDirectory();
-    cookieJar = PersistCookieJar(
-      storage: FileStorage('${dir.path}/.cookies/'),
-    );
-
     dio = Dio(BaseOptions(
       baseUrl: ApiConfig.baseUrl,
       connectTimeout: Duration(seconds: ApiConfig.connectTimeout),
       receiveTimeout: Duration(seconds: ApiConfig.receiveTimeout),
-      // Important : suivre les redirections mais ne pas les exécuter
-      // automatiquement (pour gérer le login qui redirige)
       followRedirects: false,
       validateStatus: (status) => status != null && status < 500,
       headers: {
@@ -42,26 +35,24 @@ class ApiService {
       },
     ));
 
-    // Intercepteur cookies — gère automatiquement les cookies de session
-    dio.interceptors.add(CookieManager(cookieJar));
+    // Sur mobile : cookie jar avec intercepteur dio
+    // Sur web : le navigateur gère les cookies automatiquement
+    if (!kIsWeb) {
+      cookieJar = CookieJar();
+      dio.interceptors.add(CookieManager(cookieJar!));
+    } else {
+      // Sur web, activer withCredentials pour envoyer les cookies
+      dio.options.extra['withCredentials'] = true;
+    }
 
     _initialized = true;
   }
 
-  /// Vérifie si une session active existe (cookie valide)
-  Future<bool> hasActiveSession() async {
-    try {
-      final uri = Uri.parse(ApiConfig.baseUrl);
-      final cookies = await cookieJar.loadForRequest(uri);
-      return cookies.any((c) => c.name == 'session');
-    } catch (_) {
-      return false;
-    }
-  }
-
   /// Efface tous les cookies (déconnexion)
   Future<void> clearCookies() async {
-    await cookieJar.deleteAll();
+    if (cookieJar != null) {
+      await cookieJar!.deleteAll();
+    }
   }
 
   /// POST form-encoded (pour le login)
@@ -71,7 +62,6 @@ class ApiService {
       data: FormData.fromMap(data),
       options: Options(
         contentType: 'application/x-www-form-urlencoded',
-        // Le login redirige vers /chat en cas de succès (302/303)
         followRedirects: false,
         validateStatus: (status) => status != null && status < 500,
       ),
