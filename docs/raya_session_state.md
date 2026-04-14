@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 14/04/2026 18h00** — Opus
+**Dernière mise à jour : 14/04/2026 19h30** — Opus
 
 ---
 
@@ -20,7 +20,7 @@
 - Opus peut pousser directement : docs, config, CSS simples, nouveaux petits fichiers (<10KB)
 
 ### Règles projet
-- Cache-bust : bumper `?v=N` dans aria_chat.html à chaque modif CSS/JS (actuellement **v=4**)
+- Cache-bust : bumper `?v=N` dans aria_chat.html à chaque modif CSS/JS (actuellement **v=5**)
 - Aucune écriture sans ok explicite de Guillaume
 - Langue : français, vocabulaire "Terminal", concis
 
@@ -46,8 +46,9 @@ Microsoft 365, Gmail, Odoo, Twilio/WhatsApp, ElevenLabs.
 - Téléchargement — GET /download/{file_id}
 
 ## 4. PWA ✅
-- Icône smiley vert clin d'oeil, SW v3 Network-First, cache-bust ?v=4
+- Icône smiley vert clin d'oeil, SW v3 Network-First, cache-bust ?v=5
 - Safe-area iPhone 16 Pro Max, 100dvh, sw.js no-store
+- AutoSpeak désactivé automatiquement sur iOS (A3)
 
 ## 5. SÉCURITÉ
 ### Anti-injection (P0-1) ✅
@@ -59,17 +60,17 @@ Microsoft 365, Gmail, Odoo, Twilio/WhatsApp, ElevenLabs.
 - CSP headers, X-Frame-Options DENY, session inactivity timeout
 - Bcrypt passwords, account lockout, rate limiting
 - SESSION_SECRET overridé dans Railway ✅
+- Connexions DB sécurisées try/finally (router.py, aria_context.py, llm_client.py) ✅
 
-### À faire (Phase 2 solidification)
-- [ ] CSRF tokens sur les POST
-- [ ] Sécuriser les connexions DB (try/finally systématique)
+### À faire
+- [ ] CSRF tokens sur les POST (Bloc C)
 
 ## 6. SIGNATURE EMAIL
 ### V1 en place
 - `app/email_signature.py` : signature statique Guillaume (Helvetica + bandeau Photo_9.jpg)
 - Outlook connector appelle `get_email_signature()` automatiquement
 
-### V2 à faire
+### V2 à faire (B3)
 - Bouton admin "Récupérer mes signatures" → analyse derniers mails envoyés
 - Table `email_signatures` (username, email_address, signature_html)
 - `get_email_signature(username, from_address)` → signature selon l'adresse
@@ -81,28 +82,28 @@ Microsoft 365, Gmail, Odoo, Twilio/WhatsApp, ElevenLabs.
 - `app/bug_reports.py` : 3 endpoints (POST /raya/bug-report, GET /admin/bug-reports, PATCH /admin/bug-reports/{id})
 - Table `bug_reports` : id, username, tenant_id, report_type, description, aria_memory_id, user_input, raya_response, device_info, status, created_at
 - Bouton 🐛 dans `chat.js` après 💡, séparateur visuel, dialog inline Bug/Amélioration
-- Accessible à tous les users connectés
 
 ### Flux
 1. User clique 🐛 sous une réponse Raya
 2. Choix Bug ou Amélioration + description texte
-3. POST /raya/bug-report avec contexte automatique (user_input, raya_response, device_info)
+3. POST /raya/bug-report avec contexte automatique
 4. Toast confirmation avec ID du rapport
 5. Admin consulte via GET /admin/bug-reports
-6. Opus peut lire les rapports et traiter les bugs
 
 ## 8. VISION PRODUIT & ROADMAP
 
-### Bloc A — Nettoyage (en cours)
+### Bloc A — Nettoyage ✅ TERMINÉ
 - [x] P0-1 : Anti-injection mails piégés
 - [x] P1-1 à P1-5 : Bouton SAV complet
 - [x] A1 : Mise à jour session_state
-- [ ] A2 : Nettoyage fichiers morts (7 fichiers)
-- [ ] A3 : AutoSpeak off sur iPhone
-- [ ] A4 : Logging propre (remplacer print par logger)
-- [ ] A5 : Sécuriser connexions DB (try/finally)
+- [x] A2a : Imports corrigés (aria_actions → routes/actions)
+- [ ] A2b : Suppression 7 fichiers morts (git rm manuel — non bloquant)
+- [x] A3 : AutoSpeak off sur iPhone
+- [x] A4 : Logging propre (router, llm_client, database, raya.py)
+- [x] A5 : Connexions DB sécurisées (router.py, aria_context.py)
+- [x] Cache bust v=5
 
-### Bloc B — Fonctionnalités (mai 2026)
+### Bloc B — Fonctionnalités (mai 2026) ← EN COURS
 - [ ] B1 : PDF preview mobile (liens bloquent PWA iOS)
 - [ ] B2 : Tests Gmail OAuth + outils création en prod
 - [ ] B3 : Signature email v2 (extraction auto)
@@ -111,7 +112,7 @@ Microsoft 365, Gmail, Odoo, Twilio/WhatsApp, ElevenLabs.
 ### Bloc C — Préparation commerciale (juin 2026)
 - [ ] C1 : Beta Charlotte (valider multi-tenant)
 - [ ] C2 : Tenant DEMO (5 profils sectoriels)
-- [ ] C3 : RGPD + CGV
+- [ ] C3 : RGPD + CGV + CSRF
 - [ ] C4 : WhatsApp production (sortir sandbox)
 - [ ] C5 : Facturation Stripe
 - **Objectif : premier client payant juillet 2026**
@@ -125,32 +126,19 @@ Microsoft 365, Gmail, Odoo, Twilio/WhatsApp, ElevenLabs.
 ### Phase 4 — Maturité (2027)
 
 ## 9. AUDIT CODE (14/04/2026)
-### Points forts identifiés
-- Architecture LLM-agnostic (`llm_client.py`) — changement de provider en ~20 lignes
+### Points forts
+- Architecture LLM-agnostic (`llm_client.py`)
 - Routage 3-tiers avec garde-fou économique Opus
 - Multi-tenant préparé dès le départ
 - Feedback loop 👍👎 → règle → confirmation → mémoire
 - Phases relationnelles Découverte → Consolidation → Maturité
 - RAG pgvector avec fallback
+- Prompt builder `aria_context.py` très complet
 
-### Problèmes identifiés
-- Fuites connexions DB (try/finally manquants) → A5
-- Logging incohérent (print vs logger) → A4
-- AutoSpeak muet sur iPhone (politique Apple) → A3
-- Fichiers morts (shims deprecated + .tmp) → A2
-- Pas de tests automatisés → Bloc B
-- Pas de backup DB → B4
-- Pas de CSRF → Bloc C
-- Images lourdes dans le repo (1.2MB) → plus tard
-
-### Fichiers à nettoyer (A2)
-- `app/routes/aria.py` (shim deprecated)
-- `app/routes/raya_actions.py` (shim deprecated)
-- `app/routes/raya_context.py` (shim deprecated)
-- `app/routes/aria_actions.py` (shim deprecated → routes/actions/)
-- `app/database_migrations_patch_gmail.tmp` (fichier temp)
-- `app/database_patch_jarvis.tmp` (fichier temp)
-- `app/static/chat-markdown.css` (non chargé dans HTML)
+### Fichiers à nettoyer (A2b — git rm manuel)
+- `app/routes/aria.py`, `app/routes/raya_actions.py`, `app/routes/raya_context.py`, `app/routes/aria_actions.py`
+- `app/database_migrations_patch_gmail.tmp`, `app/database_patch_jarvis.tmp`
+- `app/static/chat-markdown.css`
 
 ## 10. DOCUMENTS DE RÉFÉRENCE
 | Document | Contenu |
@@ -173,11 +161,11 @@ Webhook Twilio : https://app.raya-ia.fr/webhook/twilio
 
 ## 12. HISTORIQUE DES SESSIONS
 
-### Session 14/04/2026 (après-midi — audit + sécurité + SAV)
-AUDIT COMPLET (~35 fichiers lus). P0-1 anti-injection (GUARDRAILS + balises données externes). P1-1 à P1-5 bouton SAV complet (backend + migration + UI + cache-bust v=4). Bloc A nettoyage en cours.
+### Session 14/04/2026 (audit + sécurité + SAV + nettoyage — ~15 commits)
+AUDIT COMPLET (~35 fichiers). P0-1 anti-injection. P1-1→P1-5 bouton SAV. Bloc A complet : A2a imports, A3 iOS autoSpeak, A4 logging (4 fichiers), A5 connexions DB (2 fichiers), cache-bust v=5.
 
 ### Session 13-14/04/2026 (marathon nuit — ~50 commits)
-TOOL-CREATE-FILES (PDF+Excel). TOOL-DALLE. TOOL-READ-PDF (3/3). Capabilities. CHAT-HISTORY. FIX-SAFE-AREA. SW v3. Cache-bust. FIX-SW-CACHE. PWA icon smiley. EMAIL-SIGNATURE v1. Plan maintenance. Roadmap démo 5 profils. Roadmap fichiers. Décision app native Flutter iOS. Décision bouton SAV/bug report provisoire.
+TOOL-CREATE-FILES (PDF+Excel). TOOL-DALLE. TOOL-READ-PDF (3/3). Capabilities. CHAT-HISTORY. FIX-SAFE-AREA. SW v3. Cache-bust. FIX-SW-CACHE. PWA icon smiley. EMAIL-SIGNATURE v1. Plan maintenance. Roadmap démo 5 profils. Décision app native Flutter iOS.
 
 ### Sessions précédentes
 13/04 : Connectivité 5/5, Gmail PKCE, WhatsApp, DNS.
