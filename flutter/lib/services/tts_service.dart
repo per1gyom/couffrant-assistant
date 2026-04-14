@@ -1,10 +1,11 @@
 import 'dart:typed_data';
+import 'package:dio/dio.dart';
 import 'package:just_audio/just_audio.dart';
 import '../config/api_config.dart';
 import 'api_service.dart';
 
 /// Service TTS — appelle POST /speak et lit l'audio via just_audio.
-/// Résout le problème #1 de la PWA : autoplay bloqué sur iOS Safari.
+/// Resout le probleme #1 de la PWA : autoplay bloque sur iOS Safari.
 /// En natif Flutter, just_audio lit sans restriction.
 class TtsService {
   final ApiService _api = ApiService.instance;
@@ -34,80 +35,56 @@ class TtsService {
     try {
       _isSpeaking = true;
 
-      // Appel POST /speak — retourne audio/mpeg
       final response = await _api.dio.post(
         ApiConfig.speakEndpoint,
         data: {'text': clean, 'speed': speed},
-        options: _api.dio.options.copyWith(
+        options: Options(
           responseType: ResponseType.bytes,
           receiveTimeout: const Duration(seconds: 30),
-        ).toOptions(),
+        ),
       );
 
       if (response.statusCode == 200 && response.data != null) {
-        // Lire les bytes audio directement
         final bytes = Uint8List.fromList(response.data as List<int>);
-
-        // Charger et lire avec just_audio (autoplay natif — pas de restriction iOS)
-        await _player.setAudioSource(
-          _BytesAudioSource(bytes, 'audio/mpeg'),
-        );
+        await _player.setAudioSource(BytesAudioSource(bytes));
         await _player.play();
-
-        // Attendre la fin de la lecture
         await _player.processingStateStream.firstWhere(
           (state) => state == ProcessingState.completed,
         );
       }
-    } catch (e) {
-      // Silence en cas d'erreur TTS — pas critique
+    } catch (_) {
     } finally {
       _isSpeaking = false;
     }
   }
 
-  /// Arrête la lecture en cours
+  /// Arrete la lecture en cours
   Future<void> stop() async {
     _isSpeaking = false;
     await _player.stop();
   }
 
-  /// Libère les ressources
   void dispose() {
     _player.dispose();
   }
 }
 
-/// Options Dio en tant que Options (pas BaseOptions)
-extension on BaseOptions {
-  Options toOptions() {
-    return Options(
-      receiveTimeout: receiveTimeout,
-      responseType: responseType,
-      headers: headers,
-    );
-  }
-}
-
-/// Source audio depuis des bytes en mémoire
-class _BytesAudioSource extends StreamAudioSource {
+/// Source audio depuis des bytes en memoire
+class BytesAudioSource extends StreamAudioSource {
   final Uint8List _bytes;
-  final String _contentType;
 
-  _BytesAudioSource(this._bytes, this._contentType);
+  BytesAudioSource(this._bytes);
 
   @override
   Future<StreamAudioResponse> request([int? start, int? end]) async {
-    final effectiveStart = start ?? 0;
-    final effectiveEnd = end ?? _bytes.length;
+    final s = start ?? 0;
+    final e = end ?? _bytes.length;
     return StreamAudioResponse(
       sourceLength: _bytes.length,
-      contentLength: effectiveEnd - effectiveStart,
-      offset: effectiveStart,
-      stream: Stream.value(
-        _bytes.sublist(effectiveStart, effectiveEnd),
-      ),
-      contentType: _contentType,
+      contentLength: e - s,
+      offset: s,
+      stream: Stream.value(_bytes.sublist(s, e)),
+      contentType: 'audio/mpeg',
     );
   }
 }
