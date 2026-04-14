@@ -1,26 +1,25 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 14/04/2026 19h30** — Opus
+**Dernière mise à jour : 14/04/2026 21h00** — Opus
 
 ---
 
 ## ⚠️ RÈGLES IMPÉRATIVES (NON NÉGOCIABLES)
 
 ### Rôles
-- **Opus = architecte UNIQUEMENT** : audite via GitHub MCP, conçoit, rédige des prompts pour Sonnet. NE CODE PAS. N'utilise PAS Chrome pour coder.
+- **Opus = architecte UNIQUEMENT** : audite via GitHub MCP, conçoit, rédige des prompts pour Sonnet. NE CODE PAS.
 - **Sonnet = exécutant** : reçoit les prompts copiés par Guillaume, code, pousse sur `main`.
 - **Guillaume = décideur** : valide, teste, copie les prompts entre Opus et Sonnet.
 
 ### Workflow des prompts Opus → Sonnet
 - Opus rédige des prompts avec les specs, Sonnet écrit le code
 - **⚠️ COMMITS COURTS OBLIGATOIRES** : 1 fichier par commit max. Fichiers >15KB timeout MCP.
-- Fichiers volumineux (raya.py, main.py, chat.css) : modifications CHIRURGICALES uniquement
+- Fichiers volumineux : modifications CHIRURGICALES uniquement
 - Fin de chaque prompt : « Rapport pour Opus : fichier(s) modifié(s), SHA du commit. »
 - JAMAIS `push_files` pour du code Python — corrompt les `\n`.
-- Opus peut pousser directement : docs, config, CSS simples, nouveaux petits fichiers (<10KB)
 
 ### Règles projet
-- Cache-bust : bumper `?v=N` dans aria_chat.html à chaque modif CSS/JS (actuellement **v=5**)
+- Cache-bust : bumper `?v=N` dans aria_chat.html à chaque modif CSS/JS (actuellement **v=6**, bump v=7 en attente)
 - Aucune écriture sans ok explicite de Guillaume
 - Langue : français, vocabulaire "Terminal", concis
 
@@ -46,130 +45,95 @@ Microsoft 365, Gmail, Odoo, Twilio/WhatsApp, ElevenLabs.
 - Téléchargement — GET /download/{file_id}
 
 ## 4. PWA ✅
-- Icône smiley vert clin d'oeil, SW v3 Network-First, cache-bust ?v=5
+- Icône smiley vert clin d'oeil, SW v3 Network-First, cache-bust ?v=6
 - Safe-area iPhone 16 Pro Max, 100dvh, sw.js no-store
 - AutoSpeak désactivé automatiquement sur iOS (A3)
 
-## 5. SÉCURITÉ
-### Anti-injection (P0-1) ✅
-- `GUARDRAILS` dans `aria_context.py` : bloc SECURITE ANTI-INJECTION
-- Données externes (mails, Teams, agenda) enveloppées dans `<donnees_externes>...</donnees_externes>`
-- Raya refuse d'exécuter des instructions trouvées dans le contenu des mails
-
-### En place
+## 5. SÉCURITÉ ✅
+- Anti-injection P0-1 : GUARDRAILS + balises `<donnees_externes>`
 - CSP headers, X-Frame-Options DENY, session inactivity timeout
 - Bcrypt passwords, account lockout, rate limiting
-- SESSION_SECRET overridé dans Railway ✅
-- Connexions DB sécurisées try/finally (router.py, aria_context.py, llm_client.py) ✅
+- SESSION_SECRET overridé dans Railway
+- Connexions DB sécurisées try/finally
+- Discipline des apprentissages (FIX-LEARN) : garde-fous sur quand apprendre
+- À faire : CSRF tokens sur les POST
 
-### À faire
-- [ ] CSRF tokens sur les POST (Bloc C)
+## 6. SIGNATURE EMAIL ✅
+### V1 — fallback statique Guillaume
+### V2 — en place (B3)
+- `email_signature.py` : `get_email_signature()` DB→fallback, `extract_and_save_signature()` Graph+Haiku
+- Table `email_signatures`, endpoint `POST /admin/extract-signatures`
+- Bouton 💌 dans le tiroir admin
 
-## 6. SIGNATURE EMAIL
-### V1 en place
-- `app/email_signature.py` : signature statique Guillaume (Helvetica + bandeau Photo_9.jpg)
-- Outlook connector appelle `get_email_signature()` automatiquement
+## 7. BOUTON SAV / BUG REPORT ✅
+- `app/bug_reports.py` : POST /raya/bug-report, GET /admin/bug-reports, PATCH status
+- Bouton 🐛 dans chat.js, dialog inline Bug/Amélioration
 
-### V2 à faire (B3)
-- Bouton admin "Récupérer mes signatures" → analyse derniers mails envoyés
-- Table `email_signatures` (username, email_address, signature_html)
-- `get_email_signature(username, from_address)` → signature selon l'adresse
+## 8. RGPD ✅ (C3)
+- Export données : GET /account/export (JSON complet, 16 tables)
+- Suppression compte : DELETE /account/delete?confirm=yes (anonymisation collective)
+- Page mentions légales : GET /legal (publique, accessible sans auth)
+- Boutons 📦 Export et ⛔ Supprimer dans le tiroir admin
+- Lien mentions légales sur page login + drawer
+- Purge RGPD couvre : email_signatures + bug_reports
 
-## 7. BOUTON SAV / BUG REPORT ✅ (P1-1 à P1-5)
-**Statut : DÉPLOYÉ** — provisoire, outil de développement beta.
+## 9. BACKUP DB ✅ (B4)
+- Bouton 💾 dans tiroir admin → GET /admin/backup
+- pg_dump ou fallback CSV Python
+- **À compléter** : backup auto quotidien vers S3 (Scaleway — compte à créer par Guillaume)
 
-### Composants
-- `app/bug_reports.py` : 3 endpoints (POST /raya/bug-report, GET /admin/bug-reports, PATCH /admin/bug-reports/{id})
-- Table `bug_reports` : id, username, tenant_id, report_type, description, aria_memory_id, user_input, raya_response, device_info, status, created_at
-- Bouton 🐛 dans `chat.js` après 💡, séparateur visuel, dialog inline Bug/Amélioration
+## 10. UX / QUALITÉ RÉPONSES (FIX-LEARN) ✅
+- Capabilities mises à jour : DALL-E + lecture PDF ajoutés, limitation images supprimée
+- GUARDRAILS : discipline des apprentissages (pas de LEARN sur faits ponctuels, max 2/réponse en découverte)
+- Chat UI : notifications mémoire 🧠 remplacées par pilule verte discrète, conflits masqués
 
-### Flux
-1. User clique 🐛 sous une réponse Raya
-2. Choix Bug ou Amélioration + description texte
-3. POST /raya/bug-report avec contexte automatique
-4. Toast confirmation avec ID du rapport
-5. Admin consulte via GET /admin/bug-reports
+## 11. MULTI-TENANT
+- Infrastructure prête : tenant_id sur toutes les tables, user_tenant_access, seeding par profil
+- Tenant `couffrant_solar` : Guillaume (admin)
+- Tenant `juillet` : Charlotte (beta) — compte à créer via panel admin
+- Profils seeding : `pv_french`, `event_planner`, `generic`
 
-## 8. VISION PRODUIT & ROADMAP
+## 12. ROADMAP
 
 ### Bloc A — Nettoyage ✅ TERMINÉ
-- [x] P0-1 : Anti-injection mails piégés
-- [x] P1-1 à P1-5 : Bouton SAV complet
-- [x] A1 : Mise à jour session_state
-- [x] A2a : Imports corrigés (aria_actions → routes/actions)
-- [ ] A2b : Suppression 7 fichiers morts (git rm manuel — non bloquant)
-- [x] A3 : AutoSpeak off sur iPhone
-- [x] A4 : Logging propre (router, llm_client, database, raya.py)
-- [x] A5 : Connexions DB sécurisées (router.py, aria_context.py)
-- [x] Cache bust v=5
+### Bloc B — Fonctionnalités ✅ QUASI TERMINÉ
+- [x] B1 : PDF preview mobile
+- [ ] B2 : Tests Gmail OAuth + outils en prod (Guillaume cet après-midi)
+- [x] B3 : Signature email v2
+- [x] B4 : Backup DB (manuel — auto S3 à compléter)
 
-### Bloc B — Fonctionnalités (mai 2026) ← EN COURS
-- [ ] B1 : PDF preview mobile (liens bloquent PWA iOS)
-- [ ] B2 : Tests Gmail OAuth + outils création en prod
-- [ ] B3 : Signature email v2 (extraction auto)
-- [ ] B4 : Backup DB automatique
-
-### Bloc C — Préparation commerciale (juin 2026)
-- [ ] C1 : Beta Charlotte (valider multi-tenant)
+### Bloc C — Préparation commerciale — EN COURS
+- [x] C1-prep : RGPD purge email_signatures + bug_reports
+- [ ] C1 : Beta Charlotte (créer compte tenant `juillet`)
 - [ ] C2 : Tenant DEMO (5 profils sectoriels)
-- [ ] C3 : RGPD + CGV + CSRF
+- [x] C3 : RGPD complet (export + suppression + mentions légales)
 - [ ] C4 : WhatsApp production (sortir sandbox)
 - [ ] C5 : Facturation Stripe
+- [ ] CSRF tokens
 - **Objectif : premier client payant juillet 2026**
 
-### Phase 2 — App native iOS (août-septembre 2026)
-- **Technologie : Flutter** (choix validé par Guillaume)
-- iOS uniquement en premier
-- **Objectif : App Store octobre 2026**
+### À faire (rappels Guillaume)
+- [ ] A2b : Supprimer 7 fichiers morts (git rm)
+- [ ] B2 : Tester Gmail OAuth + PDF/Excel/DALL-E en prod
+- [ ] B4+ : Créer compte Scaleway pour backup auto
+- [ ] Cache bust v=7 (après FIX-LEARN-UI)
+- [ ] Tester bouton 💌 signatures
 
+### Phase 2 — App native iOS (août-sept 2026) — Flutter
 ### Phase 3 — App native Android (fin 2026)
 ### Phase 4 — Maturité (2027)
 
-## 9. AUDIT CODE (14/04/2026)
-### Points forts
-- Architecture LLM-agnostic (`llm_client.py`)
-- Routage 3-tiers avec garde-fou économique Opus
-- Multi-tenant préparé dès le départ
-- Feedback loop 👍👎 → règle → confirmation → mémoire
-- Phases relationnelles Découverte → Consolidation → Maturité
-- RAG pgvector avec fallback
-- Prompt builder `aria_context.py` très complet
+## 13. HISTORIQUE DES SESSIONS
 
-### Fichiers à nettoyer (A2b — git rm manuel)
-- `app/routes/aria.py`, `app/routes/raya_actions.py`, `app/routes/raya_context.py`, `app/routes/aria_actions.py`
-- `app/database_migrations_patch_gmail.tmp`, `app/database_patch_jarvis.tmp`
-- `app/static/chat-markdown.css`
-
-## 10. DOCUMENTS DE RÉFÉRENCE
-| Document | Contenu |
-|---|---|
-| `docs/raya_session_state.md` | CE FICHIER — état vivant |
-| `docs/raya_maintenance.md` | Plan maintenance |
-| `docs/raya_roadmap_demo.md` | Roadmap démo 5 profils + roadmap fichiers |
-| `docs/raya_roadmap_v2.md` | Roadmap originale (phases 5A→7) |
-
-## 11. VARIABLES RAILWAY
-```
-TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
-GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET
-GMAIL_REDIRECT_URI=https://app.raya-ia.fr/auth/gmail/callback
-APP_BASE_URL=https://app.raya-ia.fr
-RAYA_WEB_SEARCH_ENABLED=true, ELEVENLABS_SPEED=1.2
-OPENAI_API_KEY (embeddings + DALL-E)
-Webhook Twilio : https://app.raya-ia.fr/webhook/twilio
-```
-
-## 12. HISTORIQUE DES SESSIONS
-
-### Session 14/04/2026 (audit + sécurité + SAV + nettoyage — ~15 commits)
-AUDIT COMPLET (~35 fichiers). P0-1 anti-injection. P1-1→P1-5 bouton SAV. Bloc A complet : A2a imports, A3 iOS autoSpeak, A4 logging (4 fichiers), A5 connexions DB (2 fichiers), cache-bust v=5.
+### Session 14/04/2026 (~30 commits — audit + sécurité + SAV + RGPD + UX)
+AUDIT COMPLET (~35 fichiers). P0-1 anti-injection. P1-1→P1-5 bouton SAV. Bloc A complet (imports, iOS autoSpeak, logging, connexions DB). B1 PDF mobile. B3 signature v2. B4 backup DB. C1-prep RGPD purge. C3 complet (export, suppression, mentions légales). FIX-LEARN (capabilities, discipline apprentissages, pilule verte UI).
 
 ### Session 13-14/04/2026 (marathon nuit — ~50 commits)
-TOOL-CREATE-FILES (PDF+Excel). TOOL-DALLE. TOOL-READ-PDF (3/3). Capabilities. CHAT-HISTORY. FIX-SAFE-AREA. SW v3. Cache-bust. FIX-SW-CACHE. PWA icon smiley. EMAIL-SIGNATURE v1. Plan maintenance. Roadmap démo 5 profils. Décision app native Flutter iOS.
+TOOL-CREATE-FILES. TOOL-DALLE. TOOL-READ-PDF. Capabilities. CHAT-HISTORY. FIX-SAFE-AREA. SW v3. PWA icon. EMAIL-SIGNATURE v1. Roadmap démo. Décision Flutter iOS.
 
 ### Sessions précédentes
 13/04 : Connectivité 5/5, Gmail PKCE, WhatsApp, DNS.
 12-13/04 : ~55 tâches, Phase 7+8, Admin panel, Web search.
 
-## 13. REPRISE
+## 14. REPRISE
 « Bonjour Opus. Projet Raya, Guillaume Perrin (Couffrant Solar). On se tutoie, en français, vocabulaire Terminal, concis. Tu es l'ARCHITECTE du projet. Tu ne codes JAMAIS. Tu rédiges des prompts pour Sonnet (l'exécutant). Lis `docs/raya_session_state.md` sur `per1gyom/couffrant-assistant` main via GitHub MCP. Règle d'or : aucune écriture sans mon ok. Reprends où on en était. »
