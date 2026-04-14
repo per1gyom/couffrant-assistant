@@ -65,8 +65,8 @@ async function loadHistory() {
     if (welcome) welcome.remove();
 
     history.forEach(item => {
-      if (item.user) addMessage(item.user, 'user');
-      if (item.raya) addMessage(item.raya, 'raya', null, item.id);
+      if (item.user) addMessage(item.user, 'user', null, null, item.created_at || item.ts);
+      if (item.raya) addMessage(item.raya, 'raya', null, item.id, item.created_at || item.ts);
     });
 
     const sep = document.createElement('div');
@@ -129,10 +129,23 @@ function cleanText(t) {
 }
 
 // --- MESSAGES (partagées avec autres modules) ---
-function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
+function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null) {
   const welcome = messagesEl.querySelector('.welcome');
   if (welcome) welcome.remove();
   const row = document.createElement('div'); row.className = 'message-row ' + type;
+
+  // TIMESTAMP-2 : horodatage au-dessus des bulles
+  const dateObj = timestamp ? new Date(timestamp) : new Date();
+  const timeStr = dateObj.toLocaleString('fr-FR', {weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'});
+  const lastTimeEl = messagesEl.querySelector('.msg-time:last-of-type');
+  if (!lastTimeEl || lastTimeEl.textContent !== timeStr) {
+    const timeEl = document.createElement('div');
+    timeEl.className = 'msg-time';
+    timeEl.style.cssText = 'font-size:11px;color:#999;text-align:center;width:100%;margin:8px 0 2px;';
+    timeEl.textContent = timeStr;
+    messagesEl.appendChild(timeEl);
+  }
+
   const avatar = document.createElement('div'); avatar.className = 'avatar ' + type + '-avatar';
   avatar.textContent = type === 'raya' ? '✦' : (currentUser ? currentUser[0].toUpperCase() : 'G');
   const bubble = document.createElement('div'); bubble.className = 'bubble';
@@ -160,7 +173,6 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
       });
       // FIX-LEARN-UI: nettoyer les notifications mémoire brutes du contenu affiché
       const memoryNotes = [];
-      // Supprimer les <p> contenant 🧠 ou ⚠️ Conflit et collecter les 🧠
       content.innerHTML = content.innerHTML.replace(
         /<p>(?:🧠|⚠️\s*Conflit)[^<]*<\/p>/gi,
         (match) => {
@@ -168,7 +180,6 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
           return '';
         }
       );
-      // Supprimer les versions texte brut (hors balises <p>)
       content.innerHTML = content.innerHTML.replace(
         /(?:🧠|⚠️\s*Conflit de regle)[^\n<]*/gi,
         (match) => {
@@ -176,7 +187,6 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
           return '';
         }
       );
-      // Afficher une pilule verte discrète si des règles ont été apprises
       if (memoryNotes.length > 0) {
         const memDiv = document.createElement('div');
         memDiv.style.cssText = 'margin-top:6px;padding:4px 10px;background:rgba(34,197,94,0.1);border-radius:6px;font-size:12px;color:#16a34a;cursor:pointer;display:inline-block;';
