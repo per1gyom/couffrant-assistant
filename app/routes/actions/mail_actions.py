@@ -1,6 +1,7 @@
 """
 Gestion des actions mail (ARCHIVE, READ, REPLY, DELETE, READBODY, CREATEEVENT, CREATE_TASK).
 7-ACT : log d'activite apres chaque action.
+FIX-MAIL-DUP : set processed_ids pour eviter DELETE+ARCHIVE sur le meme mail.
 """
 import re
 from app.connectors.outlook_connector import perform_outlook_action
@@ -28,6 +29,8 @@ def _build_delete_label(subjects: list) -> str:
 def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_mails,
                          username, tenant_id, conversation_id):
     confirmed = []
+    # FIX-MAIL-DUP : tracker les IDs deja traites pour eviter DELETE+ARCHIVE sur le meme mail
+    processed_ids = set()
 
     if mail_can_delete:
         delete_ids = []
@@ -36,9 +39,12 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
             msg_id = msg_id.strip()
             if not is_valid_outlook_id(msg_id):
                 continue
+            if msg_id in processed_ids:
+                continue
             orig = next((m for m in live_mails + mails_from_db if m.get('message_id') == msg_id), {})
             delete_ids.append(msg_id)
             delete_subjects.append(orig.get('subject', msg_id[:30]))
+            processed_ids.add(msg_id)
         if delete_ids:
             ok_count = 0
             for msg_id in delete_ids:
@@ -61,6 +67,8 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
     for msg_id in re.findall(r'\[ACTION:ARCHIVE:([^\]]+)\]', response):
         msg_id = msg_id.strip()
         if not is_valid_outlook_id(msg_id): continue
+        if msg_id in processed_ids: continue
+        processed_ids.add(msg_id)
         try:
             r = perform_outlook_action("archive_message", {"message_id": msg_id}, token)
             if r.get("status") == "ok":
