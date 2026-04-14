@@ -37,6 +37,7 @@ from app.bug_reports import router as bug_reports_router
 from app.backup import router as backup_router
 from app.email_signature import router as signature_router
 from app.rgpd import router as rgpd_router
+from app.topics import router as topics_router
 
 SESSION_INACTIVITY_TIMEOUT = int(os.getenv("SESSION_INACTIVITY_TIMEOUT", "7200"))
 
@@ -107,6 +108,7 @@ app.include_router(bug_reports_router)
 app.include_router(backup_router)
 app.include_router(signature_router)
 app.include_router(rgpd_router)
+app.include_router(topics_router)
 
 
 @app.get("/")
