@@ -80,7 +80,12 @@ def clear_attempts(ip: str):
     _ip_attempts.pop(ip, None)
 
 
-# ─── LOCKOUT PAR USERNAME (persistant en DB, multi-instance safe) ───
+# ─── LOCKOUT PAR USERNAME (réexports depuis lockout.py) ───
+from app.lockout import (  # noqa
+    check_user_lockout, record_user_failed, clear_user_attempts,
+    is_account_locked_db, unlock_account,
+)
+
 
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
