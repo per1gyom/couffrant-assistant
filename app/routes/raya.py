@@ -10,6 +10,7 @@ SPEAK-SPEED   : vitesse de lecture ElevenLabs dynamique via payload.speed.
 TOOL-READ-PDF : extraction texte pdfplumber injectée dans le contexte LLM (commit 3/3).
 A2a           : import direct depuis app.routes.actions (shim aria_actions supprimé).
 A4-4          : print() remplacés par logger.
+FIX-CLEAN-1   : nettoyage agressif des balises techniques + dédup confirmations.
 """
 import json
 import os
@@ -296,10 +297,23 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         else:
             actions_confirmed.append(item)
 
-    # 9. Reponse propre — retire les balises [ACTION:...] du texte affiché
-    clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', raya_response).strip()
+    # 9. Reponse propre — retire TOUTES les balises techniques du texte
+    clean_response = raya_response
+    clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', clean_response)
+    clean_response = re.sub(r'\[SPEAK_SPEED:[\d.]+\]', '', clean_response)
+    clean_response = re.sub(r'^\s*\|?\["[^"]+".*$', '', clean_response, flags=re.MULTILINE)
+    clean_response = re.sub(r'\n{3,}', '\n\n', clean_response).strip()
     if actions_confirmed:
-        clean_response += "\n\n" + "\n\n".join(actions_confirmed)
+        new_actions = []
+        response_lower = clean_response.lower()
+        for act in actions_confirmed:
+            if 'corbeille' in act.lower() and 'corbeille' in response_lower:
+                continue
+            if 'archive' in act.lower() and 'archiv' in response_lower:
+                continue
+            new_actions.append(act)
+        if new_actions:
+            clean_response += "\n\n" + "\n".join(new_actions)
 
     # 10. Sauvegarde
     aria_memory_id = None
