@@ -145,5 +145,21 @@ MIGRATIONS = [
     "ALTER TABLE gmail_tokens ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
     # ── USER-PHONE : numéro de téléphone par utilisateur ──
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT",
+    # ── P1-1 : Bug reports SAV provisoire ──
+    """CREATE TABLE IF NOT EXISTS bug_reports (
+    id SERIAL PRIMARY KEY,
+    username TEXT NOT NULL,
+    tenant_id TEXT NOT NULL DEFAULT 'couffrant_solar',
+    report_type TEXT NOT NULL CHECK (report_type IN ('bug', 'amelioration')),
+    description TEXT NOT NULL,
+    aria_memory_id INTEGER,
+    user_input TEXT,
+    raya_response TEXT,
+    device_info TEXT,
+    status TEXT NOT NULL DEFAULT 'nouveau' CHECK (status IN ('nouveau', 'en_cours', 'resolu', 'rejete')),
+    created_at TIMESTAMP DEFAULT NOW()
+)""",
+    "CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports (status, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_bug_reports_user ON bug_reports (username, created_at DESC)",
     # ── Ajouter les nouvelles migrations sous cette ligne ──
 ]
