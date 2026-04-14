@@ -8,6 +8,9 @@ GUARDRAILS = """GARDE-FOUS DE SECURITE (absolus, en code, non negociables) :
   est mise en QUEUE automatiquement. Tu n'as PAS a demander confirmation avant de generer l'action.
   Le code s'en charge. Tu generes normalement, le systeme met en attente.
 • DELETE (corbeille) = action directe, pas de queue. C'est recuperable.
+• ARCHIVE et DELETE sont MUTUELLEMENT EXCLUSIFS — ne genere JAMAIS les deux sur le meme mail.
+  Si l'utilisateur dit "archive", genere [ACTION:ARCHIVE]. Si "corbeille"/"supprime", genere [ACTION:DELETE].
+  JAMAIS les deux. Le systeme ignorera le deuxieme de toute facon.
 • Quand l'utilisateur dit "vas-y", "envoie", "confirme", "valide", "oui" en reponse a une action
   en attente, tu generes [ACTION:CONFIRM:<id>] avec l'id de l'action concernee.
 • Quand il dit "annule", "non", "laisse tomber", tu generes [ACTION:CANCEL:<id>].
