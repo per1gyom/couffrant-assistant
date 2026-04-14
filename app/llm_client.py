@@ -23,6 +23,9 @@ import os
 from app.config import (
     ANTHROPIC_API_KEY, ANTHROPIC_MODEL_SMART, ANTHROPIC_MODEL_FAST,
 )
+from app.logging_config import get_logger
+
+logger = get_logger("raya.llm")
 
 
 # ─── CONFIGURATION ───
@@ -133,7 +136,6 @@ def _complete_anthropic(messages, model_name, max_tokens, system, temperature, w
         if hasattr(block, "text"):
             text_parts.append(block.text)
         elif hasattr(block, "type") and block.type == "web_search_tool_result":
-            # Les résultats de recherche contiennent du texte et des URLs
             if hasattr(block, "content"):
                 for sub in block.content:
                     if hasattr(sub, "text"):
@@ -164,6 +166,7 @@ def log_llm_usage(result: dict, username: str, tenant_id: str, purpose: str = ""
     Logge l'usage LLM en base pour suivi des coûts par tenant.
     Non-bloquant : si l'écriture échoue, on continue.
     """
+    conn = None
     try:
         from app.database import get_pg_conn
         conn = get_pg_conn()
@@ -181,6 +184,8 @@ def log_llm_usage(result: dict, username: str, tenant_id: str, purpose: str = ""
             (purpose or "")[:100],
         ))
         conn.commit()
-        conn.close()
     except Exception as e:
-        print(f"[llm_usage] Logging échoué (non bloquant) : {e}")
+        logger.warning("[llm_usage] Logging échoué (non bloquant) : %s", e)
+    finally:
+        if conn:
+            conn.close()
