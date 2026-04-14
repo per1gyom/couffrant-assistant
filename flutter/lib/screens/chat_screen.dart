@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/auth_service.dart';
+import '../services/chat_service.dart';
 import 'login_screen.dart';
 
-/// Écran de chat — placeholder Phase 1.
-/// Sera complété en Phase 2 avec le vrai chat Raya.
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
 
@@ -13,19 +14,100 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final _authService = AuthService();
+  final _chatService = ChatService();
+  final _inputController = TextEditingController();
+  final _scrollController = ScrollController();
+  final _inputFocus = FocusNode();
+
+  List<ChatMessage> _messages = [];
+  List<PendingAction> _pendingActions = [];
+  AskChoice? _askChoice;
+  bool _loading = false;
+  bool _historyLoaded = false;
   String _username = '';
 
   @override
   void initState() {
     super.initState();
-    _loadUsername();
+    _username = _authService.getUsername() ?? '';
+    _loadHistory();
   }
 
-  Future<void> _loadUsername() async {
-    final name = await _authService.getUsername();
-    if (mounted) {
-      setState(() => _username = name ?? '');
+  Future<void> _loadHistory() async {
+    try {
+      final history = await _chatService.loadHistory();
+      if (mounted && history.isNotEmpty) {
+        setState(() {
+          _messages = history;
+          _historyLoaded = true;
+        });
+        _scrollToBottom(animate: false);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _sendMessage([String? override]) async {
+    final text = override ?? _inputController.text.trim();
+    if (text.isEmpty || _loading) return;
+
+    _inputController.clear();
+    setState(() {
+      _messages.add(ChatMessage(text: text, isUser: true));
+      _loading = true;
+      _askChoice = null;
+    });
+    _scrollToBottom();
+
+    try {
+      final response = await _chatService.sendMessage(text);
+
+      // Nettoyer les balises [ACTION:...] et [SPEAK_SPEED:...]
+      var answer = response.answer;
+      answer = answer.replaceAll(RegExp(r'\[ACTION:[A-Z_]+:[^\]]*\]'), '');
+      answer = answer.replaceAll(RegExp(r'\[SPEAK_SPEED:[\d.]+\]'), '');
+      answer = answer.trim();
+
+      if (mounted) {
+        setState(() {
+          _messages.add(ChatMessage(
+            text: answer,
+            isUser: false,
+            ariaMemoryId: response.ariaMemoryId,
+            modelTier: response.modelTier,
+          ));
+          _pendingActions = response.pendingActions;
+          _askChoice = response.askChoice;
+          _loading = false;
+        });
+        _scrollToBottom();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _messages.add(ChatMessage(
+            text: 'Erreur de connexion \u00e0 Raya. R\u00e9essaie.',
+            isUser: false,
+          ));
+          _loading = false;
+        });
+      }
     }
+  }
+
+  void _scrollToBottom({bool animate = true}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        if (animate) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        } else {
+          _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+        }
+      }
+    });
   }
 
   Future<void> _logout() async {
@@ -37,189 +119,401 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   @override
+  void dispose() {
+    _inputController.dispose();
+    _scrollController.dispose();
+    _inputFocus.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF0F1117),
       body: SafeArea(
         child: Column(
           children: [
-            // Header minimaliste
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Row(
-                children: [
-                  // Point vert + Raya
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF22C55E),
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    'Raya',
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const Spacer(),
-                  // Menu trois points
-                  PopupMenuButton<String>(
-                    icon: Icon(
-                      Icons.more_vert,
-                      color: Colors.white.withOpacity(0.6),
-                    ),
-                    color: const Color(0xFF1A1C24),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    onSelected: (value) {
-                      if (value == 'logout') _logout();
-                    },
-                    itemBuilder: (context) => [
-                      PopupMenuItem(
-                        enabled: false,
-                        child: Text(
-                          'Connect\u00e9 : $_username',
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.5),
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                      const PopupMenuDivider(),
-                      const PopupMenuItem(
-                        value: 'logout',
-                        child: Row(
-                          children: [
-                            Icon(Icons.logout, color: Color(0xFFEF4444), size: 18),
-                            SizedBox(width: 10),
-                            Text(
-                              'D\u00e9connexion',
-                              style: TextStyle(color: Color(0xFFEF4444)),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-
-            // Séparateur
-            Divider(
-              height: 1,
-              color: Colors.white.withOpacity(0.08),
-            ),
-
-            // Zone de chat (placeholder)
-            Expanded(
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 56,
-                      height: 56,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF22C55E).withOpacity(0.15),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: const Center(
-                        child: Text(
-                          '\u2726',
-                          style: TextStyle(
-                            fontSize: 28,
-                            color: Color(0xFF22C55E),
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Raya est pr\u00eate.',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Phase 2 : chat en cours de d\u00e9veloppement.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: Colors.white.withOpacity(0.4),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // Barre d'input (placeholder)
-            Container(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 16),
-              decoration: BoxDecoration(
-                border: Border(
-                  top: BorderSide(color: Colors.white.withOpacity(0.08)),
-                ),
-              ),
-              child: Row(
-                children: [
-                  // Bouton pièce jointe
-                  IconButton(
-                    icon: Icon(
-                      Icons.attach_file,
-                      color: Colors.white.withOpacity(0.4),
-                    ),
-                    onPressed: () {},
-                  ),
-                  // Champ texte
-                  Expanded(
-                    child: Container(
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.07),
-                        borderRadius: BorderRadius.circular(21),
-                      ),
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      alignment: Alignment.centerLeft,
-                      child: Text(
-                        'Message...',
-                        style: TextStyle(
-                          color: Colors.white.withOpacity(0.25),
-                          fontSize: 14,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  // Bouton micro (le héros)
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFF22C55E),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.mic,
-                      color: Colors.white,
-                      size: 22,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            _buildHeader(),
+            Divider(height: 1, color: Colors.white.withOpacity(0.08)),
+            Expanded(child: _buildMessageList()),
+            if (_askChoice != null) _buildAskChoice(),
+            if (_pendingActions.isNotEmpty) _buildPendingActions(),
+            _buildInputBar(),
           ],
         ),
       ),
+    );
+  }
+
+  // --- HEADER ---
+  Widget _buildHeader() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 8, height: 8,
+            decoration: const BoxDecoration(
+              color: Color(0xFF22C55E), shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Text('Raya',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600,
+              color: Colors.white),
+          ),
+          const Spacer(),
+          PopupMenuButton<String>(
+            icon: Icon(Icons.more_vert, color: Colors.white.withOpacity(0.6)),
+            color: const Color(0xFF1A1C24),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12)),
+            onSelected: (v) { if (v == 'logout') _logout(); },
+            itemBuilder: (_) => [
+              PopupMenuItem(enabled: false, child: Text(
+                'Connect\u00e9 : $_username',
+                style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
+              )),
+              const PopupMenuDivider(),
+              const PopupMenuItem(value: 'logout', child: Row(children: [
+                Icon(Icons.logout, color: Color(0xFFEF4444), size: 18),
+                SizedBox(width: 10),
+                Text('D\u00e9connexion', style: TextStyle(color: Color(0xFFEF4444))),
+              ])),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // --- MESSAGES ---
+  Widget _buildMessageList() {
+    if (_messages.isEmpty && !_loading) {
+      return Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 56, height: 56,
+            decoration: BoxDecoration(
+              color: const Color(0xFF22C55E).withOpacity(0.15),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Center(child: Text('\u2726',
+              style: TextStyle(fontSize: 28, color: Color(0xFF22C55E)))),
+          ),
+          const SizedBox(height: 16),
+          const Text('Bonjour ! Comment puis-je t\'aider ?',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500,
+              color: Colors.white)),
+        ]),
+      );
+    }
+
+    return ListView.builder(
+      controller: _scrollController,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      itemCount: _messages.length + (_historyLoaded ? 1 : 0) + (_loading ? 1 : 0),
+      itemBuilder: (context, index) {
+        // Separateur historique
+        if (_historyLoaded && index == 0) {
+          return Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(children: [
+              Expanded(child: Divider(color: Colors.white.withOpacity(0.1))),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text('conversation pr\u00e9c\u00e9dente',
+                  style: TextStyle(fontSize: 11, color: Colors.white.withOpacity(0.25))),
+              ),
+              Expanded(child: Divider(color: Colors.white.withOpacity(0.1))),
+            ]),
+          );
+        }
+
+        final msgIndex = _historyLoaded ? index - 1 : index;
+
+        // Indicateur de chargement
+        if (msgIndex >= _messages.length) {
+          return _buildLoadingBubble();
+        }
+
+        return _buildMessageBubble(_messages[msgIndex]);
+      },
+    );
+  }
+
+  Widget _buildMessageBubble(ChatMessage msg) {
+    final isUser = msg.isUser;
+    final initial = _username.isNotEmpty ? _username[0].toUpperCase() : 'U';
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        textDirection: isUser ? TextDirection.rtl : TextDirection.ltr,
+        children: [
+          // Avatar
+          Container(
+            width: 30, height: 30,
+            decoration: BoxDecoration(
+              color: isUser ? const Color(0xFF1E3A5F) : const Color(0xFF1A3D2A),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Center(child: Text(
+              isUser ? initial : '\u2726',
+              style: TextStyle(
+                fontSize: isUser ? 13 : 15,
+                fontWeight: FontWeight.w600,
+                color: isUser ? const Color(0xFF85B7EB) : const Color(0xFF22C55E),
+              ),
+            )),
+          ),
+          const SizedBox(width: 8),
+          // Bulle
+          Flexible(
+            child: Column(
+              crossAxisAlignment: isUser
+                  ? CrossAxisAlignment.end
+                  : CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: isUser
+                        ? const Color(0xFF1E3A5F).withOpacity(0.5)
+                        : Colors.white.withOpacity(0.06),
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(isUser ? 16 : 4),
+                      topRight: Radius.circular(isUser ? 4 : 16),
+                      bottomLeft: const Radius.circular(16),
+                      bottomRight: const Radius.circular(16),
+                    ),
+                  ),
+                  child: isUser
+                      ? Text(msg.text, style: const TextStyle(
+                          color: Colors.white, fontSize: 14, height: 1.5))
+                      : MarkdownBody(
+                          data: msg.text,
+                          styleSheet: MarkdownStyleSheet(
+                            p: const TextStyle(color: Colors.white, fontSize: 14, height: 1.5),
+                            h1: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600),
+                            h2: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
+                            h3: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                            strong: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                            em: const TextStyle(color: Colors.white, fontStyle: FontStyle.italic),
+                            code: TextStyle(
+                              color: const Color(0xFF22C55E),
+                              backgroundColor: Colors.white.withOpacity(0.08),
+                              fontSize: 13,
+                            ),
+                            listBullet: const TextStyle(color: Colors.white, fontSize: 14),
+                            a: const TextStyle(color: Color(0xFF85B7EB), decoration: TextDecoration.underline),
+                          ),
+                          onTapLink: (text, href, title) {
+                            if (href != null) {
+                              launchUrl(Uri.parse(href), mode: LaunchMode.externalApplication);
+                            }
+                          },
+                        ),
+                ),
+                // Boutons feedback (seulement sur les messages Raya)
+                if (!isUser && msg.ariaMemoryId != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _feedbackBtn('\ud83d\udd0a', () {}),
+                        _feedbackBtn('\ud83d\udc4d', () {}),
+                        _feedbackBtn('\ud83d\udc4e', () {}),
+                        _feedbackBtn('\ud83d\udca1', () {}),
+                        _feedbackBtn('\ud83d\udc1b', () {}),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _feedbackBtn(String emoji, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+        child: Text(emoji, style: const TextStyle(fontSize: 16)),
+      ),
+    );
+  }
+
+  Widget _buildLoadingBubble() {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Container(
+          width: 30, height: 30,
+          decoration: BoxDecoration(
+            color: const Color(0xFF1A3D2A),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Center(child: Text('\u2726',
+            style: TextStyle(fontSize: 15, color: Color(0xFF22C55E)))),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.06),
+            borderRadius: const BorderRadius.only(
+              topLeft: Radius.circular(4), topRight: Radius.circular(16),
+              bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16),
+            ),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            _dot(0), const SizedBox(width: 4),
+            _dot(1), const SizedBox(width: 4),
+            _dot(2),
+          ]),
+        ),
+      ]),
+    );
+  }
+
+  Widget _dot(int i) {
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.3, end: 1.0),
+      duration: Duration(milliseconds: 600 + i * 200),
+      builder: (_, v, __) => Opacity(
+        opacity: v,
+        child: Container(
+          width: 6, height: 6,
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.4),
+            shape: BoxShape.circle,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // --- ASK CHOICE ---
+  Widget _buildAskChoice() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: Wrap(spacing: 8, runSpacing: 8,
+        children: _askChoice!.options.map((opt) =>
+          OutlinedButton(
+            onPressed: () => _sendMessage(opt),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF22C55E),
+              side: const BorderSide(color: Color(0xFF22C55E), width: 0.5),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            ),
+            child: Text(opt, style: const TextStyle(fontSize: 13)),
+          ),
+        ).toList(),
+      ),
+    );
+  }
+
+  // --- PENDING ACTIONS ---
+  Widget _buildPendingActions() {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.04),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.08)),
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('\u23f8\ufe0f ${_pendingActions.length} action(s) en attente',
+          style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.5))),
+        const SizedBox(height: 6),
+        ..._pendingActions.map((a) => Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Row(children: [
+            Expanded(child: Text(a.label,
+              style: const TextStyle(color: Colors.white, fontSize: 13))),
+            TextButton(
+              onPressed: () => _sendMessage('Confirme l\'action ${a.id}'),
+              child: const Text('\u2713', style: TextStyle(color: Color(0xFF22C55E))),
+            ),
+            TextButton(
+              onPressed: () => _sendMessage('Annule l\'action ${a.id}'),
+              child: const Text('\u2717', style: TextStyle(color: Color(0xFFEF4444))),
+            ),
+          ]),
+        )),
+      ]),
+    );
+  }
+
+  // --- INPUT BAR ---
+  Widget _buildInputBar() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 16),
+      decoration: BoxDecoration(
+        border: Border(top: BorderSide(color: Colors.white.withOpacity(0.08))),
+      ),
+      child: Row(children: [
+        // Piece jointe
+        IconButton(
+          icon: Icon(Icons.attach_file, color: Colors.white.withOpacity(0.4)),
+          onPressed: () {}, // TODO Phase 2.7
+        ),
+        // Input texte
+        Expanded(
+          child: TextField(
+            controller: _inputController,
+            focusNode: _inputFocus,
+            style: const TextStyle(color: Colors.white, fontSize: 14),
+            maxLines: 4,
+            minLines: 1,
+            decoration: InputDecoration(
+              hintText: 'Message...',
+              hintStyle: TextStyle(color: Colors.white.withOpacity(0.25)),
+              filled: true,
+              fillColor: Colors.white.withOpacity(0.07),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16, vertical: 10),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(21),
+                borderSide: BorderSide.none,
+              ),
+            ),
+            textInputAction: TextInputAction.send,
+            onSubmitted: (_) => _sendMessage(),
+          ),
+        ),
+        const SizedBox(width: 8),
+        // Bouton micro
+        GestureDetector(
+          onTap: () {}, // TODO Phase 3
+          child: Container(
+            width: 44, height: 44,
+            decoration: const BoxDecoration(
+              color: Color(0xFF22C55E), shape: BoxShape.circle),
+            child: const Icon(Icons.mic, color: Colors.white, size: 22),
+          ),
+        ),
+        const SizedBox(width: 6),
+        // Bouton envoi
+        GestureDetector(
+          onTap: _sendMessage,
+          child: Container(
+            width: 36, height: 36,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1), shape: BoxShape.circle),
+            child: const Icon(Icons.send, color: Colors.white, size: 18),
+          ),
+        ),
+      ]),
     );
   }
 }
