@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/auth_service.dart';
 import 'chat_screen.dart';
 
@@ -47,6 +48,13 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
+  Future<void> _openForgotPassword() async {
+    final uri = Uri.parse('https://app.raya-ia.fr/forgot-password');
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     _usernameController.dispose();
@@ -76,10 +84,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   child: const Center(
                     child: Text(
                       '\u2726',
-                      style: TextStyle(
-                        fontSize: 36,
-                        color: Colors.white,
-                      ),
+                      style: TextStyle(fontSize: 36, color: Colors.white),
                     ),
                   ),
                 ),
@@ -120,8 +125,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       borderSide: BorderSide.none,
                     ),
                     contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 16,
+                      horizontal: 16, vertical: 16,
                     ),
                   ),
                   textInputAction: TextInputAction.next,
@@ -159,19 +163,35 @@ class _LoginScreenState extends State<LoginScreen> {
                       borderSide: BorderSide.none,
                     ),
                     contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 16,
+                      horizontal: 16, vertical: 16,
                     ),
                   ),
                   textInputAction: TextInputAction.done,
                   onSubmitted: (_) => _login(),
                 ),
-                const SizedBox(height: 8),
+
+                // Mot de passe oublie
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: _openForgotPassword,
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                    ),
+                    child: Text(
+                      'Mot de passe oubli\u00e9 ?',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.white.withOpacity(0.4),
+                      ),
+                    ),
+                  ),
+                ),
 
                 // Erreur
                 if (_error != null)
                   Padding(
-                    padding: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.only(bottom: 8),
                     child: Text(
                       _error!,
                       style: const TextStyle(
@@ -181,7 +201,7 @@ class _LoginScreenState extends State<LoginScreen> {
                       textAlign: TextAlign.center,
                     ),
                   ),
-                const SizedBox(height: 24),
+                const SizedBox(height: 8),
 
                 // Bouton connexion
                 SizedBox(
@@ -199,31 +219,31 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                     child: _loading
                         ? const SizedBox(
-                            width: 22,
-                            height: 22,
+                            width: 22, height: 22,
                             child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: Colors.white,
+                              strokeWidth: 2.5, color: Colors.white,
                             ),
                           )
                         : const Text(
                             'Se connecter',
                             style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
+                              fontSize: 16, fontWeight: FontWeight.w600,
                             ),
                           ),
                   ),
                 ),
                 const SizedBox(height: 32),
 
-                // Mentions légales
+                // Mentions legales
                 GestureDetector(
-                  onTap: () {
-                    // TODO: ouvrir /legal dans un webview ou navigateur
+                  onTap: () async {
+                    final uri = Uri.parse('https://app.raya-ia.fr/legal');
+                    try {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    } catch (_) {}
                   },
                   child: Text(
-                    'Mentions légales',
+                    'Mentions l\u00e9gales',
                     style: TextStyle(
                       fontSize: 12,
                       color: Colors.white.withOpacity(0.3),
