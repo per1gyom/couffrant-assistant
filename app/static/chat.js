@@ -152,16 +152,42 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
       content.classList.add('markdown-content');
       content.querySelectorAll('a').forEach(a => { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer'); });
       // B1: PWA iOS — forcer ouverture externe pour les fichiers téléchargeables
-      // WebKit en mode standalone ignore target="_blank", window.open() fonctionne.
       content.querySelectorAll('a').forEach(a => {
         const href = a.getAttribute('href') || '';
         if (href.includes('/download/') || href.match(/\.(pdf|xlsx|xls|csv|png|jpg|jpeg)(\?|$)/i)) {
-          a.addEventListener('click', (e) => {
-            e.preventDefault();
-            window.open(href, '_blank');
-          });
+          a.addEventListener('click', (e) => { e.preventDefault(); window.open(href, '_blank'); });
         }
       });
+      // FIX-LEARN-UI: nettoyer les notifications mémoire brutes du contenu affiché
+      const memoryNotes = [];
+      // Supprimer les <p> contenant 🧠 ou ⚠️ Conflit et collecter les 🧠
+      content.innerHTML = content.innerHTML.replace(
+        /<p>(?:🧠|⚠️\s*Conflit)[^<]*<\/p>/gi,
+        (match) => {
+          if (match.includes('🧠')) memoryNotes.push(match.replace(/<\/?p>/g, '').trim());
+          return '';
+        }
+      );
+      // Supprimer les versions texte brut (hors balises <p>)
+      content.innerHTML = content.innerHTML.replace(
+        /(?:🧠|⚠️\s*Conflit de regle)[^\n<]*/gi,
+        (match) => {
+          if (match.includes('🧠')) memoryNotes.push(match.trim());
+          return '';
+        }
+      );
+      // Afficher une pilule verte discrète si des règles ont été apprises
+      if (memoryNotes.length > 0) {
+        const memDiv = document.createElement('div');
+        memDiv.style.cssText = 'margin-top:6px;padding:4px 10px;background:rgba(34,197,94,0.1);border-radius:6px;font-size:12px;color:#16a34a;cursor:pointer;display:inline-block;';
+        memDiv.innerHTML = `✅ ${memoryNotes.length} règle(s) mise(s) à jour`;
+        const detailDiv = document.createElement('div');
+        detailDiv.style.cssText = 'display:none;margin-top:4px;font-size:11px;color:#666;';
+        detailDiv.innerHTML = memoryNotes.map(n => n.replace(/🧠\s*Memorise\s*[+~]\s*/i, '').replace(/🧠\s*/g, '')).join('<br>');
+        memDiv.onclick = () => { detailDiv.style.display = detailDiv.style.display === 'none' ? 'block' : 'none'; };
+        memDiv.appendChild(detailDiv);
+        bubble.appendChild(memDiv);
+      }
     } catch(e) {
       console.error('[Raya] Erreur rendu markdown:', e, 'marked:', typeof marked);
       content.style.whiteSpace = 'pre-wrap';
