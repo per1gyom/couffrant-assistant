@@ -18,6 +18,9 @@ Pas de duplication d'appels Haiku ailleurs dans le code.
 """
 import os
 from app.llm_client import llm_complete
+from app.logging_config import get_logger
+
+logger = get_logger("raya.router")
 
 # Prompt système partagé pour tous les routages — compact et déterministe
 _ROUTER_SYSTEM = (
@@ -217,7 +220,6 @@ def execute_create_action(action_str: str, username: str, tenant_id: str) -> str
 
     # ── CREATE_PDF ──
     if action_type == "CREATE_PDF":
-        # Format : titre|contenu  (le contenu peut contenir des |)
         sep = params_raw.find("|")
         if sep == -1:
             title   = params_raw.strip()
@@ -241,8 +243,6 @@ def execute_create_action(action_str: str, username: str, tenant_id: str) -> str
 
     # ── CREATE_EXCEL ──
     if action_type == "CREATE_EXCEL":
-        # Format : titre|headers_csv|lignes
-        # headers séparés par ;, lignes séparées par \n, colonnes par ;
         sub_parts = params_raw.split("|", 2)
         title        = sub_parts[0].strip() if len(sub_parts) > 0 else ""
         headers_raw  = sub_parts[1].strip() if len(sub_parts) > 1 else ""
@@ -288,6 +288,8 @@ def _opus_daily_limit(username: str) -> int:
 
 
 def _opus_calls_today(username: str, tenant_id: str) -> int:
+    # A5-1 : try/finally pour garantir la restitution de la connexion au pool
+    conn = None
     try:
         from app.database import get_pg_conn
         conn = get_pg_conn()
@@ -300,24 +302,30 @@ def _opus_calls_today(username: str, tenant_id: str) -> int:
               AND purpose = 'raya_main_conversation'
               AND created_at > NOW() - INTERVAL '1 day'
         """, (username, tenant_id))
-        count = c.fetchone()[0]
-        conn.close()
-        return count
+        return c.fetchone()[0]
     except Exception:
         return 0
+    finally:
+        if conn:
+            conn.close()
 
 
 def _opus_quota_exceeded(username: str, tenant_id: str) -> bool:
     limit = _opus_daily_limit(username)
     calls = _opus_calls_today(username, tenant_id)
     if calls >= limit:
-        print(f"[Router] Quota Opus atteint pour {username} ({calls}/{limit}) — fallback Sonnet")
+        logger.warning(
+            "[Router] Quota Opus atteint pour %s (%d/%d) — fallback Sonnet",
+            username, calls, limit,
+        )
         return True
     return False
 
 
 def get_routing_stats(username: str, tenant_id: str) -> dict:
     """Stats de routage du jour pour /admin/costs (Phase 3b)."""
+    # A5-1 : try/finally pour garantir la restitution de la connexion au pool
+    conn = None
     try:
         from app.database import get_pg_conn
         conn = get_pg_conn()
@@ -333,7 +341,6 @@ def get_routing_stats(username: str, tenant_id: str) -> dict:
             GROUP BY model
         """, (username, tenant_id))
         rows = c.fetchall()
-        conn.close()
         return {
             "quota_limit":      _opus_daily_limit(username),
             "opus_calls_today": _opus_calls_today(username, tenant_id),
@@ -341,3 +348,6 @@ def get_routing_stats(username: str, tenant_id: str) -> dict:
         }
     except Exception:
         return {}
+    finally:
+        if conn:
+            conn.close()
