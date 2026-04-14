@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 14/04/2026 02h** — Opus
+**Dernière mise à jour : 14/04/2026 02h15** — Opus
 
 ---
 
@@ -61,9 +61,32 @@ Microsoft 365, Gmail, Odoo, Twilio/WhatsApp, ElevenLabs.
 
 ## 6. VISION PRODUIT & ROADMAP
 
-### Phase 1 — Commercialisation PWA (mai-juin 2026)
-- [ ] Beta Charlotte (valider multi-tenant)
+### Phase 1A — Outils de développement (immédiat)
+
+#### 🐛 Bouton SAV / Bug Report (PROVISOIRE)
+**But :** recueillir les bugs et suggestions d'amélioration pendant le développement et la beta.
+Distinct du feedback 👍👎 qui sert à l'apprentissage de Raya.
+
+**Specs :**
+- Bouton dédié sous chaque réponse Raya (icône distincte, ex: 🐛 ou 🔧)
+- Visuellement différent du 👍👎💡 — clairement identifié "Signaler un bug / Suggestion"
+- Au clic : popup avec choix "Bug" ou "Amélioration"
+- Saisie : texte libre ET/OU vocale (micro → transcription)
+- Le rapport inclut automatiquement : la réponse Raya concernée, la question de l'utilisateur, le timestamp, le username, le contexte (mobile/desktop)
+- **Stockage : table `bug_reports`** (id, username, tenant_id, type [bug/amélioration], description, raya_response_id, user_input, device_info, created_at, status [nouveau/en_cours/résolu])
+- **Accès : endpoint `GET /admin/bug-reports`** → liste consultable par Opus dans la conversation
+- Opus peut lire ce fichier de rapports et traiter les bugs un par un
+- **Ce bouton est PROVISOIRE** — il sera retiré quand Raya sera stable en production
+- **Activé pour :** Guillaume + Charlotte (beta testeurs)
+
+**Placement dans l'UI :**
+- Sous chaque réponse Raya, après les boutons 👍👎💡
+- Séparateur visuel entre le feedback apprentissage et le SAV développement
+
+### Phase 1B — Préparation commerciale (mai-juin 2026)
+- [ ] Bouton SAV/Bug Report (voir specs ci-dessus)
 - [ ] Signatures email v2 (dynamiques par boîte)
+- [ ] Beta Charlotte (valider multi-tenant) — le bouton SAV sera son outil de retour
 - [ ] Finitions UI/Design
 - [ ] WhatsApp production (sortir sandbox)
 - [ ] Tenant DEMO (5 profils — voir docs/raya_roadmap_demo.md)
@@ -83,14 +106,13 @@ Microsoft 365, Gmail, Odoo, Twilio/WhatsApp, ElevenLabs.
 - **Objectif : App Store octobre 2026**
 
 ### Phase 3 — App native Android (fin 2026)
-- Flutter permet de cibler Android avec le MÊME code
-- Adaptation mineure (styles Material Design, permissions Android)
+- Flutter → Android avec le MÊME code
 - Publication Google Play Store (25€ one-shot)
-- **Estimation : 1-2 semaines** supplémentaires (le gros du code est déjà fait)
+- **Estimation : 1-2 semaines** supplémentaires
 
 ### Phase 4 — Maturité (2027)
 - Multi-région Railway (EU + US)
-- App desktop (Flutter supporte aussi desktop)
+- App desktop (Flutter desktop)
 - Intelligence collective inter-Rayas
 - Marketplace d'outils/connecteurs
 
@@ -116,7 +138,7 @@ Webhook Twilio : https://app.raya-ia.fr/webhook/twilio
 ## 9. HISTORIQUE DES SESSIONS
 
 ### Session 13-14/04/2026 (marathon nuit — ~50 commits)
-TOOL-CREATE-FILES (PDF+Excel). TOOL-DALLE. TOOL-READ-PDF (3/3). Capabilities. CHAT-HISTORY. FIX-SAFE-AREA. SW v3. Cache-bust. FIX-SW-CACHE. PWA icon smiley. EMAIL-SIGNATURE v1. Plan maintenance. Roadmap démo 5 profils. Roadmap fichiers. Décision app native Flutter iOS → App Store octobre 2026.
+TOOL-CREATE-FILES (PDF+Excel). TOOL-DALLE. TOOL-READ-PDF (3/3). Capabilities. CHAT-HISTORY. FIX-SAFE-AREA. SW v3. Cache-bust. FIX-SW-CACHE. PWA icon smiley. EMAIL-SIGNATURE v1. Plan maintenance. Roadmap démo 5 profils. Roadmap fichiers. Décision app native Flutter iOS. Décision bouton SAV/bug report provisoire.
 
 ### Sessions précédentes
 13/04 : Connectivité 5/5, Gmail PKCE, WhatsApp, DNS.
