@@ -1,102 +1,93 @@
-import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../config/api_config.dart';
 import 'api_service.dart';
 
-/// Résultat d'une tentative de login.
+/// Résultat d'une tentative de login
 class AuthResult {
   final bool success;
   final String? error;
-  final String? username;
 
-  AuthResult({required this.success, this.error, this.username});
+  AuthResult({required this.success, this.error});
 }
 
 /// Service d'authentification.
-/// Login via POST /login-app (form-encoded), session maintenue par cookies.
-/// Le username est stocké dans flutter_secure_storage pour la reprise.
+/// Le backend utilise des sessions cookies.
+/// Le login POST /login-app retourne une redirection 303 vers /chat si OK,
+/// ou un 401 avec le HTML de la page login si KO.
 class AuthService {
-  final _api = ApiService.instance;
-  final _storage = const FlutterSecureStorage();
+  final ApiService _api = ApiService.instance;
+  final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
   static const _keyUsername = 'raya_username';
+  static const _keyLoggedIn = 'raya_logged_in';
 
-  /// Login : envoie username + password en form-encoded.
-  /// Le backend répond avec un redirect 303 + cookie de session.
+  /// Login avec username + password
   Future<AuthResult> login(String username, String password) async {
     try {
       final response = await _api.postForm(
-        '/login-app',
-        data: {'username': username, 'password': password},
+        ApiConfig.loginEndpoint,
+        {'username': username, 'password': password},
       );
 
-      // Le backend renvoie 303 redirect vers /chat si OK
-      // ou 401 avec HTML contenant <div class="error"> si KO
-      if (response.statusCode == 303) {
-        // Succès — le cookie de session est déjà stocké par dio_cookie_manager
-        await _storage.write(key: _keyUsername, value: username);
-        return AuthResult(success: true, username: username);
+      // Le backend redirige vers /chat (303) en cas de succès
+      // ou vers /forced-reset (303) si reset de mot de passe requis
+      if (response.statusCode == 303 || response.statusCode == 302) {
+        final location = response.headers['location']?.first ?? '';
+        if (location.contains('/chat') || location.contains('/forced-reset')) {
+          // Succès — sauvegarder le username localement
+          await _storage.write(key: _keyUsername, value: username);
+          await _storage.write(key: _keyLoggedIn, value: 'true');
+          return AuthResult(success: true);
+        }
       }
 
-      // Échec — extraire le message d'erreur du HTML
-      final body = response.data?.toString() ?? '';
-      String errorMsg = 'Identifiant ou mot de passe incorrect.';
-
-      final errorMatch = RegExp(r'class="error">(.*?)</div>').firstMatch(body);
-      if (errorMatch != null) {
-        errorMsg = errorMatch.group(1) ?? errorMsg;
-        // Nettoyer les entités HTML basiques
-        errorMsg = errorMsg
-            .replaceAll('&amp;', '&')
-            .replaceAll('&lt;', '<')
-            .replaceAll('&gt;', '>')
-            .replaceAll('&#39;', "'")
-            .replaceAll('&quot;', '"');
-      }
-
-      return AuthResult(success: false, error: errorMsg);
-    } on DioException catch (e) {
-      if (e.type == DioExceptionType.connectionTimeout) {
+      // 401 = identifiants incorrects
+      if (response.statusCode == 401) {
         return AuthResult(
           success: false,
-          error: 'Impossible de joindre le serveur. Vérifie ta connexion.',
+          error: 'Identifiant ou mot de passe incorrect.',
         );
       }
+
       return AuthResult(
         success: false,
-        error: 'Erreur de connexion : ${e.message}',
+        error: 'Erreur de connexion (${response.statusCode}).',
       );
     } catch (e) {
-      return AuthResult(success: false, error: 'Erreur inattendue : $e');
+      return AuthResult(
+        success: false,
+        error: 'Impossible de joindre le serveur Raya.',
+      );
     }
   }
 
-  /// Logout : appelle GET /logout et vide les cookies + storage.
+  /// Déconnexion
   Future<void> logout() async {
     try {
-      await _api.get('/logout');
+      await _api.get(ApiConfig.logoutEndpoint);
     } catch (_) {}
     await _api.clearCookies();
     await _storage.delete(key: _keyUsername);
+    await _storage.delete(key: _keyLoggedIn);
   }
 
-  /// Vérifie si l'utilisateur a une session active.
-  /// Teste en appelant GET /health (ou un endpoint authentifié).
+  /// Vérifie si l'utilisateur est connecté (session valide)
   Future<bool> isLoggedIn() async {
-    // D'abord vérifier si on a un cookie de session
-    final hasSession = await _api.hasSession();
-    if (!hasSession) return false;
+    // D'abord vérifier le stockage local
+    final loggedIn = await _storage.read(key: _keyLoggedIn);
+    if (loggedIn != 'true') return false;
 
-    // Vérifier que la session est encore valide côté serveur
+    // Ensuite vérifier que la session est encore valide côté serveur
     try {
-      final response = await _api.get('/token-status');
+      final response = await _api.get(ApiConfig.healthEndpoint);
       return response.statusCode == 200;
     } catch (_) {
       return false;
     }
   }
 
-  /// Récupère le username stocké localement.
-  Future<String?> getSavedUsername() async {
+  /// Récupère le username stocké
+  Future<String?> getUsername() async {
     return await _storage.read(key: _keyUsername);
   }
 }
