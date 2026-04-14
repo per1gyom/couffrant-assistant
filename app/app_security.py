@@ -73,6 +73,10 @@ input:focus {{ border-color: var(--accent);
 .forgot-link a {{ color: var(--text-muted); font-size: 13px;
   text-decoration: none; transition: color 0.15s; }}
 .forgot-link a:hover {{ color: var(--accent); text-decoration: underline; }}
+.legal-link {{ text-align: center; margin-top: 10px; }}
+.legal-link a {{ color: var(--text-muted); font-size: 12px;
+  text-decoration: none; opacity: 0.7; transition: opacity 0.15s; }}
+.legal-link a:hover {{ opacity: 1; text-decoration: underline; }}
 </style>
 </head>
 <body>
@@ -95,6 +99,7 @@ input:focus {{ border-color: var(--accent);
       <button type="submit" class="submit-btn">Se connecter</button>
     </form>
     <p class="forgot-link"><a href="/forgot-password">Mot de passe oublié ?</a></p>
+    <p class="legal-link"><a href="/legal" target="_blank">Mentions légales &amp; Confidentialité</a></p>
   </div>
 </div>
 </body>
