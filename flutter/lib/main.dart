@@ -5,6 +5,7 @@ import 'screens/login_screen.dart';
 import 'screens/chat_screen.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(const RayaApp());
 }
 
@@ -19,7 +20,6 @@ class RayaApp extends StatelessWidget {
       theme: ThemeData(
         brightness: Brightness.dark,
         scaffoldBackgroundColor: const Color(0xFF0F1117),
-        fontFamily: 'SF Pro Display',
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF22C55E),
           brightness: Brightness.dark,
@@ -32,6 +32,7 @@ class RayaApp extends StatelessWidget {
 
 /// Ecran de chargement initial.
 /// Initialise le client HTTP et verifie la session.
+/// En cas d'erreur, redirige vers le login.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -47,16 +48,23 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _init() async {
-    // Initialiser le client HTTP + cookies
-    await ApiService.instance.init();
+    bool loggedIn = false;
 
-    // Verifier si une session active existe
-    final authService = AuthService();
-    final loggedIn = await authService.isLoggedIn();
+    try {
+      // Initialiser le client HTTP
+      await ApiService.instance.init();
+
+      // Verifier si une session active existe (timeout 5s)
+      final authService = AuthService();
+      loggedIn = await authService.isLoggedIn()
+          .timeout(const Duration(seconds: 5), onTimeout: () => false);
+    } catch (_) {
+      // En cas d'erreur, on va au login
+      loggedIn = false;
+    }
 
     if (!mounted) return;
 
-    // Navigation vers login ou chat
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
         builder: (_) => loggedIn ? const ChatScreen() : const LoginScreen(),
