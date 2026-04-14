@@ -8,6 +8,7 @@ Phase 5B-1    : injection dynamique des actions par domaine via detect_query_dom
 WEB-SEARCH    : activation de la recherche web Anthropic via RAYA_WEB_SEARCH_ENABLED.
 SPEAK-SPEED   : vitesse de lecture ElevenLabs dynamique via payload.speed.
 TOOL-READ-PDF : extraction texte pdfplumber injectée dans le contexte LLM (commit 3/3).
+A2a           : import direct depuis app.routes.actions (shim aria_actions supprimé).
 """
 import json
 import os
@@ -43,7 +44,7 @@ from app.routes.aria_context import (
     load_agenda, load_teams_context, load_mail_filter_summary,
     build_system_prompt,
 )
-from app.routes.aria_actions import execute_actions, _ASK_CHOICE_PREFIX
+from app.routes.actions import execute_actions, _ASK_CHOICE_PREFIX
 from app.routes.deps import require_user
 from app.rate_limiter import check_rate_limit
 
