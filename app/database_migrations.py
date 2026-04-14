@@ -161,5 +161,16 @@ MIGRATIONS = [
 )""",
     "CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports (status, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_bug_reports_user ON bug_reports (username, created_at DESC)",
+    # ── B3 : Signatures email dynamiques ──
+    """CREATE TABLE IF NOT EXISTS email_signatures (
+    id SERIAL PRIMARY KEY,
+    username TEXT NOT NULL,
+    tenant_id TEXT DEFAULT 'couffrant_solar',
+    email_address TEXT,
+    signature_html TEXT NOT NULL,
+    extracted_from TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(username, email_address)
+)""",
     # ── Ajouter les nouvelles migrations sous cette ligne ──
 ]
