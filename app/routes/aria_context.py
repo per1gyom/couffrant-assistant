@@ -17,6 +17,7 @@ Fix-Jarvis : Raya ne connait PAS et n'utilise JAMAIS le mot "Jarvis".
 8-TON   : bloc adaptatif de ton selon les preferences de l'utilisateur.
 8-COLLAB : team_block — evenements tenant non vus + action SHARE_EVENT.
 P0-1    : guardrail anti-injection + balises <donnees_externes>.
+A5-2    : fix DB connection leak dans patterns_block (try/finally).
 """
 import os
 import json
@@ -232,17 +233,23 @@ Tu connais {display_name} en profondeur. Comportement attendu :
     try:
         if maturity_block:
             from app.database import get_pg_conn as _pg
-            _conn = _pg()
-            _c = _conn.cursor()
-            _c.execute("""
-                SELECT pattern_type, description, confidence, occurrences
-                FROM aria_patterns
-                WHERE username = %s AND active = true AND confidence >= 0.4
-                ORDER BY confidence DESC, occurrences DESC
-                LIMIT 8
-            """, (username,))
-            pattern_rows = _c.fetchall()
-            _conn.close()
+            # A5-2 : try/finally pour garantir la restitution de la connexion au pool
+            _conn = None
+            pattern_rows = []
+            try:
+                _conn = _pg()
+                _c = _conn.cursor()
+                _c.execute("""
+                    SELECT pattern_type, description, confidence, occurrences
+                    FROM aria_patterns
+                    WHERE username = %s AND active = true AND confidence >= 0.4
+                    ORDER BY confidence DESC, occurrences DESC
+                    LIMIT 8
+                """, (username,))
+                pattern_rows = _c.fetchall()
+            finally:
+                if _conn:
+                    _conn.close()
             if pattern_rows:
                 lines = [f"  [{r[0]}] {r[1]} (confiance: {r[2]:.0%}, vu {r[3]}x)"
                          for r in pattern_rows]
