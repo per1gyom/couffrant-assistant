@@ -280,7 +280,7 @@ def delete_user(username: str, requesting_user: str, requesting_tenant: str = No
       aria_memory, aria_hot_summary, aria_style_examples, aria_session_digests,
       aria_profile, reply_learning_memory, sent_mail_memory,
       user_tenant_access, proactive_alerts, daily_reports,
-      email_signatures, bug_reports
+      email_signatures, bug_reports, user_topics
 
     DONNÉES CONSERVÉES (intelligence collective) — anonymisées sous 'ancien_<username>' :
       aria_rules, aria_insights, aria_patterns, dossier_narratives,
@@ -306,7 +306,7 @@ def delete_user(username: str, requesting_user: str, requesting_tenant: str = No
             "aria_memory", "aria_hot_summary", "aria_style_examples",
             "aria_session_digests", "aria_profile", "reply_learning_memory",
             "sent_mail_memory", "user_tenant_access", "proactive_alerts", "daily_reports",
-            "email_signatures", "bug_reports",
+            "email_signatures", "bug_reports", "user_topics",
         ]
         for table in personal_tables:
             try:
