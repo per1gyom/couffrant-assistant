@@ -23,7 +23,7 @@ _PERSONAL_TABLES = [
     "aria_style_examples", "aria_session_digests", "aria_profile",
     "reply_learning_memory", "sent_mail_memory", "proactive_alerts",
     "daily_reports", "email_signatures", "bug_reports",
-    "aria_rules", "aria_insights",
+    "aria_rules", "aria_insights", "user_topics",
 ]
 
 
@@ -95,8 +95,6 @@ def delete_account(
 
     try:
         from app.security_users import delete_user
-        # requesting_user = username lui-même — delete_user interdit normalement l'auto-suppression,
-        # on passe un utilisateur fictif "system" pour contourner cette restriction.
         result = delete_user(username, requesting_user="system")
     except Exception as e:
         logger.error("[RGPD] Échec suppression %s : %s", username, e)
@@ -105,7 +103,6 @@ def delete_account(
     if result.get("status") != "ok":
         return {"ok": False, "message": result.get("message", "Erreur inconnue")}
 
-    # Invalider la session
     try:
         request.session.clear()
     except Exception:
