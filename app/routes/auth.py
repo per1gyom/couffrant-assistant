@@ -109,7 +109,7 @@ def chat(request: Request):
     if must_reset_password_check(username):
         request.session["must_reset"] = True
         return RedirectResponse("/forced-reset")
-    with open("app/templates/aria_chat.html", "r", encoding="utf-8") as f:
+    with open("app/templates/raya_chat.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
 
