@@ -14,6 +14,9 @@ import threading
 import psycopg2
 from psycopg2.pool import ThreadedConnectionPool
 from app.config import DATABASE_URL
+from app.logging_config import get_logger
+
+logger = get_logger("raya.db")
 
 
 # ─── POOL DE CONNEXIONS ───
@@ -31,7 +34,7 @@ def _get_pool() -> ThreadedConnectionPool:
                 try:
                     _pool = ThreadedConnectionPool(2, 8, DATABASE_URL)
                 except Exception as e:
-                    print(f"[DB] Pool non initialisé ({e}) — fallback connexions directes")
+                    logger.warning("[DB] Pool non initialisé (%s) — fallback connexions directes", e)
     return _pool
 
 
@@ -81,7 +84,7 @@ def get_pg_conn():
             if conn:
                 return _PooledConn(conn, pool)
         except Exception as e:
-            print(f"[DB] Pool getconn() échoué ({e}) — connexion directe")
+            logger.warning("[DB] Pool getconn() échoué (%s) — connexion directe", e)
     return psycopg2.connect(DATABASE_URL)
 
 
@@ -417,5 +420,5 @@ def init_postgres():
             conn.commit()
         except Exception as e:
             conn.rollback()
-            print(f"[Migration] Skip ({str(e)[:60]})")
+            logger.debug("[Migration] Skip (%s)", str(e)[:60])
     conn.close()
