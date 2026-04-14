@@ -1,68 +1,47 @@
 """
 Connecteur Outlook pour Raya.
-Gère : mails, calendrier, tâches, contacts.
+Gere : mails, calendrier, taches, contacts.
 
-Le Drive SharePoint est géré dans drive_connector.py.
+EMAIL-SIGNATURE : _build_email_html() utilise get_email_signature()
+  depuis app/email_signature.py.
+
+Le Drive SharePoint est gere dans drive_connector.py.
 """
 import re
 import requests
 
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
-
 ARCHIVE_FOLDER_ID = "AQMkAGEwZmJhNTllLWQ3MjUtNDg4ADQtYjdhMi1jMGEyZjRiNmFkNWEALgAAA-6yBmE1L7hGi--BXSl5S2sBAIyf8uOKE0VAkKv1dN8K6xgAAAIBRQAAAA=="
 
-SIGNATURE_HTML = """
-<div style="font-family:Arial, sans-serif; font-size:13px; color:#222; margin-top:20px; border-top:1px solid #e0e0e0; padding-top:12px;">
-    <div style="margin-bottom:2px;">Solairement,</div>
-    <div style="font-weight:bold; font-size:14px; margin-bottom:6px;">Guillaume Perrin</div>
-    <div style="color:#555; margin-bottom:2px;">&#128222; 06 49 43 09 17</div>
-    <div style="color:#555; margin-bottom:8px;">&#127758; <a href="https://www.couffrant-solar.fr" style="color:#2e7d32; text-decoration:none;">www.couffrant-solar.fr</a></div>
-    <div>
-        <img src="https://couffrant-solar.fr/wp-content/uploads/2025/04/cropped-logo-couffrant-solar-1.png"
-             alt="Couffrant Solar"
-             style="max-width:280px; height:auto; border:0; margin-top:4px;">
-    </div>
-</div>
-"""
 
-
-def _headers(token: str) -> dict:
+def _headers(token):
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
+def _graph_get(token, path, params=None):
+    r = requests.get(f"{GRAPH_BASE_URL}{path}", headers=_headers(token), params=params, timeout=30)
+    r.raise_for_status(); return r.json()
 
-def _graph_get(token: str, path: str, params: dict = None) -> dict:
-    response = requests.get(f"{GRAPH_BASE_URL}{path}", headers=_headers(token), params=params, timeout=30)
-    response.raise_for_status()
-    return response.json()
+def _graph_post(token, path, json_body=None):
+    r = requests.post(f"{GRAPH_BASE_URL}{path}", headers=_headers(token), json=json_body or {}, timeout=30)
+    r.raise_for_status(); return r.json() if r.text.strip() else {}
 
+def _graph_patch(token, path, json_body):
+    r = requests.patch(f"{GRAPH_BASE_URL}{path}", headers=_headers(token), json=json_body, timeout=30)
+    r.raise_for_status(); return r.json() if r.text.strip() else {}
 
-def _graph_post(token: str, path: str, json_body: dict = None) -> dict:
-    response = requests.post(f"{GRAPH_BASE_URL}{path}", headers=_headers(token), json=json_body or {}, timeout=30)
-    response.raise_for_status()
-    return response.json() if response.text.strip() else {}
-
-
-def _graph_patch(token: str, path: str, json_body: dict) -> dict:
-    response = requests.patch(f"{GRAPH_BASE_URL}{path}", headers=_headers(token), json=json_body, timeout=30)
-    response.raise_for_status()
-    return response.json() if response.text.strip() else {}
+def _graph_delete(token, path):
+    r = requests.delete(f"{GRAPH_BASE_URL}{path}", headers=_headers(token), timeout=30)
+    return r.status_code == 204
 
 
-def _graph_delete(token: str, path: str) -> bool:
-    response = requests.delete(f"{GRAPH_BASE_URL}{path}", headers=_headers(token), timeout=30)
-    return response.status_code == 204
+def _build_email_html(body: str, username: str = "guillaume") -> str:
+    """Corps HTML du mail avec signature. EMAIL-SIGNATURE : deleguee a get_email_signature()."""
+    from app.email_signature import get_email_signature
+    signature = get_email_signature(username)
+    return f'<div style="font-family:Arial,sans-serif;font-size:14px;color:#222;"><div style="white-space:pre-line;">{body}</div>{signature}</div>'
 
 
-def _build_email_html(body: str) -> str:
-    return f"""<div style="font-family:Arial, sans-serif; font-size:14px; color:#222;">
-    <div style="white-space:pre-line;">{body}</div>
-    {SIGNATURE_HTML}
-</div>"""
-
-
-# ─── RÉ-EXPORTS DRIVE (compatibilité) ───
-# Drive est maintenant dans drive_connector.py
-# Ces imports permettent à l'ancien code de continuer à fonctionner
+# Re-exports Drive
 from app.connectors.drive_connector import (
     _find_sharepoint_site_and_drive,
     list_drive as list_aria_drive,
@@ -74,11 +53,8 @@ from app.connectors.drive_connector import (
 )
 
 
-# ─── DISPATCHER PRINCIPAL ───
-
 def perform_outlook_action(action: str, params: dict, token: str) -> dict:
 
-    # ── Drive (délégué à drive_connector) ──
     if action == "list_aria_drive":
         return list_aria_drive(token, params.get("subfolder", ""))
 
@@ -89,32 +65,25 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         if not drive_id: return {"status": "error", "message": "Drive introuvable."}
         try:
             data = _graph_get(token, f"/drives/{drive_id}/items/{item_id}/children", params={
-                "$top": 100, "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl", "$orderby": "name"
-            })
+                "$top": 100, "$select": "name,id,size,folder,file,lastModifiedDateTime,webUrl", "$orderby": "name"})
             from app.connectors.drive_connector import _fmt
-            return {"status": "ok", "count": len(data.get("value", [])),
-                    "items": _fmt(data.get("value", []))}
+            return {"status": "ok", "count": len(data.get("value", [])), "items": _fmt(data.get("value", []))}
         except Exception as e: return {"status": "error", "message": str(e)[:200]}
 
     if action == "read_aria_drive_file":
         return read_aria_drive_file(token, params.get("file_path", "") or params.get("item_id", ""))
-
     if action == "search_aria_drive":
         return search_aria_drive(token, params.get("query", ""))
-
     if action == "create_drive_folder":
         _, drive_id, _ = _find_sharepoint_site_and_drive(token)
         return create_drive_folder(token, params.get("parent_item_id", ""), params.get("folder_name", ""), drive_id)
-
     if action == "move_drive_item":
         _, drive_id, _ = _find_sharepoint_site_and_drive(token)
         return move_drive_item(token, params.get("item_id", ""), params.get("dest_folder_id", ""), params.get("new_name"), drive_id)
-
     if action == "copy_drive_item":
         _, drive_id, _ = _find_sharepoint_site_and_drive(token)
         return copy_drive_item(token, params.get("item_id", ""), params.get("dest_folder_id", ""), params.get("new_name"), drive_id)
 
-    # ── Mails ──
     if action == "list_unread_messages":
         data = _graph_get(token, "/me/mailFolders/inbox/messages", params={
             "$top": params.get("top", 10), "$filter": "isRead eq false",
@@ -133,26 +102,26 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
 
     if action == "mark_as_read":
         _graph_patch(token, f"/me/messages/{params['message_id']}", {"isRead": True})
-        return {"status": "ok", "message": "Mail marqué comme lu."}
+        return {"status": "ok", "message": "Mail marque comme lu."}
 
     if action == "delete_message":
         try:
             moved = _graph_post(token, f"/me/messages/{params['message_id']}/move", {"destinationId": "deleteditems"})
-            return {"status": "ok", "new_message_id": moved.get("id"), "message": "Mail mis à la corbeille (récupérable)."}
-        except Exception as e: return {"status": "error", "message": f"Échec : {str(e)}"}
+            return {"status": "ok", "new_message_id": moved.get("id"), "message": "Mail mis a la corbeille."}
+        except Exception as e: return {"status": "error", "message": f"Echec : {str(e)}"}
 
     if action == "archive_message":
         try:
             moved = _graph_post(token, f"/me/messages/{params['message_id']}/move", {"destinationId": ARCHIVE_FOLDER_ID})
-            return {"status": "ok", "new_message_id": moved.get("id"), "message": "Mail archivé."}
-        except Exception as e: return {"status": "error", "message": f"Échec archivage : {str(e)}"}
+            return {"status": "ok", "new_message_id": moved.get("id"), "message": "Mail archive."}
+        except Exception as e: return {"status": "error", "message": f"Echec archivage : {str(e)}"}
 
     if action == "send_reply":
         try:
             _graph_post(token, f"/me/messages/{params['message_id']}/reply",
                 {"message": {"body": {"contentType": "HTML", "content": _build_email_html(params.get("reply_body", ""))}}})
-            return {"status": "ok", "message": "Réponse envoyée avec succès."}
-        except Exception as e: return {"status": "error", "message": f"Échec envoi : {str(e)}"}
+            return {"status": "ok", "message": "Reponse envoyee avec succes."}
+        except Exception as e: return {"status": "error", "message": f"Echec envoi : {str(e)}"}
 
     if action == "send_new_mail":
         try:
@@ -160,23 +129,22 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
                 "message": {"subject": params["subject"],
                     "body": {"contentType": "HTML", "content": _build_email_html(params.get("body", ""))},
                     "toRecipients": [{"emailAddress": {"address": params["to_email"]}}]}})
-            return {"status": "ok", "message": f"Mail envoyé à {params['to_email']}."}
-        except Exception as e: return {"status": "error", "message": f"Échec envoi : {str(e)}"}
+            return {"status": "ok", "message": f"Mail envoye a {params['to_email']}."}
+        except Exception as e: return {"status": "error", "message": f"Echec envoi : {str(e)}"}
 
     if action == "create_reply_draft":
         draft = _graph_post(token, f"/me/messages/{params['message_id']}/createReply", {})
         draft_id = draft.get("id")
-        if not draft_id: return {"status": "error", "message": "Impossible de créer le brouillon."}
+        if not draft_id: return {"status": "error", "message": "Impossible de creer le brouillon."}
         _graph_patch(token, f"/me/messages/{draft_id}",
             {"body": {"contentType": "HTML", "content": _build_email_html(params.get("reply_body", ""))}})
-        return {"status": "ok", "draft_id": draft_id, "message": "Brouillon créé."}
+        return {"status": "ok", "draft_id": draft_id, "message": "Brouillon cree."}
 
     if action == "move_message":
         moved = _graph_post(token, f"/me/messages/{params['message_id']}/move",
             {"destinationId": params["destination_folder_id"]})
-        return {"status": "ok", "new_message_id": moved.get("id"), "message": "Mail déplacé."}
+        return {"status": "ok", "new_message_id": moved.get("id"), "message": "Mail deplace."}
 
-    # ── Calendrier ──
     if action == "list_calendar_events":
         from datetime import datetime, timezone, timedelta
         start = params.get("start", datetime.now(timezone.utc).isoformat())
@@ -195,10 +163,9 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
                 "end": {"dateTime": params.get("end"), "timeZone": "Europe/Paris"},
                 "body": {"contentType": "Text", "content": params.get("body", "")},
                 "attendees": [{"emailAddress": {"address": e}, "type": "required"}
-                               for e in params.get("attendees", [])]
-            })
-            return {"status": "ok", "event_id": event.get("id"), "message": "RDV créé."}
-        except Exception as e: return {"status": "error", "message": f"Échec RDV : {str(e)}"}
+                               for e in params.get("attendees", [])]})
+            return {"status": "ok", "event_id": event.get("id"), "message": "RDV cree."}
+        except Exception as e: return {"status": "error", "message": f"Echec RDV : {str(e)}"}
 
     if action == "update_calendar_event":
         body = {}
@@ -208,14 +175,13 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         if "body" in params: body["body"] = {"contentType": "Text", "content": params["body"]}
         try:
             _graph_patch(token, f"/me/events/{params['event_id']}", body)
-            return {"status": "ok", "message": "RDV mis à jour."}
-        except Exception as e: return {"status": "error", "message": f"Échec : {str(e)}"}
+            return {"status": "ok", "message": "RDV mis a jour."}
+        except Exception as e: return {"status": "error", "message": f"Echec : {str(e)}"}
 
     if action == "delete_calendar_event":
         ok = _graph_delete(token, f"/me/events/{params['event_id']}")
-        return {"status": "ok" if ok else "error", "message": "RDV supprimé." if ok else "Échec."}
+        return {"status": "ok" if ok else "error", "message": "RDV supprime." if ok else "Echec."}
 
-    # ── Contacts ──
     if action == "list_contacts":
         data = _graph_get(token, "/me/contacts", params={
             "$top": 50, "$select": "displayName,emailAddresses,mobilePhone,businessPhones,companyName,jobTitle"})
@@ -228,29 +194,26 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
             "$select": "displayName,emailAddresses,mobilePhone,businessPhones,companyName", "$top": 10})
         return {"status": "ok", "items": data.get("value", [])}
 
-    # ── Tâches ──
     if action == "list_todo_tasks":
         lists_data = _graph_get(token, "/me/todo/lists")
         all_tasks = []
         for lst in lists_data.get("value", [])[:3]:
             tasks = _graph_get(token, f"/me/todo/lists/{lst['id']}/tasks", params={"$top": 20})
             for task in tasks.get("value", []):
-                task["listName"] = lst.get("displayName")
-                all_tasks.append(task)
+                task["listName"] = lst.get("displayName"); all_tasks.append(task)
         return {"status": "ok", "items": all_tasks}
 
     if action == "create_todo_task":
         lists_data = _graph_get(token, "/me/todo/lists")
-        if not lists_data.get("value"): return {"status": "error", "message": "Aucune liste trouvée."}
+        if not lists_data.get("value"): return {"status": "error", "message": "Aucune liste trouvee."}
         list_id = lists_data["value"][0]["id"]
         task_body = {"title": params["title"]}
         if "due" in params: task_body["dueDateTime"] = {"dateTime": params["due"], "timeZone": "Europe/Paris"}
         try:
             _graph_post(token, f"/me/todo/lists/{list_id}/tasks", task_body)
-            return {"status": "ok", "message": f"Tâche '{params['title']}' créée."}
-        except Exception as e: return {"status": "error", "message": f"Échec : {str(e)}"}
+            return {"status": "ok", "message": f"Tache '{params['title']}' creee."}
+        except Exception as e: return {"status": "error", "message": f"Echec : {str(e)}"}
 
-    # ── Teams legacy (via outlook dispatcher) ──
     if action == "list_teams_chats":
         data = _graph_get(token, "/me/chats", params={"$expand": "members", "$top": 20})
         return {"status": "ok", "items": data.get("value", [])}
@@ -258,8 +221,8 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
     if action == "send_teams_message":
         try:
             _graph_post(token, f"/me/chats/{params['chat_id']}/messages", {"body": {"content": params["message"]}})
-            return {"status": "ok", "message": "Message Teams envoyé."}
-        except Exception as e: return {"status": "error", "message": f"Échec Teams : {str(e)}"}
+            return {"status": "ok", "message": "Message Teams envoye."}
+        except Exception as e: return {"status": "error", "message": f"Echec Teams : {str(e)}"}
 
     if action == "find_teams_user":
         name_safe = params["name"].replace("'", "''")
