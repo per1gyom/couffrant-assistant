@@ -9,6 +9,7 @@ WEB-SEARCH    : activation de la recherche web Anthropic via RAYA_WEB_SEARCH_ENA
 SPEAK-SPEED   : vitesse de lecture ElevenLabs dynamique via payload.speed.
 TOOL-READ-PDF : extraction texte pdfplumber injectée dans le contexte LLM (commit 3/3).
 A2a           : import direct depuis app.routes.actions (shim aria_actions supprimé).
+A4-4          : print() remplacés par logger.
 """
 import json
 import os
@@ -38,6 +39,7 @@ from app.feedback import (
     process_positive_feedback, process_negative_feedback,
 )
 from app.tenant_manager import get_user_tenants
+from app.logging_config import get_logger
 
 from app.routes.aria_context import (
     load_user_tools, load_db_context, load_live_mails,
@@ -49,6 +51,7 @@ from app.routes.deps import require_user
 from app.rate_limiter import check_rate_limit
 
 _SHARED_POOL = ThreadPoolExecutor(max_workers=6)
+logger = get_logger("raya.core")
 
 router = APIRouter(tags=["raya"])
 
@@ -146,7 +149,7 @@ def raya_endpoint(
         }
     except Exception:
         tb = traceback.format_exc()
-        print(f"[Raya] ERREUR ENDPOINT pour {username}:\n{tb}")
+        logger.error("[Raya] ERREUR ENDPOINT pour %s:\n%s", username, tb)
         return {
             "answer": "\u26a0\ufe0f Une erreur interne est survenue. L'incident a ete logue.",
             "actions": [], "pending_actions": [],
@@ -237,7 +240,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         except Exception: pass
 
     if session_theme:
-        print(f"[Raya] Session thematique detectee pour {username} : '{session_theme}'")
+        logger.info("[Raya] Session thematique detectee pour %s : '%s'", username, session_theme)
 
     # 4b. Detection des domaines pertinents pour injection dynamique des actions
     domains = detect_query_domains(payload.query or "")
@@ -394,7 +397,7 @@ def _build_user_content(payload: RayaQuery):
             else:
                 enriched += f"\n\n--- PDF '{payload.file_name or 'doc.pdf'}' ({r['pages']}p) ---\n{r['text']}"
         except Exception as e:
-            print(f"[Raya] PDF error: {e}")
+            logger.warning("[Raya] PDF error: %s", e)
         parts.append({"type": "document",
                       "source": {"type": "base64", "media_type": "application/pdf",
                                  "data": payload.file_data}})
