@@ -3,6 +3,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/auth_service.dart';
 import '../services/chat_service.dart';
+import '../services/tts_service.dart';
 import 'login_screen.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -15,6 +16,7 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> {
   final _authService = AuthService();
   final _chatService = ChatService();
+  final _tts = TtsService();
   final _inputController = TextEditingController();
   final _scrollController = ScrollController();
   final _inputFocus = FocusNode();
@@ -24,6 +26,7 @@ class _ChatScreenState extends State<ChatScreen> {
   AskChoice? _askChoice;
   bool _loading = false;
   bool _historyLoaded = false;
+  bool _autoSpeak = true;
   String _username = '';
 
   @override
@@ -51,6 +54,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (text.isEmpty || _loading) return;
 
     _inputController.clear();
+    _tts.stop();
     setState(() {
       _messages.add(ChatMessage(text: text, isUser: true));
       _loading = true;
@@ -61,8 +65,12 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final response = await _chatService.sendMessage(text);
 
-      // Nettoyer les balises [ACTION:...] et [SPEAK_SPEED:...]
       var answer = response.answer;
+      // Extraire SPEAK_SPEED si present
+      final speedMatch = RegExp(r'\[SPEAK_SPEED:([\d.]+)\]').firstMatch(answer);
+      if (speedMatch != null) {
+        _tts.speed = double.tryParse(speedMatch.group(1)!) ?? 1.2;
+      }
       answer = answer.replaceAll(RegExp(r'\[ACTION:[A-Z_]+:[^\]]*\]'), '');
       answer = answer.replaceAll(RegExp(r'\[SPEAK_SPEED:[\d.]+\]'), '');
       answer = answer.trim();
@@ -80,6 +88,11 @@ class _ChatScreenState extends State<ChatScreen> {
           _loading = false;
         });
         _scrollToBottom();
+
+        // AutoSpeak : lire la reponse automatiquement
+        if (_autoSpeak && answer.isNotEmpty) {
+          _tts.speak(answer);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -111,6 +124,7 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _logout() async {
+    _tts.stop();
     await _authService.logout();
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
@@ -123,6 +137,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _inputController.dispose();
     _scrollController.dispose();
     _inputFocus.dispose();
+    _tts.dispose();
     super.dispose();
   }
 
@@ -168,12 +183,42 @@ class _ChatScreenState extends State<ChatScreen> {
             color: const Color(0xFF1A1C24),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12)),
-            onSelected: (v) { if (v == 'logout') _logout(); },
+            onSelected: (v) {
+              if (v == 'logout') _logout();
+              if (v == 'autospeak') setState(() => _autoSpeak = !_autoSpeak);
+            },
             itemBuilder: (_) => [
               PopupMenuItem(enabled: false, child: Text(
                 'Connect\u00e9 : $_username',
                 style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
               )),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'autospeak',
+                child: Row(children: [
+                  Icon(
+                    _autoSpeak ? Icons.volume_up : Icons.volume_off,
+                    color: _autoSpeak ? const Color(0xFF22C55E) : Colors.white54,
+                    size: 18,
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    _autoSpeak ? 'AutoSpeak : ON' : 'AutoSpeak : OFF',
+                    style: TextStyle(
+                      color: _autoSpeak ? const Color(0xFF22C55E) : Colors.white54,
+                    ),
+                  ),
+                ]),
+              ),
+              PopupMenuItem(
+                enabled: false,
+                child: Row(children: [
+                  Icon(Icons.speed, color: Colors.white.withOpacity(0.4), size: 18),
+                  const SizedBox(width: 10),
+                  Text('Vitesse : ${_tts.speed.toStringAsFixed(1)}x',
+                    style: TextStyle(color: Colors.white.withOpacity(0.5))),
+                ]),
+              ),
               const PopupMenuDivider(),
               const PopupMenuItem(value: 'logout', child: Row(children: [
                 Icon(Icons.logout, color: Color(0xFFEF4444), size: 18),
@@ -214,7 +259,6 @@ class _ChatScreenState extends State<ChatScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       itemCount: _messages.length + (_historyLoaded ? 1 : 0) + (_loading ? 1 : 0),
       itemBuilder: (context, index) {
-        // Separateur historique
         if (_historyLoaded && index == 0) {
           return Padding(
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -231,12 +275,7 @@ class _ChatScreenState extends State<ChatScreen> {
         }
 
         final msgIndex = _historyLoaded ? index - 1 : index;
-
-        // Indicateur de chargement
-        if (msgIndex >= _messages.length) {
-          return _buildLoadingBubble();
-        }
-
+        if (msgIndex >= _messages.length) return _buildLoadingBubble();
         return _buildMessageBubble(_messages[msgIndex]);
       },
     );
@@ -252,7 +291,6 @@ class _ChatScreenState extends State<ChatScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         textDirection: isUser ? TextDirection.rtl : TextDirection.ltr,
         children: [
-          // Avatar
           Container(
             width: 30, height: 30,
             decoration: BoxDecoration(
@@ -262,19 +300,15 @@ class _ChatScreenState extends State<ChatScreen> {
             child: Center(child: Text(
               isUser ? initial : '\u2726',
               style: TextStyle(
-                fontSize: isUser ? 13 : 15,
-                fontWeight: FontWeight.w600,
+                fontSize: isUser ? 13 : 15, fontWeight: FontWeight.w600,
                 color: isUser ? const Color(0xFF85B7EB) : const Color(0xFF22C55E),
               ),
             )),
           ),
           const SizedBox(width: 8),
-          // Bulle
           Flexible(
             child: Column(
-              crossAxisAlignment: isUser
-                  ? CrossAxisAlignment.end
-                  : CrossAxisAlignment.start,
+              crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
               children: [
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -301,35 +335,29 @@ class _ChatScreenState extends State<ChatScreen> {
                             h3: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
                             strong: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
                             em: const TextStyle(color: Colors.white, fontStyle: FontStyle.italic),
-                            code: TextStyle(
-                              color: const Color(0xFF22C55E),
-                              backgroundColor: Colors.white.withOpacity(0.08),
-                              fontSize: 13,
-                            ),
+                            code: TextStyle(color: const Color(0xFF22C55E),
+                              backgroundColor: Colors.white.withOpacity(0.08), fontSize: 13),
                             listBullet: const TextStyle(color: Colors.white, fontSize: 14),
                             a: const TextStyle(color: Color(0xFF85B7EB), decoration: TextDecoration.underline),
                           ),
                           onTapLink: (text, href, title) {
-                            if (href != null) {
-                              launchUrl(Uri.parse(href), mode: LaunchMode.externalApplication);
-                            }
+                            if (href != null) launchUrl(Uri.parse(href), mode: LaunchMode.externalApplication);
                           },
                         ),
                 ),
-                // Boutons feedback (seulement sur les messages Raya)
                 if (!isUser && msg.ariaMemoryId != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 4),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _feedbackBtn('\ud83d\udd0a', () {}),
-                        _feedbackBtn('\ud83d\udc4d', () {}),
-                        _feedbackBtn('\ud83d\udc4e', () {}),
-                        _feedbackBtn('\ud83d\udca1', () {}),
-                        _feedbackBtn('\ud83d\udc1b', () {}),
-                      ],
-                    ),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      _feedbackBtn('\ud83d\udd0a', () {
+                        if (_tts.isSpeaking) { _tts.stop(); }
+                        else { _tts.speak(msg.text); }
+                      }),
+                      _feedbackBtn('\ud83d\udc4d', () {}),
+                      _feedbackBtn('\ud83d\udc4e', () {}),
+                      _feedbackBtn('\ud83d\udca1', () {}),
+                      _feedbackBtn('\ud83d\udc1b', () {}),
+                    ]),
                   ),
               ],
             ),
@@ -356,9 +384,7 @@ class _ChatScreenState extends State<ChatScreen> {
         Container(
           width: 30, height: 30,
           decoration: BoxDecoration(
-            color: const Color(0xFF1A3D2A),
-            borderRadius: BorderRadius.circular(10),
-          ),
+            color: const Color(0xFF1A3D2A), borderRadius: BorderRadius.circular(10)),
           child: const Center(child: Text('\u2726',
             style: TextStyle(fontSize: 15, color: Color(0xFF22C55E)))),
         ),
@@ -369,13 +395,11 @@ class _ChatScreenState extends State<ChatScreen> {
             color: Colors.white.withOpacity(0.06),
             borderRadius: const BorderRadius.only(
               topLeft: Radius.circular(4), topRight: Radius.circular(16),
-              bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16),
-            ),
+              bottomLeft: Radius.circular(16), bottomRight: Radius.circular(16)),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            _dot(0), const SizedBox(width: 4),
-            _dot(1), const SizedBox(width: 4),
-            _dot(2),
+            _dot(0), const SizedBox(width: 4), _dot(1),
+            const SizedBox(width: 4), _dot(2),
           ]),
         ),
       ]),
@@ -388,18 +412,13 @@ class _ChatScreenState extends State<ChatScreen> {
       duration: Duration(milliseconds: 600 + i * 200),
       builder: (_, v, __) => Opacity(
         opacity: v,
-        child: Container(
-          width: 6, height: 6,
+        child: Container(width: 6, height: 6,
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.4),
-            shape: BoxShape.circle,
-          ),
-        ),
+            color: Colors.white.withOpacity(0.4), shape: BoxShape.circle)),
       ),
     );
   }
 
-  // --- ASK CHOICE ---
   Widget _buildAskChoice() {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
@@ -410,10 +429,8 @@ class _ChatScreenState extends State<ChatScreen> {
             style: OutlinedButton.styleFrom(
               foregroundColor: const Color(0xFF22C55E),
               side: const BorderSide(color: Color(0xFF22C55E), width: 0.5),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20)),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10)),
             child: Text(opt, style: const TextStyle(fontSize: 13)),
           ),
         ).toList(),
@@ -421,16 +438,13 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  // --- PENDING ACTIONS ---
   Widget _buildPendingActions() {
     return Container(
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 4),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.04),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.08)),
-      ),
+        color: Colors.white.withOpacity(0.04), borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.08))),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text('\u23f8\ufe0f ${_pendingActions.length} action(s) en attente',
           style: TextStyle(fontSize: 12, color: Colors.white.withOpacity(0.5))),
@@ -440,61 +454,45 @@ class _ChatScreenState extends State<ChatScreen> {
           child: Row(children: [
             Expanded(child: Text(a.label,
               style: const TextStyle(color: Colors.white, fontSize: 13))),
-            TextButton(
-              onPressed: () => _sendMessage('Confirme l\'action ${a.id}'),
-              child: const Text('\u2713', style: TextStyle(color: Color(0xFF22C55E))),
-            ),
-            TextButton(
-              onPressed: () => _sendMessage('Annule l\'action ${a.id}'),
-              child: const Text('\u2717', style: TextStyle(color: Color(0xFFEF4444))),
-            ),
+            TextButton(onPressed: () => _sendMessage('Confirme l\'action ${a.id}'),
+              child: const Text('\u2713', style: TextStyle(color: Color(0xFF22C55E)))),
+            TextButton(onPressed: () => _sendMessage('Annule l\'action ${a.id}'),
+              child: const Text('\u2717', style: TextStyle(color: Color(0xFFEF4444)))),
           ]),
         )),
       ]),
     );
   }
 
-  // --- INPUT BAR ---
   Widget _buildInputBar() {
     return Container(
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 16),
       decoration: BoxDecoration(
-        border: Border(top: BorderSide(color: Colors.white.withOpacity(0.08))),
-      ),
+        border: Border(top: BorderSide(color: Colors.white.withOpacity(0.08)))),
       child: Row(children: [
-        // Piece jointe
         IconButton(
           icon: Icon(Icons.attach_file, color: Colors.white.withOpacity(0.4)),
-          onPressed: () {}, // TODO Phase 2.7
+          onPressed: () {},
         ),
-        // Input texte
         Expanded(
           child: TextField(
-            controller: _inputController,
-            focusNode: _inputFocus,
+            controller: _inputController, focusNode: _inputFocus,
             style: const TextStyle(color: Colors.white, fontSize: 14),
-            maxLines: 4,
-            minLines: 1,
+            maxLines: 4, minLines: 1,
             decoration: InputDecoration(
               hintText: 'Message...',
               hintStyle: TextStyle(color: Colors.white.withOpacity(0.25)),
-              filled: true,
-              fillColor: Colors.white.withOpacity(0.07),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16, vertical: 10),
+              filled: true, fillColor: Colors.white.withOpacity(0.07),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(21),
-                borderSide: BorderSide.none,
-              ),
-            ),
+                borderRadius: BorderRadius.circular(21), borderSide: BorderSide.none)),
             textInputAction: TextInputAction.send,
             onSubmitted: (_) => _sendMessage(),
           ),
         ),
         const SizedBox(width: 8),
-        // Bouton micro
         GestureDetector(
-          onTap: () {}, // TODO Phase 3
+          onTap: () {},
           child: Container(
             width: 44, height: 44,
             decoration: const BoxDecoration(
@@ -503,7 +501,6 @@ class _ChatScreenState extends State<ChatScreen> {
           ),
         ),
         const SizedBox(width: 6),
-        // Bouton envoi
         GestureDetector(
           onTap: _sendMessage,
           child: Container(
