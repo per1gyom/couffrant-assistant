@@ -1,16 +1,16 @@
 import 'package:dio/dio.dart';
-import 'package:cookie_jar/cookie_jar.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
+import 'package:cookie_jar/cookie_jar.dart';
 import 'package:path_provider/path_provider.dart';
 import '../config/api_config.dart';
 
-/// Client HTTP singleton avec gestion automatique des cookies de session.
-/// Reproduit le comportement du navigateur pour la PWA :
-/// le backend utilise des cookies de session (pas de JWT).
+/// Client HTTP singleton avec gestion des cookies de session.
+/// Le backend Raya utilise des cookies de session (pas JWT).
+/// On reproduit le comportement du navigateur web.
 class ApiService {
   static ApiService? _instance;
   late final Dio dio;
-  late final PersistCookieJar _cookieJar;
+  late final PersistCookieJar cookieJar;
   bool _initialized = false;
 
   ApiService._();
@@ -20,13 +20,12 @@ class ApiService {
     return _instance!;
   }
 
-  /// Initialiser dio + cookie jar persistant.
-  /// Appeler une seule fois au démarrage de l'app.
   Future<void> init() async {
     if (_initialized) return;
 
+    // Cookie jar persistant (survit aux redémarrages de l'app)
     final dir = await getApplicationDocumentsDirectory();
-    _cookieJar = PersistCookieJar(
+    cookieJar = PersistCookieJar(
       storage: FileStorage('${dir.path}/.cookies/'),
     );
 
@@ -34,7 +33,8 @@ class ApiService {
       baseUrl: ApiConfig.baseUrl,
       connectTimeout: Duration(seconds: ApiConfig.connectTimeout),
       receiveTimeout: Duration(seconds: ApiConfig.receiveTimeout),
-      // Important : suivre les redirections mais ne pas changer la méthode
+      // Important : suivre les redirections mais ne pas les exécuter
+      // automatiquement (pour gérer le login qui redirige)
       followRedirects: false,
       validateStatus: (status) => status != null && status < 500,
       headers: {
@@ -42,56 +42,53 @@ class ApiService {
       },
     ));
 
-    dio.interceptors.add(CookieManager(_cookieJar));
+    // Intercepteur cookies — gère automatiquement les cookies de session
+    dio.interceptors.add(CookieManager(cookieJar));
 
     _initialized = true;
   }
 
-  /// Vider les cookies (logout).
+  /// Vérifie si une session active existe (cookie valide)
+  Future<bool> hasActiveSession() async {
+    try {
+      final uri = Uri.parse(ApiConfig.baseUrl);
+      final cookies = await cookieJar.loadForRequest(uri);
+      return cookies.any((c) => c.name == 'session');
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Efface tous les cookies (déconnexion)
   Future<void> clearCookies() async {
-    await _cookieJar.deleteAll();
+    await cookieJar.deleteAll();
   }
 
-  /// Vérifier si on a un cookie de session valide.
-  Future<bool> hasSession() async {
-    final cookies = await _cookieJar.loadForRequest(
-      Uri.parse(ApiConfig.baseUrl),
-    );
-    return cookies.any((c) => c.name == 'session');
-  }
-
-  // --- Méthodes HTTP raccourcies ---
-
-  Future<Response> get(String path, {Map<String, dynamic>? params}) {
-    return dio.get(path, queryParameters: params);
-  }
-
-  Future<Response> post(String path, {dynamic data}) {
-    return dio.post(path, data: data);
-  }
-
-  Future<Response> postForm(String path, {required Map<String, dynamic> data}) {
+  /// POST form-encoded (pour le login)
+  Future<Response> postForm(String path, Map<String, dynamic> data) async {
     return dio.post(
       path,
       data: FormData.fromMap(data),
-      options: Options(contentType: 'application/x-www-form-urlencoded'),
+      options: Options(
+        contentType: 'application/x-www-form-urlencoded',
+        // Le login redirige vers /chat en cas de succès (302/303)
+        followRedirects: false,
+        validateStatus: (status) => status != null && status < 500,
+      ),
     );
   }
 
-  Future<Response> patch(String path, {dynamic data}) {
-    return dio.patch(path, data: data);
-  }
-
-  Future<Response> delete(String path, {Map<String, dynamic>? params}) {
-    return dio.delete(path, queryParameters: params);
-  }
-
-  /// POST qui retourne des bytes (pour TTS audio).
-  Future<Response<List<int>>> postBytes(String path, {dynamic data}) {
-    return dio.post<List<int>>(
+  /// POST JSON (pour /raya, /speak, /feedback, etc.)
+  Future<Response> postJson(String path, Map<String, dynamic> data) async {
+    return dio.post(
       path,
       data: data,
-      options: Options(responseType: ResponseType.bytes),
+      options: Options(contentType: 'application/json'),
     );
+  }
+
+  /// GET (pour /health, /chat/history, etc.)
+  Future<Response> get(String path, {Map<String, dynamic>? params}) async {
+    return dio.get(path, queryParameters: params);
   }
 }
