@@ -65,6 +65,7 @@ class InactivityTimeoutMiddleware(BaseHTTPMiddleware):
         "/login-app", "/logout", "/health", "/webhook/",
         "/static/", "/sw.js", "/forgot-password",
         "/reset-password", "/forced-reset", "/pwa/",
+        "/legal",
     )
 
     async def dispatch(self, request: Request, call_next):
@@ -112,6 +113,12 @@ app.include_router(rgpd_router)
 @app.get("/")
 def root():
     return RedirectResponse("/chat")
+
+
+@app.get("/legal")
+def legal_page():
+    """Page publique — mentions légales et politique de confidentialité."""
+    return FileResponse("app/templates/legal.html", media_type="text/html")
 
 
 @app.get("/health")
