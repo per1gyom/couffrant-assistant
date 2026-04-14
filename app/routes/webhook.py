@@ -61,7 +61,8 @@ _BULK_SUBJECT_KEYWORDS = (
 
 
 # ─── RÈGLES RAYA (mail_filter) ───
-
+# ─── PIPELINE COMMUN (source-agnostic) ───
+@router.get("/webhook/microsoft")
 async def webhook_validation_get(validationToken: str = ""):
     if validationToken:
         return Response(content=validationToken, media_type="text/plain", status_code=200)
