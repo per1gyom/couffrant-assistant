@@ -12,16 +12,11 @@ def get_email_signature(username: str) -> str:
     Retourne la signature HTML pour un utilisateur.
 
     Pour l'instant, signature statique de Guillaume.
-    Le logo est servi depuis app/static/ via APP_BASE_URL.
-
-    Args:
-        username : identifiant de l'utilisateur (réservé pour la v2 dynamique)
-
-    Returns:
-        str : bloc HTML de signature à concaténer au corps du mail
+    Police Helvetica, nom en gras, bandeau Couffrant Solar en bas.
+    Largeur image = ~500px (environ 3x la ligne de texte la plus large).
     """
     base_url = os.getenv("APP_BASE_URL", "https://app.raya-ia.fr").rstrip("/")
-    banner_url = f"{base_url}/static/5AEA8C3F-2F59-4ED0-8AAA-3B324C3498DF.png"
+    banner_url = f"{base_url}/static/Photo_9.jpg"
 
     return f"""
 <br><br>
