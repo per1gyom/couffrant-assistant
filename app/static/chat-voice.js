@@ -1,6 +1,11 @@
 // chat-voice.js — Synthèse vocale + reconnaissance micro
+// A3: paramètre fromAutoSpeak — skip silencieux sur iOS (WebKit autoplay policy)
 
-function speak(text, btn) {
+function speak(text, btn, fromAutoSpeak) {
+  // A3: iOS bloque l'autoplay audio sans geste utilisateur — skip autoSpeak sur iOS
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  if (fromAutoSpeak === true && isIOS) return;
+
   stopSpeech(); speakAborted = false; currentSpeakBtn = btn || null;
   if (currentSpeakBtn) { currentSpeakBtn.textContent='⏹ Stop'; currentSpeakBtn.classList.add('playing'); }
   fetch('/speak', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text, speed: speakSpeed}) })
@@ -16,7 +21,7 @@ function resetSpeakUI() { if (currentSpeakBtn) { currentSpeakBtn.textContent='�
 function stopSpeech() { speakAborted = true; if (currentAudio) { currentAudio.pause(); currentAudio=null; } window.speechSynthesis && window.speechSynthesis.cancel(); resetSpeakUI(); }
 function setSpeakSpeed(newSpeed) {
   speakSpeed = Math.max(0.5, Math.min(2.5, newSpeed));
-  showToast('Vitesse de lecture : ' + speakSpeed.toFixed(1) + 'x', 'ok', 2000);
+  showToast('Vitesse de lecture : ' + speakSpeed.toFixed(1) + 'x', 'ok', 2000);
 }
 
 function toggleMic() {
