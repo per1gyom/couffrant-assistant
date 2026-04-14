@@ -7,6 +7,7 @@ import '../services/tts_service.dart';
 import '../services/feedback_service.dart';
 import 'login_screen.dart';
 import 'topics_sheet.dart';
+import '../services/topics_service.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -65,6 +66,11 @@ class _ChatScreenState extends State<ChatScreen> {
       var answer = response.answer;
       final speedMatch = RegExp(r'\[SPEAK_SPEED:([\d.]+)\]').firstMatch(answer);
       if (speedMatch != null) _tts.speed = double.tryParse(speedMatch.group(1)!) ?? 1.2;
+      // Auto-create topic from Raya ACTION
+      final topicMatch = RegExp(r'\\[ACTION:CREATE_TOPIC:([^\\]]+)\\]').firstMatch(answer);
+      if (topicMatch != null) {
+        TopicsService().createTopic(topicMatch.group(1)!.trim());
+      }
       answer = answer.replaceAll(RegExp(r'\[ACTION:[A-Z_]+:[^\]]*\]'), '');
       answer = answer.replaceAll(RegExp(r'\[SPEAK_SPEED:[\d.]+\]'), '');
       answer = answer.trim();
