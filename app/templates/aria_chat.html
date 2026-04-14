@@ -6,17 +6,17 @@
 <title>Raya</title>
 
 <!-- PWA -->
-<link rel="manifest" href="/static/manifest.json?v=6">
+<link rel="manifest" href="/static/manifest.json?v=7">
 <meta name="theme-color" content="#6366f1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
-<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=6">
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=7">
 
-<!-- CSS — ?v=6 force le rechargement à chaque déploiement -->
-<link rel="stylesheet" href="/static/chat.css?v=6">
-<link rel="stylesheet" href="/static/onboarding.css?v=6">
-<link rel="stylesheet" href="/static/mobile.css?v=6">
+<!-- CSS — ?v=7 force le rechargement à chaque déploiement -->
+<link rel="stylesheet" href="/static/chat.css?v=7">
+<link rel="stylesheet" href="/static/onboarding.css?v=7">
+<link rel="stylesheet" href="/static/mobile.css?v=7">
 
 <!-- marked.js + DOMPurify (CDN versionné, stable) -->
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
@@ -177,7 +177,7 @@
     <div class="d-group">
       <div class="d-group-title">🔒 Données personnelles</div>
       <div class="d-btn nav" onclick="window.open('/account/export','_blank')"><span class="d-btn-icon">📦</span><div class="d-btn-body"><span class="d-btn-label">Exporter mes données</span><span class="d-btn-desc">Télécharge toutes tes données Raya au format JSON (RGPD).</span></div></div>
-      <div class="d-btn danger" onclick="(function(){const v=prompt('Tape SUPPRIMER pour confirmer la suppression définitive de ton compte et toutes tes données :');if(v==='SUPPRIMER'){fetch('/account/delete?confirm=yes',{method:'DELETE'}).then(r=>r.json()).then(d=>{if(d.ok){showToast('Compte supprimé. Au revoir !','ok',4000);setTimeout(()=>window.location.href='/logout',2000);}else{showToast('Erreur : '+(d.message||'?'),'err',5000);}}).catch(()=>showToast('Erreur réseau','err',4000));}else if(v!==null){showToast('Confirmation incorrecte — compte non supprimé.','err',4000);}})()"><span class="d-btn-icon">⛔</span><div class="d-btn-body"><span class="d-btn-label">Supprimer mon compte</span><span class="d-btn-desc">Supprime définitivement ton compte et toutes tes données personnelles. Irréversible.</span></div></div>
+      <div class="d-btn danger" onclick="(function(){const v=prompt('Tape SUPPRIMER pour confirmer la suppression définitive de ton compte et toutes tes données :');if(v==='SUPPRIMER'){fetch('/account/delete?confirm=yes',{method:'DELETE'}).then(r=>r.json()).then(d=>{if(d.ok){showToast('Compte supprimé. Au revoir !','ok',4000);setTimeout(()=>window.location.href='/logout',2000);}else{showToast('Erreur : '+(d.message||'?'),'err',5000);}}).catch(()=>showToast('Erreur réseau','err',4000));}else if(v!==null){showToast('Confirmation incorrecte — compte non supprimé.','err',4000);}})()" ><span class="d-btn-icon">⛔</span><div class="d-btn-body"><span class="d-btn-label">Supprimer mon compte</span><span class="d-btn-desc">Supprime définitivement ton compte et toutes tes données personnelles. Irréversible.</span></div></div>
     </div>
     <div class="d-sep"></div>
     <div class="d-group">
@@ -189,14 +189,14 @@
   </div>
 </div>
 
-<!-- Modules JS — ?v=6 force le rechargement -->
-<script src="/static/chat-onboarding.js?v=6"></script>
-<script src="/static/chat-shortcuts.js?v=6"></script>
-<script src="/static/chat-voice.js?v=6"></script>
-<script src="/static/chat-feedback.js?v=6"></script>
-<script src="/static/chat-triage.js?v=6"></script>
-<script src="/static/chat-admin.js?v=6"></script>
-<script src="/static/chat.js?v=6"></script>
+<!-- Modules JS — ?v=7 force le rechargement -->
+<script src="/static/chat-onboarding.js?v=7"></script>
+<script src="/static/chat-shortcuts.js?v=7"></script>
+<script src="/static/chat-voice.js?v=7"></script>
+<script src="/static/chat-feedback.js?v=7"></script>
+<script src="/static/chat-triage.js?v=7"></script>
+<script src="/static/chat-admin.js?v=7"></script>
+<script src="/static/chat.js?v=7"></script>
 
 <script>
   if ('serviceWorker' in navigator) {
