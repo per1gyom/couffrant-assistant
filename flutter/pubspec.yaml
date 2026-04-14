@@ -16,13 +16,14 @@ dependencies:
   flutter_riverpod: ^2.4.9
   flutter_markdown: ^0.6.18
   just_audio: ^0.9.36
-  speech_to_text: ^6.6.0
-  image_picker: ^1.0.7
-  file_picker: ^6.1.1
   device_info_plus: ^9.1.1
   url_launcher: ^6.2.2
   path_provider: ^2.1.1
   local_auth: ^2.1.8
+  # Phase 2.7+ : re-ajouter quand on fera les pieces jointes
+  # image_picker: ^1.0.7
+  # file_picker: ^6.1.1
+  # speech_to_text: ^6.6.0  # Phase 3
 
 dev_dependencies:
   flutter_test:
