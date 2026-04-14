@@ -6,6 +6,7 @@ import '../services/chat_service.dart';
 import '../services/tts_service.dart';
 import '../services/feedback_service.dart';
 import 'login_screen.dart';
+import 'topics_sheet.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key});
@@ -223,6 +224,17 @@ class _ChatScreenState extends State<ChatScreen> {
     Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const LoginScreen()));
   }
 
+
+
+  void _showTopics() {
+    showModalBottomSheet(context: context, backgroundColor: const Color(0xFF1A1C24),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (_) => TopicsSheet(onTopicTap: (title) {
+        _sendMessage('Fais-moi un point sur le sujet "$title"');
+      }),
+    );
+  }
   void _showSpeedSheet() {
     showModalBottomSheet(context: context, backgroundColor: const Color(0xFF1A1C24),
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
@@ -278,6 +290,10 @@ class _ChatScreenState extends State<ChatScreen> {
         const SizedBox(width: 8),
         const Text('Raya', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white)),
         const Spacer(),
+        // Bouton Sujets
+        IconButton(
+          icon: Icon(Icons.bookmark_outline, color: Colors.white.withOpacity(0.5), size: 22),
+          onPressed: _showTopics, tooltip: 'Sujets'),
         PopupMenuButton<String>(
           icon: Icon(Icons.more_vert, color: Colors.white.withOpacity(0.6)),
           color: const Color(0xFF1A1C24),

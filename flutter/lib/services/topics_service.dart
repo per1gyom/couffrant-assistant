@@ -36,7 +36,7 @@ class TopicsService {
 
   Future<void> setSectionTitle(String title) async {
     try {
-      await _api.postJson('${ApiConfig.topicsEndpoint}/settings', {'section_title': title});
+      await _api.dio.patch('${ApiConfig.topicsEndpoint}/settings', data: {'section_title': title});
     } catch (_) {}
   }
 
