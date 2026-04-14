@@ -4,13 +4,14 @@ Endpoints Raya : /speak, /raya, /token-status, /raya/feedback, /raya/why/{id}.
 Phase 3b (B8) : detection de session thematique via detect_session_theme().
 Phase 5B-1    : injection dynamique des actions par domaine via detect_query_domains().
 5D-2f         : charge les tenants de l'utilisateur et les passe au prompt builder.
-7-6D          : marquage automatique du rapport matinal livré via le chat.
+7-6D          : marquage automatique du rapport matinal livre via le chat.
 WEB-SEARCH    : activation de la recherche web Anthropic via RAYA_WEB_SEARCH_ENABLED.
 SPEAK-SPEED   : vitesse de lecture ElevenLabs dynamique via payload.speed.
-TOOL-READ-PDF : extraction texte pdfplumber injectée dans le contexte LLM (commit 3/3).
-A2a           : import direct depuis app.routes.actions (shim aria_actions supprimé).
-A4-4          : print() remplacés par logger.
-FIX-CLEAN-1   : nettoyage agressif des balises techniques + dédup confirmations.
+TOOL-READ-PDF : extraction texte pdfplumber injectee dans le contexte LLM (commit 3/3).
+A2a           : import direct depuis app.routes.actions (shim aria_actions supprime).
+A4-4          : print() remplaces par logger.
+FIX-CLEAN-1   : nettoyage agressif des balises techniques + dedup confirmations.
+FIX-ODOO      : nettoyage fragments Odoo inline (pipes + JSON arrays).
 """
 import json
 import os
@@ -259,7 +260,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         user_tenants=user_tenants,
     )
 
-    # 6. Appel LLM (WEB-SEARCH : activé selon variable d'environnement)
+    # 6. Appel LLM (WEB-SEARCH : active selon variable d'environnement)
     messages = []
     for h in db_ctx["history"]:
         messages.append({"role": "user",      "content": h["user_input"]})
@@ -301,6 +302,8 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     clean_response = raya_response
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', clean_response)
     clean_response = re.sub(r'\[SPEAK_SPEED:[\d.]+\]', '', clean_response)
+    # FIX-ODOO : nettoyer les fragments Odoo/JSON bruts (inline ou en debut de ligne)
+    clean_response = re.sub(r'\|?\["[^"]*"(?:,"[^"]*")*\](?:\|?\d*\]?)?', '', clean_response)
     clean_response = re.sub(r'^\s*\|?\["[^"]+".*$', '', clean_response, flags=re.MULTILINE)
     clean_response = re.sub(r'\n{3,}', '\n\n', clean_response).strip()
     if actions_confirmed:
@@ -330,7 +333,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     finally:
         if conn: conn.close()
 
-    # 10b. Log d'activité (7-ACT)
+    # 10b. Log d'activite (7-ACT)
     try:
         from app.activity_log import log_activity
         log_activity(username, "conversation", str(aria_memory_id),
@@ -338,13 +341,13 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     except Exception:
         pass
 
-    # 10c. Marquage rapport livré si l'utilisateur le demande dans le chat (7-6D)
+    # 10c. Marquage rapport livre si l'utilisateur le demande dans le chat (7-6D)
     try:
         from app.routes.actions.report_actions import get_today_report, mark_report_delivered
         report = get_today_report(username)
         if report and not report["delivered"] and len(clean_response) > 200:
             query_lower = (payload.query or "").lower()
-            if "rapport" in query_lower or "résumé" in query_lower or "resume" in query_lower:
+            if "rapport" in query_lower or "resume" in query_lower:
                 mark_report_delivered(report["id"], "chat")
     except Exception:
         pass
@@ -399,7 +402,6 @@ def _build_user_content(payload: RayaQuery):
                       "text": f"[Image jointe{file_name_info}]\n{payload.query}"
                       if payload.query else f"[Image jointe{file_name_info}] Analyse ce document."})
     elif payload.file_type == "application/pdf":
-        # TOOL-READ-PDF : extraction texte via pdfplumber + injection dans le contexte LLM
         enriched = payload.query or ""
         try:
             import base64 as _b64
