@@ -20,6 +20,7 @@ P0-1    : guardrail anti-injection + balises <donnees_externes>.
 A5-2    : fix DB connection leak dans patterns_block (try/finally).
 FIX-LEARN : discipline des apprentissages — moins agressif, output plus propre.
 FIX-CLEAN-2 : guardrail — pas de narration verbeuse des actions.
+TOPICS-5 : injection des sujets actifs utilisateur + CREATE_TOPIC action.
 """
 import os
 import json
@@ -481,6 +482,29 @@ Tu connais {display_name} en profondeur. Comportement attendu :
 
     capabilities_block = "\n\n" + get_user_capabilities_prompt(username, tools)
 
+    # TOPICS : injecter les sujets actifs de l'utilisateur
+    topics_block = ""
+    try:
+        _conn_t = get_pg_conn()
+        _c_t = _conn_t.cursor()
+        _c_t.execute("""
+            SELECT title, status FROM user_topics
+            WHERE username = %s AND status != 'archived'
+            ORDER BY updated_at DESC LIMIT 10
+        """, (username,))
+        _topic_rows = _c_t.fetchall()
+        _conn_t.close()
+        if _topic_rows:
+            _lines = [f"  - {r[0]} ({r[1]})" for r in _topic_rows]
+            topics_block = (
+                "\n\n=== SUJETS DE L'UTILISATEUR ===\n"
+                + "\n".join(_lines)
+                + "\nQuand l'utilisateur parle d'un sujet ci-dessus, utilise-le comme contexte."
+                + "\nPour creer un nouveau sujet : [ACTION:CREATE_TOPIC:titre du sujet]"
+            )
+    except Exception:
+        pass
+
     # WEB-SEARCH : informer Raya qu'elle a acces a internet
     web_info = ""
     try:
@@ -529,6 +553,8 @@ Tu ne connais PAS le mot "Jarvis" et tu ne l'utilises JAMAIS. Tu es Raya, c'est 
 {f"=== TA MEMOIRE (pertinente pour cette question) ==={chr(10)}{aria_rules}" if aria_rules else "Ta memoire est vide. Tu peux commencer a construire via [ACTION:LEARN]."}
 
 {f"=== TES OBSERVATIONS SUR {display_name.upper()} ==={chr(10)}{aria_insights}" if aria_insights else ""}{theme_context_block}{conv_context_block}{teams_context_block}{mail_filter_block}{pending_block}{alerts_block}{report_block}{team_block}
+
+{topics_block}
 
 {f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}
 
