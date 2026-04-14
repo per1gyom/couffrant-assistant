@@ -1,6 +1,6 @@
 # Raya Flutter — État de session & Suivi
 
-**Dernière mise à jour : 14/04/2026** — Sonnet (exécutant Flutter)
+**Dernière mise à jour : 14/04/2026 15h20** — Sonnet (exécutant Flutter)
 **Conversation dédiée : développement app native iOS/Android**
 
 ---
@@ -17,6 +17,10 @@
 - Langue : français, vocabulaire "Terminal", concis
 - Fin de session : mettre à jour CE document avec l'avancement
 - Chaque prompt commence par lire ce fichier pour reprendre le contexte
+
+### Documents liés
+- `docs/raya_flutter_ux_specs.md` — Specs UX complètes (pour Opus + PWA)
+- `docs/raya_session_state.md` — État du backend (géré par Opus)
 
 ---
 
@@ -39,7 +43,48 @@
 
 ---
 
-## 2. BACKEND — CE QUI EXISTE (NE PAS TOUCHER)
+## 2. DESIGN UX FIGÉ (validé Guillaume 14/04/2026)
+
+### 2.1 Principes
+- **Conversation unique et continue** — pas de multi-conversations, Raya a la mémoire
+- **Écran = 95% échange** — bidirectionnel, minimaliste
+- **Voix en premier** — le micro est le héros de l'interface mobile
+
+### 2.2 Écran principal
+- **Header ultra-fin** : point vert santé + "Raya" + bouton signet (sujets) + menu ⋮
+- **Zone de chat** : tout l'espace, scroll infini vers le haut (historique par blocs de 20)
+- **Barre d'input** : 📎 pièce jointe + champ texte + **micro vert** (gros, proéminent) + envoi
+- **Séparateur** "— conversation précédente —" entre les sessions
+
+### 2.3 Bulles de message
+- **Raya** : fond secondaire, avatar ✦ vert, rendu markdown, actions en dessous (🔊👍👎💡🐛)
+- **Utilisateur** : fond bleu clair, avatar initiale, texte brut
+- **Badge sujet** : quand un sujet est ouvert, badge violet dans la bulle utilisateur
+
+### 2.4 Menu ⋮ (dropdown compact)
+- AutoSpeak (toggle on/off)
+- Vitesse voix (slider 0.5x → 2.5x)
+- Thème sombre/clair
+- Connecteurs (si admin)
+- Backup (si admin)
+- Signatures (si admin)
+- Export RGPD
+- Mentions légales
+- Déconnexion
+
+### 2.5 Sujets / Projets (NOUVELLE FONCTIONNALITÉ)
+- **Bouton signet** dans le header → ouvre un **bottom sheet**
+- **Titre de la section personnalisable** : "Mes sujets", "Mes projets", "Mes dossiers"… modifiable par l'utilisateur
+- **Liste des sujets** : titre (modifiable), statut (actif/en pause/archivé), date dernier échange
+- **Tap sur un sujet** → envoie automatiquement "Fais-moi un point sur le sujet [titre]" à Raya
+- **Bouton "+"** pour créer un sujet
+- **Création vocale** : "Raya, crée un sujet : Process de devis"
+- **Backend requis** : table `user_topics` + 5 endpoints (voir `docs/raya_flutter_ux_specs.md`)
+- **Dépendance** : attendre que Opus crée les endpoints avant d'implémenter côté Flutter
+
+---
+
+## 3. BACKEND — CE QUI EXISTE (NE PAS TOUCHER)
 
 ### Auth (app/routes/auth.py)
 - `POST /login-app` : form-encoded (username + password) → session cookie
@@ -50,7 +95,7 @@
 
 **Décision Flutter auth :** Utiliser `dio` + `cookie_jar` pour gérer les cookies de session exactement comme la PWA. Si ça ne marche pas sur iOS natif, on demandera à Opus d'ajouter un endpoint `/auth/token` JWT.
 
-### API Endpoints (base URL : https://app.raya-ia.fr)
+### API Endpoints existants (base URL : https://app.raya-ia.fr)
 
 | Endpoint | Méthode | Body | Retour | Usage |
 |---|---|---|---|---|
@@ -75,6 +120,16 @@
 | `/legal` | GET | — | HTML | Mentions légales |
 | `/onboarding/status` | GET | — | `{completed}` | État onboarding |
 
+### API Endpoints à venir (créés par Opus)
+
+| Endpoint | Méthode | Body | Retour | Usage |
+|---|---|---|---|---|
+| `GET /topics` | GET | — | `{section_title, topics: [...]}` | Liste sujets |
+| `POST /topics` | POST | `{title}` | `{id, title, status}` | Créer sujet |
+| `PATCH /topics/{id}` | PATCH | `{title?, status?}` | `{id, title, status}` | Modifier sujet |
+| `DELETE /topics/{id}` | DELETE | — | `{ok}` | Supprimer sujet |
+| `PATCH /topics/settings` | PATCH | `{section_title}` | `{section_title}` | Titre section |
+
 ### Format de la réponse `/raya`
 ```json
 {
@@ -83,7 +138,7 @@
   "pending_actions": [{"id": 1, "action_type": "...", "label": "...", "payload": {...}}],
   "aria_memory_id": 42,
   "model_tier": "smart",
-  "ask_choice": {"question": "...", "options": ["A", "B", "C"]} // ou null
+  "ask_choice": {"question": "...", "options": ["A", "B", "C"]}
 }
 ```
 
@@ -99,7 +154,7 @@
 
 ---
 
-## 3. STACK FLUTTER
+## 4. STACK FLUTTER
 
 ### Packages prévus
 | Package | Usage | Version cible |
@@ -129,28 +184,32 @@ flutter/
 │   │   ├── user.dart               # User + session
 │   │   ├── feedback.dart           # Feedback payload
 │   │   ├── pending_action.dart     # Action en attente
-│   │   └── ask_choice.dart         # Choix interactif
+│   │   ├── ask_choice.dart         # Choix interactif
+│   │   └── topic.dart              # Sujet utilisateur
 │   ├── services/
 │   │   ├── api_service.dart        # Client HTTP + cookies
 │   │   ├── auth_service.dart       # Login/logout
 │   │   ├── chat_service.dart       # POST /raya + historique
 │   │   ├── tts_service.dart        # POST /speak + lecture audio
 │   │   ├── stt_service.dart        # Reconnaissance vocale
-│   │   └── feedback_service.dart   # Feedback + bug report
+│   │   ├── feedback_service.dart   # Feedback + bug report
+│   │   └── topics_service.dart     # CRUD sujets
 │   ├── providers/
 │   │   ├── auth_provider.dart
 │   │   ├── chat_provider.dart
-│   │   └── voice_provider.dart
+│   │   ├── voice_provider.dart
+│   │   └── topics_provider.dart
 │   └── screens/
 │       ├── login_screen.dart
 │       ├── chat_screen.dart
-│       ├── admin_drawer.dart
 │       └── widgets/
 │           ├── message_bubble.dart
 │           ├── chat_input.dart
 │           ├── pending_actions_bar.dart
 │           ├── ask_choice_buttons.dart
-│           └── feedback_buttons.dart
+│           ├── feedback_buttons.dart
+│           ├── settings_menu.dart      # Menu ⋮
+│           └── topics_sheet.dart       # Bottom sheet sujets
 ├── pubspec.yaml
 ├── ios/
 └── android/
@@ -158,7 +217,7 @@ flutter/
 
 ---
 
-## 4. PLAN DE DÉVELOPPEMENT
+## 5. PLAN DE DÉVELOPPEMENT
 
 ### Phase 1 — Squelette & Auth ⬜ (EN ATTENTE)
 - [ ] F1.1 : `flutter create` + structure dossiers
@@ -170,14 +229,14 @@ flutter/
 
 ### Phase 2 — Chat core ⬜
 - [ ] F2.1 : `chat_service.dart` (POST /raya + GET /chat/history)
-- [ ] F2.2 : `chat_screen.dart` (liste de messages scrollable)
+- [ ] F2.2 : `chat_screen.dart` (liste de messages scrollable + header)
 - [ ] F2.3 : `message_bubble.dart` (rendu markdown, avatar, actions)
-- [ ] F2.4 : `chat_input.dart` (input texte + bouton envoi)
+- [ ] F2.4 : `chat_input.dart` (input texte + bouton envoi + micro + 📎)
 - [ ] F2.5 : Gestion `ask_choice` → boutons interactifs
 - [ ] F2.6 : Gestion `pending_actions` → zone confirmation
 - [ ] F2.7 : Pièces jointes image (picker + base64 + preview)
 - [ ] F2.8 : Pièces jointes PDF (picker + base64 + badge)
-- [ ] F2.9 : Historique au chargement + séparateur
+- [ ] F2.9 : Historique au chargement + séparateur + scroll infini
 
 ### Phase 3 — Voix (GAIN PRINCIPAL) ⬜
 - [ ] F3.1 : `tts_service.dart` (POST /speak → audio/mpeg → lecture just_audio)
@@ -193,28 +252,34 @@ flutter/
 - [ ] F4.3 : Bouton 🐛 bug report + dialog Bug/Amélioration
 - [ ] F4.4 : `device_info_plus` pour info appareil auto
 
-### Phase 5 — Admin & Polish ⬜
-- [ ] F5.1 : Tiroir admin (détection scope admin)
+### Phase 5 — Admin, Sujets & Polish ⬜
+- [ ] F5.1 : `settings_menu.dart` — menu ⋮ (AutoSpeak, vitesse, thème, admin, RGPD, déconnexion)
 - [ ] F5.2 : Actions admin (backup, signatures, diag, connecteurs)
 - [ ] F5.3 : RGPD (export, suppression, mentions légales)
-- [ ] F5.4 : Thème Raya (couleurs, fonts, dark mode)
-- [ ] F5.5 : Splash screen + icône app
-- [ ] F5.6 : Push notifications (Firebase — préparation)
-- [ ] F5.7 : Onboarding (si pas complété)
+- [ ] F5.4 : `topics_sheet.dart` — bottom sheet sujets (DÉPEND endpoints Opus)
+- [ ] F5.5 : `topics_service.dart` — CRUD sujets via API
+- [ ] F5.6 : Titre section personnalisable + noms sujets éditables
+- [ ] F5.7 : Thème Raya (couleurs, fonts, dark mode)
+- [ ] F5.8 : Splash screen + icône app
+- [ ] F5.9 : Push notifications (Firebase — préparation)
+- [ ] F5.10 : Onboarding (si pas complété)
 
 ---
 
-## 5. HISTORIQUE DES SESSIONS
+## 6. HISTORIQUE DES SESSIONS
 
-### Session 14/04/2026 — Initialisation
+### Session 14/04/2026 — Initialisation + Design UX
 - Lecture complète du projet : `raya_session_state.md`, `raya_roadmap_demo.md`, `raya_maintenance.md`
 - Lecture code : `raya.py`, `deps.py`, `auth.py`, `chat.js`
 - Compréhension de l'API complète et du frontend actuel
 - Création de ce document de suivi
 - Décision : cookies de session (pas JWT pour l'instant)
 - Plan de développement en 5 phases établi
+- **Design UX figé avec Guillaume** : écran minimaliste, conversation unique, menu ⋮, micro héros
+- **Fonctionnalité "Sujets"** validée : bottom sheet, titre section personnalisable, noms éditables
+- Création de `docs/raya_flutter_ux_specs.md` (rapport complet pour Opus)
 
 ---
 
-## 6. REPRISE
+## 7. REPRISE
 « Bonjour. Projet Raya, conversation Flutter. Guillaume Perrin (Couffrant Solar). En français, vocabulaire Terminal, concis. Tu es l'EXÉCUTANT Flutter. Lis `docs/raya_flutter_session.md` sur `per1gyom/couffrant-assistant` branche `main` via GitHub MCP. Reprends où on en était. »
