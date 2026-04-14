@@ -195,7 +195,6 @@ function addLoading() {
 
 // --- BUG REPORT (P1-4) ---
 function openBugReportDialog(ariaMemoryId, rayaText, msgRow, triggerBtn) {
-  // Récupère le texte utilisateur précédant ce message Raya
   let userInput = '';
   try {
     const prev = msgRow.previousElementSibling;
@@ -204,7 +203,6 @@ function openBugReportDialog(ariaMemoryId, rayaText, msgRow, triggerBtn) {
     }
   } catch(_) {}
 
-  // Supprime tout dialog bug existant
   document.querySelectorAll('.bug-report-dialog').forEach(el => el.remove());
 
   const dialog = document.createElement('div');
@@ -226,7 +224,6 @@ function openBugReportDialog(ariaMemoryId, rayaText, msgRow, triggerBtn) {
     </div>
   `;
 
-  // Sélection du type
   dialog.querySelectorAll('.bug-type-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       selectedType = btn.dataset.type;
@@ -239,10 +236,8 @@ function openBugReportDialog(ariaMemoryId, rayaText, msgRow, triggerBtn) {
     });
   });
 
-  // Annuler
   dialog.querySelector('.bug-cancel').addEventListener('click', () => dialog.remove());
 
-  // Envoyer
   dialog.querySelector('.bug-submit').addEventListener('click', async () => {
     const desc = dialog.querySelector('.bug-desc').value.trim();
     if (!desc) { showToast('Décris le problème avant d\'envoyer.', 'err', 2500); return; }
@@ -276,7 +271,6 @@ function openBugReportDialog(ariaMemoryId, rayaText, msgRow, triggerBtn) {
     }
   });
 
-  // Insérer après la bulle
   msgRow.insertAdjacentElement('afterend', dialog);
   dialog.querySelector('.bug-desc').focus();
 }
@@ -345,7 +339,8 @@ async function sendMessage() {
       if (speedMatch) { setSpeakSpeed(parseFloat(speedMatch[1])); data.answer = data.answer.replace(/\[SPEAK_SPEED:[\d.]+\]/,'').trim(); }
     }
     const msgRow = addMessage(data.answer,'raya',null,data.aria_memory_id||null);
-    if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'));
+    // A3: passe true pour signaler autoSpeak — speak() skipera sur iOS
+    if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'), true);
     if (data.ask_choice) renderAskChoice(data.ask_choice);
     if (data.actions && data.actions.length > 0) {
       const ok=data.actions.filter(a=>a.startsWith('✅')); const err=data.actions.filter(a=>a.startsWith('❌')); const pend=data.actions.filter(a=>a.startsWith('⏸️'));
