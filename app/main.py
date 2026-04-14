@@ -64,8 +64,7 @@ class InactivityTimeoutMiddleware(BaseHTTPMiddleware):
     _PUBLIC = (
         "/login-app", "/logout", "/health", "/webhook/",
         "/static/", "/sw.js", "/forgot-password",
-        "/reset-password", "/forced-reset", "/pwa/",
-        "/legal",
+        "/reset-password", "/forced-reset", "/pwa/", "/legal",
     )
 
     async def dispatch(self, request: Request, call_next):
@@ -116,8 +115,8 @@ def root():
 
 
 @app.get("/legal")
-def legal_page():
-    """Page publique — mentions légales et politique de confidentialité."""
+def legal():
+    """Page mentions legales — publique, sans authentification requise."""
     return FileResponse("app/templates/legal.html", media_type="text/html")
 
 
@@ -153,19 +152,13 @@ def service_worker():
 
 
 def _generate_raya_png(size: int) -> Response:
-    """
-    PWA-ICON : charge le logo Raya depuis app/static/ et le redimensionne.
-    Fallback : carre violet #6366f1 si l'image est absente.
-    """
     from PIL import Image
-
     try:
         src = Image.open(
             "app/static/5AEA8C3F-2F59-4ED0-8AAA-3B324C3498DF.png"
         ).convert("RGB")
     except Exception:
         src = Image.new("RGB", (512, 512), (99, 102, 241))
-
     resized = src.resize((size, size), Image.LANCZOS)
     buf = io.BytesIO()
     resized.save(buf, format="PNG")
