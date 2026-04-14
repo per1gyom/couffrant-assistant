@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Raya</title>
+
+<!-- PWA -->
+<link rel="manifest" href="/static/manifest.json?v=7">
+<meta name="theme-color" content="#6366f1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Raya">
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=7">
+
+<!-- CSS -->
+<link rel="stylesheet" href="/static/chat.css?v=7">
+<link rel="stylesheet" href="/static/onboarding.css?v=7">
+<link rel="stylesheet" href="/static/mobile.css?v=7">
+
+<!-- marked.js + DOMPurify (CDN versionné, stable) -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+</head>
+<body>
+<div class="app">
+
+  <div class="header">
+    <div class="logo">
+      <div class="logo-dot" id="msStatus" title="Microsoft 365"></div>
+      Raya
+    </div>
+    <div class="header-sep"></div>
+    <div class="mail-badge" onclick="quickAsk('Quels sont mes mails urgents ?')" title="Mails non lus">
+      📬 <span id="mailBadgeLabel">Mails</span>
+      <span class="count" id="mailCount"></span>
+    </div>
+    <div class="header-user" id="headerUser"></div>
+    <button class="h-btn token-alert-btn" id="tokenAlertBtn" onclick="toggleTokenBanner()" style="display:none" title="Problème de connexion">⚠️</button>
+    <button class="h-btn" id="autoSpeakBtn" onclick="toggleAutoSpeak()" title="Lecture automatique">🔊 Auto</button>
+    <button class="h-btn" id="adminBtn" onclick="toggleDrawer()">⚙️ Admin</button>
+    <a href="/admin/panel" class="h-btn" id="adminPanelBtn" title="Panel admin" style="display:none">🖥 Panel</a>
+    <a href="/logout" class="h-btn danger">Déconnexion</a>
+  </div>
+
+  <div class="token-banner" id="tokenBanner"></div>
+
+  <div class="quick-wrap">
+    <div class="quick-row" id="quickRow"></div>
+  </div>
+
+  <div class="messages-wrap">
+    <div class="messages" id="messages">
+      <div class="welcome" id="welcomeMsg">
+        <div class="welcome-icon">✦</div>
+        <h2 id="welcomeTitle">Bonjour !</h2>
+        <p>Je suis Raya, ton assistante personnelle.<br>Je surveille tes mails, ton agenda et ton activité.</p>
+      </div>
+    </div>
+    <button class="scroll-down-btn" id="scrollDownBtn" onclick="scrollToBottom()" title="Défiler vers le bas">↓</button>
+  </div>
+
+  <div class="triage-bar" id="triageBar">
+    <button class="triage-action triage-skip" onclick="handleTriage('skip')">⏭ Passer</button>
+    <button class="triage-action triage-archive" onclick="handleTriage('archive')">📁 Archiver</button>
+    <button class="triage-action triage-delete" onclick="handleTriage('delete')">🗑 Corbeille</button>
+    <button class="triage-action triage-reply" onclick="handleTriage('reply')">✉️ Répondre</button>
+  </div>
+
+  <div class="input-zone">
+    <div class="attachment-preview" id="attachmentPreview">
+      <span id="attachmentName">Aucun fichier</span>
+      <button class="attachment-remove" onclick="removeAttachment()">✕</button>
+    </div>
+    <div class="input-wrapper" id="inputWrapper">
+      <textarea id="input" placeholder="Envoie un message à Raya…" rows="1" oninput="autoResize(this)" onkeydown="handleKey(event)"></textarea>
+      <div class="input-btns">
+        <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="Joindre">📎</button>
+        <button class="icon-btn" id="micBtn" onclick="toggleMic()" title="Dicter">🎤</button>
+        <button class="icon-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+      </div>
+    </div>
+    <div class="mic-status" id="micStatus">🎩 En écoute… parle, je t'entends</div>
+    <input type="file" id="fileInput" accept="image/*,.pdf" onchange="handleFileSelect(event)">
+  </div>
+</div>
+
+<div id="toast-container"></div>
+
+<!-- MODAL RACCOURCIS -->
+<div class="modal-overlay" id="modalShortcuts">
+  <div class="modal">
+    <div class="modal-title">✏️ Raccourcis rapides</div>
+    <div class="modal-sub">Personnalisez les boutons de raccourcis. Cliquez sur ✕ pour supprimer, ou ajoutez le vôtre.</div>
+    <div class="shortcut-list" id="shortcutList"></div>
+    <div class="shortcut-add">
+      <input type="text" id="newShortcutText" placeholder="ex: Point clients de la semaine" maxlength="80">
+      <button class="m-btn m-btn-primary" onclick="addShortcut()">Ajouter</button>
+    </div>
+    <div class="modal-footer">
+      <button class="m-btn m-btn-ghost" onclick="closeShortcuts()">Annuler</button>
+      <button class="m-btn m-btn-primary" onclick="saveShortcuts()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- OVERLAY ONBOARDING -->
+<div class="onboarding-overlay" id="onboardingOverlay">
+  <div class="onboarding-modal">
+    <div class="onb-header">
+      <span class="onb-logo">✦ Raya</span>
+      <button class="onb-skip" onclick="skipOnboarding()">Passer pour l'instant →</button>
+    </div>
+    <div id="onboardingContent"></div>
+  </div>
+</div>
+
+<!-- TIROIR ADMIN -->
+<div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+  <div class="drawer-header">
+    <span class="drawer-title">⚙ Administration</span>
+    <button class="drawer-close" onclick="closeDrawer()">✕</button>
+  </div>
+  <div class="drawer-body">
+    <div class="d-group">
+      <div class="d-group-title">🧠 Mémoire &amp; apprentissage</div>
+      <div class="d-btn" onclick="drawerAction(this,'/build-memory','build')"><span class="d-btn-icon">🔄</span><div class="d-btn-body"><span class="d-btn-label">Reconstruire le contexte</span><span class="d-btn-desc">Relit mails et conversations pour mettre à jour le résumé et les fiches contacts.</span><div class="d-btn-result" id="result-build"></div></div></div>
+      <div class="d-btn" onclick="drawerAction(this,'/synth','synth')"><span class="d-btn-icon">📝</span><div class="d-btn-body"><span class="d-btn-label">Synthèse des conversations</span><span class="d-btn-desc">Extrait des règles et insights des 15 dernières conversations.</span><div class="d-btn-result" id="result-synth"></div></div></div>
+      <div class="d-btn" onclick="drawerAction(this,'/analyze-raw-mails','analyze')"><span class="d-btn-icon">🔍</span><div class="d-btn-body"><span class="d-btn-label">Analyser mails non traités</span><span class="d-btn-desc">Lance l'analyse IA sur les mails ingérés mais pas encore analysés.</span><div class="d-btn-result" id="result-analyze"></div></div></div>
+      <div class="d-btn" onclick="drawerAction(this,'/build-style-profile','style')"><span class="d-btn-icon">✍️</span><div class="d-btn-body"><span class="d-btn-label">Reconstruire profil de style</span><span class="d-btn-desc">Analyse les mails envoyés pour mettre à jour ta signature rédactionnelle.</span><div class="d-btn-result" id="result-style"></div></div></div>
+    </div>
+    <div class="d-group">
+      <div class="d-group-title">📊 État du système</div>
+      <div class="d-btn" onclick="drawerMemoryStatus(this)"><span class="d-btn-icon">📈</span><div class="d-btn-body"><span class="d-btn-label">Voir les compteurs</span><span class="d-btn-desc">Conversations, règles actives, insights, mails en base.</span><div class="d-btn-result" id="result-status"></div></div></div>
+      <div class="d-btn" onclick="drawerRules(this)"><span class="d-btn-icon">📋</span><div class="d-btn-body"><span class="d-btn-label">Voir mes règles actives</span><span class="d-btn-desc">Règles comportementales, style et métier que Raya a apprises.</span><div class="d-btn-result" id="result-rules"></div></div></div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-group">
+      <div class="d-group-title">⚠️ Actions sensibles</div>
+      <div class="d-btn" onclick="drawerAction(this,'/purge-memory','purge')"><span class="d-btn-icon">🗓️</span><div class="d-btn-body"><span class="d-btn-label">Purger les vieux mails</span><span class="d-btn-desc">Supprime les mails de plus de 90 jours. Règles et conversations conservées.</span><div class="d-btn-result" id="result-purge"></div></div></div>
+      <div class="d-btn danger" onclick="drawerShowConfirm('confirm-rebuild')"><span class="d-btn-icon">⛔</span><div class="d-btn-body"><span class="d-btn-label">Vider l'historique mails</span><span class="d-btn-desc">Efface tous les mails en base. Règles et insights préservés.</span><div class="d-confirm" id="confirm-rebuild"><div class="d-confirm-text">⚠️ Tous les mails en base seront supprimés. Confirmer ?</div><div class="d-confirm-btns"><button class="d-confirm-yes" onclick="drawerConfirmAction(event,'/rebuild-memory','rebuild')">Oui, vider</button><button class="d-confirm-no" onclick="drawerHideConfirm(event,'confirm-rebuild')">Annuler</button></div></div><div class="d-btn-result" id="result-rebuild"></div></div></div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-group">
+      <div class="d-group-title">🔧 Urgence / Debug</div>
+      <div class="d-btn" onclick="drawerAction(this,'/learn-inbox-mails','inbox')"><span class="d-btn-icon">📥</span><div class="d-btn-body"><span class="d-btn-label">Forcer ingéstion inbox</span><span class="d-btn-desc">Importe les 50 derniers mails. Utile après une coupure du token.</span><div class="d-btn-result" id="result-inbox"></div></div></div>
+      <div class="d-btn" onclick="drawerAction(this,'/learn-sent-mails','sent')"><span class="d-btn-icon">📤</span><div class="d-btn-body"><span class="d-btn-label">Forcer ingéstion envoyés</span><span class="d-btn-desc">Importe les 50 derniers mails envoyés pour enrichir le style.</span><div class="d-btn-result" id="result-sent"></div></div></div>
+      <div class="d-btn" onclick="drawerAction(this,'/init-db','initdb')"><span class="d-btn-icon">🗄️</span><div class="d-btn-body"><span class="d-btn-label">Vérifier la base de données</span><span class="d-btn-desc">Crée les tables manquantes et exécute les migrations. Sans danger.</span><div class="d-btn-result" id="result-initdb"></div></div></div>
+      <div class="d-btn nav" onclick="window.open('/admin/backup','_blank')"><span class="d-btn-icon">💾</span><div class="d-btn-body"><span class="d-btn-label">Télécharger un backup</span><span class="d-btn-desc">Exporte la base de données complète. À faire régulièrement.</span></div></div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-group">
+      <div class="d-group-title">🎓 Onboarding</div>
+      <div class="d-btn" onclick="drawerAction(this,'/onboarding/restart','onb-restart');closeDrawer()"><span class="d-btn-icon">🔁</span><div class="d-btn-body"><span class="d-btn-label">Relancer l'onboarding</span><span class="d-btn-desc">Recommencer la configuration initiale du profil Raya.</span><div class="d-btn-result" id="result-onb-restart"></div></div></div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-group">
+      <div class="d-group-title">📧 Connexions</div>
+      <div class="d-btn nav" onclick="window.location.href='/login/gmail'">
+        <span class="d-btn-icon">✉️</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Connecter Gmail</span>
+          <span class="d-btn-desc">Autoriser Raya à lire tes mails Gmail via OAuth2 Google.</span>
+        </div>
+      </div>
+      <div class="d-btn nav" onclick="window.location.href='/login'">
+        <span class="d-btn-icon">🔵</span>
+        <div class="d-btn-body">
+          <span class="d-btn-label">Reconnecter Microsoft 365</span>
+          <span class="d-btn-desc">Renouveler l'autorisation Microsoft si le token a expiré.</span>
+        </div>
+      </div>
+      <div class="d-btn" onclick="drawerAction(this,'/admin/extract-signatures','sig')"><span class="d-btn-icon">💌</span><div class="d-btn-body"><span class="d-btn-label">Récupérer mes signatures</span><span class="d-btn-desc">Analyse les derniers mails envoyés pour extraire ta signature automatiquement.</span><div class="d-btn-result" id="result-sig"></div></div></div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-group">
+      <div class="d-group-title">🔒 Données personnelles</div>
+      <div class="d-btn nav" onclick="window.open('/account/export','_blank')"><span class="d-btn-icon">📦</span><div class="d-btn-body"><span class="d-btn-label">Exporter mes données</span><span class="d-btn-desc">Télécharge toutes tes données Raya au format JSON (RGPD).</span></div></div>
+      <div class="d-btn danger" onclick="(function(){const v=prompt('Tape SUPPRIMER pour confirmer la suppression définitive de ton compte et toutes tes données :');if(v==='SUPPRIMER'){fetch('/account/delete?confirm=yes',{method:'DELETE'}).then(r=>r.json()).then(d=>{if(d.ok){showToast('Compte supprimé. Au revoir !','ok',4000);setTimeout(()=>window.location.href='/logout',2000);}else{showToast('Erreur : '+(d.message||'?'),'err',5000);}}).catch(()=>showToast('Erreur réseau','err',4000));}else if(v!==null){showToast('Confirmation incorrecte — compte non supprimé.','err',4000);}})()"><span class="d-btn-icon">⛔</span><div class="d-btn-body"><span class="d-btn-label">Supprimer mon compte</span><span class="d-btn-desc">Supprime définitivement ton compte et toutes tes données personnelles. Irréversible.</span></div></div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-group">
+      <div class="d-group-title">🔗 Navigation</div>
+      <div class="d-btn nav" onclick="window.open('/admin/panel','_blank')"><span class="d-btn-icon">🖥️</span><div class="d-btn-body"><span class="d-btn-label">Panel admin complet</span><span class="d-btn-desc">Gestion des utilisateurs, règles, insights, actions avancées.</span></div></div>
+      <div class="d-btn nav" onclick="window.open('/legal','_blank')"><span class="d-btn-icon">📜</span><div class="d-btn-body"><span class="d-btn-label">Mentions légales</span><span class="d-btn-desc">Mentions légales, politique de confidentialité et RGPD.</span></div></div>
+      <div class="d-btn nav" onclick="window.location.href='/logout'"><span class="d-btn-icon">🚪</span><div class="d-btn-body"><span class="d-btn-label">Déconnexion</span><span class="d-btn-desc">Ferme la session en cours.</span></div></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modules JS -->
+<script src="/static/chat-onboarding.js?v=7"></script>
+<script src="/static/chat-shortcuts.js?v=7"></script>
+<script src="/static/chat-voice.js?v=7"></script>
+<script src="/static/chat-feedback.js?v=7"></script>
+<script src="/static/chat-triage.js?v=7"></script>
+<script src="/static/chat-admin.js?v=7"></script>
+<script src="/static/chat.js?v=7"></script>
+
+<script>
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js', { scope: '/' })
+        .then(reg => {
+          console.log('[SW] Enregistré, scope:', reg.scope);
+          reg.update();
+        })
+        .catch(err => console.warn('[SW] Enregistrement échoué:', err));
+    });
+  }
+  (function(){
+    const params = new URLSearchParams(window.location.search);
+    if(params.get('gmail_connected')==='1'){
+      window.history.replaceState({}, '', '/chat');
+      setTimeout(()=>{ if(typeof showToast === 'function') showToast('✅ Gmail connecté avec succès !'); }, 800);
+    }
+    if(params.get('gmail_error')){
+      window.history.replaceState({}, '', '/chat');
+      setTimeout(()=>{ if(typeof showToast === 'function') showToast('❌ Connexion Gmail refusée : ' + params.get('gmail_error')); }, 800);
+    }
+  })();
+</script>
+</body>
+</html>
