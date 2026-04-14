@@ -308,6 +308,7 @@ class _ChatScreenState extends State<ChatScreen> {
             if (v == 'logout') _logout();
             if (v == 'autospeak') setState(() => _autoSpeak = !_autoSpeak);
             if (v == 'speed') _showSpeedSheet();
+            if (v == 'legal') launchUrl(Uri.parse('https://app.raya-ia.fr/legal'), mode: LaunchMode.externalApplication);
           },
           itemBuilder: (_) => [
             PopupMenuItem(enabled: false, child: Text('Connect\u00e9 : $_username',
@@ -324,6 +325,10 @@ class _ChatScreenState extends State<ChatScreen> {
               Icon(Icons.speed, color: Colors.white.withOpacity(0.6), size: 18),
               const SizedBox(width: 10),
               Text('Vitesse : ${_tts.speed.toStringAsFixed(1)}x', style: TextStyle(color: Colors.white.withOpacity(0.6))),
+            ])),
+            PopupMenuItem(value: 'legal', child: Row(children: [
+              Icon(Icons.gavel, color: Colors.white54, size: 18), SizedBox(width: 10),
+              Text('Mentions légales', style: TextStyle(color: Colors.white54)),
             ])),
             const PopupMenuDivider(),
             const PopupMenuItem(value: 'logout', child: Row(children: [
