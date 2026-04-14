@@ -2,11 +2,10 @@ import 'package:flutter/material.dart';
 import '../services/topics_service.dart';
 
 /// Bottom sheet des sujets/projets
-/// Tap sur un sujet → callback qui envoie "Fais-moi un point sur [sujet]" a Raya
+/// Tap sur un sujet → envoie "Fais-moi un point sur [sujet]" a Raya
 class TopicsSheet extends StatefulWidget {
   final void Function(String topicTitle) onTopicTap;
   const TopicsSheet({super.key, required this.onTopicTap});
-
   @override
   State<TopicsSheet> createState() => _TopicsSheetState();
 }
@@ -18,10 +17,7 @@ class _TopicsSheetState extends State<TopicsSheet> {
   bool _loading = true;
 
   @override
-  void initState() {
-    super.initState();
-    _load();
-  }
+  void initState() { super.initState(); _load(); }
 
   Future<void> _load() async {
     final topics = await _service.getTopics();
@@ -113,11 +109,9 @@ class _TopicsSheetState extends State<TopicsSheet> {
       constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.6),
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
-        // Handle
         Container(width: 36, height: 4, decoration: BoxDecoration(
           color: Colors.white24, borderRadius: BorderRadius.circular(2))),
         const SizedBox(height: 12),
-        // Header : titre + edit + add
         Row(children: [
           GestureDetector(onTap: _editTitle, child: Row(children: [
             Text(_sectionTitle, style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w600)),
@@ -137,15 +131,13 @@ class _TopicsSheetState extends State<TopicsSheet> {
           )),
         ]),
         const SizedBox(height: 16),
-        // Liste
         if (_loading) const Center(child: CircularProgressIndicator(color: Color(0xFF22C55E)))
         else if (_topics.isEmpty)
           Padding(padding: const EdgeInsets.symmetric(vertical: 32),
             child: Text('Aucun sujet. Ajoute ton premier projet !',
               style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 14)))
         else Expanded(child: ListView.builder(
-          shrinkWrap: true,
-          itemCount: _topics.length,
+          shrinkWrap: true, itemCount: _topics.length,
           itemBuilder: (ctx, i) {
             final t = _topics[i];
             return ListTile(
@@ -154,7 +146,7 @@ class _TopicsSheetState extends State<TopicsSheet> {
                 color: const Color(0xFF22C55E).withOpacity(0.1), borderRadius: BorderRadius.circular(10)),
                 child: const Center(child: Text('\u2726', style: TextStyle(fontSize: 16, color: Color(0xFF22C55E))))),
               title: Text(t.title, style: const TextStyle(color: Colors.white, fontSize: 14)),
-              subtitle: Text(_timeAgo(t.lastAccess),
+              subtitle: Text(_timeAgo(t.updatedAt),
                 style: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 11)),
               trailing: GestureDetector(onTap: () => _editTopic(t),
                 child: Icon(Icons.more_horiz, color: Colors.white.withOpacity(0.3), size: 20)),
