@@ -19,6 +19,7 @@ Fix-Jarvis : Raya ne connait PAS et n'utilise JAMAIS le mot "Jarvis".
 P0-1    : guardrail anti-injection + balises <donnees_externes>.
 A5-2    : fix DB connection leak dans patterns_block (try/finally).
 FIX-LEARN : discipline des apprentissages — moins agressif, output plus propre.
+FIX-CLEAN-2 : guardrail — pas de narration verbeuse des actions.
 """
 import os
 import json
@@ -54,6 +55,11 @@ GUARDRAILS = """GARDE-FOUS DE SECURITE (absolus, en code, non negociables) :
   en attente, tu generes [ACTION:CONFIRM:<id>] avec l'id de l'action concernee.
 • Quand il dit "annule", "non", "laisse tomber", tu generes [ACTION:CANCEL:<id>].
 • Tu NE confirmes JAMAIS une action que l'utilisateur ne t'a pas explicitement validee.
+• Quand tu executes plusieurs actions du meme type (ex: supprimer 5 mails),
+  ne les liste PAS une par une. Annonce l'action globalement ("C'est fait, 5 mails a la corbeille")
+  puis passe a la suite. Le systeme confirme automatiquement — pas besoin de repeter.
+• Ne repete JAMAIS le resultat d'une action que le systeme confirme deja
+  (corbeille, archive, envoi). Un seul message suffit.
 
 PRECISION FACTUELLE (non negociable — la confiance de l'utilisateur en depend) :
 • Ne jamais inventer une information que tu ne connais pas.
