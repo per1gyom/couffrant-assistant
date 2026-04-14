@@ -1,16 +1,16 @@
 """
-Liste ordonnée des migrations SQL idempotentes pour Raya.
-Ajouter les nouvelles migrations ICI UNIQUEMENT — ne pas éditer database.py.
-Chaque migration est exécutée une par une via init_postgres().
+Liste ordonnee des migrations SQL idempotentes pour Raya.
+Ajouter les nouvelles migrations ICI UNIQUEMENT — ne pas editer database.py.
+Chaque migration est executee une par une via init_postgres().
 
 Convention :
   - Toujours idempotente (IF NOT EXISTS, ON CONFLICT DO NOTHING, etc.)
   - Une migration = une action atomique
-  - Regrouper les migrations par phase avec un commentaire # ── Phase X ──
+  - Regrouper les migrations par phase avec un commentaire # -- Phase X --
 """
 
 MIGRATIONS = [
-    # ── Migrations historiques ──
+    # -- Migrations historiques --
     "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
     "ALTER TABLE aria_memory ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
     "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS username TEXT DEFAULT 'guillaume'",
@@ -70,7 +70,7 @@ MIGRATIONS = [
      "       SELECT 1 FROM oauth_tokens o\n"
      "       WHERE o.provider='google' AND o.username=g.username\n"
      "     )"),
-    # ── Phase 2 : tenant_id sur toutes les tables ──
+    # -- Phase 2 : tenant_id sur toutes les tables --
     "ALTER TABLE aria_rules           ADD COLUMN IF NOT EXISTS tenant_id TEXT",
     "ALTER TABLE aria_insights        ADD COLUMN IF NOT EXISTS tenant_id TEXT",
     "ALTER TABLE aria_memory          ADD COLUMN IF NOT EXISTS tenant_id TEXT",
@@ -115,24 +115,24 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_oauth_tokens_tenant_user     ON oauth_tokens (tenant_id, username)",
     "CREATE INDEX IF NOT EXISTS idx_reply_learning_tenant_user   ON reply_learning_memory (tenant_id, username)",
     "CREATE INDEX IF NOT EXISTS idx_sent_mail_tenant_user        ON sent_mail_memory (tenant_id, username)",
-    # ── Phase 3a : vectorisation des règles pour RAG ──
+    # -- Phase 3a : vectorisation des regles pour RAG --
     "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS embedding vector(1536)",
     "CREATE INDEX IF NOT EXISTS idx_rules_embedding ON aria_rules USING hnsw (embedding vector_cosine_ops)",
     "ALTER TABLE aria_hot_summary ADD COLUMN IF NOT EXISTS embedding vector(1536)",
-    # ── 5D-1 : peuplement user_tenant_access ──
+    # -- 5D-1 : peuplement user_tenant_access --
     ("INSERT INTO user_tenant_access (username, tenant_id, role) "
      "SELECT username, tenant_id, "
      "CASE WHEN scope = 'super_admin' THEN 'owner' WHEN scope = 'admin' THEN 'admin' ELSE 'user' END "
      "FROM users WHERE tenant_id IS NOT NULL ON CONFLICT (username, tenant_id) DO NOTHING"),
-    # ── 7-10 : shadow mode ──
+    # -- 7-10 : shadow mode --
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS shadow_mode BOOLEAN DEFAULT true",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS shadow_mode_until TIMESTAMP DEFAULT (NOW() + INTERVAL '14 days')",
-    # ── 7-5 : préférences de notification ──
+    # -- 7-5 : preferences de notification --
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS notification_prefs JSONB DEFAULT '{}'",
-    # ── 7-1a : Gmail OAuth2 ──
+    # -- 7-1a : Gmail OAuth2 --
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_credentials JSONB DEFAULT NULL",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS gmail_last_history_id TEXT DEFAULT NULL",
-    # ── FIX-JARVIS : purge du mot Jarvis dans les données existantes ──
+    # -- FIX-JARVIS --
     "UPDATE aria_rules SET rule = REPLACE(rule, 'Jarvis', 'Raya') WHERE rule ILIKE '%jarvis%'",
     "UPDATE aria_rules SET rule = REPLACE(rule, 'jarvis', 'Raya') WHERE rule ILIKE '%jarvis%'",
     "UPDATE aria_insights SET insight = REPLACE(insight, 'Jarvis', 'Raya') WHERE insight ILIKE '%jarvis%'",
@@ -141,11 +141,11 @@ MIGRATIONS = [
     "UPDATE aria_hot_summary SET content = REPLACE(content, 'Jarvis', 'Raya') WHERE content ILIKE '%jarvis%'",
     "UPDATE aria_hot_summary SET content = REPLACE(content, 'jarvis', 'Raya') WHERE content ILIKE '%jarvis%'",
     "UPDATE dossier_narratives SET narrative = REPLACE(narrative, 'Jarvis', 'Raya') WHERE narrative ILIKE '%jarvis%'",
-    # ── HOTFIX-GMAIL-TOKENS : colonne updated_at manquante dans gmail_tokens ──
+    # -- HOTFIX-GMAIL-TOKENS --
     "ALTER TABLE gmail_tokens ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
-    # ── USER-PHONE : numéro de téléphone par utilisateur ──
+    # -- USER-PHONE --
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT",
-    # ── P1-1 : Bug reports SAV provisoire ──
+    # -- P1-1 : Bug reports SAV provisoire --
     """CREATE TABLE IF NOT EXISTS bug_reports (
     id SERIAL PRIMARY KEY,
     username TEXT NOT NULL,
@@ -161,7 +161,7 @@ MIGRATIONS = [
 )""",
     "CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports (status, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_bug_reports_user ON bug_reports (username, created_at DESC)",
-    # ── B3 : Signatures email dynamiques ──
+    # -- B3 : Signatures email dynamiques --
     """CREATE TABLE IF NOT EXISTS email_signatures (
     id SERIAL PRIMARY KEY,
     username TEXT NOT NULL,
@@ -172,5 +172,17 @@ MIGRATIONS = [
     created_at TIMESTAMP DEFAULT NOW(),
     UNIQUE(username, email_address)
 )""",
-    # ── Ajouter les nouvelles migrations sous cette ligne ──
+    # -- TOPICS : sujets utilisateur --
+    """CREATE TABLE IF NOT EXISTS user_topics (
+    id SERIAL PRIMARY KEY,
+    username TEXT NOT NULL,
+    tenant_id TEXT NOT NULL DEFAULT 'couffrant_solar',
+    title TEXT NOT NULL,
+    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'paused', 'archived')),
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+)""",
+    "CREATE INDEX IF NOT EXISTS idx_user_topics_user ON user_topics (username, status, updated_at DESC)",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS settings JSONB DEFAULT '{}'",
+    # -- Ajouter les nouvelles migrations sous cette ligne --
 ]
