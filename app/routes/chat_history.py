@@ -4,7 +4,7 @@ Endpoint d'historique des conversations Raya. (CHAT-HISTORY)
 GET /chat/history?limit=20
   - Vérifie session["user"] (sinon 401)
   - Retourne les derniers échanges de aria_memory, ordre chronologique
-  - [{"user": "...", "raya": "...", "ts": "...", "id": 123}, ...]
+  - [{"user": "...", "raya": "...", "ts": "...", "created_at": "...", "id": 123}, ...]
 """
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
@@ -43,10 +43,11 @@ def get_chat_history(request: Request, limit: int = 20):
 
         return [
             {
-                "user": row[0] or "",
-                "raya": row[1] or "",
-                "ts":   str(row[2]) if row[2] else "",
-                "id":   row[3],
+                "user":       row[0] or "",
+                "raya":       row[1] or "",
+                "ts":         str(row[2]) if row[2] else "",
+                "created_at": str(row[2]) if row[2] else "",
+                "id":         row[3],
             }
             for row in rows
         ]
