@@ -151,6 +151,17 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null) {
       content.innerHTML = cleanHtml;
       content.classList.add('markdown-content');
       content.querySelectorAll('a').forEach(a => { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer'); });
+      // B1: PWA iOS — forcer ouverture externe pour les fichiers téléchargeables
+      // WebKit en mode standalone ignore target="_blank", window.open() fonctionne.
+      content.querySelectorAll('a').forEach(a => {
+        const href = a.getAttribute('href') || '';
+        if (href.includes('/download/') || href.match(/\.(pdf|xlsx|xls|csv|png|jpg|jpeg)(\?|$)/i)) {
+          a.addEventListener('click', (e) => {
+            e.preventDefault();
+            window.open(href, '_blank');
+          });
+        }
+      });
     } catch(e) {
       console.error('[Raya] Erreur rendu markdown:', e, 'marked:', typeof marked);
       content.style.whiteSpace = 'pre-wrap';
