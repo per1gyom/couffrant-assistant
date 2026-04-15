@@ -11,7 +11,7 @@
  * - Navigation HTML → Network-First avec fallback cache
  */
 
-const CACHE_VERSION = 14;
+const CACHE_VERSION = 15;
 const CACHE_NAME = 'raya-v' + CACHE_VERSION;
 
 // Assets mis en cache à l'installation

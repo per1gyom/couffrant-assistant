@@ -14,7 +14,7 @@
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
 }
 html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 15px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
-.app { display: flex; flex-direction: column; height: 100vh; max-width: 860px; margin: 0 auto; }
+.app { display: flex; flex-direction: column; height: 100vh; max-width: 1100px; margin: 0 auto; padding: 0 16px; }
 
 /* HEADER */
 .header { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.03); position: relative; z-index: 10; }
@@ -42,11 +42,13 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .scroll-down-btn:hover { border-color: var(--accent); color: var(--accent); }
 .message-row { display: flex; gap: 10px; align-items: flex-start; }
 .message-row.user { flex-direction: row-reverse; }
+.message-row.raya { flex-direction: column; }
+.message-row.raya .avatar { display: none; }
 .avatar { width: 32px; height: 32px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; margin-top: 2px; font-weight: 700; letter-spacing: -0.02em; }
 .avatar.raya-avatar { background: linear-gradient(135deg, var(--accent) 0%, #7c3aed 100%); color: #fff; }
 .avatar.user-avatar { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); }
 .bubble { max-width: 78%; border-radius: var(--radius); padding: 12px 16px; font-size: 14.5px; line-height: 1.7; word-break: break-word; }
-.message-row.raya .bubble { background: var(--raya-bg); border: 1px solid var(--border); border-radius: 4px 14px 14px 14px; box-shadow: var(--shadow); }
+.message-row.raya .bubble { background: transparent; border: none; border-radius: 0; box-shadow: none; max-width: 100%; padding: 8px 0; }
 .message-row.user .bubble { background: var(--user-bg); border: 1px solid #c7d2fe; border-radius: 14px 4px 14px 14px; color: var(--user-text); }
 .bubble-actions { display: flex; gap: 7px; margin-top: 8px; align-items: center; }
 .speak-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: var(--radius-full); padding: 4px 12px; font-size: 12px; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 5px; font-family: var(--font); font-weight: 500; }
