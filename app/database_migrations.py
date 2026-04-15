@@ -184,5 +184,8 @@ MIGRATIONS = [
 )""",
     "CREATE INDEX IF NOT EXISTS idx_user_topics_user ON user_topics (username, status, updated_at DESC)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS settings JSONB DEFAULT '{}'",
+    # -- CLOISONNEMENT DRIVE : ajouter sharepoint_site au tenant couffrant_solar --
+    """UPDATE tenants SET settings = settings || '{"sharepoint_site": "Commun"}'::jsonb
+       WHERE id = 'couffrant_solar' AND NOT (settings ? 'sharepoint_site')""",
     # -- Ajouter les nouvelles migrations sous cette ligne --
 ]

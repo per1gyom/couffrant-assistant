@@ -209,6 +209,7 @@ def ensure_default_tenant():
             "INSERT INTO tenants (id, name, settings) VALUES (%s, %s, %s)",
             (DEFAULT_TENANT, "Couffrant Solar",
              json.dumps({"email_provider": "microsoft",
+                         "sharepoint_site": "Commun",
                          "sharepoint_folder": "1_Photovoltaïque",
                          "custom_tools": []}))
         )

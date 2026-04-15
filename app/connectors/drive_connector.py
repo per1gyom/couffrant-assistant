@@ -9,10 +9,10 @@ import requests
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 
-# Valeurs par défaut
+# Valeurs par défaut — NEUTRES (pas de présupposition sur un tenant)
 _DEFAULTS = {
-    "site_name": "Commun",
-    "folder_name": "1_Photovoltaïque",
+    "site_name": "",
+    "folder_name": "",
     "drive_name": "Documents",
 }
 
@@ -56,8 +56,8 @@ def _h(token: str) -> dict:
 def get_drive_config(tenant_id: str = "couffrant_solar") -> dict:
     """
     Charge la config SharePoint depuis tenants.settings.
-    Retourne un dict avec site_name, folder_name, drive_name, path_candidates.
-    Toujours fonctionnel même si la table n'est pas configurée.
+    Retourne un dict avec site_name, folder_name, drive_name, path_candidates, configured.
+    Si le tenant n'a pas de SharePoint configuré, configured=False.
     """
     try:
         from app.database import get_pg_conn
@@ -68,20 +68,24 @@ def get_drive_config(tenant_id: str = "couffrant_solar") -> dict:
         conn.close()
         if row and row[0]:
             s = row[0]
-            folder = s.get("sharepoint_folder") or _DEFAULTS["folder_name"]
-            return {
-                "site_name": s.get("sharepoint_site") or _DEFAULTS["site_name"],
-                "folder_name": folder,
-                "drive_name": s.get("sharepoint_drive") or _DEFAULTS["drive_name"],
-                "path_candidates": _build_candidates(folder),
-            }
+            folder = s.get("sharepoint_folder", "")
+            site = s.get("sharepoint_site", "")
+            if folder and site:
+                return {
+                    "site_name": site,
+                    "folder_name": folder,
+                    "drive_name": s.get("sharepoint_drive") or "Documents",
+                    "path_candidates": _build_candidates(folder),
+                    "configured": True,
+                }
     except Exception:
         pass
     return {
-        "site_name": _DEFAULTS["site_name"],
-        "folder_name": _DEFAULTS["folder_name"],
-        "drive_name": _DEFAULTS["drive_name"],
-        "path_candidates": _build_candidates(_DEFAULTS["folder_name"]),
+        "site_name": "",
+        "folder_name": "",
+        "drive_name": "Documents",
+        "path_candidates": [],
+        "configured": False,
     }
 
 
