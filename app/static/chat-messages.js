@@ -81,7 +81,14 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
     if (ariaMemoryId) {
       const sep = document.createElement('span'); sep.className = 'bubble-actions-sep'; actions.appendChild(sep);
       const thumbUp = document.createElement('button'); thumbUp.className = 'feedback-btn'; thumbUp.title = 'Bonne réponse'; thumbUp.textContent = '👍';
-      thumbUp.onclick = () => sendFeedback(ariaMemoryId, 'positive', thumbUp); actions.appendChild(thumbUp);
+      thumbUp.onclick = () => {
+        sendFeedback(ariaMemoryId, 'positive', thumbUp);
+        const pendingZone = document.getElementById('pending-actions-zone');
+        if (pendingZone) {
+          const confirmBtns = pendingZone.querySelectorAll('.pending-btn.confirm');
+          confirmBtns.forEach(btn => { if (!btn.disabled) btn.click(); });
+        }
+      }; actions.appendChild(thumbUp);
       const thumbDown = document.createElement('button'); thumbDown.className = 'feedback-btn'; thumbDown.title = 'À améliorer'; thumbDown.textContent = '👎';
       thumbDown.onclick = () => openFeedbackDialog(ariaMemoryId, thumbDown); actions.appendChild(thumbDown);
       const whyBtn = document.createElement('button'); whyBtn.className = 'feedback-btn why-btn'; whyBtn.title = 'Pourquoi cette réponse ?'; whyBtn.textContent = '💡';
@@ -125,32 +132,48 @@ function openBugReportDialog(ariaMemoryId, rayaText, msgRow, triggerBtn) {
       <button class="bug-type-btn active" data-type="bug" style="flex:1;padding:6px;border-radius:6px;border:1px solid var(--danger);background:rgba(239,68,68,.1);color:var(--danger);cursor:pointer;font-size:13px;font-weight:600;">🐛 Bug</button>
       <button class="bug-type-btn" data-type="amelioration" style="flex:1;padding:6px;border-radius:6px;border:1px solid var(--accent);background:transparent;color:var(--accent);cursor:pointer;font-size:13px;font-weight:600;">💡 Amélioration</button>
     </div>
-    <textarea class="feedback-dialog-input bug-desc" rows="3" placeholder="Décris le problème ou la suggestion…" style="width:100%;margin-bottom:8px;"></textarea>
+    <textarea class="feedback-dialog-input bug-desc" rows="3" placeholder="Optionnel — les derniers échanges seront envoyés automatiquement" style="width:100%;margin-bottom:8px;"></textarea>
     <div class="feedback-dialog-btns">
       <button class="feedback-dialog-send bug-submit">Envoyer</button>
       <button class="feedback-dialog-cancel bug-cancel">Annuler</button>
     </div>
   `;
+  const textarea = dialog.querySelector('.bug-desc');
   dialog.querySelectorAll('.bug-type-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       selectedType = btn.dataset.type;
       dialog.querySelectorAll('.bug-type-btn').forEach(b => { b.classList.remove('active'); b.style.background = 'transparent'; });
       btn.classList.add('active');
       btn.style.background = selectedType === 'bug' ? 'rgba(239,68,68,.1)' : 'rgba(99,102,241,.1)';
+      textarea.placeholder = selectedType === 'bug'
+        ? 'Optionnel — les derniers échanges seront envoyés automatiquement'
+        : 'Décris ta suggestion…';
     });
   });
   dialog.querySelector('.bug-cancel').addEventListener('click', () => dialog.remove());
   dialog.querySelector('.bug-submit').addEventListener('click', async () => {
     const desc = dialog.querySelector('.bug-desc').value.trim();
-    if (!desc) { showToast('Décris le problème avant d\'envoyer.', 'err', 2500); return; }
+    if (!desc && selectedType === 'amelioration') { showToast('Décris ta suggestion avant d\'envoyer.', 'err', 2500); return; }
     const submitBtn = dialog.querySelector('.bug-submit');
     submitBtn.disabled = true; submitBtn.textContent = '⏳ Envoi…';
     try {
       const deviceInfo = (navigator.userAgent || '').slice(0, 200) + (window.innerWidth < 768 ? ' [mobile]' : ' [desktop]');
+      // Collecter les 2-3 derniers échanges pour contexte
+      const allRows = document.querySelectorAll('.message-row');
+      const recentExchanges = [];
+      const rows = Array.from(allRows).slice(-6);
+      rows.forEach(r => {
+        const bubbleText = r.querySelector('.bubble')?.textContent?.trim() || '';
+        if (bubbleText) {
+          const role = r.classList.contains('user') ? 'user' : 'raya';
+          recentExchanges.push(role + ': ' + bubbleText.substring(0, 300));
+        }
+      });
+      const contextStr = recentExchanges.join('\n---\n').substring(0, 2000);
       const r = await fetch('/raya/bug-report', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ report_type: selectedType, description: desc, aria_memory_id: ariaMemoryId,
-          user_input: userInput.slice(0, 500), raya_response: rayaText.slice(0, 2000), device_info: deviceInfo }),
+          user_input: userInput.slice(0, 500), raya_response: (rayaText || '').slice(0, 500) + '\n\n--- CONTEXTE (derniers échanges) ---\n' + contextStr, device_info: deviceInfo }),
       });
       const data = await r.json(); dialog.remove();
       if (data.ok) { showToast('Merci ! Rapport envoyé (#' + data.id + ')', 'ok', 4000); if (triggerBtn) { triggerBtn.style.opacity='1'; triggerBtn.textContent='✅'; } }
