@@ -211,11 +211,13 @@
 <!-- MODAL SUPPRESSION USER -->
 <div class="modal-overlay" id="modal-delete-user">
   <div class="modal">
-    <div class="modal-title">Supprimer l'utilisateur</div>
-    <p style="color:var(--text2);font-size:13px;line-height:1.6;margin-bottom:20px">Supprimer <strong id="delete-username-label" style="color:#fff"></strong> et toutes ses données.</p>
+    <div class="modal-title">⚠️ Supprimer l'utilisateur</div>
+    <div id="delete-user-alert" class="alert"></div>
+    <p style="color:var(--text2);font-size:13px;line-height:1.6;margin-bottom:12px">Vous êtes sur le point de supprimer <strong id="delete-username-label" style="color:var(--red)"></strong> et toutes ses données personnelles. Cette action est irréversible.</p>
+    <div class="form-group"><label>Tapez le nom d'utilisateur pour confirmer</label><input type="text" id="delete-user-confirm-input" placeholder="" autocomplete="off" oninput="document.getElementById('delete-user-btn').disabled=this.value!==usernameToDelete"></div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('delete-user')">Annuler</button>
-      <button class="btn btn-danger" onclick="confirmDeleteUser()">Supprimer</button>
+      <button class="btn btn-danger" id="delete-user-btn" disabled onclick="confirmDeleteUser()">Supprimer définitivement</button>
     </div>
   </div>
 </div>
@@ -225,12 +227,9 @@
   <div class="modal">
     <div class="modal-title">🏢 Créer une société</div>
     <div id="create-tenant-alert" class="alert"></div>
-    <div class="form-group">
-      <label>Identifiant unique (ID) *</label>
-      <input type="text" id="tenant-new-id" placeholder="ex: juillet_solar ou Juillet Solar" autocomplete="off" oninput="this.value=normalizeTenantId(this.value)">
-      <div class="field-hint">Converti automatiquement (ex : Juillet Solar → juillet_solar). Non modifiable après création.</div>
-    </div>
-    <div class="form-group"><label>Nom de la société *</label><input type="text" id="tenant-new-name" placeholder="ex: Juillet Solar SAS"></div>
+    <div class="form-group"><label>Nom de la société *</label><input type="text" id="tenant-new-name" placeholder="ex: Juillet Solar SAS" oninput="document.getElementById('tenant-new-id-preview').textContent='ID : '+normalizeTenantId(this.value)"></div>
+    <div class="field-hint" id="tenant-new-id-preview" style="color:var(--text3);font-size:11px;margin-top:-8px">ID : (sera généré automatiquement)</div>
+    <input type="hidden" id="tenant-new-id">
     <div class="form-group">
       <label>Forme juridique</label>
       <select id="tenant-new-legal-form">
@@ -239,11 +238,14 @@
       </select>
     </div>
     <div class="form-group">
-      <label>Numéro SIRET</label>
-      <input type="text" id="tenant-new-siret" placeholder="14 chiffres (optionnel)" maxlength="14" autocomplete="off" oninput="this.value=this.value.replace(/\D/g,'').slice(0,14)">
-      <div class="field-hint">14 chiffres sans espaces. Validé si renseigné.</div>
+      <label>Numéro SIRET *</label>
+      <input type="text" id="tenant-new-siret" placeholder="14 chiffres (obligatoire)" maxlength="14" autocomplete="off" oninput="this.value=this.value.replace(/\D/g,'').slice(0,14)">
     </div>
-    <div class="form-group"><label>Adresse du siège social</label><input type="text" id="tenant-new-address" placeholder="ex: 12 rue des Lilas, 42000 Saint-Étienne"></div>
+    <div class="form-group"><label>Adresse — Rue *</label><input type="text" id="tenant-new-rue" placeholder="ex: 12 rue des Lilas"></div>
+    <div style="display:flex;gap:12px">
+      <div class="form-group" style="flex:1"><label>Code postal *</label><input type="text" id="tenant-new-cp" placeholder="42000" maxlength="5" oninput="this.value=this.value.replace(/\D/g,'').slice(0,5)"></div>
+      <div class="form-group" style="flex:2"><label>Ville *</label><input type="text" id="tenant-new-ville" placeholder="Saint-Étienne"></div>
+    </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('create-tenant')">Annuler</button>
       <button class="btn btn-primary" onclick="createTenant()">Créer la société</button>
@@ -280,10 +282,11 @@
     <div class="modal-title">🗑️ Supprimer la société</div>
     <div id="delete-tenant-alert" class="alert"></div>
     <p style="color:var(--text2);font-size:13px;line-height:1.6;margin-bottom:12px">Vous êtes sur le point de supprimer :<br><strong id="delete-tenant-label" style="color:var(--red);font-family:var(--mono)"></strong></p>
-    <p style="color:var(--yellow);font-family:var(--mono);font-size:11px;margin-bottom:20px">⚠️ Cette action est irréversible. Les utilisateurs ne seront pas supprimés mais perdront leur accès.</p>
+    <p style="color:var(--yellow);font-family:var(--mono);font-size:11px;margin-bottom:12px">⚠️ Cette action est irréversible. Les utilisateurs ne seront pas supprimés mais perdront leur accès.</p>
+    <div class="form-group"><label>Tapez <strong style="color:var(--red)">SUPPRIMER</strong> pour confirmer</label><input type="text" id="delete-tenant-confirm-input" placeholder="SUPPRIMER" autocomplete="off" oninput="document.getElementById('delete-tenant-btn').disabled=this.value!=='SUPPRIMER'"></div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('delete-tenant')">Annuler</button>
-      <button class="btn btn-danger" onclick="confirmDeleteTenant()">Supprimer définitivement</button>
+      <button class="btn btn-danger" id="delete-tenant-btn" disabled onclick="confirmDeleteTenant()">Supprimer définitivement</button>
     </div>
   </div>
 </div>

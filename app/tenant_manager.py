@@ -37,24 +37,28 @@ def _normalize_tenant_id(value: str) -> str:
 def create_tenant(tenant_id: str, name: str, settings: dict = None) -> dict:
     """
     Crée un tenant.
-    BUG 5 : vérifie d'abord si l'ID existe — retourne une erreur si oui (plus d'écrasement silencieux).
+    SIRET obligatoire. Adresse structurée (rue, code_postal, ville).
     """
     if not tenant_id or not name:
         return {"status": "error", "message": "tenant_id et name requis."}
     normalized_id = _normalize_tenant_id(tenant_id)
     if not normalized_id:
         return {"status": "error", "message": "Identifiant invalide après normalisation."}
+    # SIRET obligatoire
+    s = settings or {}
+    siret = s.get("siret", "").replace(" ", "")
+    if not siret or not siret.isdigit() or len(siret) != 14:
+        return {"status": "error", "message": "SIRET obligatoire (14 chiffres)."}
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        # BUG 5 : vérification d'existence avant INSERT
         c.execute("SELECT id FROM tenants WHERE id = %s", (normalized_id,))
         if c.fetchone():
             return {"status": "error",
                     "message": f"Le tenant '{normalized_id}' existe déjà."}
         c.execute(
             "INSERT INTO tenants (id, name, settings) VALUES (%s, %s, %s)",
-            (normalized_id, name.strip(), json.dumps(settings or {}))
+            (normalized_id, name.strip(), json.dumps(s))
         )
         conn.commit()
         return {"status": "ok", "tenant_id": normalized_id}

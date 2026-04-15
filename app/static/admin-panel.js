@@ -141,9 +141,12 @@ async function loadCompanies(){
             <td class="mono" style="font-size:11px;color:var(--text2)">${fmtDateShort(u.last_login)}</td>
             <td style="display:flex;gap:5px;flex-wrap:wrap">
               <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope}','${u.phone||''}')">Modifier</button>
+              <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="seedUser('${u.username}')">🌱</button>
               ${u.account_locked?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unlockUser('${u.username}')">🔓</button>`:''}
+              ${u.scope!=='admin'?`<button class="btn btn-danger" style="padding:4px 9px;font-size:11px" onclick="askDeleteUser('${u.username}')">Suppr.</button>`:''}
             </td></tr>`).join('')}</tbody></table>
           <div class="sp-config-panel">
+            <div style="margin-bottom:12px"><button class="btn btn-primary" style="font-size:12px;padding:6px 14px" onclick="openCreateUserForTenant('${t.tenant_id}','${t.name.replace(/'/g,"\\'")}')">➕ Ajouter un collaborateur</button></div>
             <div class="sp-config-title">⚙️ Configuration SharePoint (optionnel)</div>
             <div class="sp-config-grid">
               <div><label>Site SharePoint</label><input type="text" id="sp-site-${i}" value="${spSite}" placeholder="Commun"></div>
@@ -170,14 +173,23 @@ async function saveSharePointConfig(tenantId,i){
   }catch(e){result.className='sp-result err';result.textContent='❌ '+e.message;}
 }
 async function createTenant(){
-  const id=normalizeTenantId(document.getElementById('tenant-new-id').value);const name=document.getElementById('tenant-new-name').value.trim();
-  const legalForm=document.getElementById('tenant-new-legal-form').value;const siret=document.getElementById('tenant-new-siret').value.replace(/\D/g,'');const address=document.getElementById('tenant-new-address').value.trim();
-  if(!id){setAlert('create-tenant-alert','Veuillez saisir un identifiant.','err');return;}
+  const name=document.getElementById('tenant-new-name').value.trim();
+  const id=normalizeTenantId(name);
+  document.getElementById('tenant-new-id').value=id;
+  const legalForm=document.getElementById('tenant-new-legal-form').value;
+  const siret=document.getElementById('tenant-new-siret').value.replace(/\D/g,'');
+  const rue=document.getElementById('tenant-new-rue').value.trim();
+  const cp=document.getElementById('tenant-new-cp').value.trim();
+  const ville=document.getElementById('tenant-new-ville').value.trim();
   if(!name){setAlert('create-tenant-alert','Le nom de la société est requis.','err');return;}
-  if(siret&&!/^\d{14}$/.test(siret)){setAlert('create-tenant-alert','SIRET doit faire 14 chiffres.','err');return;}
-  const settings={};if(legalForm) settings.legal_form=legalForm;if(siret) settings.siret=siret;if(address) settings.address=address;
+  if(!siret||siret.length!==14){setAlert('create-tenant-alert','Le SIRET est obligatoire (14 chiffres).','err');return;}
+  if(!rue||!cp||!ville){setAlert('create-tenant-alert','L\'adresse complète est requise (rue, code postal, ville).','err');return;}
+  if(cp.length!==5){setAlert('create-tenant-alert','Le code postal doit faire 5 chiffres.','err');return;}
+  const settings={};if(legalForm) settings.legal_form=legalForm;
+  settings.siret=siret;settings.rue=rue;settings.code_postal=cp;settings.ville=ville;
+  settings.address=rue+', '+cp+' '+ville;
   try{const d=await(await fetch('/admin/tenants',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id,name,settings})})).json();
-    if(d.status==='ok'||d.tenant_id){setAlert('companies-alert',`✅ Société "${name}" créée (ID : ${d.tenant_id||id}). Configurez les outils depuis la fiche société.`,'ok');closeModal('create-tenant');['tenant-new-id','tenant-new-name','tenant-new-siret','tenant-new-address'].forEach(id=>document.getElementById(id).value='');document.getElementById('tenant-new-legal-form').value='';loadCompanies();}
+    if(d.status==='ok'||d.tenant_id){setAlert('companies-alert',`✅ Société "${name}" créée (ID : ${d.tenant_id||id}). Ajoutez maintenant un administrateur.`,'ok');closeModal('create-tenant');['tenant-new-name','tenant-new-siret','tenant-new-rue','tenant-new-cp','tenant-new-ville'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});document.getElementById('tenant-new-legal-form').value='';loadCompanies();}
     else{setAlert('create-tenant-alert','❌ '+(d.message||d.detail||'Erreur lors de la création.'),'err');}
   }catch(e){setAlert('create-tenant-alert','❌ '+e.message,'err');}
 }
@@ -197,8 +209,10 @@ async function saveTenant(){
     if(d.status==='ok'||d.tenant_id){setAlert('companies-alert','✅ Société mise à jour.','ok');closeModal('edit-tenant');loadCompanies();}else{setAlert('edit-tenant-alert','❌ '+(d.message||d.detail||'Erreur'),'err');}
   }catch(e){setAlert('edit-tenant-alert','❌ '+e.message,'err');}
 }
-function openDeleteTenant(id,name){tenantToDelete=id;document.getElementById('delete-tenant-label').textContent=`${name} (${id})`;document.getElementById('delete-tenant-alert').className='alert';openModal('delete-tenant');}
+function openDeleteTenant(id,name){tenantToDelete=id;document.getElementById('delete-tenant-label').textContent=`${name} (${id})`;document.getElementById('delete-tenant-alert').className='alert';document.getElementById('delete-tenant-confirm-input').value='';document.getElementById('delete-tenant-btn').disabled=true;openModal('delete-tenant');}
 async function confirmDeleteTenant(){
+  const confirmInput=document.getElementById('delete-tenant-confirm-input');
+  if(!confirmInput||confirmInput.value!=='SUPPRIMER'){setAlert('delete-tenant-alert','Tapez SUPPRIMER pour confirmer.','err');return;}
   if(!tenantToDelete) return;
   try{const d=await(await fetch(`/admin/tenants/${tenantToDelete}`,{method:'DELETE'})).json();
     if(d.status==='ok'){setAlert('companies-alert','✅ Société supprimée.','ok');closeModal('delete-tenant');loadCompanies();}else{setAlert('delete-tenant-alert','❌ '+(d.message||d.detail||'Erreur lors de la suppression.'),'err');}
@@ -209,7 +223,10 @@ function openModal(name){
   document.getElementById('modal-'+name).classList.add('open');
   if(name==='create-user') loadTenantDropdown();
 }
-function closeModal(name){document.getElementById('modal-'+name).classList.remove('open');}
+function closeModal(name){
+  document.getElementById('modal-'+name).classList.remove('open');
+  if(name==='create-user'){const sel=document.getElementById('new-tenant');if(sel)sel.disabled=false;}
+}
 
 async function loadTenantDropdown(){
   const sel=document.getElementById('new-tenant');
@@ -219,6 +236,19 @@ async function loadTenantDropdown(){
     const tenants=await(await fetch('/admin/tenants')).json();
     tenants.forEach(t=>{const o=document.createElement('option');o.value=t.id;o.textContent=t.name+' ('+t.id+')';sel.appendChild(o);});
   }catch(e){}
+}
+
+function openCreateUserForTenant(tenantId, tenantName){
+  openModal('create-user');
+  // Attendre que le dropdown soit chargé puis pré-sélectionner
+  setTimeout(()=>{
+    const sel=document.getElementById('new-tenant');
+    sel.value=tenantId;
+    sel.disabled=true;
+    document.getElementById('create-user-alert').className='alert';
+    document.getElementById('create-user-alert').textContent='Création pour : '+tenantName;
+    document.getElementById('create-user-alert').className='alert ok';
+  },300);
 }
 
 async function seedUser(username){
@@ -276,10 +306,12 @@ async function resetPassword(){
   const d=await(await fetch(`/admin/reset-password/${currentEditUser}`,{method:'POST'})).json();
   if(d.status==='ok'){const sent=d.email_sent?`Envoyé à ${d.email}`:'Copiez le lien ci-dessous';document.getElementById('reset-result').innerHTML=`<div class="reset-box"><div style="font-family:var(--mono);font-size:11px;color:var(--green);margin-bottom:4px">✓ Lien généré — ${sent}</div><div class="reset-link">${d.reset_url}</div><button class="btn btn-ghost" style="margin-top:8px;font-size:11px;padding:4px 10px" onclick="navigator.clipboard.writeText('${d.reset_url}').then(()=>this.textContent='Copié ✓')">Copier</button></div>`;}
 }
-function askDeleteUser(username){usernameToDelete=username;document.getElementById('delete-username-label').textContent=username;openModal('delete-user');}
+function askDeleteUser(username){usernameToDelete=username;document.getElementById('delete-username-label').textContent=username;document.getElementById('delete-user-confirm-input').value='';document.getElementById('delete-user-confirm-input').placeholder=username;document.getElementById('delete-user-btn').disabled=true;openModal('delete-user');}
 async function confirmDeleteUser(){
+  const confirmInput=document.getElementById('delete-user-confirm-input');
+  if(!confirmInput||confirmInput.value!==usernameToDelete){setAlert('delete-user-alert','Tapez le nom d\'utilisateur exact pour confirmer.','err');return;}
   const d=await(await fetch(`/admin/delete-user/${usernameToDelete}`,{method:'DELETE'})).json();
-  if(d.status==='ok'){setAlert('user-alert','✅ '+d.message,'ok');closeModal('delete-user');loadUsers();}else{setAlert('user-alert','❌ '+(d.message||d.error),'err');closeModal('delete-user');}usernameToDelete=null;
+  if(d.status==='ok'){setAlert('user-alert','✅ '+d.message,'ok');closeModal('delete-user');loadUsers();loadCompanies();}else{setAlert('user-alert','❌ '+(d.message||d.error),'err');closeModal('delete-user');}usernameToDelete=null;
 }
 async function populateUserFilters(){
   const users=await(await fetch('/admin/users')).json();
