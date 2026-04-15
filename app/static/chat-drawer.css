@@ -148,18 +148,21 @@
 }
 .feedback-btn {
   background: none;
-  border: none;
+  border: 1px solid transparent;
   cursor: pointer;
-  font-size: 14px;
-  padding: 2px 4px;
-  border-radius: 4px;
-  opacity: 0.35;
-  transition: opacity 0.15s, transform 0.1s;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm, 8px);
+  color: var(--text-muted, #6e7687);
+  opacity: 0.45;
+  transition: all 0.2s;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
 }
-.feedback-btn:hover { opacity: 1; transform: scale(1.2); }
-.feedback-btn:disabled { opacity: 0.2; cursor: default; transform: none; }
-.feedback-btn.why-btn { font-size: 13px; }
+.feedback-btn svg { width: 14px; height: 14px; }
+.feedback-btn:hover { opacity: 1; color: var(--accent, #4f46e5); border-color: var(--border, #e2e6ef); background: var(--accent-light, #eef2ff); }
+.feedback-btn:disabled { opacity: 0.15; cursor: default; }
+.feedback-btn.why-btn { }
 .feedback-dialog {
   background: var(--surface);
   border: 1px solid var(--border);

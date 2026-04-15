@@ -6,23 +6,26 @@
 <title>Raya</title>
 
 <!-- PWA -->
-<link rel="manifest" href="/static/manifest.json?v=12">
+<link rel="manifest" href="/static/manifest.json?v=13">
 <meta name="theme-color" content="#6366f1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
-<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=12">
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=13">
 
 <!-- CSS -->
-<link rel="stylesheet" href="/static/chat-base.css?v=12">
-<link rel="stylesheet" href="/static/chat-components.css?v=12">
-<link rel="stylesheet" href="/static/chat-drawer.css?v=12">
-<link rel="stylesheet" href="/static/onboarding.css?v=12">
-<link rel="stylesheet" href="/static/mobile.css?v=12">
+<link rel="stylesheet" href="/static/chat-base.css?v=13">
+<link rel="stylesheet" href="/static/chat-components.css?v=13">
+<link rel="stylesheet" href="/static/chat-drawer.css?v=13">
+<link rel="stylesheet" href="/static/onboarding.css?v=13">
+<link rel="stylesheet" href="/static/mobile.css?v=13">
 
 <!-- marked.js + DOMPurify (CDN versionné, stable) -->
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
 <div class="app">
@@ -34,16 +37,17 @@
     </div>
     <div class="header-sep"></div>
     <div class="mail-badge" onclick="quickAsk('Quels sont mes mails urgents ?')" title="Mails non lus">
-      📬 <span id="mailBadgeLabel">Mails</span>
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><polyline points="22,7 12,13 2,7"/></svg>
+      <span id="mailBadgeLabel">Mails</span>
       <span class="count" id="mailCount"></span>
     </div>
     <div class="header-user" id="headerUser"></div>
     <button class="h-btn token-alert-btn" id="tokenAlertBtn" onclick="toggleTokenBanner()" style="display:none" title="Problème de connexion">⚠️</button>
-    <button class="h-btn" id="topicsBtn" onclick="toggleTopics()" title="Mes sujets">🔖</button>
-    <button class="h-btn" id="autoSpeakBtn" onclick="toggleAutoSpeak()" title="Lecture automatique">🔊 Auto</button>
-    <button class="h-btn" id="adminBtn" onclick="toggleDrawer()">⚙️ Admin</button>
-    <a href="/admin/panel?view=company" class="h-btn" id="adminPanelBtn" title="Panel admin société" style="display:none">⚙️ Ma société</a>
-    <a href="/admin/panel" class="h-btn" id="superAdminBtn" title="Panel super admin" style="display:none">🔑 Super Admin</a>
+    <button class="h-btn" id="topicsBtn" onclick="toggleTopics()" title="Mes sujets"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg></button>
+    <button class="h-btn" id="autoSpeakBtn" onclick="toggleAutoSpeak()" title="Lecture automatique"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg> Auto</button>
+    <button class="h-btn" id="adminBtn" onclick="toggleDrawer()"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg> Admin</button>
+    <a href="/admin/panel?view=company" class="h-btn" id="adminPanelBtn" title="Panel admin société" style="display:none">Ma société</a>
+    <a href="/admin/panel" class="h-btn" id="superAdminBtn" title="Panel super admin" style="display:none"><svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Super Admin</a>
     <a href="/logout" class="h-btn danger">Déconnexion</a>
   </div>
 
@@ -79,9 +83,9 @@
     <div class="input-wrapper" id="inputWrapper">
       <textarea id="input" placeholder="Envoie un message à Raya…" rows="1" oninput="autoResize(this)" onkeydown="handleKey(event)"></textarea>
       <div class="input-btns">
-        <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="Joindre">📎</button>
-        <button class="icon-btn" id="micBtn" onclick="toggleMic()" title="Dicter">🎤</button>
-        <button class="icon-btn" id="sendBtn" onclick="sendMessage()">➤</button>
+        <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="Joindre"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></button>
+        <button class="icon-btn" id="micBtn" onclick="toggleMic()" title="Dicter"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
+        <button class="icon-btn" id="sendBtn" onclick="sendMessage()"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
       </div>
     </div>
     <div class="mic-status" id="micStatus">🎩 En écoute… parle, je t'entends</div>
@@ -205,16 +209,16 @@
 </div>
 
 <!-- Modules JS -->
-<script src="/static/chat-onboarding.js?v=12"></script>
-<script src="/static/chat-shortcuts.js?v=12"></script>
-<script src="/static/chat-voice.js?v=12"></script>
-<script src="/static/chat-feedback.js?v=12"></script>
-<script src="/static/chat-triage.js?v=12"></script>
-<script src="/static/chat-admin.js?v=12"></script>
-<script src="/static/chat-topics.js?v=12"></script>
-<script src="/static/chat-core.js?v=12"></script>
-<script src="/static/chat-messages.js?v=12"></script>
-<script src="/static/chat-main.js?v=12"></script>
+<script src="/static/chat-onboarding.js?v=13"></script>
+<script src="/static/chat-shortcuts.js?v=13"></script>
+<script src="/static/chat-voice.js?v=13"></script>
+<script src="/static/chat-feedback.js?v=13"></script>
+<script src="/static/chat-triage.js?v=13"></script>
+<script src="/static/chat-admin.js?v=13"></script>
+<script src="/static/chat-topics.js?v=13"></script>
+<script src="/static/chat-core.js?v=13"></script>
+<script src="/static/chat-messages.js?v=13"></script>
+<script src="/static/chat-main.js?v=13"></script>
 
 <script>
   if ('serviceWorker' in navigator) {

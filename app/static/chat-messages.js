@@ -75,12 +75,12 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
   bubble.appendChild(content);
   if (type === 'raya') {
     const actions = document.createElement('div'); actions.className = 'bubble-actions';
-    const speakBtn = document.createElement('button'); speakBtn.className = 'speak-btn'; speakBtn.textContent = '🔊 Écouter';
+    const speakBtn = document.createElement('button'); speakBtn.className = 'speak-btn'; speakBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/><path d="M19.07 4.93a10 10 0 010 14.14"/></svg> Écouter';
     speakBtn.onclick = () => { if (speakBtn.classList.contains('playing')) stopSpeech(); else speak(text, speakBtn); };
     actions.appendChild(speakBtn);
     if (ariaMemoryId) {
       const sep = document.createElement('span'); sep.className = 'bubble-actions-sep'; actions.appendChild(sep);
-      const thumbUp = document.createElement('button'); thumbUp.className = 'feedback-btn'; thumbUp.title = 'Bonne réponse'; thumbUp.textContent = '👍';
+      const thumbUp = document.createElement('button'); thumbUp.className = 'feedback-btn'; thumbUp.title = 'Bonne réponse'; thumbUp.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 9V5a3 3 0 00-3-3l-4 9v11h11.28a2 2 0 002-1.7l1.38-9a2 2 0 00-2-2.3H14z"/><path d="M7 22H4a2 2 0 01-2-2v-7a2 2 0 012-2h3"/></svg>';
       thumbUp.onclick = () => {
         sendFeedback(ariaMemoryId, 'positive', thumbUp);
         const pendingZone = document.getElementById('pending-actions-zone');
@@ -89,12 +89,12 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
           confirmBtns.forEach(btn => { if (!btn.disabled) btn.click(); });
         }
       }; actions.appendChild(thumbUp);
-      const thumbDown = document.createElement('button'); thumbDown.className = 'feedback-btn'; thumbDown.title = 'À améliorer'; thumbDown.textContent = '👎';
+      const thumbDown = document.createElement('button'); thumbDown.className = 'feedback-btn'; thumbDown.title = 'À améliorer'; thumbDown.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 15v4a3 3 0 003 3l4-9V2H5.72a2 2 0 00-2 1.7l-1.38 9a2 2 0 002 2.3H10z"/><path d="M17 2h2.67A2.31 2.31 0 0122 4v7a2.31 2.31 0 01-2.33 2H17"/></svg>';
       thumbDown.onclick = () => openFeedbackDialog(ariaMemoryId, thumbDown); actions.appendChild(thumbDown);
-      const whyBtn = document.createElement('button'); whyBtn.className = 'feedback-btn why-btn'; whyBtn.title = 'Pourquoi cette réponse ?'; whyBtn.textContent = '💡';
+      const whyBtn = document.createElement('button'); whyBtn.className = 'feedback-btn why-btn'; whyBtn.title = 'Pourquoi cette réponse ?'; whyBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><circle cx="12" cy="12" r="10"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
       whyBtn.onclick = () => showWhy(ariaMemoryId, whyBtn); actions.appendChild(whyBtn);
       const bugSep = document.createElement('span'); bugSep.className = 'bubble-actions-sep'; actions.appendChild(bugSep);
-      const bugBtn = document.createElement('button'); bugBtn.className = 'feedback-btn bug-btn'; bugBtn.title = 'Signaler un bug ou suggérer une amélioration'; bugBtn.textContent = '🐛';
+      const bugBtn = document.createElement('button'); bugBtn.className = 'feedback-btn bug-btn'; bugBtn.title = 'Signaler un bug'; bugBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>';
       bugBtn.onclick = () => openBugReportDialog(ariaMemoryId, text, row, bugBtn); actions.appendChild(bugBtn);
     }
     bubble.appendChild(actions);
