@@ -109,7 +109,8 @@ def admin_tenants_overview(request: Request, _: dict = Depends(require_admin)):
         tenants_raw = c.fetchall()
         c.execute("""
             SELECT u.username, u.email, u.scope, u.tenant_id, u.last_login, u.created_at,
-                   COALESCE(u.account_locked, false), COALESCE(u.must_reset_password, false)
+                   COALESCE(u.account_locked, false), COALESCE(u.must_reset_password, false),
+                   COALESCE(u.suspended, false)
             FROM users u ORDER BY u.tenant_id, u.created_at
         """)
         users_raw = c.fetchall()
@@ -128,7 +129,7 @@ def admin_tenants_overview(request: Request, _: dict = Depends(require_admin)):
 
     users_by_tenant = {}
     for row in users_raw:
-        username, email, scope, tenant_id, last_login, created_at, locked, must_reset = row
+        username, email, scope, tenant_id, last_login, created_at, locked, must_reset, suspended = row
         tid = tenant_id or DEFAULT_TENANT
         users_by_tenant.setdefault(tid, []).append({
             "username": username, "email": email or "", "scope": scope or "user",
@@ -137,6 +138,7 @@ def admin_tenants_overview(request: Request, _: dict = Depends(require_admin)):
             "ms_connected": username in ms_connected,
             "account_locked": bool(locked),
             "must_reset_password": bool(must_reset),
+            "suspended": bool(suspended),
             **{k: stats.get(username, {}).get(k, 0) for k in ["conv", "rules", "insights", "mails"]},
         })
 

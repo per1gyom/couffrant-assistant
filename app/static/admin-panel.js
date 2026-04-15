@@ -133,8 +133,8 @@ async function loadCompanies(){
         </div>
         <div class="tenant-body" id="body-${i}">
           <table><thead><tr><th>Identifiant</th><th>Email</th><th>Rôle</th><th>MS</th><th>Mails</th><th>Conv.</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
-          <tbody>${t.users.map(u=>`<tr class="${u.account_locked?'row-locked':''}">
-            <td><strong class="mono">${u.username}</strong>${u.account_locked?'<span class="badge badge-red" style="margin-left:6px;font-size:9px">🔒</span>':''}${u.must_reset_password&&!u.account_locked?'<span class="badge badge-yellow" style="margin-left:6px;font-size:9px">⚠️</span>':''}</td>
+          <tbody>${t.users.map(u=>`<tr class="${u.account_locked||u.suspended?'row-locked':''}">
+            <td><strong class="mono">${u.username}</strong>${u.account_locked?'<span class="badge badge-red" style="margin-left:6px;font-size:9px">🔒</span>':''}${u.suspended?'<span class="badge badge-yellow" style="margin-left:6px;font-size:9px">⏸️</span>':''}${u.must_reset_password&&!u.account_locked?'<span class="badge badge-yellow" style="margin-left:6px;font-size:9px">⚠️</span>':''}</td>
             <td style="font-size:12px;color:var(--text2)">${u.email||'—'}</td>
             <td><span class="badge ${u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope}</span></td>
             <td><span class="badge ${u.ms_connected?'badge-ms-ok':'badge-red'}">${u.ms_connected?'✅ OK':'❌ Non'}</span></td>
@@ -143,6 +143,7 @@ async function loadCompanies(){
             <td style="display:flex;gap:5px;flex-wrap:wrap">
               <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope}','${u.phone||''}')">Modifier</button>
               <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="seedUser('${u.username}')">🌱</button>
+              ${u.suspended?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unsuspendUser('${u.username}')">▶️</button>`:`${u.scope!=='admin'?`<button class="btn btn-ghost" style="padding:4px 9px;font-size:11px;color:var(--yellow)" onclick="suspendUser('${u.username}')">⏸️</button>`:''}`}
               ${u.account_locked?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unlockUser('${u.username}')">🔓</button>`:''}
               ${u.scope!=='admin'?`<button class="btn btn-danger" style="padding:4px 9px;font-size:11px" onclick="askDeleteUser('${u.username}')">Suppr.</button>`:''}
             </td></tr>`).join('')}</tbody></table>

@@ -153,8 +153,11 @@ def admin_suspend_user(
     request: Request,
     target: str,
     payload: dict = Body(default={}),
-    _: dict = Depends(require_admin),
+    user: dict = Depends(require_tenant_admin),
 ):
+    # Tenant admin ne peut suspendre que ses propres utilisateurs
+    if user["scope"] != "admin":
+        assert_same_tenant(request, target)
     from app.suspension import suspend_user
     reason = payload.get("reason", "")
     return suspend_user(target, reason)
@@ -164,8 +167,10 @@ def admin_suspend_user(
 def admin_unsuspend_user(
     request: Request,
     target: str,
-    _: dict = Depends(require_admin),
+    user: dict = Depends(require_tenant_admin),
 ):
+    if user["scope"] != "admin":
+        assert_same_tenant(request, target)
     from app.suspension import unsuspend_user
     return unsuspend_user(target)
 
@@ -199,8 +204,11 @@ def admin_toggle_tenant_direct_actions(
     request: Request,
     tenant_id: str,
     payload: dict = Body(default={}),
-    _: dict = Depends(require_admin),
+    user: dict = Depends(require_tenant_admin),
 ):
+    # Tenant admin ne peut toggler que pour sa propre société
+    if user["scope"] != "admin" and user["tenant_id"] != tenant_id:
+        raise HTTPException(status_code=403, detail="Pas autorisé pour ce tenant.")
     from app.direct_actions import set_tenant_direct_actions
     enabled = bool(payload.get("enabled", False))
     return set_tenant_direct_actions(tenant_id, enabled)
@@ -214,6 +222,8 @@ def admin_toggle_user_direct_actions(
     user: dict = Depends(require_tenant_admin),
 ):
     """Admin tenant ou super admin peut toggler les actions directes d'un user."""
+    if user["scope"] != "admin":
+        assert_same_tenant(request, username)
     from app.direct_actions import set_user_direct_actions
     enabled = payload.get("enabled")  # null = hériter du tenant
     return set_user_direct_actions(username, enabled)
