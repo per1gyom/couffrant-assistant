@@ -29,11 +29,13 @@ function toggleMic() {
   if (!SR) { alert('Reconnaissance vocale non supportée.\nUtilisez Chrome ou Edge.'); return; }
   if (isListening) stopListening(); else startListening();
 }
+let currentRecognition = null;
 function startListening() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition; if (!SR) return;
   const target = _micTarget || inputEl;
   finalTextBase = _micTarget ? _finalTextBaseTarget : inputEl.value;
   const rec = new SR(); rec.lang='fr-FR'; rec.continuous=false; rec.interimResults=true; rec.maxAlternatives=1;
+  currentRecognition = rec;
   rec.onstart = () => {
     isListening=true;
     if (!_micTarget) { micBtn.classList.add('listening'); micBtn.textContent='⏹'; micStatus.classList.add('visible'); inputWrapper.classList.add('mic-active'); }
@@ -57,7 +59,9 @@ function startListening() {
 function resetSilenceTimer() { clearSilenceTimer(); silenceTimer=setTimeout(()=>{ if(isListening) stopListening(); },3000); }
 function clearSilenceTimer() { if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;} }
 function stopListening() {
-  isListening=false; clearSilenceTimer(); cleanupMicUI();
+  isListening=false; clearSilenceTimer();
+  if (currentRecognition) { try { currentRecognition.stop(); } catch(e) {} currentRecognition=null; }
+  cleanupMicUI();
   if (!_micTarget) { inputEl.classList.remove('interim'); if(inputEl.value) autoResize(inputEl); inputEl.focus(); }
 }
 function cleanupMicUI() {
