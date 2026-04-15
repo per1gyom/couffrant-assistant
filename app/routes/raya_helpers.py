@@ -21,8 +21,22 @@ from app.routes.aria_context import (
 )
 from app.routes.actions import execute_actions,_ASK_CHOICE_PREFIX
 from app.rate_limiter import check_rate_limit
+from pydantic import BaseModel
 _SHARED_POOL=concurrent.futures.ThreadPoolExecutor(max_workers=6)
 logger=get_logger("raya.core")
+
+
+class RayaQuery(BaseModel):
+    query: str
+    file_data: Optional[str] = None
+    file_type: Optional[str] = None
+    file_name: Optional[str] = None
+
+
+class FeedbackPayload(BaseModel):
+    aria_memory_id: int
+    feedback_type: str
+    comment: Optional[str] = None
 
 
 def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: str) -> dict:

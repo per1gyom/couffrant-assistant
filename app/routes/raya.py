@@ -51,25 +51,12 @@ from app.routes.aria_context import (
 from app.routes.actions import execute_actions, _ASK_CHOICE_PREFIX
 from app.routes.deps import require_user
 from app.rate_limiter import check_rate_limit
-from app.routes.raya_helpers import _raya_core,_build_user_content  # noqa
+from app.routes.raya_helpers import _raya_core, _build_user_content, RayaQuery, FeedbackPayload  # noqa
 
 _SHARED_POOL = ThreadPoolExecutor(max_workers=6)
 logger = get_logger("raya.core")
 
 router = APIRouter(tags=["raya"])
-
-
-class RayaQuery(BaseModel):
-    query: str
-    file_data: Optional[str] = None
-    file_type: Optional[str] = None
-    file_name: Optional[str] = None
-
-
-class FeedbackPayload(BaseModel):
-    aria_memory_id: int
-    feedback_type: str
-    comment: Optional[str] = None
 
 
 # --- ENDPOINTS ---
