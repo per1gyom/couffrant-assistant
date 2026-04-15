@@ -114,6 +114,9 @@ async function runDiag(btn){
 
 // ─ SOCIÉTÉS ─
 async function loadCompanies(){
+  // Mémoriser les cartes ouvertes avant rechargement
+  const openCards=[];
+  document.querySelectorAll('.tenant-body.open').forEach(el=>{const m=el.id.match(/body-(\d+)/);if(m)openCards.push(parseInt(m[1]));});
   document.getElementById('companies-list').innerHTML='<div style="color:var(--text3);font-family:var(--mono);font-size:12px"><span class="loader"></span> Chargement...</div>';
   document.getElementById('companies-alert').className='alert';
   try{
@@ -172,6 +175,8 @@ async function loadCompanies(){
         </div></div>`;
     }).join('');
   }catch(e){document.getElementById('companies-list').innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:12px">❌ Erreur: ${e.message}</div>`;}
+  // Restaurer les cartes qui étaient ouvertes
+  openCards.forEach(i=>toggleTenant(i));
 }
 function toggleTenant(i){document.getElementById('body-'+i).classList.toggle('open');document.getElementById('toggle-'+i).classList.toggle('open');}
 async function saveSharePointConfig(tenantId,i){
