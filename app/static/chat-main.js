@@ -56,8 +56,7 @@ async function sendMessage() {
     const response = await fetch('/raya',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const data = await response.json(); loading.remove();
     if (data.answer) {
-      const speedMatch = data.answer.match(/\[SPEAK_SPEED:([\d.]+)\]/);
-      if (speedMatch) { setSpeakSpeed(parseFloat(speedMatch[1])); data.answer = data.answer.replace(/\[SPEAK_SPEED:[\d.]+\]/,'').trim(); }
+      if (data.speak_speed) { setSpeakSpeed(data.speak_speed); }
     }
     const msgRow = addMessage(data.answer,'raya',null,data.aria_memory_id||null);
     if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'), true);

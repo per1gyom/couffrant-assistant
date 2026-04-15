@@ -144,7 +144,12 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     # 9. Reponse propre — retire TOUTES les balises techniques du texte
     clean_response = raya_response
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', clean_response)
-    # [SPEAK_SPEED:X.X] est gardé — le frontend le détecte et ajuste la vitesse
+    # Extraire [SPEAK_SPEED:X.X] avant de le supprimer — transmis en champ JSON séparé
+    speak_speed = None
+    speed_match = re.search(r'\[SPEAK_SPEED:([\d.]+)\]', clean_response)
+    if speed_match:
+        speak_speed = float(speed_match.group(1))
+    clean_response = re.sub(r'\[SPEAK_SPEED:[\d.]+\]', '', clean_response)
     # FIX-ODOO : nettoyer les fragments Odoo/JSON bruts (inline ou en debut de ligne)
     clean_response = re.sub(r'\|?\["[^"]*"(?:,"[^"]*")*\](?:\|?\d*\]?)?', '', clean_response)
     clean_response = re.sub(r'^\s*\|?\["[^"]+".*$', '', clean_response, flags=re.MULTILINE)
@@ -229,6 +234,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         "aria_memory_id":  aria_memory_id,
         "model_tier":      model_tier,
         "ask_choice":      ask_choice,
+        "speak_speed":     speak_speed,
     }
 
 
