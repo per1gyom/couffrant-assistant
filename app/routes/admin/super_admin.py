@@ -253,12 +253,76 @@ def update_tenant_endpoint(
 
 # ─── PANEL & USERS ───
 
+import time
+
+ADMIN_AUTH_TIMEOUT = 600  # 10 minutes
+
+ADMIN_LOGIN_PAGE = """<!DOCTYPE html>
+<html lang="fr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raya — Accès Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#0e0e12;color:#e0e0e0;font-family:'IBM Plex Sans',sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh}}
+.card{{background:#16161d;border:1px solid #2a2a35;border-radius:16px;padding:36px;max-width:380px;width:90%}}
+h2{{font-size:18px;margin-bottom:6px;color:#fff}}
+.sub{{font-size:12px;color:#888;margin-bottom:24px;font-family:'JetBrains Mono',monospace}}
+label{{display:block;font-size:12px;color:#aaa;margin-bottom:6px}}
+input{{width:100%;padding:10px 14px;background:#1e1e28;border:1px solid #2a2a35;border-radius:8px;color:#fff;font-size:14px;margin-bottom:16px}}
+input:focus{{outline:none;border-color:#6366f1}}
+button{{width:100%;padding:10px;background:#6366f1;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer}}
+button:hover{{background:#4f46e5}}
+.err{{color:#ef4444;font-size:12px;margin-bottom:12px;font-family:'JetBrains Mono',monospace}}
+.back{{display:block;text-align:center;margin-top:16px;color:#888;font-size:12px;text-decoration:none}}
+.back:hover{{color:#fff}}
+</style></head><body>
+<div class="card">
+<h2>🔒 Accès protégé</h2>
+<div class="sub">Saisissez votre mot de passe pour accéder au panel d'administration.</div>
+{error_block}
+<form method="POST" action="/admin/auth">
+<label>Mot de passe</label>
+<input type="password" name="password" autofocus required placeholder="Votre mot de passe">
+<input type="hidden" name="next" value="{next_url}">
+<button type="submit">Accéder</button>
+</form>
+<a class="back" href="/chat">← Retour au chat</a>
+</div></body></html>"""
+
+
 @router.get("/admin/panel", response_class=HTMLResponse)
 def admin_panel(request: Request):
     try:
         require_tenant_admin(request)
     except HTTPException:
         return RedirectResponse("/login-app")
+    # Vérifier re-auth admin (10 min)
+    admin_auth_at = request.session.get("admin_auth_at", 0)
+    if time.time() - admin_auth_at > ADMIN_AUTH_TIMEOUT:
+        return HTMLResponse(ADMIN_LOGIN_PAGE.format(error_block="", next_url="/admin/panel"))
+    with open("app/templates/admin_panel.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+@router.post("/admin/auth")
+async def admin_auth(request: Request):
+    """Re-authentification admin — protège l'accès au panel."""
+    from app.app_security import authenticate
+    form = await request.form()
+    password = form.get("password", "")
+    next_url = form.get("next", "/admin/panel")
+    username = request.session.get("user")
+    if not username:
+        return RedirectResponse("/login-app", status_code=303)
+    if authenticate(username, password):
+        request.session["admin_auth_at"] = time.time()
+        return RedirectResponse(next_url, status_code=303)
+    return HTMLResponse(
+        ADMIN_LOGIN_PAGE.format(
+            error_block='<div class="err">Mot de passe incorrect.</div>',
+            next_url=next_url,
+        )
+    )
     with open("app/templates/admin_panel.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 

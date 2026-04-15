@@ -39,7 +39,11 @@ async function loadUserInfo() {
   try {
     const d = await (await fetch('/profile')).json();
     const scope = d.scope || '';
-    if (scope === 'admin' || scope === 'tenant_admin') {
+    if (scope === 'admin') {
+      isAdmin = true;
+      document.getElementById('superAdminBtn').style.display = 'inline-flex';
+      document.getElementById('adminPanelBtn').style.display = 'inline-flex';
+    } else if (scope === 'tenant_admin') {
       isAdmin = true;
       document.getElementById('adminPanelBtn').style.display = 'inline-flex';
     }
