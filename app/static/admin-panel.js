@@ -226,7 +226,8 @@ async function assignOneUser(connId,username,tenantId,idx){
   const url=currentUserScope==='admin'?`/admin/connections/${connId}/assign`:'/tenant/connections/'+connId+'/assign';
   try{
     await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,access_level:level})});
-    loadConnections(tenantId,idx);
+    await loadConnections(tenantId,idx);
+    toggleAssignPanel(connId,tenantId,idx);
   }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
 }
 
@@ -238,7 +239,8 @@ async function assignAll(connId,tenantId,idx){
   for(const u of tenant.users){
     try{await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u.username,access_level:level})});}catch(e){}
   }
-  loadConnections(tenantId,idx);
+  await loadConnections(tenantId,idx);
+  toggleAssignPanel(connId,tenantId,idx);
 }
 
 async function unassignAll(connId,tenantId,idx){
@@ -248,7 +250,8 @@ async function unassignAll(connId,tenantId,idx){
     const url=currentUserScope==='admin'?`/admin/connections/${connId}/assign/${u.username}`:'/tenant/connections/'+connId+'/assign/'+u.username;
     try{await fetch(url,{method:'DELETE'});}catch(e){}
   }
-  loadConnections(tenantId,idx);
+  await loadConnections(tenantId,idx);
+  toggleAssignPanel(connId,tenantId,idx);
 }
 
 async function renameConn(connId,tenantId,idx,currentLabel){
@@ -264,7 +267,8 @@ async function renameConn(connId,tenantId,idx,currentLabel){
 async function unassignConn(connId,username,tenantId,idx){
   if(!confirm(`Retirer l'accès de ${username} ?`)) return;
   const url=currentUserScope==='admin'?`/admin/connections/${connId}/assign/${username}`:'/tenant/connections/'+connId+'/assign/'+username;
-  try{await fetch(url,{method:'DELETE'});loadConnections(tenantId,idx);}catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
+  const panelWasOpen=document.getElementById('assign-panel-'+connId)?.style.display==='block';
+  try{await fetch(url,{method:'DELETE'});await loadConnections(tenantId,idx);if(panelWasOpen)toggleAssignPanel(connId,tenantId,idx);}catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
 }
 
 async function unlockUser(username){
