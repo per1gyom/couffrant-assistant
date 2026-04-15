@@ -2,10 +2,12 @@
 Construction du contenu utilisateur pour Raya.
 Extrait de raya_helpers.py -- SPLIT-F9.
 """
-from app.routes.raya_helpers import RayaQuery
+from app.logging_config import get_logger
+
+logger = get_logger("raya.content")
 
 
-def _build_user_content(payload: RayaQuery):
+def _build_user_content(payload):
     if not payload.file_data or not payload.file_type:
         return payload.query
     file_name_info = f" ({payload.file_name})" if payload.file_name else ""
