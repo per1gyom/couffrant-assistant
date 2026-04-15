@@ -110,18 +110,27 @@ def update_sharepoint_config(
 # ─── SOCIÉTÉS ───
 
 @router.get("/admin/tenants-overview")
-def admin_tenants_overview(request: Request, _: dict = Depends(require_admin)):
+def _build_tenants_overview(tenant_filter=None):
+    """Construit l'overview. tenant_filter=None → tous, sinon filtre un tenant."""
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT id, name, settings FROM tenants ORDER BY name")
+        if tenant_filter:
+            c.execute("SELECT id, name, settings FROM tenants WHERE id = %s", (tenant_filter,))
+        else:
+            c.execute("SELECT id, name, settings FROM tenants ORDER BY name")
         tenants_raw = c.fetchall()
-        c.execute("""
+        q_users = """
             SELECT u.username, u.email, u.scope, u.tenant_id, u.last_login, u.created_at,
-                   COALESCE(u.account_locked, false), COALESCE(u.must_reset_password, false)
-            FROM users u ORDER BY u.tenant_id, u.created_at
-        """)
+                   COALESCE(u.account_locked, false), COALESCE(u.must_reset_password, false),
+                   COALESCE(u.suspended, false), u.settings
+            FROM users u {} ORDER BY u.tenant_id, u.created_at
+        """
+        if tenant_filter:
+            c.execute(q_users.format("WHERE u.tenant_id = %s"), (tenant_filter,))
+        else:
+            c.execute(q_users.format(""))
         users_raw = c.fetchall()
         stats = {}
         for table, key in [
@@ -138,8 +147,11 @@ def admin_tenants_overview(request: Request, _: dict = Depends(require_admin)):
 
     users_by_tenant = {}
     for row in users_raw:
-        username, email, scope, tenant_id, last_login, created_at, locked, must_reset = row
+        username, email, scope, tenant_id, last_login, created_at, locked, must_reset, suspended, user_settings = row
         tid = tenant_id or DEFAULT_TENANT
+        da_override = None
+        if user_settings and isinstance(user_settings, dict):
+            da_override = user_settings.get("direct_actions")
         users_by_tenant.setdefault(tid, []).append({
             "username": username, "email": email or "", "scope": scope or "user",
             "last_login": str(last_login) if last_login else None,
@@ -147,6 +159,8 @@ def admin_tenants_overview(request: Request, _: dict = Depends(require_admin)):
             "ms_connected": username in ms_connected,
             "account_locked": bool(locked),
             "must_reset_password": bool(must_reset),
+            "suspended": bool(suspended),
+            "direct_actions_override": da_override,
             **{k: stats.get(username, {}).get(k, 0) for k in ["conv", "rules", "insights", "mails"]},
         })
 
@@ -167,19 +181,31 @@ def admin_tenants_overview(request: Request, _: dict = Depends(require_admin)):
             "users": users,
         })
 
-    orphans = users_by_tenant.get(DEFAULT_TENANT, [])
-    if orphans and not any(t["tenant_id"] == DEFAULT_TENANT for t in result):
-        result.insert(0, {
-            "tenant_id": DEFAULT_TENANT, "name": "Couffrant Solar",
-            "settings": {}, "sharepoint_site": "Commun",
-            "sharepoint_folder": "1_Photovoltaïque", "sharepoint_drive": "Documents",
-            "user_count": len(orphans),
-            "ms_connected_count": sum(1 for u in orphans if u["ms_connected"]),
-            "total_mails": sum(u["mails"] for u in orphans),
-            "total_conv": sum(u["conv"] for u in orphans),
-            "users": orphans,
-        })
+    if not tenant_filter:
+        orphans = users_by_tenant.get(DEFAULT_TENANT, [])
+        if orphans and not any(t["tenant_id"] == DEFAULT_TENANT for t in result):
+            result.insert(0, {
+                "tenant_id": DEFAULT_TENANT, "name": "Couffrant Solar",
+                "settings": {}, "sharepoint_site": "Commun",
+                "sharepoint_folder": "1_Photovoltaïque", "sharepoint_drive": "Documents",
+                "user_count": len(orphans),
+                "ms_connected_count": sum(1 for u in orphans if u["ms_connected"]),
+                "total_mails": sum(u["mails"] for u in orphans),
+                "total_conv": sum(u["conv"] for u in orphans),
+                "users": orphans,
+            })
     return result
+
+
+@router.get("/admin/tenants-overview")
+def admin_tenants_overview(request: Request, _: dict = Depends(require_admin)):
+    return _build_tenants_overview()
+
+
+@router.get("/tenant/my-overview")
+def tenant_my_overview(request: Request, user: dict = Depends(require_tenant_admin)):
+    """Overview du tenant du user connecté (tenant admin)."""
+    return _build_tenants_overview(tenant_filter=user["tenant_id"])
 
 
 # ─── TENANTS CRUD ───
@@ -230,11 +256,118 @@ def update_tenant_endpoint(
 @router.get("/admin/panel", response_class=HTMLResponse)
 def admin_panel(request: Request):
     try:
-        require_admin(request)
+        require_tenant_admin(request)
     except HTTPException:
         return RedirectResponse("/login-app")
     with open("app/templates/admin_panel.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
+
+
+# ─── SUSPENSION ───
+
+@router.post("/admin/suspend-user/{target}")
+def admin_suspend_user(
+    request: Request,
+    target: str,
+    payload: dict = Body(default={}),
+    user: dict = Depends(require_tenant_admin),
+):
+    if user["scope"] != "admin":
+        assert_same_tenant(request, target)
+    from app.suspension import suspend_user
+    reason = payload.get("reason", "")
+    return suspend_user(target, reason)
+
+
+@router.post("/admin/unsuspend-user/{target}")
+def admin_unsuspend_user(
+    request: Request,
+    target: str,
+    user: dict = Depends(require_tenant_admin),
+):
+    if user["scope"] != "admin":
+        assert_same_tenant(request, target)
+    from app.suspension import unsuspend_user
+    return unsuspend_user(target)
+
+
+@router.post("/admin/suspend-tenant/{tenant_id}")
+def admin_suspend_tenant(
+    request: Request,
+    tenant_id: str,
+    payload: dict = Body(default={}),
+    _: dict = Depends(require_admin),
+):
+    from app.suspension import suspend_tenant
+    reason = payload.get("reason", "")
+    return suspend_tenant(tenant_id, reason)
+
+
+@router.post("/admin/unsuspend-tenant/{tenant_id}")
+def admin_unsuspend_tenant(
+    request: Request,
+    tenant_id: str,
+    _: dict = Depends(require_admin),
+):
+    from app.suspension import unsuspend_tenant
+    return unsuspend_tenant(tenant_id)
+
+
+# ─── ACTIONS DIRECTES ───
+
+@router.post("/admin/direct-actions/tenant/{tenant_id}")
+def admin_toggle_tenant_direct_actions(
+    request: Request,
+    tenant_id: str,
+    payload: dict = Body(default={}),
+    user: dict = Depends(require_tenant_admin),
+):
+    if user["scope"] != "admin" and user["tenant_id"] != tenant_id:
+        raise HTTPException(status_code=403, detail="Pas autorisé pour ce tenant.")
+    from app.direct_actions import set_tenant_direct_actions
+    enabled = bool(payload.get("enabled", False))
+    return set_tenant_direct_actions(tenant_id, enabled)
+
+
+@router.post("/admin/direct-actions/user/{username}")
+def admin_toggle_user_direct_actions(
+    request: Request,
+    username: str,
+    payload: dict = Body(default={}),
+    user: dict = Depends(require_tenant_admin),
+):
+    if user["scope"] != "admin":
+        assert_same_tenant(request, username)
+    from app.direct_actions import set_user_direct_actions
+    enabled = payload.get("enabled")
+    return set_user_direct_actions(username, enabled)
+
+
+# ─── SEEDING PROFIL ───
+
+@router.post("/admin/seed-user")
+def seed_user_endpoint(
+    request: Request,
+    payload: dict = Body(...),
+    _: dict = Depends(require_admin),
+):
+    username = payload.get("username", "").strip()
+    profile = payload.get("profile", "generic").strip()
+    if not username:
+        return {"status": "error", "message": "Username requis."}
+    from app.app_security import get_tenant_id
+    tenant_id = get_tenant_id(username)
+    if not tenant_id:
+        return {"status": "error", "message": f"Utilisateur '{username}' introuvable."}
+    try:
+        from app.seeding import seed_tenant, PROFILES
+        if profile not in PROFILES:
+            return {"status": "error", "message": f"Profil inconnu. Disponibles : {list(PROFILES.keys())}"}
+        counts = seed_tenant(tenant_id, username, profile=profile)
+        total = sum(counts.values())
+        return {"status": "ok", "message": f"{total} regles seedees (profil '{profile}').", "counts": counts}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:200]}
 
 
 from app.routes.admin.super_admin_users import router as _su

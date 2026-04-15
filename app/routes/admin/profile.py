@@ -21,11 +21,11 @@ def get_profile(request: Request, user: dict = Depends(require_user)):
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT username, email, scope FROM users WHERE username=%s", (username,))
+        c.execute("SELECT username, email, scope, tenant_id FROM users WHERE username=%s", (username,))
         row = c.fetchone()
         if not row:
             return {"error": "Utilisateur introuvable."}
-        return {"username": row[0], "email": row[1] or "", "scope": row[2]}
+        return {"username": row[0], "email": row[1] or "", "scope": row[2], "tenant_id": row[3] or ""}
     except Exception as e:
         return {"error": str(e)[:100]}
     finally:
