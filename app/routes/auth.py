@@ -68,6 +68,13 @@ async def login_app_post(
         update_last_login(real_username)
         scope = get_user_scope(real_username)
         tenant_id = get_tenant_id(real_username)
+        # 4b. Vérification suspension utilisateur
+        from app.suspension import check_suspension
+        suspended, reason = check_suspension(real_username, tenant_id)
+        if suspended:
+            return HTMLResponse(LOGIN_PAGE_HTML.format(
+                error_block=f'<div class="error">{reason}</div>'
+            ))
         request.session["user"] = real_username
         request.session["scope"] = scope
         request.session["tenant_id"] = tenant_id

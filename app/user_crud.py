@@ -228,7 +228,8 @@ def list_users() -> list:
         conn = get_pg_conn(); c = conn.cursor()
         c.execute("""
             SELECT username, email, scope, tenant_id, last_login, created_at,
-                   COALESCE(account_locked, false), COALESCE(must_reset_password, false), phone
+                   COALESCE(account_locked, false), COALESCE(must_reset_password, false), phone,
+                   COALESCE(suspended, false), suspended_reason
             FROM users ORDER BY tenant_id, created_at
         """)
         return [{
@@ -236,6 +237,7 @@ def list_users() -> list:
             "last_login": str(r[4]) if r[4] else None, "created_at": str(r[5]),
             "account_locked": bool(r[6]), "must_reset_password": bool(r[7]),
             "phone": r[8] or "",
+            "suspended": bool(r[9]), "suspended_reason": r[10] or "",
         } for r in c.fetchall()]
     except Exception:
         return []

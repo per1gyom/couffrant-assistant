@@ -60,8 +60,8 @@ async function loadUsers(){
   lcEl.textContent=locked>0?`⚠️ ${locked} compte(s) bloqué(s)`:'';
   lcEl.style.color=locked>0?'var(--red)':'';
   document.getElementById('users-tbody').innerHTML=data.map(u=>`
-    <tr class="${u.account_locked?'row-locked':''}">
-      <td><strong class="mono">${u.username}</strong>${u.account_locked?'<span class="badge badge-red" style="margin-left:7px;font-size:9px">🔒 BLOQUÉ</span>':''}${u.must_reset_password&&!u.account_locked?'<span class="badge badge-yellow" style="margin-left:7px;font-size:9px">⚠️ Reset MDP</span>':''}</td>
+    <tr class="${u.account_locked?'row-locked':u.suspended?'row-locked':''}">
+      <td><strong class="mono">${u.username}</strong>${u.account_locked?'<span class="badge badge-red" style="margin-left:7px;font-size:9px">🔒 BLOQUÉ</span>':''}${u.suspended?'<span class="badge badge-yellow" style="margin-left:7px;font-size:9px">⏸️ SUSPENDU</span>':''}${u.must_reset_password&&!u.account_locked?'<span class="badge badge-yellow" style="margin-left:7px;font-size:9px">⚠️ Reset MDP</span>':''}</td>
       <td style="font-size:12px;color:var(--text2)">${u.email||'—'}</td>
       <td><span class="badge ${u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope||'user'}</span></td>
       <td class="mono" style="font-size:11px;color:var(--text2)">${fmtDateShort(u.last_login)}</td>
@@ -70,6 +70,7 @@ async function loadUsers(){
         <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="showTools('${u.username}')">Outils</button>
         <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope||'user'}','${u.phone||''}')">Modifier</button>
         <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="seedUser('${u.username}')">🌱</button>
+        ${u.suspended?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unsuspendUser('${u.username}')">▶️ Réactiver</button>`:`<button class="btn btn-ghost" style="padding:4px 9px;font-size:11px;color:var(--yellow)" onclick="suspendUser('${u.username}')">⏸️</button>`}
         ${u.account_locked?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unlockUser('${u.username}')">🔓 Débloquer</button>`:''}
         ${u.scope!=='admin'?`<button class="btn btn-danger" style="padding:4px 9px;font-size:11px" onclick="askDeleteUser('${u.username}')">Suppr.</button>`:''}
       </td>
@@ -127,7 +128,7 @@ async function loadCompanies(){
       return `<div class="tenant-card">
         <div class="tenant-header" onclick="toggleTenant(${i})">
           <span class="tenant-toggle" id="toggle-${i}">›</span>
-          <span class="tenant-name">🏢 ${t.name}${legalForm?' <span style="font-size:11px;color:var(--text3);font-weight:400">'+legalForm+'</span>':''}</span>
+          <span class="tenant-name">🏢 ${t.name}${(t.settings||{}).suspended?'<span class="badge badge-yellow" style="margin-left:8px;font-size:10px">⏸️ SUSPENDU</span>':''}${legalForm?' <span style="font-size:11px;color:var(--text3);font-weight:400">'+legalForm+'</span>':''}</span>
           <div class="tenant-meta"><span>👥 ${t.user_count} collaborateur(s)</span><span>📬 ${fmt(t.total_mails)} mails</span><span>💬 ${fmt(t.total_conv)} conversations</span><span>🔗 ${msBar}</span>${siret?`<span style="color:var(--text3)">SIRET: ${siret}</span>`:''}</div>
         </div>
         <div class="tenant-body" id="body-${i}">
@@ -156,6 +157,7 @@ async function loadCompanies(){
             </div><div class="sp-result" id="sp-result-${i}"></div>
           </div>
           ${isSuperAdmin?`<div class="tenant-admin-bar">
+            ${(t.settings||{}).suspended?`<button class="btn btn-unlock" style="font-size:11px;padding:5px 12px" onclick="unsuspendTenant('${t.tenant_id}')">▶️ Réactiver</button>`:`<button class="btn btn-ghost" style="font-size:11px;padding:5px 12px;color:var(--yellow)" onclick="suspendTenant('${t.tenant_id}','${t.name.replace(/'/g,"\\'")}')">⏸️ Suspendre</button>`}
             <button class="btn btn-accent" style="font-size:11px;padding:5px 12px" onclick="openEditTenant('${t.tenant_id}','${t.name.replace(/'/g,"\\'")}','${settingsEscaped}','${spSite}','${spFolder}')">✏️ Modifier</button>
             <button class="btn btn-danger" style="font-size:11px;padding:5px 12px" onclick="openDeleteTenant('${t.tenant_id}','${t.name.replace(/'/g,"\\'")}')">🗑️ Supprimer</button>
             <span class="tenant-id-tag">ID : ${t.tenant_id}</span></div>`:''}
@@ -259,6 +261,43 @@ async function seedUser(username){
     if(d.status==='ok') setAlert('user-alert','🌱 '+d.message,'ok');
     else setAlert('user-alert','❌ '+(d.message||'Erreur'),'err');
   }catch(e){setAlert('user-alert','❌ '+e.message,'err');}
+}
+
+async function suspendUser(username){
+  const reason=prompt('Raison de la suspension (optionnel) :','');
+  if(reason===null) return;
+  try{
+    const d=await(await fetch(`/admin/suspend-user/${username}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason})})).json();
+    if(d.status==='ok'){setAlert('user-alert','⏸️ '+d.message,'ok');loadUsers();loadCompanies();}
+    else setAlert('user-alert','❌ '+(d.message||'Erreur'),'err');
+  }catch(e){setAlert('user-alert','❌ '+e.message,'err');}
+}
+
+async function unsuspendUser(username){
+  if(!confirm(`Réactiver le compte "${username}" ?`)) return;
+  try{
+    const d=await(await fetch(`/admin/unsuspend-user/${username}`,{method:'POST'})).json();
+    if(d.status==='ok'){setAlert('user-alert','▶️ '+d.message,'ok');loadUsers();loadCompanies();}
+    else setAlert('user-alert','❌ '+(d.message||'Erreur'),'err');
+  }catch(e){setAlert('user-alert','❌ '+e.message,'err');}
+}
+
+async function suspendTenant(tenantId,tenantName){
+  const reason=prompt(`Suspendre la société "${tenantName}" ?\n\nTous les utilisateurs seront bloqués.\nRaison (optionnel) :`,'');
+  if(reason===null) return;
+  try{
+    const d=await(await fetch(`/admin/suspend-tenant/${tenantId}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason})})).json();
+    if(d.status==='ok'){setAlert('companies-alert','⏸️ '+d.message,'ok');loadCompanies();}
+    else setAlert('companies-alert','❌ '+(d.message||'Erreur'),'err');
+  }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
+}
+
+async function unsuspendTenant(tenantId){
+  try{
+    const d=await(await fetch(`/admin/unsuspend-tenant/${tenantId}`,{method:'POST'})).json();
+    if(d.status==='ok'){setAlert('companies-alert','▶️ '+d.message,'ok');loadCompanies();}
+    else setAlert('companies-alert','❌ '+(d.message||'Erreur'),'err');
+  }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
 }
 function setAlert(id,msg,type){const el=document.getElementById(id);el.className='alert '+type;el.textContent=msg;}
 

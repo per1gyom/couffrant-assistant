@@ -144,6 +144,52 @@ from app.routes.admin_tenants import router as _at
 router.include_router(_at)
 
 
+# ─── SUSPENSION ───
+
+@router.post("/admin/suspend-user/{target}")
+def admin_suspend_user(
+    request: Request,
+    target: str,
+    payload: dict = Body(default={}),
+    _: dict = Depends(require_admin),
+):
+    from app.suspension import suspend_user
+    reason = payload.get("reason", "")
+    return suspend_user(target, reason)
+
+
+@router.post("/admin/unsuspend-user/{target}")
+def admin_unsuspend_user(
+    request: Request,
+    target: str,
+    _: dict = Depends(require_admin),
+):
+    from app.suspension import unsuspend_user
+    return unsuspend_user(target)
+
+
+@router.post("/admin/suspend-tenant/{tenant_id}")
+def admin_suspend_tenant(
+    request: Request,
+    tenant_id: str,
+    payload: dict = Body(default={}),
+    _: dict = Depends(require_admin),
+):
+    from app.suspension import suspend_tenant
+    reason = payload.get("reason", "")
+    return suspend_tenant(tenant_id, reason)
+
+
+@router.post("/admin/unsuspend-tenant/{tenant_id}")
+def admin_unsuspend_tenant(
+    request: Request,
+    tenant_id: str,
+    _: dict = Depends(require_admin),
+):
+    from app.suspension import unsuspend_tenant
+    return unsuspend_tenant(tenant_id)
+
+
 # ─── SEEDING PROFIL ───
 
 @router.post("/admin/seed-user")

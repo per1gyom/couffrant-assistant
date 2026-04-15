@@ -33,11 +33,29 @@ def require_user(request: Request) -> dict:
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Tenant introuvable pour cet utilisateur",
             )
+    # Vérification suspension (API + web)
+    _check_suspension_api(username, tenant_id)
     return {
         "username": username,
         "tenant_id": tenant_id,
         "scope": request.session.get("scope", SCOPE_USER),
     }
+
+
+def _check_suspension_api(username: str, tenant_id: str):
+    """Vérifie la suspension pour les appels API. Lève 403 si suspendu."""
+    try:
+        from app.suspension import check_suspension
+        suspended, reason = check_suspension(username, tenant_id)
+        if suspended:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=reason,
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
 
 
 def require_admin(request: Request) -> dict:

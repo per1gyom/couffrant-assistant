@@ -187,5 +187,8 @@ MIGRATIONS = [
     # -- CLOISONNEMENT DRIVE : ajouter sharepoint_site au tenant couffrant_solar --
     """UPDATE tenants SET settings = settings || '{"sharepoint_site": "Commun"}'::jsonb
        WHERE id = 'couffrant_solar' AND NOT (settings ? 'sharepoint_site')""",
+    # -- SUSPENSION : colonnes pour suspendre utilisateurs et tenants --
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended BOOLEAN DEFAULT false",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_reason TEXT",
     # -- Ajouter les nouvelles migrations sous cette ligne --
 ]
