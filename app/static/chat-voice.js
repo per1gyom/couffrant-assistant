@@ -56,7 +56,7 @@ function startListening() {
   rec.onend = () => { if (isListening) setTimeout(()=>{ if(isListening) startListening(); },100); else cleanupMicUI(); };
   try { rec.start(); resetSilenceTimer(); } catch(e) { stopListening(); }
 }
-function resetSilenceTimer() { clearSilenceTimer(); silenceTimer=setTimeout(()=>{ if(isListening) stopListening(); },3000); }
+function resetSilenceTimer() { clearSilenceTimer(); silenceTimer=setTimeout(()=>{ if(isListening) stopListening(); },10000); }
 function clearSilenceTimer() { if(silenceTimer){clearTimeout(silenceTimer);silenceTimer=null;} }
 function stopListening() {
   isListening=false; clearSilenceTimer();
