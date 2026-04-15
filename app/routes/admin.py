@@ -318,16 +318,6 @@ def admin_memory_status(request: Request, _: dict = Depends(require_admin)):
         if conn: conn.close()
 
 
-@router.get("/admin/user-tools/{target}")
-def admin_get_tools(
-    request: Request,
-    target: str,
-    _: dict = Depends(require_admin),
-):
-    return get_user_tools(target, raw=True)
-
-
-@router.post("/admin/user-tools/{target}/{tool}")
 def admin_set_tool(
     request: Request,
     target: str,
@@ -345,19 +335,6 @@ def admin_set_tool(
     return result
 
 
-@router.delete("/admin/user-tools/{target}/{tool}")
-def admin_remove_tool(
-    request: Request,
-    target: str,
-    tool: str,
-    admin: dict = Depends(require_admin),
-):
-    result = remove_user_tool(target, tool)
-    log_admin_action(admin["username"], "update_tools", target, f"remove:{tool}")
-    return result
-
-
-@router.get("/init-db")
 def init_db_now(request: Request, _: dict = Depends(require_admin)):
     init_postgres()
     try:
@@ -366,18 +343,3 @@ def init_db_now(request: Request, _: dict = Depends(require_admin)):
         pass
     return {"status": "tables créées"}
 
-
-@router.get("/test-elevenlabs")
-def test_elevenlabs(request: Request, _: dict = Depends(require_admin)):
-    api_key = os.environ.get("ELEVENLABS_API_KEY", "")
-    voice_id = os.environ.get("ELEVENLABS_VOICE_ID", "")
-    resp = http_requests.post(
-        f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}",
-        headers={"xi-api-key": api_key, "Content-Type": "application/json"},
-        json={"text": "Bonjour.", "model_id": "eleven_flash_v2_5",
-              "voice_settings": {"stability": 0.5, "similarity_boost": 0.8}},
-        timeout=30,
-    )
-    return {"status_code": resp.status_code, "api_key_length": len(api_key), "voice_id": voice_id}
-from app.routes.admin_endpoints import router as _ep
-router.include_router(_ep)
