@@ -113,6 +113,15 @@ def chat(request: Request):
     if not request.session.get("user"):
         return RedirectResponse("/login-app")
     username = request.session.get("user")
+    tenant_id = request.session.get("tenant_id", "")
+    # Vérifier suspension — déconnexion immédiate si suspendu
+    from app.suspension import check_suspension
+    suspended, reason = check_suspension(username, tenant_id)
+    if suspended:
+        request.session.clear()
+        return HTMLResponse(
+            LOGIN_PAGE_HTML.format(error_block=f'<div class="error">{reason}</div>'),
+        )
     if must_reset_password_check(username):
         request.session["must_reset"] = True
         return RedirectResponse("/forced-reset")
