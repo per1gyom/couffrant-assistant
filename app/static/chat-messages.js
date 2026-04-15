@@ -32,8 +32,12 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
   const content = document.createElement('div');
   if (type === 'raya') {
     try {
-      const rawHtml = marked.parse(text || '');
-      const cleanHtml = DOMPurify.sanitize(rawHtml, { ADD_ATTR: ['target', 'rel'] });
+      const rawHtml = marked.parse(text || '', { breaks: true, gfm: true });
+      const cleanHtml = DOMPurify.sanitize(rawHtml, {
+        ADD_ATTR: ['target', 'rel'],
+        ADD_TAGS: ['img'],
+        ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+      });
       content.innerHTML = cleanHtml;
       content.classList.add('markdown-content');
       content.querySelectorAll('a').forEach(a => { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer'); });
