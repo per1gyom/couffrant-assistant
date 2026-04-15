@@ -253,6 +253,41 @@ def update_tenant_endpoint(
 
 # ─── PANEL & USERS ───
 
+# ─── CONNEXIONS V2 ───
+
+@router.get("/admin/connections/{tenant_id}")
+def admin_list_connections(request: Request, tenant_id: str, _: dict = Depends(require_admin)):
+    from app.connections import list_connections
+    return list_connections(tenant_id)
+
+@router.post("/admin/connections/{tenant_id}")
+def admin_create_connection(request: Request, tenant_id: str, payload: dict = Body(...), user: dict = Depends(require_admin)):
+    from app.connections import create_connection
+    return create_connection(tenant_id, payload.get("tool_type", ""), payload.get("label", ""),
+        auth_type=payload.get("auth_type", "manual"), config=payload.get("config", {}),
+        credentials=payload.get("credentials", {}), created_by=user["username"],
+        status=payload.get("status", "not_configured"))
+
+@router.put("/admin/connections/{tenant_id}/{connection_id}")
+def admin_update_connection(request: Request, tenant_id: str, connection_id: int, payload: dict = Body(...), _: dict = Depends(require_admin)):
+    from app.connections import update_connection
+    return update_connection(connection_id, **payload)
+
+@router.delete("/admin/connections/{tenant_id}/{connection_id}")
+def admin_delete_connection(request: Request, tenant_id: str, connection_id: int, _: dict = Depends(require_admin)):
+    from app.connections import delete_connection
+    return delete_connection(connection_id)
+
+@router.post("/admin/connections/{connection_id}/assign")
+def admin_assign_connection(request: Request, connection_id: int, payload: dict = Body(...), _: dict = Depends(require_admin)):
+    from app.connections import assign_connection
+    return assign_connection(connection_id, payload.get("username", ""), payload.get("access_level", "read_only"), payload.get("enabled", True))
+
+@router.delete("/admin/connections/{connection_id}/assign/{username}")
+def admin_unassign_connection(request: Request, connection_id: int, username: str, _: dict = Depends(require_admin)):
+    from app.connections import unassign_connection
+    return unassign_connection(connection_id, username)
+
 import time
 
 ADMIN_AUTH_TIMEOUT = 600  # 10 minutes

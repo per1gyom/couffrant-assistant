@@ -190,5 +190,23 @@ MIGRATIONS = [
     # -- SUSPENSION : colonnes pour suspendre utilisateurs et tenants --
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended BOOLEAN DEFAULT false",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_reason TEXT",
+    # -- Connecteurs V2 --
+    """CREATE TABLE IF NOT EXISTS tenant_connections (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        tool_type TEXT NOT NULL, label TEXT NOT NULL,
+        auth_type TEXT NOT NULL DEFAULT 'manual',
+        credentials JSONB DEFAULT '{}', config JSONB DEFAULT '{}',
+        status TEXT DEFAULT 'not_configured', created_by TEXT,
+        created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
+    )""",
+    """CREATE TABLE IF NOT EXISTS connection_assignments (
+        id SERIAL PRIMARY KEY,
+        connection_id INTEGER NOT NULL REFERENCES tenant_connections(id) ON DELETE CASCADE,
+        username TEXT NOT NULL, access_level TEXT NOT NULL DEFAULT 'read_only',
+        enabled BOOLEAN DEFAULT TRUE, UNIQUE(connection_id, username)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_tc_tenant ON tenant_connections(tenant_id)",
+    "CREATE INDEX IF NOT EXISTS idx_ca_username ON connection_assignments(username)",
     # -- Ajouter les nouvelles migrations sous cette ligne --
 ]
