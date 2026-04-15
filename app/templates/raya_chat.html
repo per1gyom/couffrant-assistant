@@ -222,13 +222,17 @@
 
 <script>
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/sw.js', { scope: '/' })
-        .then(reg => {
-          console.log('[SW] Enregistré, scope:', reg.scope);
-          reg.update();
-        })
-        .catch(err => console.warn('[SW] Enregistrement échoué:', err));
+    window.addEventListener('load', async () => {
+      // Force nettoyage des anciens SW avant d'enregistrer le nouveau
+      const regs = await navigator.serviceWorker.getRegistrations();
+      for (const reg of regs) { await reg.unregister(); }
+      // Purger tous les caches SW
+      const keys = await caches.keys();
+      for (const k of keys) { await caches.delete(k); }
+      // Enregistrer le nouveau SW avec cache-bust
+      navigator.serviceWorker.register('/sw.js?v=15', { scope: '/' })
+        .then(reg => { reg.update(); })
+        .catch(err => console.warn('[SW] Échec:', err));
     });
   }
   (function(){
