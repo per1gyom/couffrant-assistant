@@ -200,4 +200,5 @@ def _fmt(items: list) -> list:
 
 
 # ─── ACTIONS DRIVE ───
-from app.connectors.drive_read import list_drive,read_drive_file,search_drive  # noqa
+# Fonctions lecture dans drive_read.py, écriture dans drive_actions.py
+# Import direct depuis ces modules — PAS de réexport ici (évite import circulaire)
