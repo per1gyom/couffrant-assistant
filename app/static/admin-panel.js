@@ -87,6 +87,65 @@ async function showTools(username){
 }
 function hideTools(){document.getElementById('tools-section').style.display='none';}
 
+// ─── OUTILS PAR USER (fiche société) ───
+let currentToolsUser=null;
+const toolsApiBase=()=>currentUserScope==='admin'?'/admin':'/tenant';
+
+async function showToolsCompany(username){
+  currentToolsUser=username;
+  const panel=document.getElementById('companies-tools-panel');
+  const grid=document.getElementById('companies-tools-grid');
+  document.getElementById('companies-tools-title').innerHTML=`🔧 Outils de <strong style="color:#fff">${username}</strong>`;
+  grid.innerHTML='<span class="loader"></span>';
+  panel.style.display='block';
+  panel.scrollIntoView({behavior:'smooth',block:'nearest'});
+  try{
+    const tools=await(await fetch(`${toolsApiBase()}/user-tools/${username}`)).json();
+    if(!tools.length){grid.innerHTML='<p style="color:var(--text3);font-family:var(--mono);font-size:12px">Aucun outil configuré.</p>';return;}
+    grid.innerHTML=tools.map(t=>`<div class="tool-card">
+      <div class="tool-name">${t.tool}</div>
+      <div class="tool-meta">Niveau : <select onchange="updateToolLevel('${username}','${t.tool}',this.value)" style="padding:2px 6px;background:var(--bg1);border:1px solid var(--border);border-radius:4px;color:var(--text1);font-size:11px">
+        <option value="read_only" ${t.access_level==='read_only'?'selected':''}>Lecture seule</option>
+        <option value="write" ${t.access_level==='write'?'selected':''}>Lecture + écriture</option>
+        <option value="full" ${t.access_level==='full'?'selected':''}>Accès complet</option>
+      </select></div>
+      <div class="tool-meta">Actif : <button class="btn ${t.enabled?'btn-accent':'btn-ghost'}" style="padding:2px 8px;font-size:10px;min-width:40px" onclick="toggleToolEnabled('${username}','${t.tool}',${!t.enabled},'${t.access_level}')">${t.enabled?'🟢 ON':'🔴 OFF'}</button></div>
+      <button class="btn btn-danger" style="padding:2px 8px;font-size:10px;margin-top:6px" onclick="removeToolFromUser('${username}','${t.tool}')">Retirer</button>
+    </div>`).join('');
+  }catch(e){grid.innerHTML=`<p style="color:var(--red);font-size:12px">❌ ${e.message}</p>`;}
+}
+function hideToolsCompany(){document.getElementById('companies-tools-panel').style.display='none';currentToolsUser=null;}
+
+async function toggleToolEnabled(username,tool,enabled,level){
+  try{
+    await fetch(`${toolsApiBase()}/user-tools/${username}/${tool}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_level:level,enabled})});
+    showToolsCompany(username);
+  }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
+}
+async function updateToolLevel(username,tool,level){
+  try{
+    await fetch(`${toolsApiBase()}/user-tools/${username}/${tool}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_level:level,enabled:true})});
+    showToolsCompany(username);
+  }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
+}
+async function removeToolFromUser(username,tool){
+  if(!confirm(`Retirer l'outil "${tool}" de ${username} ?`)) return;
+  try{
+    await fetch(`${toolsApiBase()}/user-tools/${username}/${tool}`,{method:'DELETE'});
+    showToolsCompany(username);
+  }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
+}
+async function addToolToUser(){
+  const tool=document.getElementById('new-tool-name').value;
+  const level=document.getElementById('new-tool-level').value;
+  if(!tool||!currentToolsUser){setAlert('companies-alert','Sélectionnez un outil.','err');return;}
+  try{
+    await fetch(`${toolsApiBase()}/user-tools/${currentToolsUser}/${tool}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({access_level:level,enabled:true,config:{}})});
+    document.getElementById('new-tool-name').value='';
+    showToolsCompany(currentToolsUser);
+  }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
+}
+
 async function unlockUser(username){
   if(!confirm(`Débloquer le compte "${username}" ?\n\nAssurez-vous d'avoir vérifié l'identité.`)) return;
   const d=await(await fetch(`/admin/unlock-user/${username}`,{method:'POST'})).json();
@@ -145,6 +204,7 @@ async function loadCompanies(){
             <td class="mono">${fmt(u.mails)}</td><td class="mono">${fmt(u.conv)}</td>
             <td class="mono" style="font-size:11px;color:var(--text2)">${fmtDateShort(u.last_login)}</td>
             <td style="display:flex;gap:5px;flex-wrap:wrap">
+              <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="showToolsCompany('${u.username}')">🔧</button>
               <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope}','${u.phone||''}')">Modifier</button>
               <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="seedUser('${u.username}')">🌱</button>
               ${!isSuperAdmin&&u.scope!=='admin'?`<button class="btn ${u.direct_actions_override===true?'btn-accent':u.direct_actions_override===false?'btn-danger':'btn-ghost'}" style="padding:4px 9px;font-size:10px" onclick="cycleUserDirectActions('${u.username}',${u.direct_actions_override===null||u.direct_actions_override===undefined?'null':u.direct_actions_override})" title="Actions directes fichiers">${u.direct_actions_override===true?'📂 ON':u.direct_actions_override===false?'📂 OFF':'📂 ='}</button>`:''}

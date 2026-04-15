@@ -14,6 +14,7 @@ from app.database import get_pg_conn
 from app.app_security import (
     create_user, delete_user, update_user,
     get_users_in_tenant, generate_reset_token, get_user_tools,
+    set_user_tool, remove_user_tool,
     SCOPE_USER, SCOPE_CS, SCOPE_TENANT_ADMIN, DEFAULT_TENANT,
 )
 from app.routes.deps import require_tenant_admin, get_session_tenant_id, assert_same_tenant
@@ -94,6 +95,38 @@ def tenant_get_tools(
 ):
     assert_same_tenant(request, target)
     return get_user_tools(target, raw=True)
+
+
+@router.post("/tenant/user-tools/{target}/{tool}")
+def tenant_set_tool(
+    request: Request,
+    target: str,
+    tool: str,
+    payload: dict = Body(...),
+    admin: dict = Depends(require_tenant_admin),
+):
+    assert_same_tenant(request, target)
+    result = set_user_tool(
+        target, tool,
+        payload.get("access_level", "read_only"),
+        payload.get("enabled", True),
+        payload.get("config", {}),
+    )
+    log_admin_action(admin["username"], "update_tools", target, tool)
+    return result
+
+
+@router.delete("/tenant/user-tools/{target}/{tool}")
+def tenant_remove_tool(
+    request: Request,
+    target: str,
+    tool: str,
+    admin: dict = Depends(require_tenant_admin),
+):
+    assert_same_tenant(request, target)
+    result = remove_user_tool(target, tool)
+    log_admin_action(admin["username"], "remove_tool", target, tool)
+    return result
 
 
 @router.get("/tenant/rules")
