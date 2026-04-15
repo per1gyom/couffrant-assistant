@@ -413,7 +413,18 @@ async function loadProfile(){
   try{const d=await(await fetch('/profile')).json();document.getElementById('profile-username').textContent=d.username||'—';document.getElementById('profile-email').value=d.email||'';}catch(e){}
 }
 async function initUserScope(){
-  try{const d=await(await fetch('/profile')).json();currentUserScope=d.scope||'';currentUserTenantId=d.tenant_id||'';isSuperAdmin=(currentUserScope==='admin');if(isSuperAdmin) document.getElementById('btn-create-tenant').style.display='';}catch(e){}
+  try{
+    const d=await(await fetch('/profile')).json();
+    currentUserScope=d.scope||'';currentUserTenantId=d.tenant_id||'';isSuperAdmin=(currentUserScope==='admin');
+    if(isSuperAdmin) document.getElementById('btn-create-tenant').style.display='';
+    // Tenant admin : masquer les onglets super-admin, afficher Sociétés par défaut
+    if(!isSuperAdmin){
+      const tabs=document.querySelectorAll('.nav-tabs .tab');
+      const hiddenTabs=['memory','users','rules','insights','actions'];
+      tabs.forEach(t=>{const name=t.getAttribute('onclick')||'';hiddenTabs.forEach(h=>{if(name.includes("'"+h+"'"))t.style.display='none';});});
+      switchTab('companies');
+    }
+  }catch(e){}
 }
 async function saveEmail(){
   const email=document.getElementById('profile-email').value.trim();const d=await(await fetch('/profile/email',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})})).json();

@@ -140,7 +140,13 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     if "access_token" not in result:
         return HTMLResponse("Erreur d'authentification", status_code=400)
     request.session["access_token"] = result["access_token"]
-    username = request.session.get("user", "guillaume")
+    username = request.session.get("user")
+    if not username:
+        return HTMLResponse(
+            "<h2>Session expirée</h2><p>Votre session a expiré pendant la connexion Microsoft.</p>"
+            "<p><a href='/login-app'>Se reconnecter</a></p>",
+            status_code=401,
+        )
     save_microsoft_token(
         username, result["access_token"],
         result.get("refresh_token", ""), result.get("expires_in", 3600),
@@ -196,7 +202,13 @@ def auth_gmail_callback(request: Request, code: str | None = None, error: str | 
         return HTMLResponse("Code OAuth manquant", status_code=400)
 
     from app.connectors.gmail_connector import exchange_code_for_tokens
-    username = request.session.get("user", "guillaume")
+    username = request.session.get("user")
+    if not username:
+        return HTMLResponse(
+            "<h2>Session expirée</h2><p>Votre session a expiré pendant la connexion Gmail.</p>"
+            "<p><a href='/login-app'>Se reconnecter</a></p>",
+            status_code=401,
+        )
 
     try:
         tokens = exchange_code_for_tokens(code)

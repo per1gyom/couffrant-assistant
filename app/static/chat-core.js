@@ -37,8 +37,21 @@ async function checkHealth() {
 
 async function loadUserInfo() {
   try {
-    const r = await fetch('/admin/users');
-    if (r.ok) { isAdmin = true; document.getElementById('adminPanelBtn').style.display = 'inline-flex'; }
+    const d = await (await fetch('/profile')).json();
+    const scope = d.scope || '';
+    if (scope === 'admin' || scope === 'tenant_admin') {
+      isAdmin = true;
+      document.getElementById('adminPanelBtn').style.display = 'inline-flex';
+    }
+    // Masquer les sections super-admin du drawer pour les tenant_admin
+    if (scope === 'tenant_admin') {
+      document.querySelectorAll('.d-group').forEach(g => {
+        const title = (g.querySelector('.d-group-title') || {}).textContent || '';
+        if (['Mémoire', 'État du', 'Actions sensibles', 'Urgence'].some(k => title.includes(k))) g.style.display = 'none';
+      });
+      // Masquer aussi les séparateurs orphelins
+      document.querySelectorAll('.d-sep').forEach((s, i) => { if (i < 3) s.style.display = 'none'; });
+    }
   } catch(e) {}
 }
 

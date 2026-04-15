@@ -135,7 +135,7 @@ def update_tenant_endpoint(
 @router.get("/admin/panel", response_class=HTMLResponse)
 def admin_panel(request: Request):
     try:
-        require_admin(request)
+        require_tenant_admin(request)
     except HTTPException:
         return RedirectResponse("/login-app")
     with open("app/templates/admin_panel.html", "r", encoding="utf-8") as f:
