@@ -126,7 +126,7 @@ async function loadCompanies(){
     if(!tenants.length){document.getElementById('companies-list').innerHTML='<div style="color:var(--text3);font-family:var(--mono);font-size:12px">Aucune société.</div>';return;}
     document.getElementById('companies-list').innerHTML=tenants.map((t,i)=>{
       const msBar=t.user_count>0?`${t.ms_connected_count}/${t.user_count} MS connectés`:'—';
-      const spSite=t.sharepoint_site||'Commun';const spFolder=t.sharepoint_folder||'1_Photovoltaïque';const spDrive=t.sharepoint_drive||'Documents';
+      const spSite=t.sharepoint_site||'';const spFolder=t.sharepoint_folder||'';const spDrive=t.sharepoint_drive||'';
       const settingsEscaped=JSON.stringify(t.settings||{}).replace(/'/g,"&apos;").replace(/"/g,'&quot;');
       const legalForm=(t.settings||{}).legal_form||'';const siret=(t.settings||{}).siret||'';
       return `<div class="tenant-card">

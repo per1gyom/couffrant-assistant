@@ -171,9 +171,9 @@ def _build_tenants_overview(tenant_filter=None):
         result.append({
             "tenant_id": tenant_id, "name": name or tenant_id,
             "settings": sp,
-            "sharepoint_site": sp.get("sharepoint_site", "Commun"),
-            "sharepoint_folder": sp.get("sharepoint_folder", "1_Photovoltaïque"),
-            "sharepoint_drive": sp.get("sharepoint_drive", "Documents"),
+            "sharepoint_site": sp.get("sharepoint_site", ""),
+            "sharepoint_folder": sp.get("sharepoint_folder", ""),
+            "sharepoint_drive": sp.get("sharepoint_drive", ""),
             "user_count": len(users),
             "ms_connected_count": sum(1 for u in users if u["ms_connected"]),
             "total_mails": sum(u["mails"] for u in users),
@@ -186,8 +186,8 @@ def _build_tenants_overview(tenant_filter=None):
         if orphans and not any(t["tenant_id"] == DEFAULT_TENANT for t in result):
             result.insert(0, {
                 "tenant_id": DEFAULT_TENANT, "name": "Couffrant Solar",
-                "settings": {}, "sharepoint_site": "Commun",
-                "sharepoint_folder": "1_Photovoltaïque", "sharepoint_drive": "Documents",
+                "settings": {}, "sharepoint_site": "",
+                "sharepoint_folder": "", "sharepoint_drive": "",
                 "user_count": len(orphans),
                 "ms_connected_count": sum(1 for u in orphans if u["ms_connected"]),
                 "total_mails": sum(u["mails"] for u in orphans),
