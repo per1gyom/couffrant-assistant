@@ -421,8 +421,11 @@ async function initUserScope(){
   try{
     const d=await(await fetch('/profile')).json();
     currentUserScope=d.scope||'';currentUserTenantId=d.tenant_id||'';isSuperAdmin=(currentUserScope==='admin');
+    // Mode "Ma société" : ?view=company force la vue tenant_admin même pour le super admin
+    const companyView=new URLSearchParams(window.location.search).get('view')==='company';
+    if(companyView) isSuperAdmin=false;
     if(isSuperAdmin) document.getElementById('btn-create-tenant').style.display='';
-    // Tenant admin : masquer les onglets super-admin, afficher Sociétés par défaut
+    // Vue société (tenant admin OU super admin en mode company) : masquer les onglets super-admin
     if(!isSuperAdmin){
       const tabs=document.querySelectorAll('.nav-tabs .tab');
       const hiddenTabs=['memory','users','rules','insights','actions'];
