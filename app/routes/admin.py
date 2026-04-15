@@ -142,3 +142,30 @@ def admin_panel(request: Request):
         return HTMLResponse(content=f.read())
 from app.routes.admin_tenants import router as _at
 router.include_router(_at)
+
+
+# ─── SEEDING PROFIL ───
+
+@router.post("/admin/seed-user")
+def seed_user_endpoint(
+    request: Request,
+    payload: dict = Body(...),
+    _: dict = Depends(require_admin),
+):
+    """Seed un utilisateur avec un profil metier. Idempotent."""
+    username = payload.get("username", "").strip()
+    profile = payload.get("profile", "generic").strip()
+    if not username:
+        return {"status": "error", "message": "Username requis."}
+    tenant_id = get_tenant_id(username)
+    if not tenant_id:
+        return {"status": "error", "message": f"Utilisateur '{username}' introuvable."}
+    try:
+        from app.seeding import seed_tenant, PROFILES
+        if profile not in PROFILES:
+            return {"status": "error", "message": f"Profil inconnu. Disponibles : {list(PROFILES.keys())}"}
+        counts = seed_tenant(tenant_id, username, profile=profile)
+        total = sum(counts.values())
+        return {"status": "ok", "message": f"{total} regles seedees (profil '{profile}').", "counts": counts}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:200]}
