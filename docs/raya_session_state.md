@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 16/04/2026 20h00** — Opus
+**Dernière mise à jour : 16/04/2026 22h00** — Opus
 
 ---
 
@@ -115,15 +115,26 @@ DÉCISION : seeding = DEMO. Vrais clients → questionnaire admin + questionnair
 | Panel admin (⚙️ Ma société) | ✅ (sa société) | ✅ (sa société) | ❌ |
 | Accès panel | 🔒 Re-auth MDP (10 min) | 🔒 Re-auth MDP (10 min) | ❌ |
 
-## 20. BUGS CONNUS / REPORTÉS
+## 20. CONNECTEURS V2 ✅ (Phase A+B)
+- Spec dans `docs/spec_connecteurs_v2.md` (validée 16/04)
+- **Modèle** : chaque connexion = instance d'outil avec credentials + config + statut, assignable à 1-N users
+- `tenant_connections` : id, tenant_id, tool_type, label, auth_type, credentials, config, status
+- `connection_assignments` : connection_id, username, access_level, enabled (UNIQUE)
+- Module `app/connections.py` : create/update/delete/list/assign/unassign/get_user_connections
+- 14 endpoints API (7 admin + 7 tenant)
+- UI panel : section 📡 Connexions dans chaque fiche société, créer/supprimer/renommer, dropdown users avec Tous/Aucun, >5 users = déroulant compact
+- Migration existant : 4 connexions Couffrant Solar (Drive, Outlook, Odoo, Gmail)
+- **Phase C restante** : intégration dans `_raya_core()` — `get_user_connections()` remplace `load_user_tools()`
+
+## 21. BUGS CONNUS / REPORTÉS
 - **Bug report #3 (Charlotte, 15/04)** : "Le micro reste ouvert" → FIX `eaa7d00` : `SpeechRecognition.stop()` manquant, objet rec stocké en global `currentRecognition`.
 - **Bug report #2 (Guillaume, 14/04)** : Erreur 404 archivage mail (MS Graph) → non investigué.
 - **Bug report #1 (Guillaume, 14/04)** : Erreur archivage mail (iPhone) → non investigué.
 
-## 21. FLUTTER — EN PARALLÈLE
+## 22. FLUTTER — EN PARALLÈLE
 App iOS fonctionnelle sur simulateur (login, chat, TTS, feedback). Specs dans `docs/raya_flutter_ux_specs.md`. Ne pas toucher au dossier `flutter/`.
 
-## 22. ROADMAP
+## 23. ROADMAP
 
 ### Priorité immédiate (prochaine session)
 - [x] Créer compte Charlotte (tenant `juillet`, `tenant_admin`) ✅
@@ -138,10 +149,10 @@ App iOS fonctionnelle sur simulateur (login, chat, TTS, feedback). Specs dans `d
 - [ ] Vérifier que Charlotte voit bien sa société dans le panel admin
 
 ### Commercial (Bloc C)
-- [ ] **Connecteurs v2** — spec validée (`docs/spec_connecteurs_v2.md`) — 3 phases :
-  - Phase A : Schema DB `tenant_connections` + `connection_assignments` + migration + CRUD
-  - Phase B : Panel admin UI — créer/assigner/révoquer connexions par user
-  - Phase C : Intégration Raya Core — multi-connexions par user dans le chat
+- [ ] **Connecteurs v2** — spec validée (`docs/spec_connecteurs_v2.md`) :
+  - ✅ Phase A : Schema DB `tenant_connections` + `connection_assignments` + CRUD + migration + endpoints
+  - ✅ Phase B : Panel admin UI — créer/assigner/révoquer/renommer connexions, dropdown users Tous/Aucun
+  - [ ] Phase C : Intégration Raya Core — multi-connexions par user dans le chat
 - [ ] C4 : WhatsApp production (sortir sandbox Twilio)
 - [ ] C5 : Facturation Stripe
 - [ ] Onboarding amélioré (questionnaire admin + questionnaire utilisateur)
@@ -150,7 +161,7 @@ App iOS fonctionnelle sur simulateur (login, chat, TTS, feedback). Specs dans `d
 - [ ] Backup auto S3 (Scaleway)
 - **Objectif : premier client payant juillet 2026**
 
-## 23. DÉCISIONS CLÉS
+## 24. DÉCISIONS CLÉS
 - Seeding = DEMO uniquement. Vrais clients → questionnaire admin + questionnaire utilisateur.
 - Actions directes fichiers OFF par défaut. **Tenant admin toggle** (pas super admin).
 - Corbeille mail reste en action directe (récupérable + données personnelles).
@@ -160,10 +171,10 @@ App iOS fonctionnelle sur simulateur (login, chat, TTS, feedback). Specs dans `d
 - **Routes admin** : toujours dans le package `app/routes/admin/`, jamais dans le fichier `admin.py`.
 - **Connecteurs v2** (validé 16/04) : chaque connexion (OAuth, API, SharePoint) est une instance partageable, assignable/révocable dynamiquement à 1-N users par l'admin. Spec dans `docs/spec_connecteurs_v2.md`.
 
-## 24. HISTORIQUE
+## 25. HISTORIQUE
 
-### Session 16/04/2026 (~10 commits)
-**FIX-CRITICAL : package `admin/` shadowait `admin.py`** — les routes suspension, actions directes, seed-user et /tenant/my-overview étaient mortes en prod depuis le 12/04. Toutes les routes injectées dans le package (`super_admin.py`). **FIX-CRITICAL : fallback OAuth `"guillaume"`** supprimé dans les callbacks Microsoft + Gmail — session vide → page erreur 401 au lieu de sauver le token sous Guillaume. **Migration DB** : colonnes `suspended` + `suspended_reason` ajoutées en prod (manquantes). **Fix micro** : `rec.stop()` manquant dans `chat-voice.js`. **Suspension feedback** : alertes vers l'onglet actif + cartes sociétés restent ouvertes. **Actions directes** : retirées du super admin, toggle per-user avec cycle (hérité/ON/OFF). **Panel admin tenant_admin** : `require_tenant_admin` au lieu de `require_admin`, onglets super-admin masqués. **Drawer filtré** : sections Mémoire/État/Actions sensibles/Debug masquées pour tenant_admin. **Bouton Panel** : `loadUserInfo()` utilise `/profile` → visible pour tenant_admin. **2 boutons** : 🔑 Super Admin + ⚙️ Ma société. **Re-auth MDP** : page de login admin dédiée, timeout 10 min. Charlotte créée et testée.
+### Session 16/04/2026 (~25 commits)
+**FIX-CRITICAL package admin/** : Routes suspension/direct-actions/seed mortes en prod depuis le 12/04 (package shadow), injectées dans `super_admin.py`. **FIX-CRITICAL OAuth** : fallback `"guillaume"` supprimé (Microsoft + Gmail). **Migration DB** : `suspended`+`suspended_reason` ajoutées en prod. **Fix micro** : `rec.stop()` + `stopListening()` dans `sendMessage()` + input vidé après envoi. **Suspension** : feedback alerte ciblée + cartes restent ouvertes + déconnexion session immédiate sur `/chat`. **Actions directes** : retirées du super admin, per-user toggle cycle hérité/ON/OFF. **Panel admin** : `require_tenant_admin` + drawer filtré + 2 boutons (`🔑 Super Admin` / `⚙️ Ma société` avec `?view=company`) + re-auth MDP 10 min. **Cloisonnement SharePoint** : fallbacks "Commun/Photovoltaïque" supprimés, vide par défaut. **UX** : onglet Utilisateurs supprimé (doublon) + barre recherche société/user. **Outils 🔧** : bouton par user, panneau inline, add/toggle/remove/level, endpoints tenant POST/DELETE. **Connecteurs v2** : spec validée, Phase A (tables + CRUD + migration + endpoints) + Phase B (UI dans fiche société, créer/supprimer/assigner/révoquer, dropdown users Tous/Aucun, rename labels, >5 users déroulant, panneau reste ouvert).
 
 ### Session 15/04/2026 soir (~15 commits)
 8 fichiers morts supprimés. PWA Topics (bouton 🔖 + panneau latéral). Split CSS + admin_panel.html. Split Python batch final (13 splits Sonnet + 6 hotfixes Opus). Seeding 8 profils + endpoint seed-user. Refonte panel admin (SIRET, adresse, ID auto, double confirmation, bouton collaborateur). Cloisonnement Drive. Suspension comptes. Actions directes on/off. FIX-CRITICAL 16 décorateurs admin_endpoints.py.
@@ -177,5 +188,5 @@ AUDIT COMPLET. P0-1 anti-injection. SAV. Bloc A. B1 B3 B4. C3 RGPD. FIX-LEARN. S
 ### Sessions précédentes
 13-14/04 nuit : ~50 commits. 13/04 : Connectivité 5/5. 12-13/04 : ~55 tâches. 12/04 : Refactor admin en package.
 
-## 25. REPRISE
+## 26. REPRISE
 « Bonjour Opus. Projet Raya, Guillaume Perrin (Couffrant Solar). On se tutoie, en français, vocabulaire Terminal, concis. Lis `docs/raya_session_state.md` sur `per1gyom/couffrant-assistant` main. Reprends où on en était. »
