@@ -69,6 +69,7 @@ async function loadUsers(){
       <td style="display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="showTools('${u.username}')">Outils</button>
         <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope||'user'}','${u.phone||''}')">Modifier</button>
+        <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="seedUser('${u.username}')">🌱</button>
         ${u.account_locked?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unlockUser('${u.username}')">🔓 Débloquer</button>`:''}
         ${u.scope!=='admin'?`<button class="btn btn-danger" style="padding:4px 9px;font-size:11px" onclick="askDeleteUser('${u.username}')">Suppr.</button>`:''}
       </td>
@@ -204,21 +205,51 @@ async function confirmDeleteTenant(){
   }catch(e){setAlert('delete-tenant-alert','❌ '+e.message,'err');}tenantToDelete=null;
 }
 
-function openModal(name){document.getElementById('modal-'+name).classList.add('open');}
+function openModal(name){
+  document.getElementById('modal-'+name).classList.add('open');
+  if(name==='create-user') loadTenantDropdown();
+}
 function closeModal(name){document.getElementById('modal-'+name).classList.remove('open');}
+
+async function loadTenantDropdown(){
+  const sel=document.getElementById('new-tenant');
+  if(sel.options.length>1) return;
+  sel.innerHTML='<option value="">— Choisir —</option>';
+  try{
+    const tenants=await(await fetch('/admin/tenants')).json();
+    tenants.forEach(t=>{const o=document.createElement('option');o.value=t.id;o.textContent=t.name+' ('+t.id+')';sel.appendChild(o);});
+  }catch(e){}
+}
+
+async function seedUser(username){
+  const profile=prompt('Profil de seeding :\\n- generic\\n- pv_french\\n- event_planner\\n- artisan\\n- immobilier\\n- conseil\\n- commerce\\n- medical','generic');
+  if(!profile) return;
+  try{
+    const d=await(await fetch('/admin/seed-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,profile})})).json();
+    if(d.status==='ok') setAlert('user-alert','🌱 '+d.message,'ok');
+    else setAlert('user-alert','❌ '+(d.message||'Erreur'),'err');
+  }catch(e){setAlert('user-alert','❌ '+e.message,'err');}
+}
 function setAlert(id,msg,type){const el=document.getElementById(id);el.className='alert '+type;el.textContent=msg;}
 
-// USER-PHONE : createUser envoie phone, email obligatoire
+// USER-PHONE : createUser envoie phone, email obligatoire + tenant + profil seeding
 async function createUser(){
   const username=document.getElementById('new-username').value.trim();
   const email=document.getElementById('new-email').value.trim();
   const phone=document.getElementById('new-phone').value.trim();
   const password=document.getElementById('new-password-user').value;
   const scope=document.getElementById('new-scope').value;
+  const tenant_id=document.getElementById('new-tenant').value;
+  const profile=document.getElementById('new-profile').value;
   if(!username||!password){setAlert('create-user-alert','Identifiant et mot de passe requis.','err');return;}
   if(!email){setAlert('create-user-alert','L\'email est obligatoire (identifiant de connexion).','err');return;}
-  const d=await(await fetch('/admin/create-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password,email,phone:phone||null,scope})})).json();
-  if(d.status==='ok'){setAlert('user-alert','✅ '+d.message,'ok');closeModal('create-user');['new-username','new-email','new-phone','new-password-user'].forEach(id=>document.getElementById(id).value='');loadUsers();}
+  if(!tenant_id){setAlert('create-user-alert','Sélectionnez une société.','err');return;}
+  const d=await(await fetch('/admin/create-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password,email,phone:phone||null,scope,tenant_id})})).json();
+  if(d.status==='ok'){
+    // Seeder avec le profil choisi
+    try{await fetch('/admin/seed-user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,profile})});}catch(e){}
+    setAlert('user-alert','✅ '+d.message+' (profil: '+profile+')','ok');closeModal('create-user');['new-username','new-email','new-phone','new-password-user'].forEach(id=>document.getElementById(id).value='');loadUsers();
+  }
   else{setAlert('create-user-alert','❌ '+(d.message||d.error),'err');}
 }
 // USER-PHONE : editUser accepte phone, le pré-remplit dans la modale
