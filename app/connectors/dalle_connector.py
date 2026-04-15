@@ -44,7 +44,7 @@ def generate_image(prompt: str, size: str = "1024x1024") -> dict:
         if resp.status_code != 200:
             error_msg = resp.text[:200]
             logger.error(f"[DALL-E] Erreur API: {resp.status_code} — {error_msg}")
-            return {"error": f"Erreur DALL-E ({resp.status_code}): {error_msg}"}
+            return {"error": "Impossible de générer l'image pour le moment. Réessayez plus tard."}
 
         data = resp.json()
         image_data = data.get("data", [{}])[0]

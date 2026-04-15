@@ -67,7 +67,7 @@ def execute_actions(
             )
             confirmed.append(link)
         except Exception as e:
-            confirmed.append(f"❌ Erreur création fichier : {str(e)[:80]}")
+            confirmed.append(f"❌ Impossible de créer le fichier.")
 
     # TOOL-DALLE : génération d'images avec DALL-E 3
     create_image_matches = re.findall(r'\[ACTION:CREATE_IMAGE:([^\]]*)\]', raya_response)
@@ -80,7 +80,7 @@ def execute_actions(
             else:
                 confirmed.append(f"![Image générée]({result['url']})")
         except Exception as e:
-            confirmed.append(f"❌ Erreur DALL-E: {str(e)[:100]}")
+            confirmed.append("❌ Impossible de générer l'image. Réessayez plus tard.")
 
     confirmed += _handle_ask_choice(raya_response)
 

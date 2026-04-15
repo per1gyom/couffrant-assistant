@@ -51,7 +51,7 @@ def execute_create_action(action_str: str, username: str, tenant_id: str) -> str
             url = f"{base_url}/download/{file_id}"
             return f"[📄 Télécharger {filename}]({url})"
         except Exception as e:
-            return f"❌ Erreur création PDF : {str(e)[:120]}"
+            return f"❌ Impossible de créer le PDF. Réessayez."
 
     # ── CREATE_EXCEL ──
     if action_type == "CREATE_EXCEL":
@@ -84,7 +84,7 @@ def execute_create_action(action_str: str, username: str, tenant_id: str) -> str
             url = f"{base_url}/download/{file_id}"
             return f"[📊 Télécharger {filename}]({url})"
         except Exception as e:
-            return f"❌ Erreur création Excel : {str(e)[:120]}"
+            return f"❌ Impossible de créer le fichier Excel. Réessayez avec un titre plus simple."
 
     return f"❌ Type de création inconnu : {action_type}"
 

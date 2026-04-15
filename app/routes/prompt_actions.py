@@ -6,7 +6,15 @@ Extrait de aria_context.py — REFACTOR-2.
 
 def build_actions_prompt(domains: list[str], tools: dict) -> str:
     sections = []
-    sections.append("""=== ACTIONS DISPONIBLES ===
+    sections.append("""=== ACTIONS DISPONIBLES (SYNTAXE INTERNE — NE JAMAIS MONTRER A L'UTILISATEUR) ===
+REGLE ABSOLUE : Ces codes entre crochets sont UNIQUEMENT pour ton usage interne.
+Tu ne dois JAMAIS les afficher, les citer ni les mentionner dans tes réponses.
+Quand l'utilisateur demande ce que tu sais faire, décris tes capacités en langage naturel :
+- "Je peux lire, envoyer et archiver tes mails"
+- "Je peux chercher et créer des fichiers sur le Drive"
+- "Je retiens tes préférences et j'apprends de nos échanges"
+JAMAIS : "[ACTION:LEARN]", "[ACTION:ARCHIVE:id]", "[SPEAK_SPEED:X]" etc.
+
 Confirmation des actions en attente :
   [ACTION:CONFIRM:id]  -> execute une action sensible mise en queue
   [ACTION:CANCEL:id]   -> annule une action sensible mise en queue
