@@ -144,7 +144,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     # 9. Reponse propre — retire TOUTES les balises techniques du texte
     clean_response = raya_response
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', clean_response)
-    clean_response = re.sub(r'\[SPEAK_SPEED:[\d.]+\]', '', clean_response)
+    # [SPEAK_SPEED:X.X] est gardé — le frontend le détecte et ajuste la vitesse
     # FIX-ODOO : nettoyer les fragments Odoo/JSON bruts (inline ou en debut de ligne)
     clean_response = re.sub(r'\|?\["[^"]*"(?:,"[^"]*")*\](?:\|?\d*\]?)?', '', clean_response)
     clean_response = re.sub(r'^\s*\|?\["[^"]+".*$', '', clean_response, flags=re.MULTILINE)
