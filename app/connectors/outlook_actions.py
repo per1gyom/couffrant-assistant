@@ -4,6 +4,8 @@ Extrait de outlook_connector.py -- SPLIT-C3.
 """
 import requests
 from app.logging_config import get_logger
+from app.connectors.drive_read import list_drive as list_aria_drive, read_drive_file as read_aria_drive_file, search_drive as search_aria_drive  # noqa
+from app.connectors.drive_actions import create_folder as create_drive_folder, move_item as move_drive_item, copy_item as copy_drive_item  # noqa
 logger=get_logger("raya.outlook")
 from app.connectors.outlook_calendar import _graph_post,_graph_patch,_graph_delete,_build_email_html  # noqa
 
