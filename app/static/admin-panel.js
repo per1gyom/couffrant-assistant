@@ -2,6 +2,7 @@
 let allRules=[], allInsights=[];
 let currentEditUser=null, usernameToDelete=null;
 let isSuperAdmin=false, currentUserScope='', currentUserTenantId='';
+let _lastTenants=[];
 let currentEditTenantId=null, tenantToDelete=null;
 
 function updateClock(){document.getElementById('clock').textContent=new Date().toLocaleString('fr-FR',{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'});}
@@ -146,6 +147,71 @@ async function addToolToUser(){
   }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
 }
 
+// ─── CONNEXIONS V2 ───
+const connApiBase=()=>currentUserScope==='admin'?'/admin':'/tenant';
+const TOOL_ICONS={'outlook':'📧','gmail':'✉️','drive':'📁','odoo':'🔧','teams':'💬','whatsapp':'📱','microsoft':'🔵','google':'🟢'};
+
+function showAddConnection(tenantId,idx){document.getElementById('conn-add-'+idx).style.display='block';}
+
+async function loadConnections(tenantId,idx){
+  const el=document.getElementById('conn-list-'+idx);
+  if(!el) return;
+  try{
+    const url=currentUserScope==='admin'?`/admin/connections/${tenantId}`:'/tenant/connections';
+    const conns=await(await fetch(url)).json();
+    if(!conns.length){el.innerHTML='<span style="color:var(--text3)">Aucune connexion configurée.</span>';return;}
+    el.innerHTML=conns.map(c=>{
+      const icon=TOOL_ICONS[c.tool_type]||'🔌';
+      const statusBadge=c.status==='connected'?'<span class="badge badge-green" style="font-size:9px">connecté</span>':c.status==='expired'?'<span class="badge badge-red" style="font-size:9px">expiré</span>':'<span class="badge badge-gray" style="font-size:9px">non configuré</span>';
+      const users=c.assignments.map(a=>`<span class="badge ${a.enabled?'badge-blue':'badge-gray'}" style="font-size:9px;cursor:pointer" title="${a.access_level}" onclick="unassignConn(${c.id},'${a.username}','${tenantId}',${idx})">${a.username} ✕</span>`).join(' ');
+      return `<div style="padding:8px 12px;background:var(--bg1);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font-size:16px">${icon}</span>
+        <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span> ${statusBadge}</div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap">${users||'<span style="color:var(--text3);font-size:10px">aucun user</span>'}</div>
+        <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="showAssignConn(${c.id},'${tenantId}',${idx})">👥+</button>
+        <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
+      </div>`;
+    }).join('');
+  }catch(e){el.innerHTML='<span style="color:var(--red)">❌ '+e.message+'</span>';}
+}
+
+async function createConnection(tenantId,idx){
+  const type=document.getElementById('conn-type-'+idx).value.trim().toLowerCase();
+  const label=document.getElementById('conn-label-'+idx).value.trim();
+  if(!type||!label){setAlert('companies-alert','Type et nom requis.','err');return;}
+  const url=currentUserScope==='admin'?`/admin/connections/${tenantId}`:'/tenant/connections';
+  try{
+    const d=await(await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tool_type:type,label})})).json();
+    if(d.status==='ok'){document.getElementById('conn-add-'+idx).style.display='none';document.getElementById('conn-type-'+idx).value='';document.getElementById('conn-label-'+idx).value='';loadConnections(tenantId,idx);}
+    else setAlert('companies-alert','❌ '+(d.message||'Erreur'),'err');
+  }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
+}
+
+async function deleteConn(connId,tenantId,idx){
+  if(!confirm('Supprimer cette connexion et tous ses accès ?')) return;
+  const url=currentUserScope==='admin'?`/admin/connections/${tenantId}/${connId}`:'/tenant/connections/'+connId;
+  try{await fetch(url,{method:'DELETE'});loadConnections(tenantId,idx);}catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
+}
+
+async function showAssignConn(connId,tenantId,idx){
+  const username=prompt('Nom d\'utilisateur à ajouter :');
+  if(!username) return;
+  const level=prompt('Niveau d\'accès (read_only / write / full) :','write');
+  if(!level) return;
+  const url=currentUserScope==='admin'?`/admin/connections/${connId}/assign`:'/tenant/connections/'+connId+'/assign';
+  try{
+    const d=await(await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.trim(),access_level:level})})).json();
+    if(d.status==='ok') loadConnections(tenantId,idx);
+    else setAlert('companies-alert','❌ '+(d.message||'Erreur'),'err');
+  }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
+}
+
+async function unassignConn(connId,username,tenantId,idx){
+  if(!confirm(`Retirer l'accès de ${username} ?`)) return;
+  const url=currentUserScope==='admin'?`/admin/connections/${connId}/assign/${username}`:'/tenant/connections/'+connId+'/assign/'+username;
+  try{await fetch(url,{method:'DELETE'});loadConnections(tenantId,idx);}catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
+}
+
 async function unlockUser(username){
   if(!confirm(`Débloquer le compte "${username}" ?\n\nAssurez-vous d'avoir vérifié l'identité.`)) return;
   const d=await(await fetch(`/admin/unlock-user/${username}`,{method:'POST'})).json();
@@ -182,6 +248,7 @@ async function loadCompanies(){
     const url=isSuperAdmin?'/admin/tenants-overview':'/tenant/my-overview';
     const tenants=await(await fetch(url)).json();
     document.getElementById('companies-count').textContent=`${tenants.length} société(s)`;
+    _lastTenants=tenants;
     if(!tenants.length){document.getElementById('companies-list').innerHTML='<div style="color:var(--text3);font-family:var(--mono);font-size:12px">Aucune société.</div>';return;}
     document.getElementById('companies-list').innerHTML=tenants.map((t,i)=>{
       const msBar=t.user_count>0?`${t.ms_connected_count}/${t.user_count} MS connectés`:'—';
@@ -226,6 +293,21 @@ async function loadCompanies(){
               <div><label>Bibliothèque</label><input type="text" id="sp-drive-${i}" value="${spDrive}" placeholder="Documents"></div>
               <div><button class="btn btn-accent" onclick="saveSharePointConfig('${t.tenant_id}',${i})">💾 Enregistrer</button></div>
             </div><div class="sp-result" id="sp-result-${i}"></div>
+            <div style="margin-top:20px">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                <div class="sp-config-title" style="margin:0">📡 Connexions</div>
+                <button class="btn btn-accent" style="font-size:11px;padding:4px 12px" onclick="showAddConnection('${t.tenant_id}',${i})">+ Ajouter</button>
+              </div>
+              <div id="conn-add-${i}" style="display:none;margin-bottom:12px;padding:10px;background:rgba(99,102,241,.04);border-radius:8px">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                  <input type="text" id="conn-type-${i}" placeholder="Type (outlook, gmail, drive...)" style="padding:5px 8px;background:var(--bg1);border:1px solid var(--border);border-radius:6px;color:var(--text1);font-size:11px;width:140px">
+                  <input type="text" id="conn-label-${i}" placeholder="Nom (ex: Boîte contact@...)" style="padding:5px 8px;background:var(--bg1);border:1px solid var(--border);border-radius:6px;color:var(--text1);font-size:11px;flex:1;min-width:180px">
+                  <button class="btn btn-primary" style="font-size:11px;padding:4px 12px" onclick="createConnection('${t.tenant_id}',${i})">Créer</button>
+                  <button class="btn btn-ghost" style="font-size:11px;padding:4px 8px" onclick="document.getElementById('conn-add-${i}').style.display='none'">✕</button>
+                </div>
+              </div>
+              <div id="conn-list-${i}" style="font-family:var(--mono);font-size:11px;color:var(--text3)">Chargement...</div>
+            </div>
           </div>
           ${isSuperAdmin?`<div class="tenant-admin-bar">
             ${(t.settings||{}).suspended?`<button class="btn btn-unlock" style="font-size:11px;padding:5px 12px" onclick="unsuspendTenant('${t.tenant_id}')">▶️ Réactiver</button>`:`<button class="btn btn-ghost" style="font-size:11px;padding:5px 12px;color:var(--yellow)" onclick="suspendTenant('${t.tenant_id}','${t.name.replace(/'/g,"\\'")}')">⏸️ Suspendre</button>`}
@@ -237,6 +319,8 @@ async function loadCompanies(){
   }catch(e){document.getElementById('companies-list').innerHTML=`<div style="color:var(--red);font-family:var(--mono);font-size:12px">❌ Erreur: ${e.message}</div>`;}
   // Restaurer les cartes qui étaient ouvertes
   openCards.forEach(i=>toggleTenant(i));
+  // Charger les connexions pour chaque tenant
+  if(typeof _lastTenants!=='undefined') _lastTenants.forEach((t,i)=>loadConnections(t.tenant_id,i));
 }
 function toggleTenant(i){document.getElementById('body-'+i).classList.toggle('open');document.getElementById('toggle-'+i).classList.toggle('open');}
 function filterCompanies(){
