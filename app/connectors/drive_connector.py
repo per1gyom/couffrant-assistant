@@ -200,5 +200,12 @@ def _fmt(items: list) -> list:
 
 
 # ─── ACTIONS DRIVE ───
-# Fonctions lecture dans drive_read.py, écriture dans drive_actions.py
-# Import direct depuis ces modules — PAS de réexport ici (évite import circulaire)
+# Réexport lazy pour éviter l'import circulaire drive_connector ↔ drive_read
+def __getattr__(name):
+    if name in ('list_drive', 'read_drive_file', 'search_drive'):
+        from app.connectors.drive_read import list_drive, read_drive_file, search_drive
+        return {'list_drive': list_drive, 'read_drive_file': read_drive_file, 'search_drive': search_drive}[name]
+    if name in ('create_folder', 'move_item', 'copy_item', 'save_drive_config'):
+        from app.connectors.drive_actions import create_folder, move_item, copy_item, save_drive_config
+        return {'create_folder': create_folder, 'move_item': move_item, 'copy_item': copy_item, 'save_drive_config': save_drive_config}[name]
+    raise AttributeError(f"module 'app.connectors.drive_connector' has no attribute {name}")
