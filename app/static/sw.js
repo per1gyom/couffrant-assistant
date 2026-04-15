@@ -11,22 +11,27 @@
  * - Navigation HTML → Network-First avec fallback cache
  */
 
-const CACHE_VERSION = 3;
+const CACHE_VERSION = 13;
 const CACHE_NAME = 'raya-v' + CACHE_VERSION;
 
 // Assets mis en cache à l'installation
 const PRECACHE_ASSETS = [
   '/chat',
-  '/static/chat.css',
+  '/static/chat-base.css',
+  '/static/chat-components.css',
+  '/static/chat-drawer.css',
   '/static/onboarding.css',
   '/static/mobile.css',
-  '/static/chat.js',
+  '/static/chat-core.js',
+  '/static/chat-main.js',
+  '/static/chat-messages.js',
   '/static/chat-onboarding.js',
   '/static/chat-shortcuts.js',
   '/static/chat-voice.js',
   '/static/chat-feedback.js',
   '/static/chat-triage.js',
   '/static/chat-admin.js',
+  '/static/chat-topics.js',
   '/static/manifest.json',
   'https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js',
   'https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js',
