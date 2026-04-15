@@ -179,6 +179,17 @@ async function loadCompanies(){
   openCards.forEach(i=>toggleTenant(i));
 }
 function toggleTenant(i){document.getElementById('body-'+i).classList.toggle('open');document.getElementById('toggle-'+i).classList.toggle('open');}
+function filterCompanies(){
+  const q=(document.getElementById('companies-search').value||'').toLowerCase().trim();
+  document.querySelectorAll('.tenant-card').forEach(card=>{
+    if(!q){card.style.display='';return;}
+    const text=card.textContent.toLowerCase();
+    const match=text.includes(q);
+    card.style.display=match?'':'none';
+    // Auto-ouvrir si match sur un utilisateur
+    if(match&&q.length>1){const body=card.querySelector('.tenant-body');const toggle=card.querySelector('.tenant-toggle');if(body&&!body.classList.contains('open')){body.classList.add('open');if(toggle)toggle.classList.add('open');}}
+  });
+}
 async function saveSharePointConfig(tenantId,i){
   const site=document.getElementById(`sp-site-${i}`).value.trim();const folder=document.getElementById(`sp-folder-${i}`).value.trim();const drive=document.getElementById(`sp-drive-${i}`).value.trim()||'Documents';
   const result=document.getElementById(`sp-result-${i}`);if(!site||!folder){result.className='sp-result err';result.textContent='❌ Site et dossier requis.';return;}
@@ -425,12 +436,17 @@ async function initUserScope(){
     const companyView=new URLSearchParams(window.location.search).get('view')==='company';
     if(companyView) isSuperAdmin=false;
     if(isSuperAdmin) document.getElementById('btn-create-tenant').style.display='';
+    if(isSuperAdmin) { const b=document.getElementById('btn-create-user-companies'); if(b) b.style.display=''; }
     // Vue société (tenant admin OU super admin en mode company) : masquer les onglets super-admin
     if(!isSuperAdmin){
       const tabs=document.querySelectorAll('.nav-tabs .tab');
       const hiddenTabs=['memory','users','rules','insights','actions'];
       tabs.forEach(t=>{const name=t.getAttribute('onclick')||'';hiddenTabs.forEach(h=>{if(name.includes("'"+h+"'"))t.style.display='none';});});
       switchTab('companies');
+    } else {
+      // Super admin : masquer l'onglet Utilisateurs (doublon de Sociétés)
+      const tabs=document.querySelectorAll('.nav-tabs .tab');
+      tabs.forEach(t=>{if((t.getAttribute('onclick')||'').includes("'users'"))t.style.display='none';});
     }
   }catch(e){}
 }
