@@ -5,7 +5,15 @@ Extrait de outlook_connector.py -- SPLIT-C3.
 import requests
 from app.logging_config import get_logger
 logger=get_logger("raya.outlook")
-from app.connectors.outlook_connector import _headers,_graph_get
+
+GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
+
+def _headers(token):
+    return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+def _graph_get(token, path, params=None):
+    r = requests.get(f"{GRAPH_BASE_URL}{path}", headers=_headers(token), params=params, timeout=30)
+    r.raise_for_status(); return r.json()
 
 
 def _graph_post(token, path, json_body=None):

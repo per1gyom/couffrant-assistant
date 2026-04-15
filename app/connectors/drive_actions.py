@@ -105,9 +105,7 @@ def copy_item(token: str, item_id: str, dest_id: str,
 
 
 # ─── ALIAS DE COMPATIBILITÉ ───
-list_aria_drive = list_drive
-read_aria_drive_file = read_drive_file
-search_aria_drive = search_drive
+# (list_drive, read_drive_file, search_drive restent dans drive_connector.py)
 create_drive_folder = create_folder
 move_drive_item = move_item
 copy_drive_item = copy_item
