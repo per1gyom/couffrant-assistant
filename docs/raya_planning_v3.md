@@ -96,16 +96,22 @@
 
 ---
 
-## MILESTONE CHARLOTTE — Beta mi-juin 2026
+## MILESTONE CHARLOTTE — ~~Beta mi-juin 2026~~ EN COURS (avancé au 16/04)
 
-| Tâche | Complexité | Notes |
+| Tâche | Complexité | Statut |
 |---|---|---|
-| 5D-4 Onboarding par tenant | Moyenne | Questionnaire adapté au métier |
-| 5G-7 Modèle générique de démarrage | Haute | Extraire patterns structurels de 2 utilisateurs |
-| 6-2 Connecteurs réseaux sociaux (LinkedIn, Instagram) | Haute | Besoin Charlotte |
-| Tests multi-tenant réels | — | 2 sociétés, 2 profils différents |
+| 5D-4 Onboarding par tenant | Moyenne | ❌ Planifié |
+| 5G-7 Modèle générique de démarrage | Haute | ❌ Planifié |
+| Multi-tenant réel (2 sociétés) | — | ✅ Charlotte créée (tenant juillet, tenant_admin) |
+| Panel admin tenant_admin | Moyenne | ✅ Accès panel + onglets filtrés |
+| Sécurité panel (re-auth MDP) | Moyenne | ✅ Timeout 10 min |
+| Cloisonnement OAuth | Critique | ✅ Fallback "guillaume" supprimé |
+| Actions directes per-user | Moyenne | ✅ Toggle cycle hérité/ON/OFF |
+| Suspension comptes | Moyenne | ✅ Users + tenants + feedback |
+| 6-2 Connecteurs réseaux sociaux (LinkedIn, Instagram) | Haute | ❌ Besoin Charlotte |
+| Tests multi-tenant complets | — | 🔄 En cours (3 niveaux d'accès à valider) |
 
-**Livrable :** Raya fonctionne pour Charlotte (Juillet, événementiel) en plus de Guillaume (Couffrant Solar, photovoltaïque). Validation du modèle multi-tenant + onboarding.
+**Avancement** : Charlotte est déjà en test sur `https://app.raya-ia.fr`. Le multi-tenant fonctionne. Reste : onboarding, connecteurs sociaux, validation complète des 3 niveaux d'accès.
 
 ---
 
@@ -125,16 +131,18 @@
 
 ---
 
-## RÉSUMÉ TIMELINE
+## RÉSUMÉ TIMELINE (mise à jour 16/04)
 
 ```
-12 avril      Aujourd'hui — Phase 5 complète + Phase 7 à 80%
+12 avril      Phase 5 complète + Phase 7 à 80%
+14-15 avril   Audit + SAV + RGPD + Refactoring complet + Multi-tenant + Suspension
+16 avril      Charlotte en test — Panel admin multi-rôle — Sécurité OAuth + re-auth
 Mi-avril      Sprint 1 — Rapport à la demande + workflow intelligence
 Fin avril     Sprint 2-3 — Multi-mailbox Gmail + monitoring + WhatsApp bidirectionnel
 Mi-mai        Phase 7 complète (Jarvis opérationnel)
 Fin mai       Phase 8 complète (intelligence avancée)
-Mi-juin       Beta Charlotte (multi-tenant validé, 2 utilisateurs)
-Juillet-Août  Commercialisation (supervision, API, MCP, premiers clients)
+Juin          Onboarding Charlotte + connecteurs sociaux + premiers clients beta
+Juillet-Août  Commercialisation (supervision, API, MCP, clients payants)
 ```
 
 ## RISQUES

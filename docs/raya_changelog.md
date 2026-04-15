@@ -4,54 +4,81 @@
 
 ---
 
-## Session 12-13/04/2026 (Opus + Sonnet + Guillaume)
+## Session 16/04/2026 (Opus + Guillaume — ~10 commits)
 
-### Audit global + Roadmap V2
-- `758a975` — docs: Roadmap V2 complète + state file
+### FIX-CRITICAL : Package admin/ shadow
+- `5bd1e5c` — Routes suspension, direct-actions, seed-user, /tenant/my-overview injectées dans le package `app/routes/admin/super_admin.py`. Le fichier `admin.py` était shadowed par le dossier `admin/` depuis le 12/04.
 
-### Phase 5A — Sécurité & dette technique (14/14 ✅)
+### FIX-CRITICAL : OAuth fallback "guillaume"
+- `8ef3f27` — Fallback `request.session.get("user", "guillaume")` supprimé dans les callbacks Microsoft + Gmail. Session vide → page 401.
 
-| Tâche | Fichier(s) | Description |
-|---|---|---|
-| 5A-1 | `app/config.py` | MDP par défaut supprimé, env obligatoire |
-| 5A-2 | `app/main.py` | Cookie 30j → 7j |
-| 5A-3 | `app/rate_limiter.py` + `app/routes/raya.py` | Rate limiter 60 req/h |
-| 5A-4 | `app/admin_audit.py` + `app/routes/admin.py` | Audit log admin (10 appels) |
-| 5A-5 | `app/ai_client.py` | Migré vers llm_complete |
-| 5A-6 | `app/memory_contacts.py` | Migré vers llm_complete |
-| 5A-7 | `app/memory_style.py` | Migré vers llm_complete |
-| 5A-8 | `app/memory_contacts.py` | Doublon get_contacts_keywords supprimé |
-| 5A-9+13 | `app/memory_rules.py` + `app/memory_manager.py` | Wrappers dépréciés supprimés |
-| 5A-10 | `app/pending_actions.py` + `app/tools_registry.py` | tools_registry source de vérité unique |
-| 5A-11 | `app/scheduler.py` + `app/main.py` | Threads daemon → APScheduler |
-| 5A-12 | Racine repo | 9 scripts legacy supprimés |
-| 5A-14 | `app/memory_loader.py` + `app/memory_manager.py` | Import direct, manager déprécié |
+### Migration DB prod
+- Colonnes `suspended BOOLEAN` + `suspended_reason TEXT` ajoutées manuellement via psycopg2 (manquaient en prod).
 
-### Phase 5B — Optimisation prompt (5/5 ✅)
+### Suspension & Actions directes
+- `93d97cb` — Feedback suspension : alertes vers l'onglet actif
+- `65c7f0e` — `/tenant/my-overview` + `direct_actions_override` par user
+- `264efb0` — Cartes sociétés restent ouvertes après suspend/toggle
+- Actions directes retirées du super admin, toggle per-user cycle (hérité/ON/OFF)
 
-| Tâche | Fichier(s) | Description |
-|---|---|---|
-| 5B-1 | `app/router.py` + `app/routes/aria_context.py` + `app/routes/raya.py` | Injection dynamique actions par domaine |
-| 5B-2 | `app/database.py` + `app/memory_synthesis.py` | Hot_summary 3 niveaux + vectorisé |
-| 5B-3 | `app/cache.py` + `app/routes/aria_context.py` | Cache TTL 5min |
-| 5B-4 | `app/routes/aria_context.py` | Déduplication contexte RAG vs historique |
-| 5B-5 | `app/routes/raya.py` | ThreadPoolExecutor partagé |
+### Panel admin multi-rôle
+- Panel accessible aux `tenant_admin` (onglets Sociétés + Profil uniquement)
+- Drawer chat filtré par scope (sections super-admin masquées)
+- Bouton 🖥 Panel visible pour tenant_admin via `/profile`
 
-### Phase 5C — Robustesse (4/4 ✅)
+### Sécurité panel
+- `9241291` — Re-auth mot de passe pour accès panel (timeout 10 min)
+- 2 boutons header : `🔑 Super Admin` + `⚙️ Ma société`
+- Page de login admin dédiée, endpoint `POST /admin/auth`
 
-| Tâche | Fichier(s) | Description |
-|---|---|---|
-| 5C-1 | `app/logging_config.py` + `app/main.py` + `app/scheduler.py` | Structured logging (3 commits) |
-| 5C-2 | `app/main.py` | Health check profond DB + LLM |
-| 5C-3 | `app/routes/raya.py` | Timeout 30s sur /raya |
-| 5C-4 | (résolu par 5A-11) | Monitoring threads → APScheduler |
-
-### Hotfixes
-| Fichier | Description |
-|---|---|
-| `app/routes/memory.py` | Migré vers llm_complete (crash import) |
+### Fix micro
+- `eaa7d00` — `SpeechRecognition.stop()` manquant, objet stocké en global `currentRecognition`
 
 ---
 
-## Sessions précédentes
+## Session 15/04/2026 soir (~15 commits)
+- 8 fichiers morts supprimés (aria.py, raya_actions.py, etc.)
+- PWA Topics : bouton 🔖 + panneau latéral `chat-topics.js`
+- Split CSS (chat.css → 3 fichiers) + split admin_panel.html (CSS+JS extraits)
+- Split Python batch final (13 splits Sonnet + 6 hotfixes Opus imports circulaires)
+- C1+C2 : 8 profils seeding + endpoint `POST /admin/seed-user`
+- Refonte panel admin : SIRET obligatoire, adresse 3 champs, ID auto, double confirmation suppression, bouton ➕ collaborateur
+- Cloisonnement Drive : défauts neutres, plus de fallback vers Couffrant Solar
+- Suspension comptes : users + tenants, login + API, boutons ⏸️/▶️
+- Actions directes on/off par société + par user
+- FIX-CRITICAL : 16 décorateurs de routes restaurés dans admin_endpoints.py
+
+## Session 15/04/2026 matin (~70 commits)
+- TOPICS 5/5 : 5 endpoints CRUD + migration DB + prompt injection + RGPD + Flutter prêt
+- FIX-CLEAN + TIMESTAMP : nettoyage actions brutes + horodatage messages
+- RENAME raya_chat + 3 bugs chat corrigés
+- Refactoring BATCH 1+2+3 : 19 splits (tous les fichiers Python < 10KB)
+- UX-TONE : style conversationnel naturel
+- Bug report amélioré : commentaire optionnel + collecte auto échanges
+- 👍 confirme pending actions + DELETE/ARCHIVE mutuellement exclusifs
+- 3 hotfixes imports cassés
+
+## Session 14/04/2026 (~45 commits)
+- AUDIT COMPLET : inventaire de toute la codebase
+- P0-1 : anti-injection prompt (GUARDRAILS, CSP)
+- SAV/Bug report système complet
+- Bloc A : PWA, safe-area iOS, autoSpeak off
+- B1 B3 B4 : Teams ingestion, email signatures v2, scheduler
+- C3 : RGPD complet (export + suppression + mentions légales)
+- FIX-LEARN : pilule verte mémoire
+- Split aria_context + security_users
+- Lancement Flutter (app iOS simulateur)
+
+## Session 12-13/04/2026 (~105 commits)
+
+### Phase 5A — Sécurité & dette technique (14/14 ✅)
+MDP env obligatoire, cookie 7j, rate limiter, audit log, migration llm_complete, wrappers supprimés, tools_registry source de vérité, APScheduler, 9 scripts legacy supprimés.
+
+### Phase 5B — Optimisation prompt (5/5 ✅)
+Injection dynamique actions, hot_summary 3 niveaux, cache TTL 5min, déduplication RAG, ThreadPoolExecutor.
+
+### Phase 5C — Robustesse (4/4 ✅)
+Structured logging, health check profond, timeout 30s, monitoring APScheduler.
+
+### Sessions précédentes
 Phases 1–4 : RAG, multi-tenant, rule_validator, feedback, scheduler, tests.

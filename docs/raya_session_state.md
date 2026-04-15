@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 15/04/2026 15h30** — Opus
+**Dernière mise à jour : 16/04/2026 20h00** — Opus
 
 ---
 
@@ -18,6 +18,7 @@
 - Cache-bust : `?v=12` (actuel)
 - Français, vocabulaire Terminal, concis
 - Git config local : `per1guillaume@mac-1.home`
+- **⚠️ ARCHITECTURE ADMIN** : Les routes admin sont dans le **package** `app/routes/admin/` (pas le fichier `admin.py` qui est shadowed). Toute nouvelle route admin doit être ajoutée dans `super_admin.py`, `tenant_admin.py` ou `profile.py`.
 
 ---
 
@@ -38,67 +39,67 @@ Nettoyage actions brutes, horodatage messages, style conversationnel naturel (UX
 5 endpoints CRUD + PWA (bouton 🔖 dans header + panneau latéral `chat-topics.js`) + RGPD couvert + Flutter prêt (TopicsService à switcher vers API).
 
 ## 12. REFACTORING ARCHITECTURE ✅ (COMPLET)
-30+ splits Python — tous les fichiers Python < 10KB. 6 hotfixes imports circulaires (HOTFIX-1 à HOTFIX-6). CSS splitté en 3 fichiers (chat-base.css + chat-components.css + chat-drawer.css). Admin panel splitté (admin-panel.css + admin-panel.js extraits). 8 fichiers morts supprimés (aria.py, raya_actions.py, etc.).
+30+ splits Python — tous les fichiers Python < 10KB. 6 hotfixes imports circulaires (HOTFIX-1 à HOTFIX-6). CSS splitté en 3 fichiers (chat-base.css + chat-components.css + chat-drawer.css). Admin panel splitté (admin-panel.css + admin-panel.js extraits). 8 fichiers morts supprimés.
 
-**FIX-CRITICAL admin_endpoints.py** : Le split Sonnet avait empilé 16 décorateurs de routes sur une seule fonction `admin_memory_status`. Corrigé : chaque fonction a son propre `@router.` + `admin_endpoints.py` correctement inclus via `include_router` dans `admin.py`. Doublons `@router` nettoyés. Auto-import circulaire supprimé.
-
-**⚠️ NETTOYAGE RESTANT** : `admin_tenants.py` contient encore 2 fonctions mortes (`admin_set_tool`, `init_db_now`) qui sont dupliquées depuis `admin_endpoints.py`. À supprimer.
+**⚠️ Package admin/** : Le refactoring du 12/04 a créé `app/routes/admin/` (package) qui shadow `app/routes/admin.py` (fichier). Les routes ajoutées dans `admin.py` après le 12/04 étaient mortes en prod jusqu'au fix du 16/04. Toutes les routes sont maintenant dans le package : `super_admin.py`, `super_admin_users.py`, `super_admin_system.py`, `tenant_admin.py`, `profile.py`.
 
 ## 13. MULTI-TENANT ✅
-- Tenant `couffrant_solar` : Guillaume (super_admin)
-- Tenant `juillet` : créé dans le panel — Charlotte à créer (tenant_admin) — Guillaume veut tester le formulaire lui-même
+- Tenant `couffrant_solar` : Guillaume (super_admin) — 5 utilisateurs
+- Tenant `juillet` : Charlotte (tenant_admin) — créé le 15/04, testable
 
 ## 14. PANEL ADMIN — REFONTE ✅
 ### Création société
-- Nom de la société → ID auto-généré (normalisé). L'utilisateur ne saisit pas l'ID technique.
-- SIRET obligatoire (14 chiffres, validé côté JS + backend)
-- Adresse structurée : 3 champs séparés (rue + code postal 5 chiffres + ville)
-- Forme juridique (dropdown SAS/SARL/SASU/EURL/SA/SCI/Auto-entrepreneur/Association)
-- Fournisseur email configurable
+- Nom → ID auto-généré (normalisé), SIRET obligatoire (14 chiffres), adresse 3 champs (rue/CP/ville), forme juridique (dropdown), fournisseur email configurable.
 
 ### Création utilisateur
-- Formulaire avec sélecteur société (dropdown chargé dynamiquement) + sélecteur profil métier (8 profils)
-- Bouton "➕ Ajouter un collaborateur" dans chaque fiche société (tenant pré-rempli et verrouillé)
-- Le seeding est appelé automatiquement après création
+- Formulaire avec sélecteur société + profil métier (8 profils). Bouton "➕ Ajouter un collaborateur" dans chaque fiche. Seeding auto après création.
 
 ### Double confirmation suppressions
-- Suppression société : modale → champ "Tapez SUPPRIMER" → bouton grisé tant que non saisi
-- Suppression utilisateur : modale → champ "Tapez le nom d'utilisateur" → bouton grisé
+- Société : modale → champ "Tapez SUPPRIMER" → bouton grisé. User : modale → champ "Tapez le nom".
+
+### Accès panel par rôle
+- Super admin : voit tous les onglets (Mémoire, Utilisateurs, Règles, Insights, Actions, Sociétés, Profil)
+- Tenant admin : voit seulement Sociétés (sa société) + Mon profil. Onglets super-admin masqués.
+- 2 boutons dans le header du chat : `🔑 Super Admin` (super admin uniquement) + `⚙️ Ma société` (admin + tenant_admin)
+
+### Re-authentification admin (SECURITY) ✅
+- Accès au panel protégé par **re-saisie du mot de passe** même si la session web est active
+- Timeout : **10 minutes** (`ADMIN_AUTH_TIMEOUT = 600`). Après expiration → re-saisie obligatoire
+- Page de login admin dédiée (design dark, formulaire simple)
+- Endpoint `POST /admin/auth` : vérifie le mot de passe, écrit `admin_auth_at` en session
+- Protection contre les sessions laissées ouvertes : personne ne peut accéder au panel sans le mot de passe
 
 ## 15. SUSPENSION DE COMPTES ✅
 - `app/suspension.py` : check_suspension(), suspend_user(), unsuspend_user(), suspend_tenant(), unsuspend_tenant()
-- Migration DB : colonnes `suspended BOOLEAN` + `suspended_reason TEXT` sur table users
+- **Migration DB exécutée le 16/04** : colonnes `suspended BOOLEAN` + `suspended_reason TEXT` sur table users
 - Tenants : `suspended` + `suspended_reason` dans le JSONB `settings`
-- Vérification au login web (`auth.py`) : message "Votre compte/organisation est suspendu. Contactez..."
-- Vérification sur tous les endpoints API (`deps.py`) : HTTP 403 → bloque aussi l'app Flutter
-- Super admin : peut suspendre n'importe quel user ou tenant
-- Tenant admin : peut suspendre/réactiver les utilisateurs de sa propre société (`assert_same_tenant`)
-- Panel admin : boutons ⏸️ Suspendre (avec raison optionnelle) / ▶️ Réactiver par utilisateur + par société
-- Badges visuels ⏸️ SUSPENDU dans les listes users et les cartes sociétés
+- Vérification au login web (`auth.py`) + tous les endpoints API (`deps.py`) : HTTP 403
+- Super admin : suspend n'importe quel user ou tenant. Tenant admin : suspend users de sa société.
+- Panel admin : boutons ⏸️ / ▶️ par utilisateur + par société. Badges ⏸️ SUSPENDU.
+- **Feedback** : alertes dirigées vers l'onglet actif (companies-alert ou user-alert). Cartes sociétés restent ouvertes après action.
 
 ## 16. ACTIONS DIRECTES (FICHIERS) ✅
-- `app/direct_actions.py` : `can_do_direct_actions(username, tenant_id)` — priorité : user override > tenant setting > défaut (False)
-- Par défaut OFF : CREATEFOLDER passe en queue de confirmation si `direct_actions` est off
-- MOVEDRIVE/COPYFILE : déjà en queue (confirmation requise)
-- Corbeille mail : reste en action directe (récupérable + données personnelles de l'utilisateur)
-- Panel admin : toggle 🟢 ON / 🔴 OFF au niveau société, visible dans chaque fiche société
-- Tenant admin peut toggler pour sa société + pour chaque utilisateur individuellement
-- Super admin peut toggler pour n'importe quel tenant/user
-- **BUG FIXÉ** : `Body(...)` → `Body(default={})` sur les endpoints — à vérifier en prod
+- `app/direct_actions.py` : priorité user override > tenant setting > défaut (False)
+- Par défaut OFF. Corbeille mail reste en action directe (récupérable).
+- **Changement de spec (16/04)** : cette fonction est réservée au **tenant_admin** (pas au super admin)
+- Toggle par société : 🟢 ON / 🔴 OFF visible dans la fiche société (uniquement pour tenant admin)
+- Toggle par utilisateur : bouton 📂 ON / 📂 OFF / 📂 = (hérité) avec cycle au clic (`cycleUserDirectActions`)
+- Le super admin ne voit **plus** le toggle actions directes dans sa vue sociétés
 
-## 17. CLOISONNEMENT DRIVE ✅
-- `drive_connector.py` : défauts neutres (site_name="", folder_name=""). Plus de fallback vers Couffrant Solar.
-- `get_drive_config()` retourne `configured: False` si le tenant n'a pas de SharePoint configuré
-- Migration : `sharepoint_site: "Commun"` ajouté au tenant `couffrant_solar`
-- Lazy `__getattr__` dans drive_connector.py pour réexport sans import circulaire (HOTFIX-5)
+## 17. CLOISONNEMENT ✅
+### Drive
+- `drive_connector.py` : défauts neutres, plus de fallback vers Couffrant Solar. Lazy `__getattr__` (HOTFIX-5).
+
+### OAuth (FIX-CRITICAL 16/04)
+- **Avant** : `request.session.get("user", "guillaume")` dans les callbacks OAuth Microsoft ET Gmail → si session vide, token sauvé sous Guillaume
+- **Après** : Session vide → page d'erreur 401 "Session expirée" avec lien de reconnexion. Aucun fallback.
+- Charlotte confirmée : aucun `oauth_token` hérité en DB. Ses connexions Microsoft/Gmail sont vierges (à configurer).
 
 ## 18. SEEDING PROFILS (DEMO uniquement)
-8 profils dans `app/seeding.py` : pv_french, event_planner, generic, artisan, immobilier, conseil, commerce, medical.
-Endpoint : `POST /admin/seed-user` avec body `{"username": "xxx", "profile": "generic"}`.
-Bouton 🌱 par utilisateur dans la liste du panel admin.
-**DÉCISION** : Les profils de seeding sont réservés aux comptes DEMO. Les vrais clients apprennent via questionnaire admin (création société) + questionnaire utilisateur (1ère connexion). Cet onboarding amélioré est planifié mais pas encore codé.
+8 profils dans `app/seeding.py`. Endpoint `POST /admin/seed-user`. Bouton 🌱 par utilisateur.
+DÉCISION : seeding = DEMO. Vrais clients → questionnaire admin + questionnaire utilisateur (à coder).
 
-## 19. MATRICE DES DROITS (VALIDÉE)
+## 19. MATRICE DES DROITS (MISE À JOUR 16/04)
 | Fonctionnalité | Super Admin | Admin Tenant | Utilisateur |
 |---|---|---|---|
 | Voir toutes les sociétés | ✅ | ❌ (que la sienne) | ❌ |
@@ -106,54 +107,70 @@ Bouton 🌱 par utilisateur dans la liste du panel admin.
 | Suspendre société | ✅ | ❌ | ❌ |
 | Suspendre utilisateur | ✅ (tous) | ✅ (sa société) | ❌ |
 | Créer/Supprimer utilisateur | ✅ (tous) | ✅ (sa société) | ❌ |
-| Toggle actions directes | ✅ (tous) | ✅ (sa société) | ❌ |
+| Toggle actions directes | ❌ (retiré) | ✅ (sa société) | ❌ |
 | Seeder un profil | ✅ | ✅ (sa société) | ❌ |
 | Chat Raya | ✅ | ✅ | ✅ |
-| Tiroir admin chat | ✅ (complet) | ✅ (partiel) | ❌ (masqué) |
-| Panel admin | ✅ (complet) | ✅ (sa société) | ❌ |
+| Tiroir admin chat | ✅ (complet) | ✅ (connexions + onboarding) | ❌ (masqué) |
+| Panel admin (🔑 Super Admin) | ✅ (tous les onglets) | ❌ | ❌ |
+| Panel admin (⚙️ Ma société) | ✅ (sa société) | ✅ (sa société) | ❌ |
+| Accès panel | 🔒 Re-auth MDP (10 min) | 🔒 Re-auth MDP (10 min) | ❌ |
 
-## 20. FLUTTER — EN PARALLÈLE
+## 20. BUGS CONNUS / REPORTÉS
+- **Bug report #3 (Charlotte, 15/04)** : "Le micro reste ouvert" → FIX `eaa7d00` : `SpeechRecognition.stop()` manquant, objet rec stocké en global `currentRecognition`.
+- **Bug report #2 (Guillaume, 14/04)** : Erreur 404 archivage mail (MS Graph) → non investigué.
+- **Bug report #1 (Guillaume, 14/04)** : Erreur archivage mail (iPhone) → non investigué.
+
+## 21. FLUTTER — EN PARALLÈLE
 App iOS fonctionnelle sur simulateur (login, chat, TTS, feedback). Specs dans `docs/raya_flutter_ux_specs.md`. Ne pas toucher au dossier `flutter/`.
 
-## 21. ROADMAP
+## 22. ROADMAP
 
 ### Priorité immédiate (prochaine session)
-- [ ] Créer compte Charlotte (tenant `juillet`, `tenant_admin`) — Guillaume teste le formulaire lui-même
-- [ ] Tester bouton actions directes ON/OFF en prod (erreur Body fixée commit `0dbe735`)
-- [ ] Vérifier les 3 niveaux d'accès : super admin (Guillaume), tenant admin (Charlotte), utilisateur simple
-- [ ] Nettoyer fonctions mortes dans `admin_tenants.py` (admin_set_tool, init_db_now dupliquées)
+- [x] Créer compte Charlotte (tenant `juillet`, `tenant_admin`) ✅
+- [x] Tester bouton actions directes ON/OFF en prod ✅
+- [x] Suspension feedback + badges ✅
+- [x] Nettoyer dead code `admin_tenants.py` ✅
+- [ ] Tester les 3 niveaux d'accès complets (super admin / tenant admin / user)
+- [ ] Investiguer bug reports #1 et #2 (archivage mail 404)
 - [ ] Tester Gmail OAuth + outils en prod
 - [ ] Tester 💌 signatures en prod
+- [ ] UX admin : repenser le drawer admin (trop de fonctions, certaines inutiles pour les non-super-admin)
+- [ ] Vérifier que Charlotte voit bien sa société dans le panel admin
 
 ### Commercial (Bloc C)
 - [ ] C4 : WhatsApp production (sortir sandbox Twilio)
 - [ ] C5 : Facturation Stripe
-- [ ] Onboarding amélioré (questionnaire admin + questionnaire utilisateur — planifié, pas codé)
+- [ ] Onboarding amélioré (questionnaire admin + questionnaire utilisateur)
 - [ ] CSRF tokens sur les POST
 - [ ] Audit performance (délai de réponse)
 - [ ] Backup auto S3 (Scaleway)
 - **Objectif : premier client payant juillet 2026**
 
-## 22. DÉCISIONS CLÉS
-- Seeding = DEMO uniquement. Vrais clients apprennent via questionnaire admin + questionnaire utilisateur.
-- Actions directes fichiers OFF par défaut. Admin tenant toggle ON/OFF par société + par user.
+## 23. DÉCISIONS CLÉS
+- Seeding = DEMO uniquement. Vrais clients → questionnaire admin + questionnaire utilisateur.
+- Actions directes fichiers OFF par défaut. **Tenant admin toggle** (pas super admin).
 - Corbeille mail reste en action directe (récupérable + données personnelles).
-- Toujours expliquer la solution avant de coder. Guillaume valide, puis Opus exécute.
+- Panel admin protégé par re-auth mot de passe (10 min timeout).
+- 2 boutons : 🔑 Super Admin (tous les onglets) + ⚙️ Ma société (vue société).
 - Fichiers > 10KB = risque timeout MCP. Cible < 10KB pour tous les fichiers Python.
+- **Routes admin** : toujours dans le package `app/routes/admin/`, jamais dans le fichier `admin.py`.
 
-## 23. HISTORIQUE
+## 24. HISTORIQUE
+
+### Session 16/04/2026 (~10 commits)
+**FIX-CRITICAL : package `admin/` shadowait `admin.py`** — les routes suspension, actions directes, seed-user et /tenant/my-overview étaient mortes en prod depuis le 12/04. Toutes les routes injectées dans le package (`super_admin.py`). **FIX-CRITICAL : fallback OAuth `"guillaume"`** supprimé dans les callbacks Microsoft + Gmail — session vide → page erreur 401 au lieu de sauver le token sous Guillaume. **Migration DB** : colonnes `suspended` + `suspended_reason` ajoutées en prod (manquantes). **Fix micro** : `rec.stop()` manquant dans `chat-voice.js`. **Suspension feedback** : alertes vers l'onglet actif + cartes sociétés restent ouvertes. **Actions directes** : retirées du super admin, toggle per-user avec cycle (hérité/ON/OFF). **Panel admin tenant_admin** : `require_tenant_admin` au lieu de `require_admin`, onglets super-admin masqués. **Drawer filtré** : sections Mémoire/État/Actions sensibles/Debug masquées pour tenant_admin. **Bouton Panel** : `loadUserInfo()` utilise `/profile` → visible pour tenant_admin. **2 boutons** : 🔑 Super Admin + ⚙️ Ma société. **Re-auth MDP** : page de login admin dédiée, timeout 10 min. Charlotte créée et testée.
 
 ### Session 15/04/2026 soir (~15 commits)
-8 fichiers morts supprimés. PWA Topics (bouton 🔖 + panneau latéral). Split CSS (chat.css → 3 fichiers) + split admin_panel.html (CSS+JS extraits). Split Python batch final (13 splits Sonnet + 6 hotfixes Opus). C1+C2 : 8 profils seeding + endpoint seed-user. Refonte panel admin (SIRET obligatoire, adresse 3 champs, ID auto, double confirmation suppression, bouton ajout collaborateur). Sécurité cloisonnement Drive. Suspension comptes (users + tenants). Actions directes on/off. FIX-CRITICAL 16 décorateurs admin_endpoints.py restaurés.
+8 fichiers morts supprimés. PWA Topics (bouton 🔖 + panneau latéral). Split CSS + admin_panel.html. Split Python batch final (13 splits Sonnet + 6 hotfixes Opus). Seeding 8 profils + endpoint seed-user. Refonte panel admin (SIRET, adresse, ID auto, double confirmation, bouton collaborateur). Cloisonnement Drive. Suspension comptes. Actions directes on/off. FIX-CRITICAL 16 décorateurs admin_endpoints.py.
 
 ### Session 15/04/2026 matin (~70 commits)
-TOPICS 5/5. FIX-CLEAN + TIMESTAMP. RENAME raya_chat. 3 bugs chat. Refactoring BATCH 1+2+3 (19 splits). UX-TONE style conversationnel. UX bug report amélioré. UX 👍 confirme pending. 3 hotfixes imports cassés.
+TOPICS 5/5. FIX-CLEAN + TIMESTAMP. RENAME raya_chat. 3 bugs chat. Refactoring BATCH 1+2+3 (19 splits). UX-TONE. Bug report amélioré. 👍 confirme pending. 3 hotfixes imports.
 
 ### Session 14/04/2026 (~45 commits)
 AUDIT COMPLET. P0-1 anti-injection. SAV. Bloc A. B1 B3 B4. C3 RGPD. FIX-LEARN. Split aria_context + security_users. Lancement Flutter.
 
 ### Sessions précédentes
-13-14/04 nuit : ~50 commits. 13/04 : Connectivité 5/5. 12-13/04 : ~55 tâches.
+13-14/04 nuit : ~50 commits. 13/04 : Connectivité 5/5. 12-13/04 : ~55 tâches. 12/04 : Refactor admin en package.
 
-## 24. REPRISE
+## 25. REPRISE
 « Bonjour Opus. Projet Raya, Guillaume Perrin (Couffrant Solar). On se tutoie, en français, vocabulaire Terminal, concis. Lis `docs/raya_session_state.md` sur `per1gyom/couffrant-assistant` main. Reprends où on en était. »
