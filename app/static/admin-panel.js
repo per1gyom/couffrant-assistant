@@ -164,12 +164,15 @@ async function loadConnections(tenantId,idx){
       const icon=TOOL_ICONS[c.tool_type]||'🔌';
       const statusBadge=c.status==='connected'?'<span class="badge badge-green" style="font-size:9px">connecté</span>':c.status==='expired'?'<span class="badge badge-red" style="font-size:9px">expiré</span>':'<span class="badge badge-gray" style="font-size:9px">non configuré</span>';
       const users=c.assignments.map(a=>`<span class="badge ${a.enabled?'badge-blue':'badge-gray'}" style="font-size:9px;cursor:pointer" title="${a.access_level}" onclick="unassignConn(${c.id},'${a.username}','${tenantId}',${idx})">${a.username} ✕</span>`).join(' ');
-      return `<div style="padding:8px 12px;background:var(--bg1);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-        <span style="font-size:16px">${icon}</span>
-        <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span> ${statusBadge}</div>
-        <div style="display:flex;gap:4px;flex-wrap:wrap">${users||'<span style="color:var(--text3);font-size:10px">aucun user</span>'}</div>
-        <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="showAssignConn(${c.id},'${tenantId}',${idx})">👥+</button>
-        <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
+      return `<div style="padding:8px 12px;background:var(--bg1);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span style="font-size:16px">${icon}</span>
+          <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px;cursor:pointer;border-bottom:1px dashed var(--text3)" onclick="renameConn(${c.id},'${tenantId}',${idx},'${c.label.replace(/'/g,"\\'")}')" title="Cliquer pour renommer">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span> ${statusBadge}</div>
+          <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
+          <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
+        </div>
+        <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">${users||'<span style="color:var(--text3);font-size:10px">aucun user assigné</span>'}</div>
+        <div id="assign-panel-${c.id}" style="display:none;margin-top:8px;padding:8px;background:rgba(99,102,241,.04);border-radius:6px"></div>
       </div>`;
     }).join('');
   }catch(e){el.innerHTML='<span style="color:var(--red)">❌ '+e.message+'</span>';}
@@ -193,16 +196,64 @@ async function deleteConn(connId,tenantId,idx){
   try{await fetch(url,{method:'DELETE'});loadConnections(tenantId,idx);}catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
 }
 
-async function showAssignConn(connId,tenantId,idx){
-  const username=prompt('Nom d\'utilisateur à ajouter :');
-  if(!username) return;
-  const level=prompt('Niveau d\'accès (read_only / write / full) :','write');
-  if(!level) return;
+function toggleAssignPanel(connId,tenantId,idx){
+  const panel=document.getElementById('assign-panel-'+connId);
+  if(panel.style.display==='block'){panel.style.display='none';return;}
+  // Trouver les users de ce tenant
+  const tenant=_lastTenants.find(t=>t.tenant_id===tenantId);
+  if(!tenant){panel.innerHTML='Erreur: tenant introuvable';panel.style.display='block';return;}
+  const users=tenant.users||[];
+  panel.innerHTML=`
+    <div style="margin-bottom:6px;display:flex;gap:6px">
+      <button class="btn btn-accent" style="padding:2px 10px;font-size:10px" onclick="assignAll(${connId},'${tenantId}',${idx})">✅ Tous</button>
+      <button class="btn btn-ghost" style="padding:2px 10px;font-size:10px" onclick="unassignAll(${connId},'${tenantId}',${idx})">❌ Aucun</button>
+      <select id="assign-level-${connId}" style="padding:2px 6px;background:var(--bg1);border:1px solid var(--border);border-radius:4px;color:var(--text1);font-size:10px">
+        <option value="read_only">Lecture seule</option><option value="write" selected>Lecture + écriture</option><option value="full">Accès complet</option>
+      </select>
+    </div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap">${users.map(u=>
+      `<button class="btn btn-ghost" style="padding:3px 10px;font-size:11px" onclick="assignOneUser(${connId},'${u.username}','${tenantId}',${idx})">${u.username}</button>`
+    ).join('')}</div>`;
+  panel.style.display='block';
+}
+
+async function assignOneUser(connId,username,tenantId,idx){
+  const level=document.getElementById('assign-level-'+connId).value;
   const url=currentUserScope==='admin'?`/admin/connections/${connId}/assign`:'/tenant/connections/'+connId+'/assign';
   try{
-    const d=await(await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:username.trim(),access_level:level})})).json();
-    if(d.status==='ok') loadConnections(tenantId,idx);
-    else setAlert('companies-alert','❌ '+(d.message||'Erreur'),'err');
+    await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,access_level:level})});
+    loadConnections(tenantId,idx);
+  }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
+}
+
+async function assignAll(connId,tenantId,idx){
+  const tenant=_lastTenants.find(t=>t.tenant_id===tenantId);
+  if(!tenant) return;
+  const level=document.getElementById('assign-level-'+connId).value;
+  const url=currentUserScope==='admin'?`/admin/connections/${connId}/assign`:'/tenant/connections/'+connId+'/assign';
+  for(const u of tenant.users){
+    try{await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u.username,access_level:level})});}catch(e){}
+  }
+  loadConnections(tenantId,idx);
+}
+
+async function unassignAll(connId,tenantId,idx){
+  const tenant=_lastTenants.find(t=>t.tenant_id===tenantId);
+  if(!tenant) return;
+  for(const u of tenant.users){
+    const url=currentUserScope==='admin'?`/admin/connections/${connId}/assign/${u.username}`:'/tenant/connections/'+connId+'/assign/'+u.username;
+    try{await fetch(url,{method:'DELETE'});}catch(e){}
+  }
+  loadConnections(tenantId,idx);
+}
+
+async function renameConn(connId,tenantId,idx,currentLabel){
+  const newLabel=prompt('Nouveau nom de la connexion :',currentLabel);
+  if(!newLabel||newLabel===currentLabel) return;
+  const url=currentUserScope==='admin'?`/admin/connections/${tenantId}/${connId}`:'/tenant/connections/'+connId;
+  try{
+    await fetch(url,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:newLabel})});
+    loadConnections(tenantId,idx);
   }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
 }
 
