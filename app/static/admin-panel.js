@@ -163,7 +163,11 @@ async function loadConnections(tenantId,idx){
     el.innerHTML=conns.map(c=>{
       const icon=TOOL_ICONS[c.tool_type]||'🔌';
       const statusBadge=c.status==='connected'?'<span class="badge badge-green" style="font-size:9px">connecté</span>':c.status==='expired'?'<span class="badge badge-red" style="font-size:9px">expiré</span>':'<span class="badge badge-gray" style="font-size:9px">non configuré</span>';
-      const users=c.assignments.map(a=>`<span class="badge ${a.enabled?'badge-blue':'badge-gray'}" style="font-size:9px;cursor:pointer" title="${a.access_level}" onclick="unassignConn(${c.id},'${a.username}','${tenantId}',${idx})">${a.username} ✕</span>`).join(' ');
+      const userBadges=c.assignments.map(a=>`<span class="badge ${a.enabled?'badge-blue':'badge-gray'}" style="font-size:9px;cursor:pointer" title="${a.access_level}" onclick="unassignConn(${c.id},'${a.username}','${tenantId}',${idx})">${a.username} ✕</span>`);
+      const usersInline=c.assignments.length<=5;
+      const usersHtml=!c.assignments.length?'<span style="color:var(--text3);font-size:10px">aucun user assigné</span>'
+        :usersInline?userBadges.join(' ')
+        :`<details style="display:inline"><summary style="cursor:pointer;font-size:10px;color:var(--accent)">${c.assignments.length} utilisateurs ▾</summary><div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">${userBadges.join(' ')}</div></details>`;
       return `<div style="padding:8px 12px;background:var(--bg1);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <span style="font-size:16px">${icon}</span>
@@ -171,7 +175,7 @@ async function loadConnections(tenantId,idx){
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
           <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
         </div>
-        <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap">${users||'<span style="color:var(--text3);font-size:10px">aucun user assigné</span>'}</div>
+        <div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;align-items:center">${usersHtml}</div>
         <div id="assign-panel-${c.id}" style="display:none;margin-top:8px;padding:8px;background:rgba(99,102,241,.04);border-radius:6px"></div>
       </div>`;
     }).join('');
