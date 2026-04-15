@@ -1,7 +1,7 @@
 /* Admin Panel — JS */
 let allRules=[], allInsights=[];
 let currentEditUser=null, usernameToDelete=null;
-let isSuperAdmin=false, currentUserScope='';
+let isSuperAdmin=false, currentUserScope='', currentUserTenantId='';
 let currentEditTenantId=null, tenantToDelete=null;
 
 function updateClock(){document.getElementById('clock').textContent=new Date().toLocaleString('fr-FR',{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'});}
@@ -117,7 +117,8 @@ async function loadCompanies(){
   document.getElementById('companies-list').innerHTML='<div style="color:var(--text3);font-family:var(--mono);font-size:12px"><span class="loader"></span> Chargement...</div>';
   document.getElementById('companies-alert').className='alert';
   try{
-    const tenants=await(await fetch('/admin/tenants-overview')).json();
+    const url=isSuperAdmin?'/admin/tenants-overview':'/tenant/my-overview';
+    const tenants=await(await fetch(url)).json();
     document.getElementById('companies-count').textContent=`${tenants.length} société(s)`;
     if(!tenants.length){document.getElementById('companies-list').innerHTML='<div style="color:var(--text3);font-family:var(--mono);font-size:12px">Aucune société.</div>';return;}
     document.getElementById('companies-list').innerHTML=tenants.map((t,i)=>{
@@ -143,17 +144,18 @@ async function loadCompanies(){
             <td style="display:flex;gap:5px;flex-wrap:wrap">
               <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope}','${u.phone||''}')">Modifier</button>
               <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="seedUser('${u.username}')">🌱</button>
+              ${!isSuperAdmin&&u.scope!=='admin'?`<button class="btn ${u.direct_actions_override===true?'btn-accent':u.direct_actions_override===false?'btn-danger':'btn-ghost'}" style="padding:4px 9px;font-size:10px" onclick="cycleUserDirectActions('${u.username}',${u.direct_actions_override===null||u.direct_actions_override===undefined?'null':u.direct_actions_override})" title="Actions directes fichiers">${u.direct_actions_override===true?'📂 ON':u.direct_actions_override===false?'📂 OFF':'📂 ='}</button>`:''}
               ${u.suspended?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unsuspendUser('${u.username}')">▶️</button>`:`${u.scope!=='admin'?`<button class="btn btn-ghost" style="padding:4px 9px;font-size:11px;color:var(--yellow)" onclick="suspendUser('${u.username}')">⏸️</button>`:''}`}
               ${u.account_locked?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unlockUser('${u.username}')">🔓</button>`:''}
               ${u.scope!=='admin'?`<button class="btn btn-danger" style="padding:4px 9px;font-size:11px" onclick="askDeleteUser('${u.username}')">Suppr.</button>`:''}
             </td></tr>`).join('')}</tbody></table>
           <div class="sp-config-panel">
             <div style="margin-bottom:12px"><button class="btn btn-primary" style="font-size:12px;padding:6px 14px" onclick="openCreateUserForTenant('${t.tenant_id}','${t.name.replace(/'/g,"\\'")}')">➕ Ajouter un collaborateur</button></div>
-            <div style="margin-bottom:16px;padding:10px 14px;background:rgba(99,102,241,.06);border-radius:8px;display:flex;align-items:center;gap:12px">
-              <span style="font-size:13px;font-weight:600">Actions directes sur les fichiers</span>
-              <button class="btn ${(t.settings||{}).direct_actions?'btn-accent':'btn-ghost'}" style="padding:4px 14px;font-size:11px;min-width:60px" onclick="toggleTenantDirectActions('${t.tenant_id}',${!!(t.settings||{}).direct_actions})">${(t.settings||{}).direct_actions?'🟢 ON':'🔴 OFF'}</button>
-              <span style="font-size:11px;color:var(--text3)">${(t.settings||{}).direct_actions?'Les utilisateurs peuvent créer/modifier des fichiers sans validation':'Toute action fichier nécessite une validation humaine'}</span>
-            </div>
+            ${!isSuperAdmin?`<div style="margin-bottom:16px;padding:10px 14px;background:rgba(99,102,241,.06);border-radius:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+              <span style="font-size:13px;font-weight:600">Actions directes fichiers</span>
+              <button class="btn ${(t.settings||{}).direct_actions?'btn-accent':'btn-ghost'}" style="padding:4px 14px;font-size:11px;min-width:80px" onclick="toggleTenantDirectActions('${t.tenant_id}',${!!(t.settings||{}).direct_actions})">${(t.settings||{}).direct_actions?'🟢 ON':'🔴 OFF'} (société)</button>
+              <span style="font-size:11px;color:var(--text3)">${(t.settings||{}).direct_actions?'Actions fichiers sans validation':'Validation humaine requise'}</span>
+            </div>`:''}
             <div class="sp-config-title">⚙️ Configuration SharePoint (optionnel)</div>
             <div class="sp-config-grid">
               <div><label>Site SharePoint</label><input type="text" id="sp-site-${i}" value="${spSite}" placeholder="Commun"></div>
@@ -272,20 +274,22 @@ async function seedUser(username){
 async function suspendUser(username){
   const reason=prompt('Raison de la suspension (optionnel) :','');
   if(reason===null) return;
+  const alertId=document.getElementById('tab-companies').classList.contains('active')?'companies-alert':'user-alert';
   try{
     const d=await(await fetch(`/admin/suspend-user/${username}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({reason})})).json();
-    if(d.status==='ok'){setAlert('user-alert','⏸️ '+d.message,'ok');loadUsers();loadCompanies();}
-    else setAlert('user-alert','❌ '+(d.message||'Erreur'),'err');
-  }catch(e){setAlert('user-alert','❌ '+e.message,'err');}
+    if(d.status==='ok'){setAlert(alertId,'⏸️ '+d.message,'ok');loadUsers();loadCompanies();}
+    else setAlert(alertId,'❌ '+(d.message||'Erreur'),'err');
+  }catch(e){setAlert(alertId,'❌ '+e.message,'err');}
 }
 
 async function unsuspendUser(username){
   if(!confirm(`Réactiver le compte "${username}" ?`)) return;
+  const alertId=document.getElementById('tab-companies').classList.contains('active')?'companies-alert':'user-alert';
   try{
     const d=await(await fetch(`/admin/unsuspend-user/${username}`,{method:'POST'})).json();
-    if(d.status==='ok'){setAlert('user-alert','▶️ '+d.message,'ok');loadUsers();loadCompanies();}
-    else setAlert('user-alert','❌ '+(d.message||'Erreur'),'err');
-  }catch(e){setAlert('user-alert','❌ '+e.message,'err');}
+    if(d.status==='ok'){setAlert(alertId,'▶️ '+d.message,'ok');loadUsers();loadCompanies();}
+    else setAlert(alertId,'❌ '+(d.message||'Erreur'),'err');
+  }catch(e){setAlert(alertId,'❌ '+e.message,'err');}
 }
 
 async function suspendTenant(tenantId,tenantName){
@@ -315,11 +319,15 @@ async function toggleTenantDirectActions(tenantId, currentState){
   }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
 }
 
-async function toggleUserDirectActions(username, currentState){
-  const enabled=currentState?null:true;
+async function cycleUserDirectActions(username, current){
+  // Cycle : null (hérité) → true (ON) → false (OFF) → null
+  let next;
+  if(current===null||current===undefined) next=true;
+  else if(current===true) next=false;
+  else next=null;
   try{
-    const d=await(await fetch(`/admin/direct-actions/user/${username}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})})).json();
-    if(d.status==='ok'){setAlert('companies-alert','✅ '+d.message,'ok');loadCompanies();}
+    const d=await(await fetch(`/admin/direct-actions/user/${username}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:next})})).json();
+    if(d.status==='ok'){setAlert('companies-alert',(next===true?'🟢':next===false?'🔴':'🔵')+' '+d.message,'ok');loadCompanies();}
     else setAlert('companies-alert','❌ '+(d.message||'Erreur'),'err');
   }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
 }
@@ -405,7 +413,7 @@ async function loadProfile(){
   try{const d=await(await fetch('/profile')).json();document.getElementById('profile-username').textContent=d.username||'—';document.getElementById('profile-email').value=d.email||'';}catch(e){}
 }
 async function initUserScope(){
-  try{const d=await(await fetch('/profile')).json();currentUserScope=d.scope||'';isSuperAdmin=(currentUserScope==='admin');if(isSuperAdmin) document.getElementById('btn-create-tenant').style.display='';}catch(e){}
+  try{const d=await(await fetch('/profile')).json();currentUserScope=d.scope||'';currentUserTenantId=d.tenant_id||'';isSuperAdmin=(currentUserScope==='admin');if(isSuperAdmin) document.getElementById('btn-create-tenant').style.display='';}catch(e){}
 }
 async function saveEmail(){
   const email=document.getElementById('profile-email').value.trim();const d=await(await fetch('/profile/email',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})})).json();
