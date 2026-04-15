@@ -1,7 +1,7 @@
 # Raya — Spec : Architecture Connecteurs v2
 
 **Auteur :** Opus — **Date :** 16/04/2026
-**Statut :** PROPOSITION — à valider par Guillaume
+**Statut :** ✅ VALIDÉ par Guillaume (16/04/2026)
 
 ---
 
@@ -63,6 +63,17 @@ SOCIÉTÉ (tenant)
 | access_level | TEXT | `read_only`, `write`, `full` |
 | enabled | BOOLEAN | Actif/inactif pour cet user |
 | UNIQUE | | (connection_id, username) |
+
+### Principe fondamental : assignation dynamique (validé Guillaume)
+
+Chaque connexion est **indépendamment assignable et révocable** à tout moment :
+- L'admin crée une connexion (ex: "SharePoint Commun") et l'assigne à 5 users
+- Le lendemain, il retire l'accès à 1 user → simple DELETE dans `connection_assignments`
+- Il ajoute un nouveau user sur "SharePoint Projets" → simple INSERT
+- Il peut aussi changer le niveau d'accès (read_only → write) sans toucher à la connexion elle-même
+- Chaque outil (drive, outlook, gmail, odoo, teams, whatsapp) suit exactement le même modèle
+- Un user peut avoir **plusieurs connexions du même type** (ex: 2 boîtes Outlook)
+- Une connexion peut être partagée par **1 à N users** de la société
 
 ### Migration depuis l'existant
 

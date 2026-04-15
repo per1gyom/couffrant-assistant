@@ -138,6 +138,10 @@ App iOS fonctionnelle sur simulateur (login, chat, TTS, feedback). Specs dans `d
 - [ ] Vérifier que Charlotte voit bien sa société dans le panel admin
 
 ### Commercial (Bloc C)
+- [ ] **Connecteurs v2** — spec validée (`docs/spec_connecteurs_v2.md`) — 3 phases :
+  - Phase A : Schema DB `tenant_connections` + `connection_assignments` + migration + CRUD
+  - Phase B : Panel admin UI — créer/assigner/révoquer connexions par user
+  - Phase C : Intégration Raya Core — multi-connexions par user dans le chat
 - [ ] C4 : WhatsApp production (sortir sandbox Twilio)
 - [ ] C5 : Facturation Stripe
 - [ ] Onboarding amélioré (questionnaire admin + questionnaire utilisateur)
@@ -154,6 +158,7 @@ App iOS fonctionnelle sur simulateur (login, chat, TTS, feedback). Specs dans `d
 - 2 boutons : 🔑 Super Admin (tous les onglets) + ⚙️ Ma société (vue société).
 - Fichiers > 10KB = risque timeout MCP. Cible < 10KB pour tous les fichiers Python.
 - **Routes admin** : toujours dans le package `app/routes/admin/`, jamais dans le fichier `admin.py`.
+- **Connecteurs v2** (validé 16/04) : chaque connexion (OAuth, API, SharePoint) est une instance partageable, assignable/révocable dynamiquement à 1-N users par l'admin. Spec dans `docs/spec_connecteurs_v2.md`.
 
 ## 24. HISTORIQUE
 
