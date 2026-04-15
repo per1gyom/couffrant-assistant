@@ -148,6 +148,11 @@ async function loadCompanies(){
             </td></tr>`).join('')}</tbody></table>
           <div class="sp-config-panel">
             <div style="margin-bottom:12px"><button class="btn btn-primary" style="font-size:12px;padding:6px 14px" onclick="openCreateUserForTenant('${t.tenant_id}','${t.name.replace(/'/g,"\\'")}')">➕ Ajouter un collaborateur</button></div>
+            <div style="margin-bottom:16px;padding:10px 14px;background:rgba(99,102,241,.06);border-radius:8px;display:flex;align-items:center;gap:12px">
+              <span style="font-size:13px;font-weight:600">Actions directes sur les fichiers</span>
+              <button class="btn ${(t.settings||{}).direct_actions?'btn-accent':'btn-ghost'}" style="padding:4px 14px;font-size:11px;min-width:60px" onclick="toggleTenantDirectActions('${t.tenant_id}',${!!(t.settings||{}).direct_actions})">${(t.settings||{}).direct_actions?'🟢 ON':'🔴 OFF'}</button>
+              <span style="font-size:11px;color:var(--text3)">${(t.settings||{}).direct_actions?'Les utilisateurs peuvent créer/modifier des fichiers sans validation':'Toute action fichier nécessite une validation humaine'}</span>
+            </div>
             <div class="sp-config-title">⚙️ Configuration SharePoint (optionnel)</div>
             <div class="sp-config-grid">
               <div><label>Site SharePoint</label><input type="text" id="sp-site-${i}" value="${spSite}" placeholder="Commun"></div>
@@ -296,6 +301,24 @@ async function unsuspendTenant(tenantId){
   try{
     const d=await(await fetch(`/admin/unsuspend-tenant/${tenantId}`,{method:'POST'})).json();
     if(d.status==='ok'){setAlert('companies-alert','▶️ '+d.message,'ok');loadCompanies();}
+    else setAlert('companies-alert','❌ '+(d.message||'Erreur'),'err');
+  }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
+}
+
+async function toggleTenantDirectActions(tenantId, currentState){
+  const enabled=!currentState;
+  try{
+    const d=await(await fetch(`/admin/direct-actions/tenant/${tenantId}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})})).json();
+    if(d.status==='ok'){setAlert('companies-alert',(enabled?'🟢':'🔴')+' '+d.message,'ok');loadCompanies();}
+    else setAlert('companies-alert','❌ '+(d.message||'Erreur'),'err');
+  }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
+}
+
+async function toggleUserDirectActions(username, currentState){
+  const enabled=currentState?null:true;
+  try{
+    const d=await(await fetch(`/admin/direct-actions/user/${username}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled})})).json();
+    if(d.status==='ok'){setAlert('companies-alert','✅ '+d.message,'ok');loadCompanies();}
     else setAlert('companies-alert','❌ '+(d.message||'Erreur'),'err');
   }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
 }

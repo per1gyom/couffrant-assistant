@@ -14,6 +14,9 @@ from app.activity_log import log_activity
 
 def _handle_drive_actions(response, token, drive_write, username, tenant_id, conversation_id):
     confirmed = []
+    # Vérifier si l'utilisateur peut faire des actions directes sur les fichiers
+    from app.direct_actions import can_do_direct_actions
+    direct_ok = can_do_direct_actions(username, tenant_id)
 
     for match in re.finditer(r'\[ACTION:LISTDRIVE:([^\]]*)]', response):
         subfolder = match.group(1).strip()
@@ -76,16 +79,27 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
         for match in re.finditer(r'\[ACTION:CREATEFOLDER:([^|^\]]+)\|([^\]]+)\]', response):
             parent_id = match.group(1).strip()
             folder_name = match.group(2).strip()
-            try:
-                _, drive_id, _ = _find_sharepoint_site_and_drive(token)
-                r = create_folder(token, parent_id, folder_name, drive_id)
-                if r.get("status") == "ok":
-                    confirmed.append(f"\u2705 Dossier '{folder_name}' cree")
-                    log_activity(username, "drive_create", folder_name[:200], parent_id[:100], tenant_id=tenant_id)
-                else:
-                    confirmed.append(f"\u274c {r.get('message')}")
-            except Exception as e:
-                confirmed.append(f"\u274c {str(e)[:80]}")
+            if direct_ok:
+                # Action directe autorisée
+                try:
+                    _, drive_id, _ = _find_sharepoint_site_and_drive(token)
+                    r = create_folder(token, parent_id, folder_name, drive_id)
+                    if r.get("status") == "ok":
+                        confirmed.append(f"\u2705 Dossier '{folder_name}' cree")
+                        log_activity(username, "drive_create", folder_name[:200], parent_id[:100], tenant_id=tenant_id)
+                    else:
+                        confirmed.append(f"\u274c {r.get('message')}")
+                except Exception as e:
+                    confirmed.append(f"\u274c {str(e)[:80]}")
+            else:
+                # Action en queue — validation requise
+                label = f"Creer dossier '{folder_name}'"
+                action_id = queue_action(
+                    tenant_id=tenant_id, username=username, action_type="CREATEFOLDER",
+                    payload={"parent_id": parent_id, "folder_name": folder_name},
+                    label=label, conversation_id=conversation_id,
+                )
+                confirmed.append(f"\u23f8\ufe0f Action #{action_id} en attente : {label}\n   Pour confirmer : dites \"confirme action {action_id}\"")
 
         for match in re.finditer(r'\[ACTION:MOVEDRIVE:([^|^\]]+)\|([^|^\]]+)\|?([^\]]*)\]', response):
             item_id = match.group(1).strip()

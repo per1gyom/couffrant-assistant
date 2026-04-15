@@ -190,6 +190,33 @@ def admin_unsuspend_tenant(
     return unsuspend_tenant(tenant_id)
 
 
+# ─── ACTIONS DIRECTES ───
+
+@router.post("/admin/direct-actions/tenant/{tenant_id}")
+def admin_toggle_tenant_direct_actions(
+    request: Request,
+    tenant_id: str,
+    payload: dict = Body(...),
+    _: dict = Depends(require_admin),
+):
+    from app.direct_actions import set_tenant_direct_actions
+    enabled = bool(payload.get("enabled", False))
+    return set_tenant_direct_actions(tenant_id, enabled)
+
+
+@router.post("/admin/direct-actions/user/{username}")
+def admin_toggle_user_direct_actions(
+    request: Request,
+    username: str,
+    payload: dict = Body(...),
+    user: dict = Depends(require_tenant_admin),
+):
+    """Admin tenant ou super admin peut toggler les actions directes d'un user."""
+    from app.direct_actions import set_user_direct_actions
+    enabled = payload.get("enabled")  # null = hériter du tenant
+    return set_user_direct_actions(username, enabled)
+
+
 # ─── SEEDING PROFIL ───
 
 @router.post("/admin/seed-user")
