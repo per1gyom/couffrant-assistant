@@ -44,6 +44,8 @@ async function sendMessage() {
   }
   document.querySelectorAll('.ask-choice-zone').forEach(el => el.remove());
   const fileSnapshot = currentFile ? {...currentFile} : null;
+  // Couper le micro AVANT de vider l'input (sinon onresult réécrit dedans)
+  if(typeof stopListening==='function'&&isListening) stopListening();
   inputEl.value=''; inputEl.style.height='auto'; inputEl.classList.remove('interim');
   removeAttachment(); sendBtn.disabled=true; stopSpeech();
   addMessage(text||'[Fichier joint]','user',fileSnapshot);
