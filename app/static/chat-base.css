@@ -42,7 +42,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .scroll-down-btn:hover { border-color: var(--accent); color: var(--accent); }
 .message-row { display: flex; gap: 10px; align-items: flex-start; }
 .message-row.user { flex-direction: row-reverse; }
-.message-row.raya { flex-direction: column; }
+.message-row.raya { flex-direction: column; width: 100%; }
 .message-row.raya .avatar { display: none; }
 .avatar { width: 32px; height: 32px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; margin-top: 2px; font-weight: 700; letter-spacing: -0.02em; }
 .avatar.raya-avatar { background: linear-gradient(135deg, var(--accent) 0%, #7c3aed 100%); color: #fff; }

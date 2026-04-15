@@ -6,19 +6,19 @@
 <title>Raya</title>
 
 <!-- PWA -->
-<link rel="manifest" href="/static/manifest.json?v=15">
+<link rel="manifest" href="/static/manifest.json?v=16">
 <meta name="theme-color" content="#6366f1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
-<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=15">
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=16">
 
 <!-- CSS -->
-<link rel="stylesheet" href="/static/chat-base.css?v=15">
-<link rel="stylesheet" href="/static/chat-components.css?v=15">
-<link rel="stylesheet" href="/static/chat-drawer.css?v=15">
-<link rel="stylesheet" href="/static/onboarding.css?v=15">
-<link rel="stylesheet" href="/static/mobile.css?v=15">
+<link rel="stylesheet" href="/static/chat-base.css?v=16">
+<link rel="stylesheet" href="/static/chat-components.css?v=16">
+<link rel="stylesheet" href="/static/chat-drawer.css?v=16">
+<link rel="stylesheet" href="/static/onboarding.css?v=16">
+<link rel="stylesheet" href="/static/mobile.css?v=16">
 
 <!-- marked.js + DOMPurify (CDN versionné, stable) -->
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
@@ -209,30 +209,25 @@
 </div>
 
 <!-- Modules JS -->
-<script src="/static/chat-onboarding.js?v=15"></script>
-<script src="/static/chat-shortcuts.js?v=15"></script>
-<script src="/static/chat-voice.js?v=15"></script>
-<script src="/static/chat-feedback.js?v=15"></script>
-<script src="/static/chat-triage.js?v=15"></script>
-<script src="/static/chat-admin.js?v=15"></script>
-<script src="/static/chat-topics.js?v=15"></script>
-<script src="/static/chat-core.js?v=15"></script>
-<script src="/static/chat-messages.js?v=15"></script>
-<script src="/static/chat-main.js?v=15"></script>
+<script src="/static/chat-onboarding.js?v=16"></script>
+<script src="/static/chat-shortcuts.js?v=16"></script>
+<script src="/static/chat-voice.js?v=16"></script>
+<script src="/static/chat-feedback.js?v=16"></script>
+<script src="/static/chat-triage.js?v=16"></script>
+<script src="/static/chat-admin.js?v=16"></script>
+<script src="/static/chat-topics.js?v=16"></script>
+<script src="/static/chat-core.js?v=16"></script>
+<script src="/static/chat-messages.js?v=16"></script>
+<script src="/static/chat-main.js?v=16"></script>
 
 <script>
+  // Supprimer TOUS les Service Workers — ils causent des problèmes de cache
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', async () => {
-      // Force nettoyage des anciens SW avant d'enregistrer le nouveau
-      const regs = await navigator.serviceWorker.getRegistrations();
-      for (const reg of regs) { await reg.unregister(); }
-      // Purger tous les caches SW
-      const keys = await caches.keys();
-      for (const k of keys) { await caches.delete(k); }
-      // Enregistrer le nouveau SW avec cache-bust
-      navigator.serviceWorker.register('/sw.js?v=15', { scope: '/' })
-        .then(reg => { reg.update(); })
-        .catch(err => console.warn('[SW] Échec:', err));
+    navigator.serviceWorker.getRegistrations().then(regs => {
+      regs.forEach(reg => reg.unregister());
+    });
+    caches.keys().then(keys => {
+      keys.forEach(k => caches.delete(k));
     });
   }
   (function(){
