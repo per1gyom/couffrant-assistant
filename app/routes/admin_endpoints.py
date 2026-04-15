@@ -2,21 +2,33 @@
 Endpoints admin gestion utilisateurs/regles/insights.
 Extrait de admin.py -- SPLIT-R2.
 """
-from fastapi import APIRouter,Request,Body
+import os
+import requests as http_requests
+from fastapi import APIRouter, Request, Body, Depends, HTTPException
 from fastapi.responses import JSONResponse
-from app.routes.deps import require_admin,require_tenant_admin
-from app.security_tools import ALL_SCOPES,SCOPE_USER,SCOPE_ADMIN,SCOPE_TENANT_ADMIN
+from app.routes.deps import require_admin, require_tenant_admin, get_session_tenant_id, assert_same_tenant
+from app.security_tools import ALL_SCOPES, SCOPE_USER, SCOPE_CS, SCOPE_ADMIN, SCOPE_TENANT_ADMIN, DEFAULT_TENANT
+from app.app_security import (
+    create_user, delete_user, update_user, list_users,
+    get_user_tools, set_user_tool, remove_user_tool,
+    get_users_in_tenant, get_tenant_id, generate_reset_token,
+    hash_password, init_default_user,
+)
+from app.database import get_pg_conn, init_postgres
+from app.admin_audit import log_admin_action
 from app.logging_config import get_logger
-logger=get_logger("raya.admin")
-router=APIRouter(tags=["admin"])
+logger = get_logger("raya.admin")
+router = APIRouter(tags=["admin"])
 
 
+@router.get("/admin/users")
 def admin_list_users(request: Request, _: dict = Depends(require_admin)):
     return list_users()
 
 
 
 
+@router.post("/admin/create-user")
 def admin_create_user(
     request: Request,
     payload: dict = Body(...),
@@ -37,6 +49,7 @@ def admin_create_user(
 
 
 
+@router.put("/admin/update-user/{target}")
 def admin_update_user(
     request: Request,
     target: str,
@@ -51,6 +64,7 @@ def admin_update_user(
 
 
 
+@router.delete("/admin/delete-user/{target}")
 def admin_delete_user(
     request: Request,
     target: str,
@@ -63,6 +77,7 @@ def admin_delete_user(
 
 
 
+@router.post("/admin/reset-password/{target}")
 def admin_reset_password(
     request: Request,
     target: str,
@@ -74,6 +89,7 @@ def admin_reset_password(
 
 
 
+@router.post("/admin/users/{username}/reset-password")
 def admin_users_reset_password(
     request: Request,
     username: str,
@@ -116,12 +132,14 @@ def admin_users_reset_password(
 
 
 
+@router.get("/tenant/users")
 def tenant_list_users(request: Request, _: dict = Depends(require_tenant_admin)):
     return get_users_in_tenant(get_session_tenant_id(request))
 
 
 
 
+@router.post("/tenant/create-user")
 def tenant_create_user(
     request: Request,
     payload: dict = Body(...),
@@ -146,6 +164,7 @@ def tenant_create_user(
 
 
 
+@router.put("/tenant/update-user/{target}")
 def tenant_update_user(
     request: Request,
     target: str,
@@ -161,6 +180,7 @@ def tenant_update_user(
 
 
 
+@router.delete("/tenant/delete-user/{target}")
 def tenant_delete_user(
     request: Request,
     target: str,
@@ -174,6 +194,7 @@ def tenant_delete_user(
 
 
 
+@router.post("/tenant/reset-password/{target}")
 def tenant_reset_password(
     request: Request,
     target: str,
@@ -185,6 +206,7 @@ def tenant_reset_password(
 
 
 
+@router.get("/tenant/user-tools/{target}")
 def tenant_get_tools(
     request: Request,
     target: str,
@@ -196,6 +218,7 @@ def tenant_get_tools(
 
 
 
+@router.get("/tenant/rules")
 def tenant_rules(request: Request, user: dict = Depends(require_tenant_admin)):
     conn = None
     try:
@@ -219,6 +242,7 @@ def tenant_rules(request: Request, user: dict = Depends(require_tenant_admin)):
 
 
 
+@router.get("/admin/rules")
 def admin_rules(request: Request, user: str = "", _: dict = Depends(require_admin)):
     conn = None
     try:
@@ -243,6 +267,7 @@ def admin_rules(request: Request, user: str = "", _: dict = Depends(require_admi
 
 
 
+@router.get("/admin/insights")
 def admin_insights(request: Request, user: str = "", _: dict = Depends(require_admin)):
     conn = None
     try:
@@ -275,7 +300,6 @@ def admin_get_tools(
 
 
 @router.post("/admin/user-tools/{target}/{tool}")
-@router.post("/admin/user-tools/{target}/{tool}")
 def admin_set_tool(
     request: Request,
     target: str,
@@ -294,7 +318,6 @@ def admin_set_tool(
 
 
 @router.delete("/admin/user-tools/{target}/{tool}")
-@router.delete("/admin/user-tools/{target}/{tool}")
 def admin_remove_tool(
     request: Request,
     target: str,
@@ -307,7 +330,6 @@ def admin_remove_tool(
 
 
 @router.get("/init-db")
-@router.get("/init-db")
 def init_db_now(request: Request, _: dict = Depends(require_admin)):
     init_postgres()
     try:
@@ -317,7 +339,6 @@ def init_db_now(request: Request, _: dict = Depends(require_admin)):
     return {"status": "tables créées"}
 
 
-@router.get("/test-elevenlabs")
 @router.get("/test-elevenlabs")
 def test_elevenlabs(request: Request, _: dict = Depends(require_admin)):
     api_key = os.environ.get("ELEVENLABS_API_KEY", "")
@@ -330,6 +351,4 @@ def test_elevenlabs(request: Request, _: dict = Depends(require_admin)):
         timeout=30,
     )
     return {"status_code": resp.status_code, "api_key_length": len(api_key), "voice_id": voice_id}
-from app.routes.admin_endpoints import router as _ep
-router.include_router(_ep)
 

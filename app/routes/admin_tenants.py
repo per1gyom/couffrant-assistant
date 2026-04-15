@@ -174,7 +174,9 @@ def admin_tenants_overview(request: Request, _: dict = Depends(require_admin)):
 
 # ─── TENANTS ───
 
-@router.get("/admin/users")@router.post("/admin/create-user")@router.put("/admin/update-user/{target}")@router.delete("/admin/delete-user/{target}")@router.post("/admin/reset-password/{target}")@router.post("/admin/users/{username}/reset-password")@router.get("/tenant/users")@router.post("/tenant/create-user")@router.put("/tenant/update-user/{target}")@router.delete("/tenant/delete-user/{target}")@router.post("/tenant/reset-password/{target}")@router.get("/tenant/user-tools/{target}")@router.get("/tenant/rules")@router.get("/admin/rules")@router.get("/admin/insights")@router.get("/admin/memory-status")
+# ─── MEMORY STATUS ───
+
+@router.get("/admin/memory-status")
 def admin_memory_status(request: Request, _: dict = Depends(require_admin)):
     conn = None
     try:

@@ -142,6 +142,8 @@ def admin_panel(request: Request):
         return HTMLResponse(content=f.read())
 from app.routes.admin_tenants import router as _at
 router.include_router(_at)
+from app.routes.admin_endpoints import router as _ep
+router.include_router(_ep)
 
 
 # ─── SUSPENSION ───
@@ -196,7 +198,7 @@ def admin_unsuspend_tenant(
 def admin_toggle_tenant_direct_actions(
     request: Request,
     tenant_id: str,
-    payload: dict = Body(...),
+    payload: dict = Body(default={}),
     _: dict = Depends(require_admin),
 ):
     from app.direct_actions import set_tenant_direct_actions
@@ -208,7 +210,7 @@ def admin_toggle_tenant_direct_actions(
 def admin_toggle_user_direct_actions(
     request: Request,
     username: str,
-    payload: dict = Body(...),
+    payload: dict = Body(default={}),
     user: dict = Depends(require_tenant_admin),
 ):
     """Admin tenant ou super admin peut toggler les actions directes d'un user."""
