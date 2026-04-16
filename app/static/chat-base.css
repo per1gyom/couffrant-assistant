@@ -48,7 +48,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .avatar.raya-avatar { background: linear-gradient(135deg, var(--accent) 0%, #7c3aed 100%); color: #fff; }
 .avatar.user-avatar { background: var(--surface2); border: 1px solid var(--border); color: var(--text-muted); }
 .bubble { max-width: 78%; border-radius: var(--radius); padding: 12px 16px; font-size: 14.5px; line-height: 1.7; word-break: break-word; }
-.message-row.raya .bubble { background: transparent; border: none; border-radius: 0; box-shadow: none; max-width: 100%; padding: 8px 0; }
+.message-row.raya .bubble { background: transparent; border: none; border-radius: 0; box-shadow: none; max-width: 100%; width: 100%; padding: 8px 0; }
 .message-row.user .bubble { background: var(--user-bg); border: 1px solid #c7d2fe; border-radius: 14px 4px 14px 14px; color: var(--user-text); }
 .bubble-actions { display: flex; gap: 7px; margin-top: 8px; align-items: center; }
 .speak-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: var(--radius-full); padding: 4px 12px; font-size: 12px; cursor: pointer; transition: all 0.2s; display: inline-flex; align-items: center; gap: 5px; font-family: var(--font); font-weight: 500; }
