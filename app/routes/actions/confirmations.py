@@ -16,18 +16,23 @@ def _handle_confirmations(response, username, tenant_id, outlook_token, tools):
             confirmed.append(f"\u274c Action #{action_id} introuvable, deja traitee ou expiree.")
             continue
         result = _execute_confirmed_action(action, outlook_token, tools)
+        label = action.get("label") or f"#{action_id}"
         if result.get("ok"):
             mark_executed(action_id, result)
-            confirmed.append(f"\u2705 {result.get('message', 'Action executee')}")
+            confirmed.append(f"\u2705 {result.get('message', 'Action executee')} — {label}")
         else:
             mark_failed(action_id, result.get("error", "erreur inconnue"))
-            confirmed.append(f"\u274c Echec : {result.get('error', 'erreur inconnue')}")
+            confirmed.append(f"\u274c Echec ({label}) : {result.get('error', 'erreur inconnue')}")
 
     for match in re.finditer(r'\[ACTION:CANCEL:(\d+)\]', response):
         action_id = int(match.group(1))
+        # Lire le label avant d'annuler
+        from app.pending_actions import get_action
+        action_info = get_action(action_id, username, tenant_id)
+        label = (action_info.get("label") if action_info else None) or f"#{action_id}"
         ok = cancel_action(action_id, username, tenant_id, reason="Annule par l'utilisateur")
         confirmed.append(
-            f"\u23f9\ufe0f Action #{action_id} annulee." if ok
+            f"\u23f9\ufe0f Annule : {label}" if ok
             else f"\u274c Action #{action_id} introuvable."
         )
 
@@ -52,7 +57,19 @@ def _execute_confirmed_action(action: dict, outlook_token: str, tools: dict) -> 
                 "message_id": payload["message_id"],
                 "reply_body": payload["reply_text"],
             }, outlook_token)
-            return {"ok": r.get("status") == "ok", "message": "Reponse envoyee",
+            to_label = payload.get("sender_name") or payload.get("to") or ""
+            msg = f"Reponse envoyee a {to_label}" if to_label else "Reponse envoyee"
+            return {"ok": r.get("status") == "ok", "message": msg,
+                    "error": r.get("message", "envoi echoue")}
+
+        if action_type == "SEND_MAIL":
+            r = perform_outlook_action("send_new_mail", {
+                "to_email": payload["to_email"],
+                "subject":  payload["subject"],
+                "body":     payload["body"],
+            }, outlook_token)
+            msg = f"Mail envoye a {payload.get('to_email', '?')}"
+            return {"ok": r.get("status") == "ok", "message": msg,
                     "error": r.get("message", "envoi echoue")}
 
         if action_type == "DELETE_GROUPED":

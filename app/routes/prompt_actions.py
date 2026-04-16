@@ -28,6 +28,9 @@ Interactif (immediat) :
   [ACTION:ARCHIVE:id] [ACTION:READ:id] [ACTION:READBODY:id]
   [ACTION:REPLY:id:texte] [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
   [ACTION:CREATE_TASK:titre]{delete_line}
+  [ACTION:SEND_MAIL:destinataire@email.fr|sujet|corps] -> envoyer un NOUVEAU mail (pas une reponse)
+    Exemple : [ACTION:SEND_MAIL:per1.guillaume@gmail.com|Test Raya|Bonjour, ceci est un test.]
+    -> met en queue + confirmation requise avant envoi
 Filtre mails :
   [ACTION:LEARN:mail_filter|autoriser: email@domaine.fr]
   [ACTION:LEARN:mail_filter|bloquer: promo@xyz.fr]""")

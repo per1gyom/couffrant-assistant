@@ -146,4 +146,17 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
         except Exception:
             pass
 
+    # SEND_MAIL : nouveau mail (pas une reponse) — mise en queue + confirmation
+    for match in re.finditer(r'\[ACTION:SEND_MAIL:([^\|\]]+)\|([^\|\]]+)\|(.+?)\]', response, re.DOTALL):
+        to_email    = match.group(1).strip()
+        subject     = match.group(2).strip()
+        body        = match.group(3).strip().replace('\\n', '\n')
+        label       = f"Envoyer un mail a {to_email} — {subject[:50]}"
+        action_id   = queue_action(
+            tenant_id=tenant_id, username=username, action_type="SEND_MAIL",
+            payload={"to_email": to_email, "subject": subject, "body": body},
+            label=label, conversation_id=conversation_id,
+        )
+        log_activity(username, "mail_send_queued", to_email, subject[:100], tenant_id=tenant_id)
+
     return confirmed

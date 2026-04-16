@@ -214,27 +214,33 @@ function renderPendingActions(pendingList) {
   pendingList.forEach(action => {
     const card = document.createElement('div'); card.className = 'pending-card';
     const isReply = action.action_type === 'REPLY';
+    const isSendMail = action.action_type === 'SEND_MAIL';
 
-    if (isReply && action.payload) {
-      // ── Carte email propre ──
+    // Badge d'identification de l'action
+    const idBadge = `<div class="pending-id-badge">#${action.id} — ${action.action_type}</div>`;
+
+    if ((isReply || isSendMail) && action.payload) {
       const p = action.payload;
-      const senderName = p.sender_name || p.to || '?';
+      const senderName = p.sender_name || p.to_email || p.to || '?';
       const subject    = p.subject || '(sans sujet)';
-      const body       = (p.reply_text || '').replace(/\\n/g, '\n').replace(/\n/g, '<br>');
+      const body       = (p.reply_text || p.body || '').replace(/\\n/g, '\n').replace(/\n/g, '<br>');
+      const toLabel    = isReply ? `À : <strong>${senderName}</strong>` : `À : <strong>${p.to_email || '?'}</strong>`;
 
       card.innerHTML = `
+        ${idBadge}
         <div class="pending-mail-header">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-          <span class="pending-mail-to">À : <strong>${senderName}</strong></span>
+          <span class="pending-mail-to">${toLabel}</span>
         </div>
         <div class="pending-mail-subject">Sujet : <em>${subject}</em></div>
         <div class="pending-mail-body">${body}</div>`;
     } else {
+      card.innerHTML = idBadge;
       const label = document.createElement('div'); label.className = 'pending-label';
       label.textContent = action.label || `${action.action_type} #${action.id}`; card.appendChild(label);
-      if (action.payload && action.payload.reply_text) {
+      if (action.payload && (action.payload.reply_text || action.payload.body)) {
         const preview = document.createElement('div'); preview.className = 'pending-preview';
-        preview.textContent = (action.payload.reply_text || '').replace(/\\n/g, '\n');
+        preview.textContent = (action.payload.reply_text || action.payload.body || '').replace(/\\n/g, '\n');
         card.appendChild(preview);
       }
     }
