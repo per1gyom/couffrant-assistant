@@ -165,6 +165,16 @@
   line-height: 1.55;
 }
 /* Carte email propre */
+.pending-mail-from {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.pending-mail-from strong {
+  color: var(--text);
+}
 .pending-mail-header {
   display: flex; align-items: center; gap: 7px;
   font-size: 0.88em; color: var(--text-muted); margin-bottom: 4px;

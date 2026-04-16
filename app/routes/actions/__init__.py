@@ -17,6 +17,20 @@ from app.memory_loader import MEMORY_OK
 _ASK_CHOICE_PREFIX = "__CHOICE__:"
 
 
+def _get_user_email(username: str) -> str:
+    """Retourne l'email de l'utilisateur depuis la table users (boite Microsoft principale)."""
+    try:
+        from app.database import get_pg_conn
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("SELECT email FROM users WHERE username = %s LIMIT 1", (username,))
+        row = c.fetchone()
+        conn.close()
+        return row[0] if row and row[0] else ""
+    except Exception:
+        return ""
+
+
 def execute_actions(
     raya_response: str,
     username: str,
@@ -32,12 +46,16 @@ def execute_actions(
     mail_can_delete = tools.get("mail_can_delete", False)
     synth_threshold = get_memoire_param(username, "synth_threshold", 15)
 
+    # Récupérer l'email Microsoft de l'utilisateur pour le champ "De:" des cartes mail
+    from_email = _get_user_email(username)
+
     confirmed += _handle_confirmations(raya_response, username, tenant_id, outlook_token, tools)
 
     if outlook_token:
         confirmed += _handle_mail_actions(
             raya_response, outlook_token, mail_can_delete,
-            mails_from_db, live_mails, username, tenant_id, conversation_id
+            mails_from_db, live_mails, username, tenant_id, conversation_id,
+            from_email=from_email
         )
         confirmed += _handle_drive_actions(
             raya_response, outlook_token, drive_write, username, tenant_id, conversation_id

@@ -27,7 +27,7 @@ def _build_delete_label(subjects: list) -> str:
 
 
 def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_mails,
-                         username, tenant_id, conversation_id):
+                         username, tenant_id, conversation_id, from_email=""):
     confirmed = []
     # FIX-MAIL-DUP : tracker les IDs deja traites pour eviter DELETE+ARCHIVE sur le meme mail
     processed_ids = set()
@@ -107,7 +107,8 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
             tenant_id=tenant_id, username=username, action_type="REPLY",
             payload={"message_id": msg_id, "reply_text": reply_text,
                      "subject": subject, "to": to_email,
-                     "sender_name": sender_name},
+                     "sender_name": sender_name,
+                     "from_email": from_email},
             label=label, conversation_id=conversation_id,
         )
         log_activity(username, "mail_reply_queued", msg_id, subject[:100], tenant_id=tenant_id)
@@ -154,7 +155,8 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
         label       = f"Envoyer un mail a {to_email} — {subject[:50]}"
         action_id   = queue_action(
             tenant_id=tenant_id, username=username, action_type="SEND_MAIL",
-            payload={"to_email": to_email, "subject": subject, "body": body},
+            payload={"to_email": to_email, "subject": subject, "body": body,
+                     "from_email": from_email},
             label=label, conversation_id=conversation_id,
         )
         log_activity(username, "mail_send_queued", to_email, subject[:100], tenant_id=tenant_id)

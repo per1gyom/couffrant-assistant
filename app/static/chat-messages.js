@@ -227,10 +227,16 @@ function appendPendingActionToChat(action) {
 
   // Contenu selon type
   if (isReply || isSendMail) {
-    const toName = p.sender_name || p.to_email || p.to || '?';
-    const subject = p.subject || '(sans sujet)';
-    const body    = (p.reply_text || p.body || '').replace(/\\n/g, '\n').replace(/\n/g, '<br>');
+    const toName    = p.sender_name || p.to_email || p.to || '?';
+    const fromEmail = p.from_email || '';
+    const subject   = p.subject || '(sans sujet)';
+    const body      = (p.reply_text || p.body || '').replace(/\\n/g, '\n').replace(/\n/g, '<br>');
 
+    if (fromEmail) {
+      const fromEl = document.createElement('div'); fromEl.className = 'pending-mail-from';
+      fromEl.innerHTML = `De&nbsp;: <strong>${fromEmail}</strong>`;
+      card.appendChild(fromEl);
+    }
     const header = document.createElement('div'); header.className = 'pending-mail-header';
     header.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> À&nbsp;: <strong>${toName}</strong>`;
     const subjectEl = document.createElement('div'); subjectEl.className = 'pending-mail-subject';
@@ -290,10 +296,10 @@ function _markActionInChat(actionId, status, message) {
   row.className = 'message-row action-done';
   const card = row.querySelector('.action-card');
   if (!card) return;
-  // Supprimer tout sauf le badge
-  const badge = card.querySelector('.pending-id-badge');
-  card.innerHTML = '';
-  if (badge) card.appendChild(badge);
+  // Retirer uniquement les boutons — garder le contenu du mail visible
+  const btns = card.querySelector('.pending-btns');
+  if (btns) btns.remove();
+  // Ajouter le statut horodaté en bas de la carte
   const statusEl = document.createElement('div');
   statusEl.className = 'action-done-status';
   const icon = status === 'ok' ? '✅' : (status === 'cancelled' ? '⏹️' : '❌');
