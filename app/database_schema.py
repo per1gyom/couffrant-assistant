@@ -1,12 +1,12 @@
 """
-Schéma SQL Raya — toutes les tables CREATE TABLE IF NOT EXISTS.
+Schema SQL Raya — toutes les tables CREATE TABLE IF NOT EXISTS.
 Extrait de database.py — SPLIT-1.
-Importé par init_postgres() dans database.py.
+Importe par init_postgres() dans database.py.
 """
 
 
 def get_schema_statements() -> list[str]:
-    """Retourne la liste ordonnée des CREATE TABLE / CREATE INDEX à exécuter."""
+    """Retourne la liste ordonnee des CREATE TABLE / CREATE INDEX a executer."""
     return [
         """
         CREATE TABLE IF NOT EXISTS tenants (
@@ -82,7 +82,7 @@ def get_schema_statements() -> list[str]:
         """
         CREATE TABLE IF NOT EXISTS aria_rules (
             id SERIAL PRIMARY KEY, username TEXT DEFAULT 'guillaume',
-            category TEXT DEFAULT 'général', rule TEXT NOT NULL,
+            category TEXT DEFAULT 'general', rule TEXT NOT NULL,
             source TEXT DEFAULT 'auto', confidence REAL DEFAULT 0.7,
             reinforcements INTEGER DEFAULT 1, active BOOLEAN DEFAULT true,
             context TEXT DEFAULT 'couffrant_solar',
@@ -289,6 +289,19 @@ def get_schema_statements() -> list[str]:
             last_seen_at TIMESTAMP DEFAULT NOW(),
             status TEXT DEFAULT 'ok', details TEXT,
             UNIQUE(component)
+        )
+    """,
+        """
+        CREATE TABLE IF NOT EXISTS user_shortcuts (
+            id SERIAL PRIMARY KEY,
+            username TEXT NOT NULL,
+            tenant_id TEXT NOT NULL DEFAULT 'couffrant_solar',
+            label TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            color TEXT DEFAULT '#059669',
+            position INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
         )
     """,
     ]
