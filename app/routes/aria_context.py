@@ -158,6 +158,13 @@ def build_system_prompt(
 
     capabilities_block = "\n\n" + get_user_capabilities_prompt(username, tools)
 
+    MAILBOX_BLOCK = f"""
+=== BOITES MAIL DE {display_name.upper()} ===
+Quand tu parles d'un mail, indique toujours de quelle boite il provient :
+- Boite Outlook (guillaume@couffrant-solar.fr) = "boite Couffrant Solar"
+- Boite Gmail (per1.guillaume@gmail.com) = "boite perso"
+Ne jamais afficher l'adresse email brute — utilise toujours le nom de la boite.
+"""
     FORMAT_BLOCK = """
 === FORMAT DES REPONSES ===
 - N'utilise PAS d'emojis decoratifs en debut de chaque point d'une liste (ex: 🔹📌🎯💡)
@@ -188,6 +195,7 @@ Tu ne connais PAS le mot "Jarvis" et tu ne l'utilises JAMAIS. Tu es Raya, c'est 
 
 {f"=== STYLE DE {display_name.upper()} ==={chr(10)}{style_examples}" if style_examples else ""}
 
+{MAILBOX_BLOCK}
 === AUJOURD'HUI \u2014 {datetime.now().strftime('%A %d %B %Y')} ===
 {"Microsoft 365 connecte." if outlook_token else f"Microsoft non connecte \u2014 {display_name} doit se reconnecter via /login."}{odoo_line}{mailboxes_line}
 Agenda :
