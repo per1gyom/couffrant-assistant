@@ -4,24 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Raya</title>
-<link rel="manifest" href="/static/manifest.json?v=29">
+<link rel="manifest" href="/static/manifest.json?v=30">
 <meta name="theme-color" content="#0057b8">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
-<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=29">
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=30">
 <script>
-window.__RAYA_V = 21;
+window.__RAYA_V = 22;
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(r => r.forEach(sw => sw.unregister()));
   caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
 }
 </script>
-<link rel="stylesheet" href="/static/chat-base.css?v=29">
-<link rel="stylesheet" href="/static/chat-components.css?v=29">
-<link rel="stylesheet" href="/static/chat-drawer.css?v=29">
-<link rel="stylesheet" href="/static/onboarding.css?v=29">
-<link rel="stylesheet" href="/static/mobile.css?v=29">
+<link rel="stylesheet" href="/static/chat-base.css?v=30">
+<link rel="stylesheet" href="/static/chat-components.css?v=30">
+<link rel="stylesheet" href="/static/chat-drawer.css?v=30">
+<link rel="stylesheet" href="/static/onboarding.css?v=30">
+<link rel="stylesheet" href="/static/mobile.css?v=30">
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -35,7 +35,6 @@ if ('serviceWorker' in navigator) {
     <div class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:6px">
-          <!-- Logo : rond vert + nom de session -->
           <div class="logo">
             <div class="logo-dot" id="msStatus" title="Connexion"></div>
             <span class="logo-username" id="logoUserName"></span>
@@ -210,16 +209,16 @@ if ('serviceWorker' in navigator) {
   </div>
 </div>
 
-<script src="/static/chat-onboarding.js?v=29"></script>
-<script src="/static/chat-shortcuts.js?v=29"></script>
-<script src="/static/chat-voice.js?v=29"></script>
-<script src="/static/chat-feedback.js?v=29"></script>
-<script src="/static/chat-triage.js?v=29"></script>
-<script src="/static/chat-admin.js?v=29"></script>
-<script src="/static/chat-topics.js?v=29"></script>
-<script src="/static/chat-core.js?v=29"></script>
-<script src="/static/chat-messages.js?v=29"></script>
-<script src="/static/chat-main.js?v=29"></script>
+<script src="/static/chat-onboarding.js?v=30"></script>
+<script src="/static/chat-shortcuts.js?v=30"></script>
+<script src="/static/chat-voice.js?v=30"></script>
+<script src="/static/chat-feedback.js?v=30"></script>
+<script src="/static/chat-triage.js?v=30"></script>
+<script src="/static/chat-admin.js?v=30"></script>
+<script src="/static/chat-topics.js?v=30"></script>
+<script src="/static/chat-core.js?v=30"></script>
+<script src="/static/chat-messages.js?v=30"></script>
+<script src="/static/chat-main.js?v=30"></script>
 
 <script>
   document.addEventListener('click', e => {
