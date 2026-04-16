@@ -6,15 +6,15 @@
 <title>Raya</title>
 
 <!-- PWA -->
-<link rel="manifest" href="/static/manifest.json?v=24">
+<link rel="manifest" href="/static/manifest.json?v=25">
 <meta name="theme-color" content="#6366f1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
-<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=24">
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=25">
 <script>
-// ANTI-CACHE: nettoyer les SW et forcer le rechargement si fichiers périmés
-window.__RAYA_V = 16;
+// ANTI-CACHE: nettoyer les SW et forcer le rechargement si fichiers perimés
+window.__RAYA_V = 17;
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(r => r.forEach(sw => sw.unregister()));
   caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
@@ -22,11 +22,11 @@ if ('serviceWorker' in navigator) {
 </script>
 
 <!-- CSS -->
-<link rel="stylesheet" href="/static/chat-base.css?v=24">
-<link rel="stylesheet" href="/static/chat-components.css?v=24">
-<link rel="stylesheet" href="/static/chat-drawer.css?v=24">
-<link rel="stylesheet" href="/static/onboarding.css?v=24">
-<link rel="stylesheet" href="/static/mobile.css?v=24">
+<link rel="stylesheet" href="/static/chat-base.css?v=25">
+<link rel="stylesheet" href="/static/chat-components.css?v=25">
+<link rel="stylesheet" href="/static/chat-drawer.css?v=25">
+<link rel="stylesheet" href="/static/onboarding.css?v=25">
+<link rel="stylesheet" href="/static/mobile.css?v=25">
 
 <!-- marked.js + DOMPurify (CDN versionné, stable) -->
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
@@ -38,7 +38,7 @@ if ('serviceWorker' in navigator) {
 <body>
 <div class="app">
 
-  <!-- PAS DE TOPBAR — menu 3 points dans la sidebar -->
+  <!-- PAS DE TOPBAR - menu 3 points dans la sidebar -->
 
   <div class="token-banner" id="tokenBanner"></div>
 
@@ -61,9 +61,11 @@ if ('serviceWorker' in navigator) {
           <span class="count" id="mailCount"></span>
         </div>
       </div>
-      <div class="sidebar-section">
-        <button class="sidebar-item" id="topicsBtn" onclick="toggleTopics()"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg> Mes sujets</button>
-      </div>
+      <!-- SUJETS integres dans la sidebar -->
+      <details class="sidebar-details" id="topicsSidebarSection" open>
+        <summary class="sidebar-section-title">Mes sujets</summary>
+        <div id="topicsSidebarList"></div>
+      </details>
       <details class="sidebar-details">
         <summary class="sidebar-section-title">Raccourcis</summary>
         <div class="quick-row" id="quickRow"></div>
@@ -94,35 +96,35 @@ if ('serviceWorker' in navigator) {
   <div class="messages-wrap">
     <div class="messages" id="messages">
       <div class="welcome" id="welcomeMsg">
-        <div class="welcome-icon">✦</div>
+        <div class="welcome-icon">&#10022;</div>
         <h2 id="welcomeTitle">Bonjour !</h2>
-        <p>Je suis Raya, ton assistante personnelle.<br>Je surveille tes mails, ton agenda et ton activité.</p>
+        <p>Je suis Raya, ton assistante personnelle.<br>Je surveille tes mails, ton agenda et ton activite.</p>
       </div>
     </div>
-    <button class="scroll-down-btn" id="scrollDownBtn" onclick="scrollToBottom()" title="Défiler vers le bas">↓</button>
+    <button class="scroll-down-btn" id="scrollDownBtn" onclick="scrollToBottom()" title="Defiler vers le bas">&#8595;</button>
   </div>
 
   <div class="triage-bar" id="triageBar">
-    <button class="triage-action triage-skip" onclick="handleTriage('skip')">⏭ Passer</button>
-    <button class="triage-action triage-archive" onclick="handleTriage('archive')">📁 Archiver</button>
-    <button class="triage-action triage-delete" onclick="handleTriage('delete')">🗑 Corbeille</button>
-    <button class="triage-action triage-reply" onclick="handleTriage('reply')">✉️ Répondre</button>
+    <button class="triage-action triage-skip" onclick="handleTriage('skip')">&#9197; Passer</button>
+    <button class="triage-action triage-archive" onclick="handleTriage('archive')">&#128193; Archiver</button>
+    <button class="triage-action triage-delete" onclick="handleTriage('delete')">&#128465; Corbeille</button>
+    <button class="triage-action triage-reply" onclick="handleTriage('reply')">&#9993;&#65039; Repondre</button>
   </div>
 
   <div class="input-zone">
     <div class="attachment-preview" id="attachmentPreview">
       <span id="attachmentName">Aucun fichier</span>
-      <button class="attachment-remove" onclick="removeAttachment()">✕</button>
+      <button class="attachment-remove" onclick="removeAttachment()">&#10005;</button>
     </div>
     <div class="input-wrapper" id="inputWrapper">
-      <textarea id="input" placeholder="Envoie un message à Raya…" rows="1" oninput="autoResize(this)" onkeydown="handleKey(event)"></textarea>
+      <textarea id="input" placeholder="Envoie un message a Raya..." rows="1" oninput="autoResize(this)" onkeydown="handleKey(event)"></textarea>
       <div class="input-btns">
         <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="Joindre"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></button>
         <button class="icon-btn" id="micBtn" onclick="toggleMic()" title="Dicter"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
         <button class="icon-btn" id="sendBtn" onclick="sendMessage()"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
       </div>
     </div>
-    <div class="mic-status" id="micStatus">🎩 En écoute… parle, je t'entends</div>
+    <div class="mic-status" id="micStatus">&#127913; En ecoute... parle, je t'entends</div>
     <input type="file" id="fileInput" accept="image/*,.pdf" onchange="handleFileSelect(event)">
   </div>
     </div><!-- /chat-column -->
@@ -131,19 +133,25 @@ if ('serviceWorker' in navigator) {
 
 <div id="toast-container"></div>
 
-<!-- MODAL RACCOURCIS -->
-<div class="modal-overlay" id="modalShortcuts">
+<!-- MODAL RACCOURCI EDIT/CREATE -->
+<div class="modal-overlay" id="modalShortcutEdit">
   <div class="modal">
-    <div class="modal-title">✏️ Raccourcis rapides</div>
-    <div class="modal-sub">Personnalisez les boutons de raccourcis. Cliquez sur ✕ pour supprimer, ou ajoutez le vôtre.</div>
-    <div class="shortcut-list" id="shortcutList"></div>
-    <div class="shortcut-add">
-      <input type="text" id="newShortcutText" placeholder="ex: Point clients de la semaine" maxlength="80">
-      <button class="m-btn m-btn-primary" onclick="addShortcut()">Ajouter</button>
+    <div class="modal-title" id="shortcutEditTitle">Raccourci</div>
+    <div class="modal-field">
+      <label class="modal-label">Titre (affiche dans la sidebar)</label>
+      <input type="text" id="shortcutEditLabel" class="modal-input" placeholder="ex: Mails urgents" maxlength="100">
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Prompt envoye a Raya</label>
+      <textarea id="shortcutEditPrompt" class="modal-textarea" placeholder="ex: Fais un tri complet de mes mails non lus..." maxlength="2000"></textarea>
+    </div>
+    <div class="modal-field">
+      <label class="modal-label">Couleur</label>
+      <div id="shortcutColorPicker" class="color-picker-row"></div>
     </div>
     <div class="modal-footer">
-      <button class="m-btn m-btn-ghost" onclick="closeShortcuts()">Annuler</button>
-      <button class="m-btn m-btn-primary" onclick="saveShortcuts()">Enregistrer</button>
+      <button class="m-btn m-btn-ghost" onclick="closeShortcutEdit()">Annuler</button>
+      <button class="m-btn m-btn-primary" onclick="saveShortcutEdit()">Enregistrer</button>
     </div>
   </div>
 </div>
@@ -152,109 +160,99 @@ if ('serviceWorker' in navigator) {
 <div class="onboarding-overlay" id="onboardingOverlay">
   <div class="onboarding-modal">
     <div class="onb-header">
-      <span class="onb-logo">✦ Raya</span>
-      <button class="onb-skip" onclick="skipOnboarding()">Passer pour l'instant →</button>
+      <span class="onb-logo">&#10022; Raya</span>
+      <button class="onb-skip" onclick="skipOnboarding()">Passer pour l'instant &#8594;</button>
     </div>
     <div id="onboardingContent"></div>
   </div>
-</div>
-
-<!-- PANNEAU TOPICS -->
-<div class="drawer-overlay" id="topicsOverlay" onclick="closeTopics()"></div>
-<div class="drawer topics-drawer" id="topicsPanel">
-  <div class="drawer-header">
-    <span class="drawer-title">🔖 Mes sujets</span>
-    <button class="drawer-close" onclick="closeTopics()">✕</button>
-  </div>
-  <div class="drawer-body" id="topicsList"></div>
 </div>
 
 <!-- TIROIR ADMIN -->
 <div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
 <div class="drawer" id="drawer">
   <div class="drawer-header">
-    <span class="drawer-title">⚙ Administration</span>
-    <button class="drawer-close" onclick="closeDrawer()">✕</button>
+    <span class="drawer-title">&#9881; Administration</span>
+    <button class="drawer-close" onclick="closeDrawer()">&#10005;</button>
   </div>
   <div class="drawer-body">
     <div class="d-group">
-      <div class="d-group-title">🧠 Mémoire &amp; apprentissage</div>
-      <div class="d-btn" onclick="drawerAction(this,'/build-memory','build')"><span class="d-btn-icon">🔄</span><div class="d-btn-body"><span class="d-btn-label">Reconstruire le contexte</span><span class="d-btn-desc">Relit mails et conversations pour mettre à jour le résumé et les fiches contacts.</span><div class="d-btn-result" id="result-build"></div></div></div>
-      <div class="d-btn" onclick="drawerAction(this,'/synth','synth')"><span class="d-btn-icon">📝</span><div class="d-btn-body"><span class="d-btn-label">Synthèse des conversations</span><span class="d-btn-desc">Extrait des règles et insights des 15 dernières conversations.</span><div class="d-btn-result" id="result-synth"></div></div></div>
-      <div class="d-btn" onclick="drawerAction(this,'/analyze-raw-mails','analyze')"><span class="d-btn-icon">🔍</span><div class="d-btn-body"><span class="d-btn-label">Analyser mails non traités</span><span class="d-btn-desc">Lance l'analyse IA sur les mails ingérés mais pas encore analysés.</span><div class="d-btn-result" id="result-analyze"></div></div></div>
-      <div class="d-btn" onclick="drawerAction(this,'/build-style-profile','style')"><span class="d-btn-icon">✍️</span><div class="d-btn-body"><span class="d-btn-label">Reconstruire profil de style</span><span class="d-btn-desc">Analyse les mails envoyés pour mettre à jour ta signature rédactionnelle.</span><div class="d-btn-result" id="result-style"></div></div></div>
+      <div class="d-group-title">&#129504; Memoire &amp; apprentissage</div>
+      <div class="d-btn" onclick="drawerAction(this,'/build-memory','build')"><span class="d-btn-icon">&#128260;</span><div class="d-btn-body"><span class="d-btn-label">Reconstruire le contexte</span><span class="d-btn-desc">Relit mails et conversations pour mettre a jour le resume et les fiches contacts.</span><div class="d-btn-result" id="result-build"></div></div></div>
+      <div class="d-btn" onclick="drawerAction(this,'/synth','synth')"><span class="d-btn-icon">&#128221;</span><div class="d-btn-body"><span class="d-btn-label">Synthese des conversations</span><span class="d-btn-desc">Extrait des regles et insights des 15 dernieres conversations.</span><div class="d-btn-result" id="result-synth"></div></div></div>
+      <div class="d-btn" onclick="drawerAction(this,'/analyze-raw-mails','analyze')"><span class="d-btn-icon">&#128269;</span><div class="d-btn-body"><span class="d-btn-label">Analyser mails non traites</span><span class="d-btn-desc">Lance l'analyse IA sur les mails ingeres mais pas encore analyses.</span><div class="d-btn-result" id="result-analyze"></div></div></div>
+      <div class="d-btn" onclick="drawerAction(this,'/build-style-profile','style')"><span class="d-btn-icon">&#9997;&#65039;</span><div class="d-btn-body"><span class="d-btn-label">Reconstruire profil de style</span><span class="d-btn-desc">Analyse les mails envoyes pour mettre a jour ta signature redactionnelle.</span><div class="d-btn-result" id="result-style"></div></div></div>
     </div>
     <div class="d-group">
-      <div class="d-group-title">📊 État du système</div>
-      <div class="d-btn" onclick="drawerMemoryStatus(this)"><span class="d-btn-icon">📈</span><div class="d-btn-body"><span class="d-btn-label">Voir les compteurs</span><span class="d-btn-desc">Conversations, règles actives, insights, mails en base.</span><div class="d-btn-result" id="result-status"></div></div></div>
-      <div class="d-btn" onclick="drawerRules(this)"><span class="d-btn-icon">📋</span><div class="d-btn-body"><span class="d-btn-label">Voir mes règles actives</span><span class="d-btn-desc">Règles comportementales, style et métier que Raya a apprises.</span><div class="d-btn-result" id="result-rules"></div></div></div>
-      <div class="d-btn nav" onclick="window.open('/admin/bug-reports','_blank')"><span class="d-btn-icon">🐛</span><div class="d-btn-body"><span class="d-btn-label">Voir les bug reports</span><span class="d-btn-desc">Liste des bugs et améliorations signalés par les utilisateurs.</span></div></div>
-    </div>
-    <div class="d-sep"></div>
-    <div class="d-group">
-      <div class="d-group-title">⚠️ Actions sensibles</div>
-      <div class="d-btn" onclick="drawerAction(this,'/purge-memory','purge')"><span class="d-btn-icon">🗓️</span><div class="d-btn-body"><span class="d-btn-label">Purger les vieux mails</span><span class="d-btn-desc">Supprime les mails de plus de 90 jours. Règles et conversations conservées.</span><div class="d-btn-result" id="result-purge"></div></div></div>
-      <div class="d-btn danger" onclick="drawerShowConfirm('confirm-rebuild')"><span class="d-btn-icon">⛔</span><div class="d-btn-body"><span class="d-btn-label">Vider l'historique mails</span><span class="d-btn-desc">Efface tous les mails en base. Règles et insights préservés.</span><div class="d-confirm" id="confirm-rebuild"><div class="d-confirm-text">⚠️ Tous les mails en base seront supprimés. Confirmer ?</div><div class="d-confirm-btns"><button class="d-confirm-yes" onclick="drawerConfirmAction(event,'/rebuild-memory','rebuild')">Oui, vider</button><button class="d-confirm-no" onclick="drawerHideConfirm(event,'confirm-rebuild')">Annuler</button></div></div><div class="d-btn-result" id="result-rebuild"></div></div></div>
+      <div class="d-group-title">&#128202; Etat du systeme</div>
+      <div class="d-btn" onclick="drawerMemoryStatus(this)"><span class="d-btn-icon">&#128200;</span><div class="d-btn-body"><span class="d-btn-label">Voir les compteurs</span><span class="d-btn-desc">Conversations, regles actives, insights, mails en base.</span><div class="d-btn-result" id="result-status"></div></div></div>
+      <div class="d-btn" onclick="drawerRules(this)"><span class="d-btn-icon">&#128203;</span><div class="d-btn-body"><span class="d-btn-label">Voir mes regles actives</span><span class="d-btn-desc">Regles comportementales, style et metier que Raya a apprises.</span><div class="d-btn-result" id="result-rules"></div></div></div>
+      <div class="d-btn nav" onclick="window.open('/admin/bug-reports','_blank')"><span class="d-btn-icon">&#128027;</span><div class="d-btn-body"><span class="d-btn-label">Voir les bug reports</span><span class="d-btn-desc">Liste des bugs et ameliorations signales par les utilisateurs.</span></div></div>
     </div>
     <div class="d-sep"></div>
     <div class="d-group">
-      <div class="d-group-title">🔧 Urgence / Debug</div>
-      <div class="d-btn" onclick="drawerAction(this,'/learn-inbox-mails','inbox')"><span class="d-btn-icon">📥</span><div class="d-btn-body"><span class="d-btn-label">Forcer ingéstion inbox</span><span class="d-btn-desc">Importe les 50 derniers mails. Utile après une coupure du token.</span><div class="d-btn-result" id="result-inbox"></div></div></div>
-      <div class="d-btn" onclick="drawerAction(this,'/learn-sent-mails','sent')"><span class="d-btn-icon">📤</span><div class="d-btn-body"><span class="d-btn-label">Forcer ingéstion envoyés</span><span class="d-btn-desc">Importe les 50 derniers mails envoyés pour enrichir le style.</span><div class="d-btn-result" id="result-sent"></div></div></div>
-      <div class="d-btn" onclick="drawerAction(this,'/init-db','initdb')"><span class="d-btn-icon">🗄️</span><div class="d-btn-body"><span class="d-btn-label">Vérifier la base de données</span><span class="d-btn-desc">Crée les tables manquantes et exécute les migrations. Sans danger.</span><div class="d-btn-result" id="result-initdb"></div></div></div>
-      <div class="d-btn nav" onclick="window.open('/admin/backup','_blank')"><span class="d-btn-icon">💾</span><div class="d-btn-body"><span class="d-btn-label">Télécharger un backup</span><span class="d-btn-desc">Exporte la base de données complète. À faire régulièrement.</span></div></div>
+      <div class="d-group-title">&#9888;&#65039; Actions sensibles</div>
+      <div class="d-btn" onclick="drawerAction(this,'/purge-memory','purge')"><span class="d-btn-icon">&#128199;&#65039;</span><div class="d-btn-body"><span class="d-btn-label">Purger les vieux mails</span><span class="d-btn-desc">Supprime les mails de plus de 90 jours. Regles et conversations conservees.</span><div class="d-btn-result" id="result-purge"></div></div></div>
+      <div class="d-btn danger" onclick="drawerShowConfirm('confirm-rebuild')"><span class="d-btn-icon">&#9940;</span><div class="d-btn-body"><span class="d-btn-label">Vider l'historique mails</span><span class="d-btn-desc">Efface tous les mails en base. Regles et insights preserves.</span><div class="d-confirm" id="confirm-rebuild"><div class="d-confirm-text">&#9888;&#65039; Tous les mails en base seront supprimes. Confirmer ?</div><div class="d-confirm-btns"><button class="d-confirm-yes" onclick="drawerConfirmAction(event,'/rebuild-memory','rebuild')">Oui, vider</button><button class="d-confirm-no" onclick="drawerHideConfirm(event,'confirm-rebuild')">Annuler</button></div></div><div class="d-btn-result" id="result-rebuild"></div></div></div>
     </div>
     <div class="d-sep"></div>
     <div class="d-group">
-      <div class="d-group-title">🎓 Onboarding</div>
-      <div class="d-btn" onclick="drawerAction(this,'/onboarding/restart','onb-restart');closeDrawer()"><span class="d-btn-icon">🔁</span><div class="d-btn-body"><span class="d-btn-label">Relancer l'onboarding</span><span class="d-btn-desc">Recommencer la configuration initiale du profil Raya.</span><div class="d-btn-result" id="result-onb-restart"></div></div></div>
+      <div class="d-group-title">&#128295; Urgence / Debug</div>
+      <div class="d-btn" onclick="drawerAction(this,'/learn-inbox-mails','inbox')"><span class="d-btn-icon">&#128229;</span><div class="d-btn-body"><span class="d-btn-label">Forcer ingesion inbox</span><span class="d-btn-desc">Importe les 50 derniers mails. Utile apres une coupure du token.</span><div class="d-btn-result" id="result-inbox"></div></div></div>
+      <div class="d-btn" onclick="drawerAction(this,'/learn-sent-mails','sent')"><span class="d-btn-icon">&#128228;</span><div class="d-btn-body"><span class="d-btn-label">Forcer ingesion envoyes</span><span class="d-btn-desc">Importe les 50 derniers mails envoyes pour enrichir le style.</span><div class="d-btn-result" id="result-sent"></div></div></div>
+      <div class="d-btn" onclick="drawerAction(this,'/init-db','initdb')"><span class="d-btn-icon">&#128452;&#65039;</span><div class="d-btn-body"><span class="d-btn-label">Verifier la base de donnees</span><span class="d-btn-desc">Cree les tables manquantes et execute les migrations. Sans danger.</span><div class="d-btn-result" id="result-initdb"></div></div></div>
+      <div class="d-btn nav" onclick="window.open('/admin/backup','_blank')"><span class="d-btn-icon">&#128190;</span><div class="d-btn-body"><span class="d-btn-label">Telecharger un backup</span><span class="d-btn-desc">Exporte la base de donnees complete. A faire regulierement.</span></div></div>
     </div>
     <div class="d-sep"></div>
     <div class="d-group">
-      <div class="d-group-title">📧 Connexions</div>
+      <div class="d-group-title">&#127891; Onboarding</div>
+      <div class="d-btn" onclick="drawerAction(this,'/onboarding/restart','onb-restart');closeDrawer()"><span class="d-btn-icon">&#128257;</span><div class="d-btn-body"><span class="d-btn-label">Relancer l'onboarding</span><span class="d-btn-desc">Recommencer la configuration initiale du profil Raya.</span><div class="d-btn-result" id="result-onb-restart"></div></div></div>
+    </div>
+    <div class="d-sep"></div>
+    <div class="d-group">
+      <div class="d-group-title">&#128231; Connexions</div>
       <div class="d-btn nav" onclick="window.location.href='/login/gmail'">
-        <span class="d-btn-icon">✉️</span>
+        <span class="d-btn-icon">&#9993;&#65039;</span>
         <div class="d-btn-body">
           <span class="d-btn-label">Connecter Gmail</span>
-          <span class="d-btn-desc">Autoriser Raya à lire tes mails Gmail via OAuth2 Google.</span>
+          <span class="d-btn-desc">Autoriser Raya a lire tes mails Gmail via OAuth2 Google.</span>
         </div>
       </div>
       <div class="d-btn nav" onclick="window.location.href='/login'">
-        <span class="d-btn-icon">🔵</span>
+        <span class="d-btn-icon">&#128309;</span>
         <div class="d-btn-body">
           <span class="d-btn-label">Reconnecter Microsoft 365</span>
-          <span class="d-btn-desc">Renouveler l'autorisation Microsoft si le token a expiré.</span>
+          <span class="d-btn-desc">Renouveler l'autorisation Microsoft si le token a expire.</span>
         </div>
       </div>
-      <div class="d-btn" onclick="drawerAction(this,'/admin/extract-signatures','sig')"><span class="d-btn-icon">💌</span><div class="d-btn-body"><span class="d-btn-label">Récupérer mes signatures</span><span class="d-btn-desc">Analyse les derniers mails envoyés pour extraire ta signature automatiquement.</span><div class="d-btn-result" id="result-sig"></div></div></div>
+      <div class="d-btn" onclick="drawerAction(this,'/admin/extract-signatures','sig')"><span class="d-btn-icon">&#128140;</span><div class="d-btn-body"><span class="d-btn-label">Recuperer mes signatures</span><span class="d-btn-desc">Analyse les derniers mails envoyes pour extraire ta signature automatiquement.</span><div class="d-btn-result" id="result-sig"></div></div></div>
     </div>
     <div class="d-sep"></div>
     <div class="d-group">
-      <div class="d-group-title">🔒 Données personnelles</div>
-      <div class="d-btn nav" onclick="window.open('/account/export','_blank')"><span class="d-btn-icon">📦</span><div class="d-btn-body"><span class="d-btn-label">Exporter mes données</span><span class="d-btn-desc">Télécharge toutes tes données Raya au format JSON (RGPD).</span></div></div>
-      <div class="d-btn danger" onclick="(function(){const v=prompt('Tape SUPPRIMER pour confirmer la suppression définitive de ton compte et toutes tes données :');if(v==='SUPPRIMER'){fetch('/account/delete?confirm=yes',{method:'DELETE'}).then(r=>r.json()).then(d=>{if(d.ok){showToast('Compte supprimé. Au revoir !','ok',4000);setTimeout(()=>window.location.href='/logout',2000);}else{showToast('Erreur : '+(d.message||'?'),'err',5000);}}).catch(()=>showToast('Erreur réseau','err',4000));}else if(v!==null){showToast('Confirmation incorrecte — compte non supprimé.','err',4000);}})()"><span class="d-btn-icon">⛔</span><div class="d-btn-body"><span class="d-btn-label">Supprimer mon compte</span><span class="d-btn-desc">Supprime définitivement ton compte et toutes tes données personnelles. Irréversible.</span></div></div>
+      <div class="d-group-title">&#128274; Donnees personnelles</div>
+      <div class="d-btn nav" onclick="window.open('/account/export','_blank')"><span class="d-btn-icon">&#128230;</span><div class="d-btn-body"><span class="d-btn-label">Exporter mes donnees</span><span class="d-btn-desc">Telecharge toutes tes donnees Raya au format JSON (RGPD).</span></div></div>
+      <div class="d-btn danger" onclick="(function(){const v=prompt('Tape SUPPRIMER pour confirmer la suppression definitive de ton compte et toutes tes donnees :');if(v==='SUPPRIMER'){fetch('/account/delete?confirm=yes',{method:'DELETE'}).then(r=>r.json()).then(d=>{if(d.ok){showToast('Compte supprime. Au revoir !','ok',4000);setTimeout(()=>window.location.href='/logout',2000);}else{showToast('Erreur : '+(d.message||'?'),'err',5000);}}).catch(()=>showToast('Erreur reseau','err',4000));}else if(v!==null){showToast('Confirmation incorrecte - compte non supprime.','err',4000);}})()"><span class="d-btn-icon">&#9940;</span><div class="d-btn-body"><span class="d-btn-label">Supprimer mon compte</span><span class="d-btn-desc">Supprime definitivement ton compte et toutes tes donnees personnelles. Irreversible.</span></div></div>
     </div>
     <div class="d-sep"></div>
     <div class="d-group">
-      <div class="d-group-title">🔗 Navigation</div>
-      <div class="d-btn nav" onclick="window.open('/admin/panel','_blank')"><span class="d-btn-icon">🖥️</span><div class="d-btn-body"><span class="d-btn-label">Panel admin complet</span><span class="d-btn-desc">Gestion des utilisateurs, règles, insights, actions avancées.</span></div></div>
-      <div class="d-btn nav" onclick="window.open('/legal','_blank')"><span class="d-btn-icon">📜</span><div class="d-btn-body"><span class="d-btn-label">Mentions légales</span><span class="d-btn-desc">Mentions légales, politique de confidentialité et RGPD.</span></div></div>
-      <div class="d-btn nav" onclick="window.location.href='/logout'"><span class="d-btn-icon">🚪</span><div class="d-btn-body"><span class="d-btn-label">Déconnexion</span><span class="d-btn-desc">Ferme la session en cours.</span></div></div>
+      <div class="d-group-title">&#128279; Navigation</div>
+      <div class="d-btn nav" onclick="window.open('/admin/panel','_blank')"><span class="d-btn-icon">&#128421;&#65039;</span><div class="d-btn-body"><span class="d-btn-label">Panel admin complet</span><span class="d-btn-desc">Gestion des utilisateurs, regles, insights, actions avancees.</span></div></div>
+      <div class="d-btn nav" onclick="window.open('/legal','_blank')"><span class="d-btn-icon">&#128220;</span><div class="d-btn-body"><span class="d-btn-label">Mentions legales</span><span class="d-btn-desc">Mentions legales, politique de confidentialite et RGPD.</span></div></div>
+      <div class="d-btn nav" onclick="window.location.href='/logout'"><span class="d-btn-icon">&#128682;</span><div class="d-btn-body"><span class="d-btn-label">Deconnexion</span><span class="d-btn-desc">Ferme la session en cours.</span></div></div>
     </div>
   </div>
 </div>
 
 <!-- Modules JS -->
-<script src="/static/chat-onboarding.js?v=24"></script>
-<script src="/static/chat-shortcuts.js?v=24"></script>
-<script src="/static/chat-voice.js?v=24"></script>
-<script src="/static/chat-feedback.js?v=24"></script>
-<script src="/static/chat-triage.js?v=24"></script>
-<script src="/static/chat-admin.js?v=24"></script>
-<script src="/static/chat-topics.js?v=24"></script>
-<script src="/static/chat-core.js?v=24"></script>
-<script src="/static/chat-messages.js?v=24"></script>
-<script src="/static/chat-main.js?v=24"></script>
+<script src="/static/chat-onboarding.js?v=25"></script>
+<script src="/static/chat-shortcuts.js?v=25"></script>
+<script src="/static/chat-voice.js?v=25"></script>
+<script src="/static/chat-feedback.js?v=25"></script>
+<script src="/static/chat-triage.js?v=25"></script>
+<script src="/static/chat-admin.js?v=25"></script>
+<script src="/static/chat-topics.js?v=25"></script>
+<script src="/static/chat-core.js?v=25"></script>
+<script src="/static/chat-messages.js?v=25"></script>
+<script src="/static/chat-main.js?v=25"></script>
 
 <script>
   // Fermer le menu 3 points en cliquant ailleurs
@@ -262,7 +260,7 @@ if ('serviceWorker' in navigator) {
     const wrap = document.querySelector('.dotmenu-wrap');
     if (wrap && !wrap.contains(e.target)) wrap.classList.remove('open');
   });
-  // Supprimer TOUS les Service Workers — ils causent des problèmes de cache
+  // Supprimer TOUS les Service Workers
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.getRegistrations().then(regs => {
       regs.forEach(reg => reg.unregister());
@@ -271,7 +269,7 @@ if ('serviceWorker' in navigator) {
       keys.forEach(k => caches.delete(k));
     });
   }
-  // Détection fichiers périmés : si marked n'est pas chargé, forcer un rechargement
+  // Detection fichiers perimes : si marked n'est pas charge, forcer un rechargement
   if (typeof marked === 'undefined' && !sessionStorage.getItem('raya_reloaded')) {
     sessionStorage.setItem('raya_reloaded', '1');
     location.reload();
@@ -282,11 +280,11 @@ if ('serviceWorker' in navigator) {
     const params = new URLSearchParams(window.location.search);
     if(params.get('gmail_connected')==='1'){
       window.history.replaceState({}, '', '/chat');
-      setTimeout(()=>{ if(typeof showToast === 'function') showToast('✅ Gmail connecté avec succès !'); }, 800);
+      setTimeout(()=>{ if(typeof showToast === 'function') showToast('Gmail connecte avec succes !'); }, 800);
     }
     if(params.get('gmail_error')){
       window.history.replaceState({}, '', '/chat');
-      setTimeout(()=>{ if(typeof showToast === 'function') showToast('❌ Connexion Gmail refusée : ' + params.get('gmail_error')); }, 800);
+      setTimeout(()=>{ if(typeof showToast === 'function') showToast('Connexion Gmail refusee : ' + params.get('gmail_error')); }, 800);
     }
   })();
 </script>
