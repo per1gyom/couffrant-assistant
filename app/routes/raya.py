@@ -328,6 +328,8 @@ async def raya_confirm_action(
     """Confirme et execute une action en attente — avec payload_override optionnel."""
     username = user["username"]
     tenant_id = user["tenant_id"]
+    username = user["username"]
+    tenant_id = user["tenant_id"]
     from app.pending_actions import confirm_action, mark_executed, mark_failed
     from app.routes.actions.confirmations import _execute_confirmed_action
 

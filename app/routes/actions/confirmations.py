@@ -51,6 +51,7 @@ def _execute_confirmed_action(action: dict, outlook_token: str, tools: dict) -> 
 
     action_type = action["action_type"]
     payload = action["payload"]
+    username = action.get("username", "")
     try:
         if action_type == "REPLY":
             r = perform_outlook_action("send_reply", {
