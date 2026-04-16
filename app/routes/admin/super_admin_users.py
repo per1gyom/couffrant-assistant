@@ -286,3 +286,72 @@ def test_elevenlabs(request: Request, _: dict = Depends(require_admin)):
     )
     return {"status_code": resp.status_code, "api_key_length": len(api_key), "voice_id": voice_id}
 
+
+
+# ─── SUPPRESSION COMPTE — VALIDATION ADMIN ───
+
+@router.post("/admin/users/{username}/confirm-delete")
+def admin_confirm_delete(
+    request: Request,
+    username: str,
+    admin: dict = Depends(require_tenant_admin),
+):
+    """
+    L'admin confirme la suppression d'un compte dont deletion_requested_at est renseigné.
+    Exécute la vraie suppression RGPD.
+    """
+    from app.database import get_pg_conn
+    from app.security_users import delete_user as _delete_user
+    from app.admin_audit import log_admin_action
+
+    # Vérifier qu'une demande existe bien
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            "SELECT username, deletion_requested_at FROM users WHERE username = %s",
+            (username,)
+        )
+        row = c.fetchone()
+        if not row:
+            return {"status": "error", "message": "Utilisateur introuvable."}
+        if not row[1]:
+            return {"status": "error", "message": "Aucune demande de suppression en cours pour cet utilisateur."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:100]}
+    finally:
+        if conn:
+            conn.close()
+
+    # Exécuter la suppression RGPD
+    result = _delete_user(username, requesting_user=admin["username"])
+    if result.get("status") == "ok":
+        log_admin_action(admin["username"], "confirm_delete_account", username)
+    return result
+
+
+@router.post("/admin/users/{username}/reject-delete")
+def admin_reject_delete(
+    request: Request,
+    username: str,
+    admin: dict = Depends(require_tenant_admin),
+):
+    """
+    L'admin refuse la demande de suppression. Remet deletion_requested_at à NULL.
+    """
+    from app.database import get_pg_conn
+    from app.admin_audit import log_admin_action
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("UPDATE users SET deletion_requested_at = NULL WHERE username = %s", (username,))
+        conn.commit()
+        log_admin_action(admin["username"], "reject_delete_account", username)
+        return {"status": "ok", "message": f"Demande de suppression de '{username}' rejetée."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:100]}
+    finally:
+        if conn:
+            conn.close()

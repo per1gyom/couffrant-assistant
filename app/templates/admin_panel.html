@@ -222,6 +222,13 @@
   <div class="modal">
     <div class="modal-title" id="edit-modal-title">Éditer l'utilisateur</div>
     <div id="edit-user-alert" class="alert"></div>
+    <div id="edit-delete-request-banner" style="display:none;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#b91c1c">
+      ⚠️ Cet utilisateur a demandé la suppression de son compte.
+      <div style="margin-top:8px;display:flex;gap:8px">
+        <button class="btn btn-danger" style="padding:4px 12px;font-size:12px" onclick="adminConfirmDelete()">✓ Confirmer la suppression</button>
+        <button class="btn btn-ghost" style="padding:4px 12px;font-size:12px" onclick="adminRejectDelete()">✕ Refuser la demande</button>
+      </div>
+    </div>
     <div class="form-group"><label>Email</label><input type="email" id="edit-email" placeholder="prenom@domaine.fr"></div>
     <div class="form-group">
       <label>Téléphone (optionnel)</label>
@@ -341,14 +348,15 @@
   const _origLoad=window.loadUsers;
   window.loadUsers=async function(){
     await _origLoad();
-    try{const users=await(await fetch('/admin/users')).json();window._dnMap={};users.forEach(u=>{window._dnMap[u.username]=u.display_name||'';});}catch(e){}
+    try{const users=await(await fetch('/admin/users')).json();window._dnMap={};window._drMap={};users.forEach(u=>{window._dnMap[u.username]=u.display_name||'';window._drMap[u.username]=!!u.deletion_requested_at;});}catch(e){}
   };
   const _origEdit=window.editUser;
-  window.editUser=function(username,email,scope,phone,displayName){
+  window.editUser=function(username,email,scope,phone,displayName,deletionRequested){
     _origEdit(username,email,scope,phone);
     const el=document.getElementById('edit-display-name');
-    if(!el)return;
-    el.value=(displayName!==undefined)?displayName||'':(window._dnMap?window._dnMap[username]||'':'');
+    if(el)el.value=(displayName!==undefined)?displayName||'':(window._dnMap?window._dnMap[username]||'':'');
+    const banner=document.getElementById('edit-delete-request-banner');
+    if(banner){const pending=deletionRequested!==undefined?!!deletionRequested:!!(window._drMap&&window._drMap[username]);banner.style.display=pending?'block':'none';}
   };
   const _origProf=window.loadProfile;
   window.loadProfile=async function(){

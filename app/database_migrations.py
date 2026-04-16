@@ -210,5 +210,7 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_ca_username ON connection_assignments(username)",
     # -- DISPLAY NAME : nom d'affichage personnalise --
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT",
+    # -- SUPPRESSION COMPTE : workflow validation admin --
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS deletion_requested_at TIMESTAMP DEFAULT NULL",
     # -- Ajouter les nouvelles migrations sous cette ligne --
 ]

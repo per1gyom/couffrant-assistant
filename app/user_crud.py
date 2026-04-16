@@ -231,7 +231,8 @@ def list_users() -> list:
         c.execute("""
             SELECT username, email, scope, tenant_id, last_login, created_at,
                    COALESCE(account_locked, false), COALESCE(must_reset_password, false), phone,
-                   COALESCE(suspended, false), suspended_reason, display_name
+                   COALESCE(suspended, false), suspended_reason, display_name,
+                   deletion_requested_at
             FROM users ORDER BY tenant_id, created_at
         """)
         return [{
@@ -241,6 +242,7 @@ def list_users() -> list:
             "phone": r[8] or "",
             "suspended": bool(r[9]), "suspended_reason": r[10] or "",
             "display_name": r[11] or "",
+            "deletion_requested_at": str(r[12]) if r[12] else None,
         } for r in c.fetchall()]
     except Exception:
         return []
