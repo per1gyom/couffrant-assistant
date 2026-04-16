@@ -100,25 +100,22 @@ def _execute_confirmed_action(action: dict, outlook_token: str, tools: dict) -> 
                 "error": f"Echec sur {n - ok_count} mail(s)" if ok_count < n else "",
             }
 
-        if action_type == "TEAMS_MSG":
-            r = send_message_to_user(outlook_token, payload["email"], payload["text"])
-            return {"ok": r.get("status") == "ok", "message": r.get("message", "Message Teams envoye"),
-                    "error": r.get("message", "envoi Teams echoue")}
-
-        if action_type == "TEAMS_REPLYCHAT":
-            r = send_chat_message(outlook_token, payload["chat_id"], payload["text"])
-            return {"ok": r.get("status") == "ok", "message": "Reponse Teams envoyee",
-                    "error": r.get("message", "envoi echoue")}
-
-        if action_type == "TEAMS_SENDCHANNEL":
-            r = send_channel_message(outlook_token, payload["team_id"], payload["channel_id"], payload["text"])
-            return {"ok": r.get("status") == "ok", "message": "Message canal Teams envoye",
-                    "error": r.get("message", "envoi echoue")}
-
-        if action_type == "TEAMS_GROUPE":
-            r = create_group_chat(outlook_token, payload["emails"], payload["topic"], payload["text"])
-            return {"ok": r.get("status") == "ok", "message": r.get("message", "Groupe Teams cree"),
-                    "error": r.get("message", "creation echouee")}
+        if action_type in ("TEAMS_MSG", "TEAMS_REPLYCHAT", "TEAMS_SENDCHANNEL", "TEAMS_GROUPE"):
+            from app.messaging_manager import get_messenger_for
+            provider_hint = payload.get("provider", "teams")
+            m = get_messenger_for(username, provider_hint)
+            if not m:
+                return {"ok": False, "error": "Aucun système de messagerie connecté."}
+            if action_type == "TEAMS_MSG":
+                r = m.send_message(payload["email"], payload["text"])
+            elif action_type == "TEAMS_REPLYCHAT":
+                r = m.reply_conversation(payload["chat_id"], payload["text"])
+            elif action_type == "TEAMS_SENDCHANNEL":
+                r = m.send_channel(payload["team_id"], payload["channel_id"], payload["text"])
+            elif action_type == "TEAMS_GROUPE":
+                r = m.send_group(payload["emails"], payload["topic"], payload["text"])
+            return {"ok": r.get("ok", False), "message": r.get("message", "Envoyé"),
+                    "error": r.get("message", "") if not r.get("ok") else ""}
 
         if action_type == "MOVEDRIVE":
             if not tools.get("drive_write"):
