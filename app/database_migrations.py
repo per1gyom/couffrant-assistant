@@ -221,4 +221,6 @@ MIGRATIONS = [
     # -- CONNECTEURS V2 : email + oauth_state sur tenant_connections --
     "ALTER TABLE tenant_connections ADD COLUMN IF NOT EXISTS connected_email TEXT",
     "ALTER TABLE tenant_connections ADD COLUMN IF NOT EXISTS oauth_state TEXT",
+    # -- PENDING_ACTIONS : conversation_id (lien avec aria_memory) --
+    "ALTER TABLE pending_actions ADD COLUMN IF NOT EXISTS conversation_id INTEGER",
 ]

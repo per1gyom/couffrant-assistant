@@ -45,13 +45,16 @@ async function loadUserInfo() {
     // Nom dans le logo en haut (remplace "Raya")
     const logoEl = document.getElementById('logoUserName');
     if (logoEl) logoEl.textContent = name;
-    if (scope === 'admin') {
+    if (scope === 'admin' || scope === 'super_admin') {
       isAdmin = true;
-      document.getElementById('superAdminBtn').style.display = 'inline-flex';
-      document.getElementById('adminPanelBtn').style.display = 'inline-flex';
+      const sa = document.getElementById('superAdminBtn');
+      const ap = document.getElementById('adminPanelBtn');
+      if (sa) sa.style.display = 'inline-flex';
+      if (ap) ap.style.display = 'inline-flex';
     } else if (scope === 'tenant_admin') {
       isAdmin = true;
-      document.getElementById('adminPanelBtn').style.display = 'inline-flex';
+      const ap = document.getElementById('adminPanelBtn');
+      if (ap) ap.style.display = 'inline-flex';
     }
     if (scope === 'tenant_admin') {
       document.querySelectorAll('.d-group').forEach(g => {

@@ -38,32 +38,28 @@ def get_chat_history(request: Request, limit: int = 20):
             conn.close()
             return []
 
-        # 2. Action cards liées par conversation_id
-        memory_ids = [row[3] for row in rows]
-        placeholders = ','.join(['%s'] * len(memory_ids))
-        c.execute(f"""
-            SELECT id, action_type, action_label, payload_json, status, conversation_id, created_at
-            FROM pending_actions
-            WHERE conversation_id IN ({placeholders})
-              AND username = %s
-            ORDER BY created_at ASC
-        """, (*memory_ids, username))
-        action_rows = c.fetchall()
-        conn.close()
-
-        # Indexer les actions par conversation_id
+        # Action cards liées (optionnel — ne bloque pas si colonne absente)
         actions_by_conv = {}
-        for ar in action_rows:
-            aid, atype, alabel, apayload, astatus, aconv_id, acreated = ar
-            if aconv_id not in actions_by_conv:
-                actions_by_conv[aconv_id] = []
-            actions_by_conv[aconv_id].append({
-                "id":          aid,
-                "action_type": atype,
-                "label":       alabel,
-                "payload":     apayload,
-                "status":      astatus,
-            })
+        try:
+            memory_ids = [row[3] for row in rows]
+            placeholders = ','.join(['%s'] * len(memory_ids))
+            c.execute(f"""
+                SELECT id, action_type, action_label, payload_json, status, conversation_id
+                FROM pending_actions
+                WHERE conversation_id IN ({placeholders}) AND username = %s
+                ORDER BY created_at ASC
+            """, (*memory_ids, username))
+            for ar in c.fetchall():
+                aid, atype, alabel, apayload, astatus, aconv_id = ar
+                if aconv_id not in actions_by_conv:
+                    actions_by_conv[aconv_id] = []
+                actions_by_conv[aconv_id].append({
+                    "id": aid, "action_type": atype, "label": alabel,
+                    "payload": apayload, "status": astatus,
+                })
+        except Exception:
+            pass  # La colonne conversation_id peut ne pas exister encore
+        conn.close()
 
         return [
             {
