@@ -4,44 +4,32 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Raya</title>
-
-<!-- PWA -->
-<link rel="manifest" href="/static/manifest.json?v=27">
+<link rel="manifest" href="/static/manifest.json?v=28">
 <meta name="theme-color" content="#0057b8">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
-<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=27">
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=28">
 <script>
-// ANTI-CACHE: nettoyer les SW et forcer le rechargement si fichiers perimés
-window.__RAYA_V = 19;
+window.__RAYA_V = 20;
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(r => r.forEach(sw => sw.unregister()));
   caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
 }
 </script>
-
-<!-- CSS -->
-<link rel="stylesheet" href="/static/chat-base.css?v=27">
-<link rel="stylesheet" href="/static/chat-components.css?v=27">
-<link rel="stylesheet" href="/static/chat-drawer.css?v=27">
-<link rel="stylesheet" href="/static/onboarding.css?v=27">
-<link rel="stylesheet" href="/static/mobile.css?v=27">
-
-<!-- marked.js + DOMPurify (CDN versionné, stable) -->
+<link rel="stylesheet" href="/static/chat-base.css?v=28">
+<link rel="stylesheet" href="/static/chat-components.css?v=28">
+<link rel="stylesheet" href="/static/chat-drawer.css?v=28">
+<link rel="stylesheet" href="/static/onboarding.css?v=28">
+<link rel="stylesheet" href="/static/mobile.css?v=28">
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
-<!-- Fonts -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 </head>
 <body>
 <div class="app">
-
-  <!-- PAS DE TOPBAR - menu 3 points dans la sidebar -->
-
   <div class="token-banner" id="tokenBanner"></div>
-
   <div class="main-layout">
     <!-- SIDEBAR -->
     <div class="sidebar" id="sidebar">
@@ -61,7 +49,6 @@ if ('serviceWorker' in navigator) {
           <span class="count" id="mailCount"></span>
         </div>
       </div>
-      <!-- SUJETS integres dans la sidebar -->
       <details class="sidebar-details" id="topicsSidebarSection" open>
         <summary class="sidebar-section-title">Mes sujets</summary>
         <div id="topicsSidebarList"></div>
@@ -92,48 +79,45 @@ if ('serviceWorker' in navigator) {
       <button class="sidebar-expand-btn" onclick="document.getElementById('sidebar').classList.remove('collapsed')" title="Afficher le menu">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>
       </button>
-
-  <div class="messages-wrap">
-    <div class="messages" id="messages">
-      <div class="welcome" id="welcomeMsg">
-        <div class="welcome-icon">&#10022;</div>
-        <h2 id="welcomeTitle">Bonjour !</h2>
-        <p>Je suis Raya, ton assistante personnelle.<br>Je surveille tes mails, ton agenda et ton activite.</p>
+      <div class="messages-wrap">
+        <div class="messages" id="messages">
+          <div class="welcome" id="welcomeMsg">
+            <div class="welcome-icon">&#10022;</div>
+            <h2 id="welcomeTitle">Bonjour !</h2>
+            <p>Je suis Raya, ton assistante personnelle.<br>Je surveille tes mails, ton agenda et ton activite.</p>
+          </div>
+        </div>
+        <button class="scroll-down-btn" id="scrollDownBtn" onclick="scrollToBottom()" title="Defiler vers le bas">&#8595;</button>
+      </div>
+      <div class="triage-bar" id="triageBar">
+        <button class="triage-action triage-skip" onclick="handleTriage('skip')">&#9197; Passer</button>
+        <button class="triage-action triage-archive" onclick="handleTriage('archive')">&#128193; Archiver</button>
+        <button class="triage-action triage-delete" onclick="handleTriage('delete')">&#128465; Corbeille</button>
+        <button class="triage-action triage-reply" onclick="handleTriage('reply')">&#9993;&#65039; Repondre</button>
+      </div>
+      <div class="input-zone">
+        <div class="attachment-preview" id="attachmentPreview">
+          <span id="attachmentName">Aucun fichier</span>
+          <button class="attachment-remove" onclick="removeAttachment()">&#10005;</button>
+        </div>
+        <div class="input-wrapper" id="inputWrapper">
+          <textarea id="input" placeholder="Envoie un message a Raya..." rows="1" oninput="autoResize(this)" onkeydown="handleKey(event)"></textarea>
+          <div class="input-btns">
+            <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="Joindre"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></button>
+            <button class="icon-btn" id="micBtn" onclick="toggleMic()" title="Dicter"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
+            <button class="icon-btn" id="sendBtn" onclick="sendMessage()"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+          </div>
+        </div>
+        <div class="mic-status" id="micStatus">&#127913; En ecoute... parle, je t'entends</div>
+        <input type="file" id="fileInput" accept="image/*,.pdf" onchange="handleFileSelect(event)">
       </div>
     </div>
-    <button class="scroll-down-btn" id="scrollDownBtn" onclick="scrollToBottom()" title="Defiler vers le bas">&#8595;</button>
   </div>
-
-  <div class="triage-bar" id="triageBar">
-    <button class="triage-action triage-skip" onclick="handleTriage('skip')">&#9197; Passer</button>
-    <button class="triage-action triage-archive" onclick="handleTriage('archive')">&#128193; Archiver</button>
-    <button class="triage-action triage-delete" onclick="handleTriage('delete')">&#128465; Corbeille</button>
-    <button class="triage-action triage-reply" onclick="handleTriage('reply')">&#9993;&#65039; Repondre</button>
-  </div>
-
-  <div class="input-zone">
-    <div class="attachment-preview" id="attachmentPreview">
-      <span id="attachmentName">Aucun fichier</span>
-      <button class="attachment-remove" onclick="removeAttachment()">&#10005;</button>
-    </div>
-    <div class="input-wrapper" id="inputWrapper">
-      <textarea id="input" placeholder="Envoie un message a Raya..." rows="1" oninput="autoResize(this)" onkeydown="handleKey(event)"></textarea>
-      <div class="input-btns">
-        <button class="icon-btn" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="Joindre"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg></button>
-        <button class="icon-btn" id="micBtn" onclick="toggleMic()" title="Dicter"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2a3 3 0 00-3 3v7a3 3 0 006 0V5a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="22"/></svg></button>
-        <button class="icon-btn" id="sendBtn" onclick="sendMessage()"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
-      </div>
-    </div>
-    <div class="mic-status" id="micStatus">&#127913; En ecoute... parle, je t'entends</div>
-    <input type="file" id="fileInput" accept="image/*,.pdf" onchange="handleFileSelect(event)">
-  </div>
-    </div><!-- /chat-column -->
-  </div><!-- /main-layout -->
 </div>
 
 <div id="toast-container"></div>
 
-<!-- MODAL RACCOURCI EDIT/CREATE -->
+<!-- MODAL RACCOURCI -->
 <div class="modal-overlay" id="modalShortcutEdit">
   <div class="modal">
     <div class="modal-title" id="shortcutEditTitle">Raccourci</div>
@@ -156,7 +140,7 @@ if ('serviceWorker' in navigator) {
   </div>
 </div>
 
-<!-- OVERLAY ONBOARDING -->
+<!-- ONBOARDING -->
 <div class="onboarding-overlay" id="onboardingOverlay">
   <div class="onboarding-modal">
     <div class="onb-header">
@@ -210,66 +194,46 @@ if ('serviceWorker' in navigator) {
     <div class="d-sep"></div>
     <div class="d-group">
       <div class="d-group-title">&#128231; Connexions</div>
-      <div class="d-btn nav" onclick="window.location.href='/login/gmail'">
-        <span class="d-btn-icon">&#9993;&#65039;</span>
-        <div class="d-btn-body">
-          <span class="d-btn-label">Connecter Gmail</span>
-          <span class="d-btn-desc">Autoriser Raya a lire tes mails Gmail via OAuth2 Google.</span>
-        </div>
-      </div>
-      <div class="d-btn nav" onclick="window.location.href='/login'">
-        <span class="d-btn-icon">&#128309;</span>
-        <div class="d-btn-body">
-          <span class="d-btn-label">Reconnecter Microsoft 365</span>
-          <span class="d-btn-desc">Renouveler l'autorisation Microsoft si le token a expire.</span>
-        </div>
-      </div>
+      <div class="d-btn nav" onclick="window.location.href='/login/gmail'"><span class="d-btn-icon">&#9993;&#65039;</span><div class="d-btn-body"><span class="d-btn-label">Connecter Gmail</span><span class="d-btn-desc">Autoriser Raya a lire tes mails Gmail via OAuth2 Google.</span></div></div>
+      <div class="d-btn nav" onclick="window.location.href='/login'"><span class="d-btn-icon">&#128309;</span><div class="d-btn-body"><span class="d-btn-label">Reconnecter Microsoft 365</span><span class="d-btn-desc">Renouveler l'autorisation Microsoft si le token a expire.</span></div></div>
       <div class="d-btn" onclick="drawerAction(this,'/admin/extract-signatures','sig')"><span class="d-btn-icon">&#128140;</span><div class="d-btn-body"><span class="d-btn-label">Recuperer mes signatures</span><span class="d-btn-desc">Analyse les derniers mails envoyes pour extraire ta signature automatiquement.</span><div class="d-btn-result" id="result-sig"></div></div></div>
     </div>
     <div class="d-sep"></div>
     <div class="d-group">
       <div class="d-group-title">&#128274; Donnees personnelles</div>
       <div class="d-btn nav" onclick="window.open('/account/export','_blank')"><span class="d-btn-icon">&#128230;</span><div class="d-btn-body"><span class="d-btn-label">Exporter mes donnees</span><span class="d-btn-desc">Telecharge toutes tes donnees Raya au format JSON (RGPD).</span></div></div>
-      <div class="d-btn danger" onclick="(function(){const v=prompt('Tape SUPPRIMER pour confirmer la suppression definitive de ton compte et toutes tes donnees :');if(v==='SUPPRIMER'){fetch('/account/delete?confirm=yes',{method:'DELETE'}).then(r=>r.json()).then(d=>{if(d.ok){showToast('Compte supprime. Au revoir !','ok',4000);setTimeout(()=>window.location.href='/logout',2000);}else{showToast('Erreur : '+(d.message||'?'),'err',5000);}}).catch(()=>showToast('Erreur reseau','err',4000));}else if(v!==null){showToast('Confirmation incorrecte - compte non supprime.','err',4000);}})()"><span class="d-btn-icon">&#9940;</span><div class="d-btn-body"><span class="d-btn-label">Supprimer mon compte</span><span class="d-btn-desc">Supprime definitivement ton compte et toutes tes donnees personnelles. Irreversible.</span></div></div>
+      <div class="d-btn danger" onclick="(function(){const v=prompt('Tape SUPPRIMER pour confirmer :');if(v==='SUPPRIMER'){fetch('/account/delete?confirm=yes',{method:'DELETE'}).then(r=>r.json()).then(d=>{if(d.ok){showToast('Compte supprime. Au revoir !','ok',4000);setTimeout(()=>window.location.href='/logout',2000);}else{showToast('Erreur : '+(d.message||'?'),'err',5000);}}).catch(()=>showToast('Erreur reseau','err',4000));}else if(v!==null){showToast('Confirmation incorrecte.','err',4000);}})()"><span class="d-btn-icon">&#9940;</span><div class="d-btn-body"><span class="d-btn-label">Supprimer mon compte</span><span class="d-btn-desc">Supprime definitivement ton compte et toutes tes donnees. Irreversible.</span></div></div>
     </div>
     <div class="d-sep"></div>
     <div class="d-group">
       <div class="d-group-title">&#128279; Navigation</div>
       <div class="d-btn nav" onclick="window.open('/admin/panel','_blank')"><span class="d-btn-icon">&#128421;&#65039;</span><div class="d-btn-body"><span class="d-btn-label">Panel admin complet</span><span class="d-btn-desc">Gestion des utilisateurs, regles, insights, actions avancees.</span></div></div>
-      <div class="d-btn nav" onclick="window.open('/legal','_blank')"><span class="d-btn-icon">&#128220;</span><div class="d-btn-body"><span class="d-btn-label">Mentions legales</span><span class="d-btn-desc">Mentions legales, politique de confidentialite et RGPD.</span></div></div>
+      <div class="d-btn nav" onclick="window.open('/legal','_blank')"><span class="d-btn-icon">&#128220;</span><div class="d-btn-body"><span class="d-btn-label">Mentions legales</span><span class="d-btn-desc">CGU, confidentialite et RGPD.</span></div></div>
       <div class="d-btn nav" onclick="window.location.href='/logout'"><span class="d-btn-icon">&#128682;</span><div class="d-btn-body"><span class="d-btn-label">Deconnexion</span><span class="d-btn-desc">Ferme la session en cours.</span></div></div>
     </div>
   </div>
 </div>
 
-<!-- Modules JS -->
-<script src="/static/chat-onboarding.js?v=27"></script>
-<script src="/static/chat-shortcuts.js?v=27"></script>
-<script src="/static/chat-voice.js?v=27"></script>
-<script src="/static/chat-feedback.js?v=27"></script>
-<script src="/static/chat-triage.js?v=27"></script>
-<script src="/static/chat-admin.js?v=27"></script>
-<script src="/static/chat-topics.js?v=27"></script>
-<script src="/static/chat-core.js?v=27"></script>
-<script src="/static/chat-messages.js?v=27"></script>
-<script src="/static/chat-main.js?v=27"></script>
+<script src="/static/chat-onboarding.js?v=28"></script>
+<script src="/static/chat-shortcuts.js?v=28"></script>
+<script src="/static/chat-voice.js?v=28"></script>
+<script src="/static/chat-feedback.js?v=28"></script>
+<script src="/static/chat-triage.js?v=28"></script>
+<script src="/static/chat-admin.js?v=28"></script>
+<script src="/static/chat-topics.js?v=28"></script>
+<script src="/static/chat-core.js?v=28"></script>
+<script src="/static/chat-messages.js?v=28"></script>
+<script src="/static/chat-main.js?v=28"></script>
 
 <script>
-  // Fermer le menu 3 points en cliquant ailleurs
   document.addEventListener('click', e => {
     const wrap = document.querySelector('.dotmenu-wrap');
     if (wrap && !wrap.contains(e.target)) wrap.classList.remove('open');
   });
-  // Supprimer TOUS les Service Workers
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.getRegistrations().then(regs => {
-      regs.forEach(reg => reg.unregister());
-    });
-    caches.keys().then(keys => {
-      keys.forEach(k => caches.delete(k));
-    });
+    navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(reg => reg.unregister()));
+    caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
   }
-  // Detection fichiers perimes : si marked n'est pas charge, forcer un rechargement
   if (typeof marked === 'undefined' && !sessionStorage.getItem('raya_reloaded')) {
     sessionStorage.setItem('raya_reloaded', '1');
     location.reload();
