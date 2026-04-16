@@ -1,6 +1,20 @@
 // chat-shortcuts.js v2 — Raccourcis DB (titre + prompt personnalisé + couleur)
 
-const SHORTCUT_COLORS = ['#4f46e5','#059669','#d97706','#dc2626','#7c3aed','#0891b2','#db2777','#65a30d','#ea580c','#6366f1','#14b8a6','#f59e0b'];
+// Palette arc-en-ciel : 12 couleurs toutes distinctes (rouge → rose)
+const SHORTCUT_COLORS = [
+  '#ef4444', // rouge
+  '#f97316', // orange
+  '#eab308', // jaune
+  '#84cc16', // lime
+  '#22c55e', // vert
+  '#14b8a6', // teal
+  '#06b6d4', // cyan
+  '#0ea5e9', // sky
+  '#3b82f6', // bleu
+  '#6366f1', // indigo
+  '#8b5cf6', // violet
+  '#ec4899', // rose
+];
 
 let _shortcuts = [];
 let shortcutsEditMode = false;
