@@ -21,7 +21,6 @@ import traceback
 import threading
 import requests as http_requests
 import concurrent.futures
-from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 
 from fastapi import APIRouter, Request, Body, Depends
@@ -31,7 +30,6 @@ from pydantic import BaseModel
 from app.llm_client import llm_complete, log_llm_usage
 from app.router import route_query_tier, detect_session_theme, detect_query_domains
 from app.database import get_pg_conn
-from app.token_manager import get_valid_microsoft_token as _legacy_ms_token
 from app.connection_token_manager import get_connection_token
 
 
@@ -58,10 +56,7 @@ from app.routes.deps import require_user
 from app.rate_limiter import check_rate_limit
 from app.routes.raya_helpers import _raya_core, _build_user_content, RayaQuery, FeedbackPayload  # noqa
 
-_SHARED_POOL = ThreadPoolExecutor(max_workers=6)
-logger = get_logger("raya.core")
-
-router = APIRouter(tags=["raya"])
+from app.routes.raya_helpers import _raya_core, _build_user_content, RayaQuery, FeedbackPayload  # noqa
 
 
 # --- ENDPOINTS ---
@@ -85,48 +80,13 @@ def token_status(request: Request, user: dict = Depends(require_user)):
     except Exception:
         pass
 
-    # Vérification Gmail — V2 d'abord, fallback legacy
+    # Vérification Gmail — V2 uniquement
     try:
         from app.connection_token_manager import get_user_tool_connections
-        from app.database import get_pg_conn as _gpc
-        from datetime import datetime, timezone, timedelta
-        # V2
         v2 = get_user_tool_connections(username)
         if "gmail" in v2:
-            gmail_email = v2["gmail"].get("email", "")
             if not v2["gmail"].get("token"):
-                warnings.append({
-                    "provider": "Gmail", "mailbox": gmail_email or "Gmail",
-                    "message": "Connexion expirée.",
-                    "action_url": "/login/gmail", "severity": "error",
-                })
-        else:
-            # Legacy — vérifie expiry dans oauth_tokens, affiche email depuis gmail_tokens
-            conn = _gpc(); c = conn.cursor()
-            c.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
-            row = c.fetchone()
-            gmail_email = (row[0] if row and row[0] else "")
-            c.execute("""
-                SELECT expires_at FROM oauth_tokens
-                WHERE provider='google' AND username=%s
-                ORDER BY updated_at DESC LIMIT 1
-            """, (username,))
-            ot = c.fetchone()
-            conn.close()
-            if ot:
-                expires_at = ot[0]
-                now = datetime.now(timezone.utc)
-                if expires_at:
-                    if expires_at.tzinfo is None:
-                        expires_at = expires_at.replace(tzinfo=timezone.utc)
-                    if expires_at < now - timedelta(minutes=5):
-                        warnings.append({
-                            "provider": "Gmail", "mailbox": gmail_email or "Gmail",
-                            "message": "Connexion expirée.",
-                            "action_url": "/login/gmail", "severity": "error",
-                        })
-            elif gmail_email:
-                # gmail_tokens existe mais pas oauth_tokens → token legacy expiré
+                gmail_email = v2["gmail"].get("email", "Gmail")
                 warnings.append({
                     "provider": "Gmail", "mailbox": gmail_email,
                     "message": "Connexion expirée.",

@@ -7,12 +7,11 @@ from fastapi import Request
 from app.llm_client import llm_complete,log_llm_usage
 from app.router import route_query_tier,detect_session_theme,detect_query_domains
 from app.database import get_pg_conn
-from app.token_manager import get_valid_microsoft_token as _legacy_ms_token
 from app.connection_token_manager import get_connection_token
 
 
 def _get_microsoft_token(username: str) -> str | None:
-    """Résout le token Microsoft — V2 tenant_connections en priorité, fallback legacy."""
+    """Résout le token Microsoft via tenant_connections (V2)."""
     return get_connection_token(username, "microsoft")
 from app.memory_loader import MEMORY_OK,synthesize_session
 from app.rule_engine import get_memoire_param
@@ -57,38 +56,33 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     # 5D-2f : charger les tenants de l'utilisateur
     user_tenants = get_user_tenants(username)
 
-    # 2. Appels reseau en PARALLELE
+    # 2. Appels réseau en parallèle
     live_mails, agenda, teams_ctx, mail_filter = [], [], "", ""
-    pool = _SHARED_POOL
-    if True:
-        f_mails  = pool.submit(load_live_mails, outlook_token, username)
-        f_agenda = pool.submit(load_agenda, outlook_token, username)
-        f_teams  = pool.submit(load_teams_context, username)
-        f_filter = pool.submit(load_mail_filter_summary, username)
-        try: live_mails  = f_mails.result(timeout=8)
-        except Exception: pass
-        try: agenda      = f_agenda.result(timeout=8)
-        except Exception: pass
-        try: teams_ctx   = f_teams.result(timeout=5)
-        except Exception: pass
-        try: mail_filter = f_filter.result(timeout=3)
-        except Exception: pass
+    f_mails  = _SHARED_POOL.submit(load_live_mails, outlook_token, username)
+    f_agenda = _SHARED_POOL.submit(load_agenda, outlook_token, username)
+    f_teams  = _SHARED_POOL.submit(load_teams_context, username)
+    f_filter = _SHARED_POOL.submit(load_mail_filter_summary, username)
+    try: live_mails  = f_mails.result(timeout=8)
+    except Exception: pass
+    try: agenda      = f_agenda.result(timeout=8)
+    except Exception: pass
+    try: teams_ctx   = f_teams.result(timeout=5)
+    except Exception: pass
+    try: mail_filter = f_filter.result(timeout=3)
+    except Exception: pass
 
     # 3. Actions en attente
     pending_list = get_pending(username=username, tenant_id=tenant_id, limit=10)
 
-    # 4. Routage de tier + detection de session thematique
-    model_tier    = "smart"
-    session_theme = None
-    pool = _SHARED_POOL
-    if True:
-        f_tier  = pool.submit(route_query_tier, payload.query or "",
-                              username, tenant_id, len(db_ctx["history"]))
-        f_theme = pool.submit(detect_session_theme, db_ctx["history"])
-        try: model_tier    = f_tier.result(timeout=4)
-        except Exception: pass
-        try: session_theme = f_theme.result(timeout=3)
-        except Exception: pass
+    # 4. Routage tier + détection thématique — en parallèle
+    model_tier, session_theme = "smart", None
+    f_tier  = _SHARED_POOL.submit(route_query_tier, payload.query or "",
+                                  username, tenant_id, len(db_ctx["history"]))
+    f_theme = _SHARED_POOL.submit(detect_session_theme, db_ctx["history"])
+    try: model_tier    = f_tier.result(timeout=4)
+    except Exception: pass
+    try: session_theme = f_theme.result(timeout=3)
+    except Exception: pass
 
     if session_theme:
         logger.info("[Raya] Session thematique detectee pour %s : '%s'", username, session_theme)
@@ -128,20 +122,17 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     log_llm_usage(result, username=username, tenant_id=tenant_id,
                   purpose="raya_main_conversation")
 
-    # 7→9. Reponse propre — retire TOUTES les balises techniques du texte
-    clean_response = raya_response
-    clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', clean_response)
-    clean_response = re.sub(r'\[ACTION:[A-Z_]+\]', '', clean_response)
+    # Nettoyage : retire toutes les balises techniques de la réponse affichée
+    clean_response = re.sub(r'`?\[ACTION:[^\]]*\]`?', '', raya_response)
     speak_speed = None
     speed_match = re.search(r'\[SPEAK_SPEED:([\d.]+)\]', clean_response)
     if speed_match:
         speak_speed = float(speed_match.group(1))
-    clean_response = re.sub(r'\[SPEAK_SPEED:[\d.]+\]', '', clean_response)
-    clean_response = re.sub(r'`?\[ACTION:[^\]]*\]`?', '', clean_response)
     clean_response = re.sub(r'`?\[SPEAK_SPEED:[^\]]*\]`?', '', clean_response)
-    clean_response = re.sub(r'``', '', clean_response)
+    # Fragments Odoo inline
     clean_response = re.sub(r'\|?\["[^"]*"(?:,"[^"]*")*\](?:\|?\d*\]?)?', '', clean_response)
     clean_response = re.sub(r'^\s*\|?\["[^"]+".*$', '', clean_response, flags=re.MULTILINE)
+    clean_response = re.sub(r'``', '', clean_response)
     clean_response = re.sub(r'\n{3,}', '\n\n', clean_response).strip()
 
     # 7→10. Sauvegarde AVANT execute_actions pour avoir l'aria_memory_id comme conversation_id

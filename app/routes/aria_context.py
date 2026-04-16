@@ -67,6 +67,34 @@ def _get_messaging_summary(username: str) -> str:
         return "Non disponible"
 
 
+def _build_mailbox_block(username: str, display_name: str) -> str:
+    """Génère dynamiquement le bloc boîtes mail depuis les connexions réelles."""
+    try:
+        from app.mailbox_manager import get_user_mailboxes
+        mailboxes = get_user_mailboxes(username)
+        if not mailboxes:
+            return ""
+        lines = []
+        for m in mailboxes:
+            if m.provider == "microsoft":
+                label = "boîte pro" if len(mailboxes) > 1 else "boîte mail"
+            elif m.provider == "gmail":
+                label = "boîte perso" if len(mailboxes) > 1 else "boîte mail"
+            else:
+                label = f"boîte {m.provider}"
+            email_part = f" ({m.email})" if m.email else ""
+            lines.append(f'- {m.provider.title()}{email_part} = "{label}"')
+        block = "\n".join(lines)
+        return f"""
+=== BOITES MAIL DE {display_name.upper()} ===
+{block}
+Quand tu parles d'un mail, indique toujours de quelle boîte il provient.
+Ne jamais afficher l'adresse email brute — utilise toujours le nom de la boîte.
+"""
+    except Exception:
+        return ""
+
+
 def build_system_prompt(
     username: str,
     tenant_id: str,
@@ -94,6 +122,20 @@ def build_system_prompt(
     if hot_summary is None:
         hot_summary = get_hot_summary(username)
         cache.set(cache_key_hot, hot_summary)
+
+    # Résumés connexions — cachés 5 min (changent très rarement)
+    _mb = cache.get(f"mb_summary:{username}")
+    if _mb is None:
+        _mb = _get_mailbox_summary(username)
+        cache.set(f"mb_summary:{username}", _mb, ttl=300)
+    _drv = cache.get(f"drv_summary:{username}")
+    if _drv is None:
+        _drv = _get_drive_summary(username)
+        cache.set(f"drv_summary:{username}", _drv, ttl=300)
+    _msg = cache.get(f"msg_summary:{username}")
+    if _msg is None:
+        _msg = _get_messaging_summary(username)
+        cache.set(f"msg_summary:{username}", _msg, ttl=300)
 
     # Blocs de contexte — chacun dans prompt_blocks.py
     maturity_block, adaptive = build_maturity_block(username, display_name)
@@ -185,13 +227,7 @@ def build_system_prompt(
 
     capabilities_block = "\n\n" + get_user_capabilities_prompt(username, tools)
 
-    MAILBOX_BLOCK = f"""
-=== BOITES MAIL DE {display_name.upper()} ===
-Quand tu parles d'un mail, indique toujours de quelle boite il provient :
-- Boite Outlook (guillaume@couffrant-solar.fr) = "boite Couffrant Solar"
-- Boite Gmail (per1.guillaume@gmail.com) = "boite perso"
-Ne jamais afficher l'adresse email brute — utilise toujours le nom de la boite.
-"""
+    MAILBOX_BLOCK = _build_mailbox_block(username, display_name)
     FORMAT_BLOCK = """
 === FORMAT DES REPONSES ===
 - N'utilise PAS d'emojis decoratifs en debut de chaque point d'une liste (ex: 🔹📌🎯💡)
@@ -231,9 +267,9 @@ Tu ne connais PAS le mot "Jarvis" et tu ne l'utilises JAMAIS. Tu es Raya, c'est 
 {MAILBOX_BLOCK}
 === AUJOURD'HUI \u2014 {datetime.now().strftime('%A %d %B %Y')} ===
 {"Microsoft 365 connecte." if outlook_token else f"Microsoft non connecte \u2014 {display_name} doit se reconnecter via /login."}{odoo_line}{mailboxes_line}
-Boites mail connectees : {_get_mailbox_summary(username)}
-Drives connectes : {_get_drive_summary(username)}
-Messagerie connectee : {_get_messaging_summary(username)}
+Boites mail connectees : {_mb}
+Drives connectes : {_drv}
+Messagerie connectee : {_msg}
 Agenda :
 <donnees_externes>{json.dumps(agenda, ensure_ascii=False, default=str) if agenda else "Aucun RDV."}</donnees_externes>
 Inbox ({len(live_mails)}) :
