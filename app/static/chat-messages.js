@@ -224,10 +224,17 @@ function appendPendingActionToChat(action) {
   const isSendMail = action.action_type === 'SEND_MAIL';
   const p = action.payload || {};
 
-  // Badge #ID
+  // Badge lisible selon le type d'action
   const badge = document.createElement('div');
   badge.className = 'pending-id-badge';
-  badge.textContent = `#${action.id} — ${action.action_type}`;
+  const badgeLabels = {
+    'SEND_MAIL':    '✉️ Mail préparé',
+    'REPLY':        '↩️ Réponse préparée',
+    'TEAMS_MSG':    '💬 Message Teams',
+    'CREATEEVENT':  '📅 Événement',
+    'MOVEDRIVE':    '📁 Déplacement Drive',
+  };
+  badge.textContent = badgeLabels[action.action_type] || `📋 ${action.action_type}`;
   card.appendChild(badge);
 
   // Contenu selon type
