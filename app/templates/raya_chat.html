@@ -12,6 +12,14 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
 <link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=16">
+<script>
+// ANTI-CACHE: nettoyer les SW et forcer le rechargement si fichiers périmés
+window.__RAYA_V = 16;
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.getRegistrations().then(r => r.forEach(sw => sw.unregister()));
+  caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
+}
+</script>
 
 <!-- CSS -->
 <link rel="stylesheet" href="/static/chat-base.css?v=16">
@@ -229,6 +237,13 @@
     caches.keys().then(keys => {
       keys.forEach(k => caches.delete(k));
     });
+  }
+  // Détection fichiers périmés : si marked n'est pas chargé, forcer un rechargement
+  if (typeof marked === 'undefined' && !sessionStorage.getItem('raya_reloaded')) {
+    sessionStorage.setItem('raya_reloaded', '1');
+    location.reload();
+  } else {
+    sessionStorage.removeItem('raya_reloaded');
   }
   (function(){
     const params = new URLSearchParams(window.location.search);
