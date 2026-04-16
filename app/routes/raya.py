@@ -350,6 +350,9 @@ async def raya_confirm_action(
                     except Exception as e:
                         logger.warning("[Confirm] learn_from_correction échoué: %s", e)
                 threading.Thread(target=_learn, daemon=True).start()
+                return {"ok": True,
+                        "message": result.get("message", "Action executee"),
+                        "learned": True}
 
         return {"ok": True, "message": result.get("message", "Action executee")}
     else:

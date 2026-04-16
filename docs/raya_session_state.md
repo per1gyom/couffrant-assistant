@@ -162,7 +162,15 @@ app/
 
 ---
 
-## ROADMAP — RESTANT
+## AUDITS PLANIFIÉS — DANS L'ORDRE
+
+1. **Performance** ← EN COURS
+2. **Sécurité** — cloisonnement tenants, routes admin, isolation données
+3. **Système d'actions** — pending_actions, queue, confirmations, robustesse
+4. **Scheduler/jobs** — ce qui tourne vraiment, ce qui est mort, robustesse
+5. **Frontend** — chat-main.js, flux UI, code mort, gestion erreurs
+
+---
 
 ### Priorité haute (avant commercialisation)
 - [ ] Google OAuth → passer en mode "Externe" + vérification Google

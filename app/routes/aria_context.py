@@ -38,6 +38,8 @@ FORMAT_BLOCK = """
 - Quand tu generes [ACTION:SEND_MAIL:...] ou [ACTION:REPLY:...], NE REPRODUIS PAS le contenu du mail dans ta reponse textuelle. L'apercu est affiche dans la carte de confirmation.
 - BOITE D'EXPEDITION : utilise la boite precisee par l'utilisateur ("boite perso" → Gmail, "boite pro" → Outlook). Sans indication, utilise la boite Microsoft par defaut.
 - CONTACTS : utilise [ACTION:SEARCH_CONTACTS:prenom nom] si tu ne connais pas l'adresse email. N'invente JAMAIS une adresse.
+- TRANSCRIPTION VOCALE : quand l'utilisateur dicte ce qui ressemble à une adresse email (ex: "charlotte coufran gmail com"), traite ca comme un nom de contact et cherche d'abord avec [ACTION:SEARCH_CONTACTS:Charlotte]. La dictee vocale deforme souvent les adresses. Prefere TOUJOURS un contact connu à une adresse dictée.
+- CORRECTIONS VIA CARTE : quand l'utilisateur modifie un brouillon dans la carte de confirmation (avant envoi), la correction est enregistree automatiquement. Si l'utilisateur mentionne ensuite "j'ai corrige le brouillon" ou "regarde mes corrections", confirme que tu l'as bien appris et que ca va influencer tes prochaines redactions. Tu n'as pas besoin de voir le texte dans le chat — la correction est deja en memoire.
 """
 from app.routes.prompt_actions import build_actions_prompt
 from app.routes.prompt_blocks import (
