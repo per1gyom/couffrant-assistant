@@ -59,7 +59,7 @@ function _renderTokenBanner(warnings) {
     <div class="token-warning-pill">
       <span class="token-warning-icon">⚠️</span>
       <span class="token-warning-label">${w.mailbox || w.provider}</span>
-      <span class="token-warning-msg">Token expiré</span>
+      <span class="token-warning-msg">Connexion expirée</span>
       <a href="${w.action_url}" class="token-warning-btn">Reconnecter →</a>
     </div>
   `).join('');
