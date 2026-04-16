@@ -156,7 +156,12 @@ Factuel, direct, sans blabla. N'invente rien — base-toi uniquement sur les don
     finally:
         if conn: conn.close()
 
+    # Invalider le cache en mémoire pour que le prochain appel recharge la version fraîche
     try:
+        import app.cache as _cache
+        _cache.set(f"hot_summary:{username}", summary, ttl=1800)
+    except Exception:
+        pass
         vec = _vec_str(_embed(summary[:3000]))
         if vec:
             conn2 = get_pg_conn()

@@ -139,9 +139,14 @@ Pour rules_learned : ne propose que des regles NOUVELLES. Prefere la qualite a l
     finally:
         if conn: conn.close()
 
-    for rule_text in parsed.get("rules_learned", []):
+    rules_learned = parsed.get("rules_learned", [])
+    # Confiance initiale plus basse pour l'auto-synthèse (0.5) :
+    # le mécanisme de reinforcements dans save_rule élèvera la confiance
+    # si la même règle réapparaît dans de futures synthèses.
+    base_confidence = 0.5
+    for rule_text in rules_learned:
         if rule_text and len(rule_text) > 10:
-            save_rule("auto", rule_text, "synthesis", 0.6, username, tenant_id=effective_tenant)
+            save_rule("auto", rule_text, "synthesis", base_confidence, username, tenant_id=effective_tenant)
 
     for item in parsed.get("insights", []):
         if isinstance(item, dict):
@@ -157,13 +162,30 @@ Pour rules_learned : ne propose que des regles NOUVELLES. Prefere la qualite a l
     try:
         conn = get_pg_conn()
         c = conn.cursor()
+        # Archivage doux : flag archived=true au lieu de DELETE irréversible.
+        # Les conversations restent récupérables en cas d'erreur de synthèse.
         c.execute("""
-            DELETE FROM aria_memory WHERE username = %s AND id NOT IN (
-                SELECT id FROM aria_memory WHERE username = %s ORDER BY id DESC LIMIT %s
-            )
+            UPDATE aria_memory SET archived = true
+            WHERE username = %s AND id NOT IN (
+                SELECT id FROM aria_memory WHERE username = %s
+                ORDER BY id DESC LIMIT %s
+            ) AND (archived IS NULL OR archived = false)
         """, (username, username, keep_recent))
         purged = c.rowcount
         conn.commit()
+    except Exception:
+        # Si la colonne archived n'existe pas encore, fallback sur l'ancien DELETE
+        try:
+            if conn: conn.rollback()
+            c.execute("""
+                DELETE FROM aria_memory WHERE username = %s AND id NOT IN (
+                    SELECT id FROM aria_memory WHERE username = %s ORDER BY id DESC LIMIT %s
+                )
+            """, (username, username, keep_recent))
+            purged = c.rowcount
+            conn.commit()
+        except Exception:
+            pass
     finally:
         if conn: conn.close()
 

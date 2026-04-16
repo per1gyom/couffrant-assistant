@@ -121,7 +121,9 @@ def build_system_prompt(
     hot_summary = cache.get(cache_key_hot)
     if hot_summary is None:
         hot_summary = get_hot_summary(username)
-        cache.set(cache_key_hot, hot_summary)
+        # TTL 30 min — se renouvelle automatiquement après une synthèse
+        # (synthesize_session appelle rebuild_hot_summary qui invalide ce cache)
+        cache.set(cache_key_hot, hot_summary, ttl=1800)
 
     # Résumés connexions — cachés 5 min (changent très rarement)
     _mb = cache.get(f"mb_summary:{username}")
@@ -162,10 +164,20 @@ def build_system_prompt(
         conv_context  = ""
 
     if conv_context and db_ctx.get("history"):
-        recent_inputs = {h.get("user_input", "")[:80].lower() for h in db_ctx["history"] if h.get("user_input")}
+        # Dédupliquer : retirer les blocs RAG dont le texte correspond déjà
+        # à une conversation récente (comparaison sur l'input complet normalisé).
+        recent_inputs = set()
+        for h in db_ctx["history"]:
+            inp = (h.get("user_input") or "").strip().lower()
+            if inp:
+                recent_inputs.add(inp)
+                # Aussi les 40 premiers chars pour capturer les troncatures du RAG
+                recent_inputs.add(inp[:40])
         filtered_parts = []
         for block in conv_context.split("\n---\n"):
-            if not any(inp and inp in block.lower() for inp in recent_inputs):
+            block_lower = block.lower()
+            # Garder le bloc si aucun input récent n'y est clairement présent
+            if not any(inp and len(inp) > 10 and inp in block_lower for inp in recent_inputs):
                 filtered_parts.append(block)
         conv_context = "\n---\n".join(filtered_parts) if filtered_parts else ""
 
