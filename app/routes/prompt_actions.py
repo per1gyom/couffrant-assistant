@@ -26,16 +26,20 @@ Interactif (immediat) :
         delete_line = "\n  [ACTION:DELETE:id] -> corbeille recuperable (direct, pas de confirmation)" if tools.get("mail_can_delete") else ""
         sections.append(f"""Mails :
   [ACTION:ARCHIVE:id] [ACTION:READ:id] [ACTION:READBODY:id]
-  [ACTION:REPLY:id:texte] [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]
-  [ACTION:CREATE_TASK:titre]{delete_line}
-  [ACTION:SEND_MAIL:destinataire@email.fr|sujet|corps] -> envoyer depuis la boite Microsoft (Outlook)
-  [ACTION:SEND_GMAIL:destinataire@email.fr|sujet|corps] -> envoyer depuis la boite Gmail (boite perso)
-    Utiliser SEND_GMAIL quand l'utilisateur dit "boite perso", "Gmail", "per1.guillaume@gmail.com", etc.
-    Les deux actions mettent en queue et necessitent confirmation.
-  [ACTION:SEARCH_CONTACTS:prenom nom] -> cherche dans TOUTES les boites connectees (Microsoft + Gmail + ...)
-    A utiliser OBLIGATOIREMENT avant SEND_MAIL ou SEND_GMAIL quand tu ne connais pas l'adresse exacte.
-    Retourne le nom, l'email trouve et la source ('microsoft' ou 'gmail'), ou vide si inconnu.
-  [ACTION:CREATE_CONTACT:Nom|email|telephone_opt] -> cree dans la boite la plus adaptee (Gmail en priorite)
+  [ACTION:REPLY:id:texte] [ACTION:CREATE_TASK:titre]{delete_line}
+  [ACTION:SEND_MAIL:boite|destinataire|sujet|corps]
+    boite = adresse email exacte, 'gmail', 'microsoft', 'perso', 'pro', ou '' (auto)
+    L'utilisateur dit "boite perso" / "Gmail" → 'gmail'
+    L'utilisateur dit "boite pro" / "Outlook" → 'microsoft'
+    Aucune indication → '' (premiere boite disponible)
+    Mise en queue, necessite confirmation.
+    Exemples : [ACTION:SEND_MAIL:|to@mail.fr|Objet|Corps]
+               [ACTION:SEND_MAIL:gmail|to@mail.fr|Objet|Corps]
+               [ACTION:SEND_MAIL:contact@entreprise.fr|client@mail.fr|Objet|Corps]
+  [ACTION:SEARCH_CONTACTS:prenom nom] -> cherche dans TOUTES les boites connectees
+    OBLIGATOIRE avant SEND_MAIL si tu ne connais pas l'email exact.
+    Retourne nom, email et source ('microsoft'/'gmail').
+  [ACTION:CREATE_CONTACT:Nom|email|telephone_opt] -> cree dans la boite la plus adaptee
 Filtre mails :
   [ACTION:LEARN:mail_filter|autoriser: email@domaine.fr]
   [ACTION:LEARN:mail_filter|bloquer: promo@xyz.fr]""")

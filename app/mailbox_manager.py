@@ -242,3 +242,32 @@ def _get_legacy_gmail_email(username: str) -> str:
         return row[0] if row and row[0] else ""
     except Exception:
         return ""
+
+
+def get_connector_for_mailbox(username: str, hint: str = "") -> "MailboxConnector | None":
+    """
+    Résout le connecteur à utiliser selon un hint (email, provider, ou vide).
+    hint = email exact, 'gmail', 'microsoft', 'perso', 'pro', '' → premier disponible.
+    """
+    mailboxes = get_user_mailboxes(username)
+    if not mailboxes:
+        return None
+    if not hint or hint.lower() in ("auto", ""):
+        return mailboxes[0]
+    h = hint.lower().strip()
+    # Correspondance exacte email
+    for m in mailboxes:
+        if m.email.lower() == h:
+            return m
+    # Correspondance partielle email
+    for m in mailboxes:
+        if m.email and h in m.email.lower():
+            return m
+    # Correspondance provider / alias
+    gmail_aliases = {"gmail", "google", "perso", "boite perso", "boîte perso", "personnel", "particulier"}
+    ms_aliases    = {"microsoft", "outlook", "office", "office365", "365", "pro",
+                     "boite pro", "boîte pro", "professionnel", "entreprise"}
+    for m in mailboxes:
+        if m.provider == "gmail"     and h in gmail_aliases: return m
+        if m.provider == "microsoft" and h in ms_aliases:    return m
+    return mailboxes[0]

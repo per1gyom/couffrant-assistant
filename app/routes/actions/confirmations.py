@@ -63,26 +63,27 @@ def _execute_confirmed_action(action: dict, outlook_token: str, tools: dict) -> 
             return {"ok": r.get("status") == "ok", "message": msg,
                     "error": r.get("message", "envoi echoue")}
 
-        if action_type == "SEND_GMAIL":
-            from app.connectors.gmail_connector import send_gmail_message
-            # Convertir le corps texte en HTML (sauts de ligne → <br>)
-            body_html = payload["body"].replace('\r\n', '\n').replace('\r', '\n').replace('\n', '<br>\n')
-            result = send_gmail_message(
-                username=username,
-                to_email=payload["to_email"],
-                subject=payload["subject"],
-                html_body=body_html,
+        if action_type in ("SEND_MAIL", "SEND_GMAIL"):
+            # Envoi unifié via MailboxConnector
+            from app.mailbox_manager import get_connector_for_mailbox
+            mailbox_hint = payload.get("mailbox_hint") or payload.get("from_email", "")
+            # Pour SEND_GMAIL sans hint → forcer gmail
+            if action_type == "SEND_GMAIL" and not mailbox_hint:
+                mailbox_hint = "gmail"
+            connector = get_connector_for_mailbox(username, mailbox_hint)
+            if not connector:
+                return {"ok": False, "message": "Aucune boîte mail connectée.", "error": "no_connector"}
+            body = payload.get("body", "")
+            result = connector.send_mail(
+                to=payload.get("to_email", ""),
+                subject=payload.get("subject", ""),
+                body=body,
+                from_email=payload.get("from_email", ""),
             )
-            msg = f"Mail Gmail envoyé à {payload.get('to_email', '?')}" if result.get("ok") else result.get("error", "Erreur envoi Gmail")
-            return {"ok": result.get("ok", False), "message": msg, "error": result.get("error", "")}
-            r = perform_outlook_action("send_new_mail", {
-                "to_email": payload["to_email"],
-                "subject":  payload["subject"],
-                "body":     payload["body"],
-            }, outlook_token)
-            msg = f"Mail envoye a {payload.get('to_email', '?')}"
-            return {"ok": r.get("status") == "ok", "message": msg,
-                    "error": r.get("message", "envoi echoue")}
+            ok = result.get("ok", False)
+            return {"ok": ok,
+                    "message": result.get("message", f"Mail envoyé à {payload.get('to_email','?')}" if ok else "Erreur envoi"),
+                    "error": result.get("message", "") if not ok else ""}
 
         if action_type == "DELETE_GROUPED":
             ids = payload.get("message_ids", [])

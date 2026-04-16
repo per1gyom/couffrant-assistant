@@ -26,6 +26,44 @@ def _build_delete_label(subjects: list) -> str:
     return f"Supprimer {len(subjects)} mail{'s' if len(subjects) > 1 else ''} ({detail})"
 
 
+def _queue_send_mail(username, tenant_id, mailbox_hint, to_email, subject, body,
+                     conversation_id, default_from_email, seen_set, confirmed):
+    """
+    Met en queue un envoi de mail vers le bon connecteur.
+    mailbox_hint : email, 'gmail', 'microsoft', '' (auto)
+    """
+    dedup_key = (to_email.lower(), subject.lower())
+    if dedup_key in seen_set:
+        return
+    seen_set.add(dedup_key)
+
+    # Résoudre le connecteur
+    connector = None
+    from_email_resolved = default_from_email
+    action_type = "SEND_MAIL"
+    try:
+        from app.mailbox_manager import get_connector_for_mailbox
+        connector = get_connector_for_mailbox(username, mailbox_hint)
+        if connector:
+            from_email_resolved = connector.email
+            action_type = "SEND_GMAIL" if connector.provider == "gmail" else "SEND_MAIL"
+    except Exception:
+        pass
+
+    label = f"{'Gmail' if action_type == 'SEND_GMAIL' else 'Mail'} → {to_email} — {subject[:50]}"
+    queue_action(
+        tenant_id=tenant_id, username=username, action_type=action_type,
+        payload={
+            "to_email": to_email, "subject": subject, "body": body,
+            "from_email": from_email_resolved,
+            "mailbox_hint": mailbox_hint,  # conservé pour la confirmation
+        },
+        label=label, conversation_id=conversation_id,
+    )
+    source = "gmail" if action_type == "SEND_GMAIL" else "mail"
+    log_activity(username, f"{source}_send_queued", to_email, subject[:100], tenant_id=tenant_id)
+
+
 def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_mails,
                          username, tenant_id, conversation_id, from_email=""):
     confirmed = []
@@ -165,55 +203,56 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
         except Exception:
             pass
 
-    # SEND_MAIL : nouveau mail (pas une reponse) — mise en queue + confirmation
-    # Dédup par (to_email, subject) pour éviter le double-queue si le LLM génère 2 tags
-    _seen_send_mail = set()
-    for match in re.finditer(r'\[ACTION:SEND_MAIL:([^\|\]]+)\|([^\|\]]+)\|(.+?)\]', response, re.DOTALL):
-        to_email    = match.group(1).strip()
-        subject     = match.group(2).strip()
-        body        = match.group(3).strip().replace('\\n', '\n')
-        dedup_key   = (to_email.lower(), subject.lower())
-        if dedup_key in _seen_send_mail:
-            continue
-        _seen_send_mail.add(dedup_key)
-        label       = f"Envoyer un mail a {to_email} — {subject[:50]}"
-        action_id   = queue_action(
-            tenant_id=tenant_id, username=username, action_type="SEND_MAIL",
-            payload={"to_email": to_email, "subject": subject, "body": body,
-                     "from_email": from_email},
-            label=label, conversation_id=conversation_id,
-        )
-        log_activity(username, "mail_send_queued", to_email, subject[:100], tenant_id=tenant_id)
+    # ── ENVOI MAIL UNIFIÉ ────────────────────────────────────────────────
+    # Format nouveau (4 champs) : [ACTION:SEND_MAIL:boite|to|sujet|corps]
+    #   boite = email, 'gmail', 'microsoft', 'perso', 'pro', '' (auto)
+    # Format ancien (3 champs) : [ACTION:SEND_MAIL:to|sujet|corps]
+    #   → backward compat, utilise le premier connecteur disponible
+    _seen_send = set()
 
-    # SEND_GMAIL : nouveau mail depuis Gmail (boite perso) — mise en queue + confirmation
-    _seen_gmail = set()
-    for match in re.finditer(r'\[ACTION:SEND_GMAIL:([^\|\]]+)\|([^\|\]]+)\|(.+?)\]', response, re.DOTALL):
+    for match in re.finditer(
+        r'\[ACTION:SEND_MAIL:([^\|\]]+)\|([^\|\]]+)\|([^\|\]]+)\|(.+?)\]',
+        response, re.DOTALL
+    ):
+        # Nouveau format : boite | to | sujet | corps
+        mailbox_hint = match.group(1).strip()
+        to_email     = match.group(2).strip()
+        subject      = match.group(3).strip()
+        body         = match.group(4).strip().replace('\\n', '\n')
+        _queue_send_mail(
+            username, tenant_id, mailbox_hint, to_email, subject, body,
+            conversation_id, from_email, _seen_send, confirmed
+        )
+
+    for match in re.finditer(
+        r'\[ACTION:SEND_MAIL:([^\|\]]+)\|([^\|\]]+)\|(.+?)\]',
+        response, re.DOTALL
+    ):
+        # Ancien format (3 champs) : to | sujet | corps
+        # S'assurer qu'il ne matche pas les 4-champs déjà traités
+        full = match.group(0)
+        if full.count('|') >= 3:
+            continue
         to_email = match.group(1).strip()
         subject  = match.group(2).strip()
         body     = match.group(3).strip().replace('\\n', '\n')
-        dedup_key = (to_email.lower(), subject.lower())
-        if dedup_key in _seen_gmail:
-            continue
-        _seen_gmail.add(dedup_key)
-        # Récupérer l'email Gmail de l'expéditeur
-        gmail_from = ""
-        try:
-            from app.database import get_pg_conn as _gpc
-            _c = _gpc(); cur = _c.cursor()
-            cur.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
-            row = cur.fetchone()
-            if row and row[0]: gmail_from = row[0]
-            _c.close()
-        except Exception:
-            pass
-        label = f"Gmail → {to_email} — {subject[:50]}"
-        action_id = queue_action(
-            tenant_id=tenant_id, username=username, action_type="SEND_GMAIL",
-            payload={"to_email": to_email, "subject": subject, "body": body,
-                     "from_email": gmail_from},
-            label=label, conversation_id=conversation_id,
+        _queue_send_mail(
+            username, tenant_id, "", to_email, subject, body,
+            conversation_id, from_email, _seen_send, confirmed
         )
-        log_activity(username, "gmail_send_queued", to_email, subject[:100], tenant_id=tenant_id)
+
+    # Backward compat : SEND_GMAIL → routé vers connecteur Gmail
+    for match in re.finditer(
+        r'\[ACTION:SEND_GMAIL:([^\|\]]+)\|([^\|\]]+)\|(.+?)\]',
+        response, re.DOTALL
+    ):
+        to_email = match.group(1).strip()
+        subject  = match.group(2).strip()
+        body     = match.group(3).strip().replace('\\n', '\n')
+        _queue_send_mail(
+            username, tenant_id, "gmail", to_email, subject, body,
+            conversation_id, from_email, _seen_send, confirmed
+        )
 
     # CREATE_CONTACT : [ACTION:CREATE_CONTACT:Nom|email|téléphone_optionnel]
     for match in re.finditer(r'\[ACTION:CREATE_CONTACT:([^\|\]]+)\|([^\|\]]+)(?:\|([^\]]*))?\]', response):
