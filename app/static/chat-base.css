@@ -89,6 +89,8 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .welcome h2 { font-size: 22px; font-weight: 700; color: var(--text); margin-bottom: 8px; letter-spacing: -0.03em; }
 .welcome p { font-size: 14px; max-width: 400px; margin: 0 auto; line-height: 1.7; color: var(--text-muted); }
 
+/* Pills icônes settings — modernes */
+.s-pill { display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;flex-shrink:0;margin-right:8px; }
 /* MODAL PARAMÈTRES — boutons inline */
 .settings-btn-primary { padding:8px 14px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--font);white-space:nowrap;transition:background .15s; }
 .settings-btn-primary:hover { background:var(--accent-hover); }
@@ -144,8 +146,12 @@ textarea#input.interim { color: var(--text-muted); font-style: italic; }
 .bubble h1:first-child, .bubble h2:first-child, .bubble h3:first-child { margin-top: 0; }
 .bubble p { margin: 6px 0; }
 .bubble p:first-child { margin-top: 0; }
-.bubble ul, .bubble ol { margin: 6px 0; padding-left: 20px; }
-.bubble li { margin: 3px 0; }
+.bubble ul { margin: 8px 0; padding-left: 0; list-style: none; }
+.bubble ol { margin: 8px 0; padding-left: 20px; }
+.bubble ul li { position: relative; padding-left: 18px; margin: 5px 0; line-height: 1.65; }
+.bubble ul li::before { content: ''; position: absolute; left: 3px; top: 0.65em; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: 0.65; }
+.bubble ol li { margin: 5px 0; line-height: 1.65; padding-left: 4px; }
+.bubble ol li::marker { color: var(--accent); font-weight: 600; }
 .bubble strong { font-weight: 650; color: var(--text); }
 .bubble hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
 .bubble a { color: var(--accent); text-decoration: none; font-weight: 500; }
