@@ -145,16 +145,19 @@ def get_costs_dashboard(tenant_id: str = None, days: int = 30) -> dict:
 
         # Par utilisateur
         c.execute(f"""
-            SELECT username, COUNT(*) AS calls,
-                   COALESCE(SUM(input_tokens + output_tokens), 0) AS tokens,
-                   COALESCE(SUM(COALESCE(cost_usd_estimate, 0)), 0) AS cost
-            FROM llm_usage
-            WHERE created_at > NOW() - INTERVAL '%s days'
+            SELECT lu.username, u.tenant_id, COUNT(*) AS calls,
+                   COALESCE(SUM(lu.input_tokens), 0)  AS input_tokens,
+                   COALESCE(SUM(lu.output_tokens), 0) AS output_tokens,
+                   COALESCE(SUM(lu.input_tokens + lu.output_tokens), 0) AS tokens
+            FROM llm_usage lu
+            LEFT JOIN users u ON u.username = lu.username
+            WHERE lu.created_at > NOW() - INTERVAL '%s days'
             {tenant_filter}
-            GROUP BY username ORDER BY cost DESC
+            GROUP BY lu.username, u.tenant_id ORDER BY tokens DESC
         """, params_base)
         by_user = [
-            {"username": r[0], "calls": r[1], "tokens": r[2], "cost_usd": float(r[3])}
+            {"username": r[0], "tenant_id": r[1] or "", "calls": r[2],
+             "input_tokens": r[3], "output_tokens": r[4], "tokens": r[5]}
             for r in c.fetchall()
         ]
 

@@ -23,6 +23,7 @@ function switchTab(name){
   if(name==='users') loadUsers();
   if(name==='rules'){populateUserFilters();loadRules();}
   if(name==='insights'){populateUserFilters();loadInsights();}
+  if(name==='usage') loadUsage();
   if(name==='companies') loadCompanies();
   if(name==='profile') loadProfile();
 }
@@ -155,29 +156,46 @@ function showAddConnection(tenantId,idx){document.getElementById('conn-add-'+idx
 
 async function loadConnections(tenantId,idx){
   const el=document.getElementById('conn-list-'+idx);
+  const summaryEl=document.getElementById('conn-summary-'+idx);
   if(!el) return;
   try{
     const url=currentUserScope==='admin'?`/admin/connections/${tenantId}`:'/tenant/connections';
     const conns=await(await fetch(url)).json();
+
+    // ── Résumé dans l'entête de la carte ──
+    if(summaryEl){
+      const byType={};
+      for(const c of conns){
+        const grp = c.tool_type==='gmail'||c.tool_type==='microsoft' ? 'mail'
+                  : c.tool_type==='sharepoint'||c.tool_type==='google_drive' ? 'drive' : 'autre';
+        if(!byType[grp]) byType[grp]={total:0,connected:0};
+        byType[grp].total++;
+        if(c.status==='connected') byType[grp].connected++;
+      }
+      const pills = Object.entries(byType).map(([g,v])=>{
+        const icon = g==='mail'?'📧': g==='drive'?'📁':'🔧';
+        const ok = v.connected===v.total;
+        const color = ok?'var(--green)':v.connected>0?'var(--orange)':'var(--text3)';
+        return `<span style="font-size:10px;color:${color};font-family:var(--mono)">${icon} ${v.connected}/${v.total}</span>`;
+      });
+      summaryEl.innerHTML = pills.length ? pills.join('&nbsp;·&nbsp;') : '<span style="font-size:10px;color:var(--text3)">aucune connexion</span>';
+    }
+
     if(!conns.length){el.innerHTML='<span style="color:var(--text3)">Aucune connexion configurée.</span>';return;}
     el.innerHTML=conns.map(c=>{
       const icon=TOOL_ICONS[c.tool_type]||'🔌';
-      const statusBadge=c.status==='connected'?`<span class="badge badge-green" style="font-size:9px">✅ ${c.connected_email||'connecté'}</span>`:c.status==='expired'?'<span class="badge badge-red" style="font-size:9px">⚠️ expiré</span>':'<span class="badge badge-gray" style="font-size:9px">non connecté</span>';
-      // Bouton connexion OAuth selon le type
-      let oauthBtn = '';
-      if (c.status !== 'connected') {
-        if (c.tool_type === 'microsoft') {
-          oauthBtn = `<a href="/admin/connections/${tenantId}/oauth/microsoft/start?connection_id=${c.id}" class="btn btn-primary" style="padding:2px 10px;font-size:10px;text-decoration:none">🔵 Connecter Microsoft</a>`;
-        } else if (c.tool_type === 'gmail') {
-          oauthBtn = `<a href="/admin/connections/${tenantId}/oauth/gmail/start?connection_id=${c.id}" class="btn btn-accent" style="padding:2px 10px;font-size:10px;text-decoration:none">✉️ Connecter Gmail</a>`;
-        }
-      } else {
-        // Déjà connecté — proposer de reconnecter
-        if (c.tool_type === 'microsoft') {
-          oauthBtn = `<a href="/admin/connections/${tenantId}/oauth/microsoft/start?connection_id=${c.id}" class="btn btn-ghost" style="padding:2px 10px;font-size:10px;text-decoration:none">🔄 Reconnecter</a>`;
-        } else if (c.tool_type === 'gmail') {
-          oauthBtn = `<a href="/admin/connections/${tenantId}/oauth/gmail/start?connection_id=${c.id}" class="btn btn-ghost" style="padding:2px 10px;font-size:10px;text-decoration:none">🔄 Reconnecter</a>`;
-        }
+      const statusBadge=c.status==='connected'
+        ?`<span class="badge badge-green" style="font-size:9px">✅ ${c.connected_email||'connecté'}</span>`
+        :c.status==='expired'
+        ?'<span class="badge badge-red" style="font-size:9px">⚠️ expiré</span>'
+        :'<span class="badge badge-gray" style="font-size:9px">non connecté</span>';
+      let oauthBtn='';
+      if(c.status!=='connected'){
+        if(c.tool_type==='microsoft') oauthBtn=`<a href="/admin/connections/${tenantId}/oauth/microsoft/start?connection_id=${c.id}" class="btn btn-primary" style="padding:2px 10px;font-size:10px;text-decoration:none">🔵 Connecter Microsoft</a>`;
+        else if(c.tool_type==='gmail') oauthBtn=`<a href="/admin/connections/${tenantId}/oauth/gmail/start?connection_id=${c.id}" class="btn btn-accent" style="padding:2px 10px;font-size:10px;text-decoration:none">✉️ Connecter Gmail</a>`;
+      }else{
+        if(c.tool_type==='microsoft') oauthBtn=`<a href="/admin/connections/${tenantId}/oauth/microsoft/start?connection_id=${c.id}" class="btn btn-ghost" style="padding:2px 10px;font-size:10px;text-decoration:none">🔄 Reconnecter</a>`;
+        else if(c.tool_type==='gmail') oauthBtn=`<a href="/admin/connections/${tenantId}/oauth/gmail/start?connection_id=${c.id}" class="btn btn-ghost" style="padding:2px 10px;font-size:10px;text-decoration:none">🔄 Reconnecter</a>`;
       }
       const userBadges=c.assignments.map(a=>`<span class="badge ${a.enabled?'badge-blue':'badge-gray'}" style="font-size:9px;cursor:pointer" title="${a.access_level}" onclick="unassignConn(${c.id},'${a.username}','${tenantId}',${idx})">${a.username} ✕</span>`);
       const usersInline=c.assignments.length<=5;
@@ -186,7 +204,6 @@ async function loadConnections(tenantId,idx){
         :`<details style="display:inline"><summary style="cursor:pointer;font-size:10px;color:var(--accent)">${c.assignments.length} utilisateurs ▾</summary><div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">${userBadges.join(' ')}</div></details>`;
       return `<div style="padding:8px 12px;background:var(--bg1);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <span style="font-size:16px">${icon}</span>
           <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px;cursor:pointer;border-bottom:1px dashed var(--text3)" onclick="renameConn(${c.id},'${tenantId}',${idx},'${c.label.replace(/'/g,"\\'")}')" title="Cliquer pour renommer">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span> ${statusBadge}</div>
           ${oauthBtn}
@@ -336,7 +353,7 @@ async function loadCompanies(){
         <div class="tenant-header" onclick="toggleTenant(${i})">
           <span class="tenant-toggle" id="toggle-${i}">›</span>
           <span class="tenant-name">🏢 ${t.name}${(t.settings||{}).suspended?'<span class="badge badge-yellow" style="margin-left:8px;font-size:10px">⏸️ SUSPENDU</span>':''}${legalForm?' <span style="font-size:11px;color:var(--text3);font-weight:400">'+legalForm+'</span>':''}</span>
-          <div class="tenant-meta"><span>👥 ${t.user_count} collaborateur(s)</span><span>📬 ${fmt(t.total_mails)} mails</span><span>💬 ${fmt(t.total_conv)} conversations</span><span>🔗 ${msBar}</span>${siret?`<span style="color:var(--text3)">SIRET: ${siret}</span>`:''}</div>
+          <div class="tenant-meta"><span>👥 ${t.user_count} collaborateur(s)</span><span>📬 ${fmt(t.total_mails)} mails</span><span>💬 ${fmt(t.total_conv)} conversations</span><span id="conn-summary-${i}" style="display:inline-flex;gap:6px;align-items:center">…</span>${siret?`<span style="color:var(--text3)">SIRET: ${siret}</span>`:''}</div>
         </div>
         <div class="tenant-body" id="body-${i}">
           <table><thead><tr><th>Identifiant</th><th>Email</th><th>Rôle</th><th>MS</th><th>Mails</th><th>Conv.</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
@@ -614,7 +631,68 @@ async function resetPassword(){
   const d=await(await fetch(`/admin/reset-password/${currentEditUser}`,{method:'POST'})).json();
   if(d.status==='ok'){const sent=d.email_sent?`Envoyé à ${d.email}`:'Copiez le lien ci-dessous';document.getElementById('reset-result').innerHTML=`<div class="reset-box"><div style="font-family:var(--mono);font-size:11px;color:var(--green);margin-bottom:4px">✓ Lien généré — ${sent}</div><div class="reset-link">${d.reset_url}</div><button class="btn btn-ghost" style="margin-top:8px;font-size:11px;padding:4px 10px" onclick="navigator.clipboard.writeText('${d.reset_url}').then(()=>this.textContent='Copié ✓')">Copier</button></div>`;}
 }
-function askDeleteUser(username){usernameToDelete=username;document.getElementById('delete-username-label').textContent=username;document.getElementById('delete-user-confirm-input').value='';document.getElementById('delete-user-confirm-input').placeholder=username;document.getElementById('delete-user-btn').disabled=true;openModal('delete-user');}
+async function loadUsage() {
+  const days   = parseInt(document.getElementById('usage-period').value || '30');
+  const tenant = document.getElementById('usage-tenant-filter').value || '';
+  const url    = `/admin/costs?days=${days}${tenant ? '&tenant_id='+encodeURIComponent(tenant) : ''}`;
+
+  ['usage-user-tbody','usage-tenant-tbody'].forEach(id =>
+    document.getElementById(id).innerHTML =
+      '<tr class="loading-row"><td colspan="6"><span class="loader"></span></td></tr>');
+
+  try {
+    const d = await (await fetch(url)).json();
+
+    // Stats globales
+    const totalTokens = (d.total_input_tokens||0)+(d.total_output_tokens||0);
+    document.getElementById('usage-stats').innerHTML = `
+      <div class="stat-card"><div class="stat-label">Appels LLM</div><div class="stat-value accent">${fmt(d.total_calls||0)}</div></div>
+      <div class="stat-card"><div class="stat-label">Tokens entrants</div><div class="stat-value">${fmt(d.total_input_tokens||0)}</div></div>
+      <div class="stat-card"><div class="stat-label">Tokens sortants</div><div class="stat-value">${fmt(d.total_output_tokens||0)}</div></div>
+      <div class="stat-card"><div class="stat-label">Total tokens</div><div class="stat-value green">${fmt(totalTokens)}</div></div>`;
+
+    // Agréger par tenant depuis by_user
+    const ta = {};
+    for (const u of d.by_user||[]) {
+      const t = u.tenant_id || '—';
+      if (!ta[t]) ta[t] = {calls:0, inp:0, out:0, users:new Set()};
+      ta[t].calls += u.calls||0;
+      ta[t].inp   += u.input_tokens||0;
+      ta[t].out   += u.output_tokens||0;
+      ta[t].users.add(u.username);
+    }
+    document.getElementById('usage-tenant-tbody').innerHTML =
+      Object.keys(ta).length
+      ? Object.entries(ta).sort((a,b)=>(b[1].inp+b[1].out)-(a[1].inp+a[1].out)).map(([t,v])=>`
+          <tr>
+            <td><strong class="mono">${t}</strong></td>
+            <td class="mono">${v.users.size}</td>
+            <td class="mono">${fmt(v.calls)}</td>
+            <td class="mono">${fmt(v.inp)}</td>
+            <td class="mono">${fmt(v.out)}</td>
+            <td class="mono"><strong>${fmt(v.inp+v.out)}</strong></td>
+          </tr>`).join('')
+      : '<tr class="loading-row"><td colspan="6" style="color:var(--text3)">Aucune donnée.</td></tr>';
+
+    // Par utilisateur
+    document.getElementById('usage-user-tbody').innerHTML =
+      (d.by_user||[]).length
+      ? (d.by_user||[]).map(u=>`
+          <tr>
+            <td><strong class="mono">${u.username}</strong></td>
+            <td style="font-size:11px;color:var(--text3)">${u.tenant_id||'—'}</td>
+            <td class="mono">${fmt(u.calls||0)}</td>
+            <td class="mono">${fmt(u.input_tokens||0)}</td>
+            <td class="mono">${fmt(u.output_tokens||0)}</td>
+            <td class="mono"><strong>${fmt(u.tokens||0)}</strong></td>
+          </tr>`).join('')
+      : '<tr class="loading-row"><td colspan="6" style="color:var(--text3)">Aucune donnée.</td></tr>';
+
+  } catch(e) {
+    document.getElementById('usage-stats').innerHTML =
+      `<div class="stat-card" style="color:var(--red)">❌ ${e.message}</div>`;
+  }
+}usernameToDelete=username;document.getElementById('delete-username-label').textContent=username;document.getElementById('delete-user-confirm-input').value='';document.getElementById('delete-user-confirm-input').placeholder=username;document.getElementById('delete-user-btn').disabled=true;openModal('delete-user');}
 
 async function adminConfirmDelete() {
   if (!currentEditUser) return;
