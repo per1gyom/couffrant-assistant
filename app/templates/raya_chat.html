@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes, minimum-scale=0.5, maximum-scale=5">
 <title>Raya</title>
-<link rel="manifest" href="/static/manifest.json?v=59">
+<link rel="manifest" href="/static/manifest.json?v=60">
 <meta name="theme-color" content="#0057b8">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
-<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=59">
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=60">
 <script>
 window.__RAYA_V = 28;
 if ('serviceWorker' in navigator) {
@@ -17,11 +17,11 @@ if ('serviceWorker' in navigator) {
   caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
 }
 </script>
-<link rel="stylesheet" href="/static/chat-base.css?v=59">
-<link rel="stylesheet" href="/static/chat-components.css?v=59">
-<link rel="stylesheet" href="/static/chat-drawer.css?v=59">
-<link rel="stylesheet" href="/static/onboarding.css?v=59">
-<link rel="stylesheet" href="/static/mobile.css?v=59">
+<link rel="stylesheet" href="/static/chat-base.css?v=60">
+<link rel="stylesheet" href="/static/chat-components.css?v=60">
+<link rel="stylesheet" href="/static/chat-drawer.css?v=60">
+<link rel="stylesheet" href="/static/onboarding.css?v=60">
+<link rel="stylesheet" href="/static/mobile.css?v=60">
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -376,20 +376,20 @@ if ('serviceWorker' in navigator) {
     <div class="d-sep"></div>
     <div class="d-group">
       <div class="d-group-title">&#127891; Onboarding</div>
-      <div class="d-btn" onclick="drawerAction(this,'/onboarding/restart','onb-restart');closeDrawer()"><span class="d-btn-icon">&#128257;</span><div class="d-btn-body"><span class="d-btn-label">Relancer l'onboarding</span><span class="d-btn-desc">Recommencer la configuration initiale du profil Raya.</span><div class="d-btn-result" id="result-onb-restart"></div></div></div>
+      <div class="d-btn" onclick="drawerActionPost(this,'/onboarding/restart','onb-restart');closeDrawer()"><span class="d-btn-icon">&#128257;</span><div class="d-btn-body"><span class="d-btn-label">Relancer l'onboarding</span><span class="d-btn-desc">Recommencer la configuration initiale du profil Raya.</span><div class="d-btn-result" id="result-onb-restart"></div></div></div>
     </div>
     <div class="d-sep"></div>
     <div class="d-group">
       <div class="d-group-title">&#128231; Connexions</div>
       <div class="d-btn nav" onclick="window.location.href='/login/gmail'"><span class="d-btn-icon">&#9993;&#65039;</span><div class="d-btn-body"><span class="d-btn-label">Connecter Gmail</span><span class="d-btn-desc">Autoriser Raya a lire tes mails Gmail via OAuth2 Google.</span></div></div>
       <div class="d-btn nav" onclick="window.location.href='/login'"><span class="d-btn-icon">&#128309;</span><div class="d-btn-body"><span class="d-btn-label">Reconnecter Microsoft 365</span><span class="d-btn-desc">Renouveler l'autorisation Microsoft si le token a expire.</span></div></div>
-      <div class="d-btn" onclick="drawerAction(this,'/admin/extract-signatures','sig')"><span class="d-btn-icon">&#128140;</span><div class="d-btn-body"><span class="d-btn-label">Recuperer mes signatures</span><span class="d-btn-desc">Analyse les derniers mails envoyes pour extraire ta signature automatiquement.</span><div class="d-btn-result" id="result-sig"></div></div></div>
+      <div class="d-btn" onclick="drawerActionPost(this,'/admin/extract-signatures','sig')"><span class="d-btn-icon">&#128140;</span><div class="d-btn-body"><span class="d-btn-label">Recuperer mes signatures</span><span class="d-btn-desc">Analyse les derniers mails envoyes pour extraire ta signature automatiquement.</span><div class="d-btn-result" id="result-sig"></div></div></div>
     </div>
     <div class="d-sep"></div>
     <div class="d-group">
       <div class="d-group-title">&#128274; Donnees personnelles</div>
       <div class="d-btn nav" onclick="window.open('/account/export','_blank')"><span class="d-btn-icon">&#128230;</span><div class="d-btn-body"><span class="d-btn-label">Exporter mes donnees</span><span class="d-btn-desc">Telecharge toutes tes donnees Raya au format JSON (RGPD).</span></div></div>
-      <div class="d-btn danger" onclick="(function(){const v=prompt('Tape SUPPRIMER pour confirmer :');if(v==='SUPPRIMER'){fetch('/account/delete?confirm=yes',{method:'DELETE'}).then(r=>r.json()).then(d=>{if(d.ok){showToast('Compte supprime. Au revoir !','ok',4000);setTimeout(()=>window.location.href='/logout',2000);}else{showToast('Erreur : '+(d.message||'?'),'err',5000);}}).catch(()=>showToast('Erreur reseau','err',4000));}else if(v!==null){showToast('Confirmation incorrecte.','err',4000);}})()"><span class="d-btn-icon">&#9940;</span><div class="d-btn-body"><span class="d-btn-label">Supprimer mon compte</span><span class="d-btn-desc">Supprime definitivement ton compte et toutes tes donnees. Irreversible.</span></div></div>
+      <div class="d-btn danger" onclick="(function(){const pw=prompt('Entrez votre mot de passe pour confirmer :');if(pw===null)return;if(!pw){showToast('Mot de passe requis','err',4000);return;}fetch('/account/delete/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})}).then(r=>r.json()).then(d=>{if(d.status==='ok'){showToast('Demande envoyée — votre admin sera notifié.','ok',5000);}else{showToast('Erreur : '+(d.message||'?'),'err',5000);}}).catch(()=>showToast('Erreur réseau','err',4000));})()"><span class="d-btn-icon">&#9940;</span><div class="d-btn-body"><span class="d-btn-label">Supprimer mon compte</span><span class="d-btn-desc">Supprime definitivement ton compte et toutes tes donnees. Irreversible.</span></div></div>
     </div>
     <div class="d-sep"></div>
     <div class="d-group">
@@ -401,17 +401,17 @@ if ('serviceWorker' in navigator) {
   </div>
 </div>
 
-<script src="/static/chat-onboarding.js?v=59"></script>
-<script src="/static/chat-shortcuts.js?v=59"></script>
-<script src="/static/chat-signatures.js?v=59"></script>
-<script src="/static/chat-voice.js?v=59"></script>
-<script src="/static/chat-feedback.js?v=59"></script>
-<script src="/static/chat-triage.js?v=59"></script>
-<script src="/static/chat-admin.js?v=59"></script>
-<script src="/static/chat-topics.js?v=59"></script>
-<script src="/static/chat-core.js?v=59"></script>
-<script src="/static/chat-messages.js?v=59"></script>
-<script src="/static/chat-main.js?v=59"></script>
+<script src="/static/chat-onboarding.js?v=60"></script>
+<script src="/static/chat-shortcuts.js?v=60"></script>
+<script src="/static/chat-signatures.js?v=60"></script>
+<script src="/static/chat-voice.js?v=60"></script>
+<script src="/static/chat-feedback.js?v=60"></script>
+<script src="/static/chat-triage.js?v=60"></script>
+<script src="/static/chat-admin.js?v=60"></script>
+<script src="/static/chat-topics.js?v=60"></script>
+<script src="/static/chat-core.js?v=60"></script>
+<script src="/static/chat-messages.js?v=60"></script>
+<script src="/static/chat-main.js?v=60"></script>
 
 <script>
   // ─── MODAL PARAMÈTRES UTILISATEUR ───

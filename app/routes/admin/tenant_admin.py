@@ -182,3 +182,39 @@ def tenant_rules(request: Request, user: dict = Depends(require_tenant_admin)):
         return [dict(zip(cols, row)) for row in c.fetchall()]
     finally:
         if conn: conn.close()
+
+
+# ─── CONNEXIONS V2 — lecture seule pour tenant admin ───
+
+@router.get("/tenant/connections")
+def tenant_list_connections(request: Request, user: dict = Depends(require_tenant_admin)):
+    """Retourne les connexions du tenant (sans credentials)."""
+    from app.connections import list_connections
+    return list_connections(user["tenant_id"])
+
+@router.post("/tenant/connections")
+def tenant_create_connection(request: Request, payload: dict = Body(...), user: dict = Depends(require_tenant_admin)):
+    from app.connections import create_connection
+    return create_connection(user["tenant_id"], payload.get("tool_type",""), payload.get("label",""),
+        auth_type=payload.get("auth_type","manual"), config=payload.get("config",{}),
+        credentials={}, created_by=user["username"], status="not_configured")
+
+@router.put("/tenant/connections/{connection_id}")
+def tenant_update_connection(request: Request, connection_id: int, payload: dict = Body(...), user: dict = Depends(require_tenant_admin)):
+    from app.connections import update_connection
+    return update_connection(connection_id, **{k:v for k,v in payload.items() if k != "credentials"})
+
+@router.delete("/tenant/connections/{connection_id}")
+def tenant_delete_connection(request: Request, connection_id: int, user: dict = Depends(require_tenant_admin)):
+    from app.connections import delete_connection
+    return delete_connection(connection_id)
+
+@router.post("/tenant/connections/{connection_id}/assign")
+def tenant_assign_connection(request: Request, connection_id: int, payload: dict = Body(...), user: dict = Depends(require_tenant_admin)):
+    from app.connections import assign_connection
+    return assign_connection(connection_id, payload.get("username",""), payload.get("access_level","read_only"), payload.get("enabled",True))
+
+@router.delete("/tenant/connections/{connection_id}/assign/{username}")
+def tenant_unassign_connection(request: Request, connection_id: int, username: str, user: dict = Depends(require_tenant_admin)):
+    from app.connections import unassign_connection
+    return unassign_connection(connection_id, username)

@@ -615,6 +615,21 @@ async function resetPassword(){
   if(d.status==='ok'){const sent=d.email_sent?`Envoyé à ${d.email}`:'Copiez le lien ci-dessous';document.getElementById('reset-result').innerHTML=`<div class="reset-box"><div style="font-family:var(--mono);font-size:11px;color:var(--green);margin-bottom:4px">✓ Lien généré — ${sent}</div><div class="reset-link">${d.reset_url}</div><button class="btn btn-ghost" style="margin-top:8px;font-size:11px;padding:4px 10px" onclick="navigator.clipboard.writeText('${d.reset_url}').then(()=>this.textContent='Copié ✓')">Copier</button></div>`;}
 }
 function askDeleteUser(username){usernameToDelete=username;document.getElementById('delete-username-label').textContent=username;document.getElementById('delete-user-confirm-input').value='';document.getElementById('delete-user-confirm-input').placeholder=username;document.getElementById('delete-user-btn').disabled=true;openModal('delete-user');}
+
+async function adminConfirmDelete() {
+  if (!currentEditUser) return;
+  if (!confirm(`Confirmer la suppression définitive de "${currentEditUser}" ? Irréversible.`)) return;
+  const d = await (await fetch(`/admin/delete-user/${currentEditUser}`, {method:'DELETE'})).json();
+  if (d.status === 'ok') { setAlert('user-alert','✅ '+d.message,'ok'); closeModal('edit-user'); loadUsers(); loadCompanies(); }
+  else { setAlert('edit-user-alert','❌ '+(d.message||d.error),'err'); }
+}
+
+async function adminRejectDelete() {
+  if (!currentEditUser) return;
+  const d = await (await fetch(`/admin/users/${currentEditUser}/reject-delete`, {method:'POST'})).json();
+  if (d.status === 'ok') { setAlert('user-alert','✅ Demande de suppression refusée.','ok'); closeModal('edit-user'); loadUsers(); }
+  else { setAlert('edit-user-alert','❌ '+(d.message||d.error),'err'); }
+}
 async function confirmDeleteUser(){
   const confirmInput=document.getElementById('delete-user-confirm-input');
   if(!confirmInput||confirmInput.value!==usernameToDelete){setAlert('delete-user-alert','Tapez le nom d\'utilisateur exact pour confirmer.','err');return;}

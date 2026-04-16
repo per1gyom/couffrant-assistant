@@ -25,7 +25,6 @@
 
 <nav class="nav-tabs">
   <div class="tab active" onclick="switchTab('memory')">Mémoire</div>
-  <div class="tab" onclick="switchTab('users')">Utilisateurs</div>
   <div class="tab" onclick="switchTab('rules')">Règles</div>
   <div class="tab" onclick="switchTab('insights')">Insights</div>
   <div class="tab" onclick="switchTab('actions')">Actions</div>
@@ -240,6 +239,7 @@
       </div>
     </div>
     <div class="form-group"><label>Email</label><input type="email" id="edit-email" placeholder="prenom@domaine.fr"></div>
+    <div class="form-group"><label>Nom d'affichage</label><input type="text" id="edit-display-name" placeholder="ex : Guillaume D." maxlength="80"></div>
     <div class="form-group">
       <label>Téléphone (optionnel)</label>
       <input type="tel" id="edit-phone" placeholder="+33 6 12 34 56 78">

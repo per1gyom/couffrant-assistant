@@ -13,6 +13,17 @@ async function drawerAction(btn, url, id) {
   } catch(e) { el.className='d-btn-result err'; el.textContent='❌ Erreur: '+e.message; showToast("Erreur lors de l'action",'err'); }
   btn.disabled=false;
 }
+
+async function drawerActionPost(btn, url, id) {
+  const el=document.getElementById('result-'+id);
+  el.className='d-btn-result loading'; el.textContent='⏳ En cours…'; btn.disabled=true;
+  try {
+    const d=await (await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})).json();
+    const txt=formatDrawerResult(d);
+    el.className='d-btn-result ok'; el.textContent=txt; showToast(txt.split('\n')[0].substring(0,60),'ok');
+  } catch(e) { el.className='d-btn-result err'; el.textContent='❌ Erreur: '+e.message; showToast("Erreur lors de l'action",'err'); }
+  btn.disabled=false;
+}
 async function drawerConfirmAction(e, url, id) { e.stopPropagation(); drawerHideConfirm(e,'confirm-'+id); await drawerAction(e.target.closest('.d-btn'), url, id); }
 function drawerShowConfirm(id) { document.getElementById(id).classList.add('visible'); }
 function drawerHideConfirm(e, id) { e.stopPropagation(); document.getElementById(id).classList.remove('visible'); }
