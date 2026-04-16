@@ -168,6 +168,12 @@
     <button class="btn btn-primary" onclick="saveEmail()">Enregistrer l'email</button>
   </div>
   <div class="profile-card">
+    <div class="profile-section-title">✏️ Nom d’affichage</div>
+    <div class="profile-info">Ce nom apparaît en haut de Raya. Laissez vide pour utiliser l’identifiant (première lettre en majuscule).</div>
+    <div class="form-group"><label>Nom d’affichage</label><input type="text" id="profile-display-name" placeholder="ex : Guillaume D., Pierre Martin…" maxlength="80"></div>
+    <button class="btn btn-primary" onclick="saveDisplayName()">Enregistrer le nom</button>
+  </div>
+  <div class="profile-card">
     <div class="profile-section-title">🔑 Changer le mot de passe</div>
     <div class="profile-info">Critères : 12 caractères min · majuscule · minuscule · chiffre · caractère spécial.</div>
     <div id="password-alert" class="alert"></div>
@@ -317,6 +323,46 @@
   </div>
 </div>
 
-<script src="/static/admin-panel.js?v=24"></script>
+<script src="/static/admin-panel.js?v=25"></script>
+<script>
+// display_name patch v25
+(function(){
+  const _origSave=window.saveUser;
+  window.saveUser=async function(){
+    const email=document.getElementById('edit-email').value.trim();
+    const phone=document.getElementById('edit-phone').value.trim();
+    const scope=document.getElementById('edit-scope').value;
+    const dnEl=document.getElementById('edit-display-name');
+    const displayName=dnEl?dnEl.value.trim():'';
+    const d=await(await fetch('/admin/update-user/'+currentEditUser,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,scope,phone:phone||null,display_name:displayName||null})})).json();
+    if(d.status==='ok'){setAlert('user-alert','✅ Utilisateur mis à jour.','ok');closeModal('edit-user');loadUsers();}
+    else{setAlert('edit-user-alert','❌ '+(d.message||d.error),'err');}
+  };
+  const _origLoad=window.loadUsers;
+  window.loadUsers=async function(){
+    await _origLoad();
+    try{const users=await(await fetch('/admin/users')).json();window._dnMap={};users.forEach(u=>{window._dnMap[u.username]=u.display_name||'';});}catch(e){}
+  };
+  const _origEdit=window.editUser;
+  window.editUser=function(username,email,scope,phone,displayName){
+    _origEdit(username,email,scope,phone);
+    const el=document.getElementById('edit-display-name');
+    if(!el)return;
+    el.value=(displayName!==undefined)?displayName||'':(window._dnMap?window._dnMap[username]||'':'');
+  };
+  const _origProf=window.loadProfile;
+  window.loadProfile=async function(){
+    await _origProf();
+    try{const d=await(await fetch('/profile')).json();const el=document.getElementById('profile-display-name');if(el)el.value=d.display_name||'';}catch(e){}
+  };
+  window.saveDisplayName=async function(){
+    const el=document.getElementById('profile-display-name');
+    const d=await(await fetch('/profile/display-name',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({display_name:el?el.value.trim():null})})).json();
+    if(d.status==='ok')setAlert('profile-alert',"✅ Nom d’affichage mis à jour (reconnectez-vous).",'ok');
+    else setAlert('profile-alert','❌ '+(d.message||d.error),'err');
+    setTimeout(()=>{document.getElementById('profile-alert').className='alert';},5000);
+  };
+})();
+</script>
 </body>
 </html>

@@ -52,7 +52,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .sidebar-user { font-size: 13px; color: var(--text); font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Logo : dot vert + nom session */
 .logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; color: var(--text); letter-spacing: -0.02em; min-width: 0; flex: 1; }
-.logo-username { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.logo-username { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); font-style: italic; font-weight: 600; }
 .logo-dot { width: 10px; height: 10px; background: var(--success); border-radius: 50%; animation: pulse 2.5s ease-in-out infinite; flex-shrink: 0; }
 .logo-dot.off { background: #f87171; animation: none; }
 @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.4} }
