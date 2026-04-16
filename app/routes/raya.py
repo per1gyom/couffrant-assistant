@@ -103,9 +103,17 @@ def token_status(request: Request, user: dict = Depends(require_user)):
                     "severity": "error",
                 })
         else:
-            # Legacy
+            # Legacy — lire email depuis gmail_tokens ET oauth_tokens
             conn = _gpc(); c = conn.cursor()
-            c.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
+            c.execute("""
+                SELECT COALESCE(gt.email, ot.username)
+                FROM oauth_tokens ot
+                LEFT JOIN gmail_tokens gt ON gt.username = ot.username
+                WHERE ot.provider='google' AND ot.username=%s
+                UNION
+                SELECT email FROM gmail_tokens WHERE username=%s
+                LIMIT 1
+            """, (username, username))
             row = c.fetchone(); conn.close()
             if row and row[0]:
                 gmail_email = row[0]
@@ -115,7 +123,7 @@ def token_status(request: Request, user: dict = Depends(require_user)):
                     warnings.append({
                         "provider": "Gmail",
                         "mailbox": gmail_email,
-                        "message": "Token Gmail expiré — reconnectez votre boîte perso.",
+                        "message": "Connexion expirée — reconnectez votre boîte Gmail.",
                         "action_url": "/login/gmail",
                         "severity": "error",
                     })

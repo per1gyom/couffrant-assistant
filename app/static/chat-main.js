@@ -55,14 +55,17 @@ function _renderTokenBanner(warnings) {
     return;
   }
   banner.style.display = 'flex';
-  banner.innerHTML = warnings.map(w => `
-    <div class="token-warning-pill">
+  banner.innerHTML = warnings.map(w => {
+    const isEmail = w.mailbox && w.mailbox.includes('@');
+    const label = isEmail ? w.mailbox : w.provider;
+    const sub = isEmail ? '' : `<span class="token-warning-sub">${w.provider}</span>`;
+    return `<div class="token-warning-pill">
       <span class="token-warning-icon">⚠️</span>
-      <span class="token-warning-label">${w.mailbox || w.provider}</span>
+      <span class="token-warning-label">${label}</span>${sub}
       <span class="token-warning-msg">Connexion expirée</span>
       <a href="${w.action_url}" class="token-warning-btn">Reconnecter →</a>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 // --- INIT ---
