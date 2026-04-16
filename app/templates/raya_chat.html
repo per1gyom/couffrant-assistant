@@ -112,7 +112,7 @@ if ('serviceWorker' in navigator) {
 
 <!-- MODAL PARAMÈTRES UTILISATEUR -->
 <div class="modal-overlay" id="modalUserSettings">
-  <div class="modal" style="max-width:420px">
+  <div class="modal" style="max-width:min(65vw,720px);width:90%;max-height:85vh;overflow-y:auto;display:flex;flex-direction:column;">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px">
       <span style="font-size:16px;font-weight:700;color:var(--text)">&#9881;&#65039; Paramètres</span>
       <button onclick="closeUserSettings()" style="background:none;border:none;font-size:20px;color:var(--text-muted);cursor:pointer;padding:0 4px">×</button>
