@@ -39,6 +39,8 @@ async function loadUserInfo() {
   try {
     const d = await (await fetch('/profile')).json();
     const scope = d.scope || '';
+    const userEl = document.getElementById('headerUser');
+    if (userEl) userEl.textContent = d.username || d.email || '';
     if (scope === 'admin') {
       isAdmin = true;
       document.getElementById('superAdminBtn').style.display = 'inline-flex';
