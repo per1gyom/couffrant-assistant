@@ -62,7 +62,18 @@ def _execute_confirmed_action(action: dict, outlook_token: str, tools: dict) -> 
             return {"ok": r.get("status") == "ok", "message": msg,
                     "error": r.get("message", "envoi echoue")}
 
-        if action_type == "SEND_MAIL":
+        if action_type == "SEND_GMAIL":
+            from app.connectors.gmail_connector import send_gmail_message
+            # Convertir le corps texte en HTML (sauts de ligne → <br>)
+            body_html = payload["body"].replace('\r\n', '\n').replace('\r', '\n').replace('\n', '<br>\n')
+            result = send_gmail_message(
+                username=username,
+                to_email=payload["to_email"],
+                subject=payload["subject"],
+                html_body=body_html,
+            )
+            msg = f"Mail Gmail envoyé à {payload.get('to_email', '?')}" if result.get("ok") else result.get("error", "Erreur envoi Gmail")
+            return {"ok": result.get("ok", False), "message": msg, "error": result.get("error", "")}
             r = perform_outlook_action("send_new_mail", {
                 "to_email": payload["to_email"],
                 "subject":  payload["subject"],

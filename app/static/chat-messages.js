@@ -221,14 +221,15 @@ function appendPendingActionToChat(action) {
   card.className = 'action-card';
 
   const isReply    = action.action_type === 'REPLY';
-  const isSendMail = action.action_type === 'SEND_MAIL';
+  const isSendMail = action.action_type === 'SEND_MAIL' || action.action_type === 'SEND_GMAIL';
   const p = action.payload || {};
 
   // Badge lisible selon le type d'action
   const badge = document.createElement('div');
   badge.className = 'pending-id-badge';
   const badgeLabels = {
-    'SEND_MAIL':    '✉️ Mail préparé',
+    'SEND_MAIL':    '✉️ Mail préparé (Outlook)',
+    'SEND_GMAIL':   '✉️ Mail préparé (Gmail)',
     'REPLY':        '↩️ Réponse préparée',
     'TEAMS_MSG':    '💬 Message Teams',
     'CREATEEVENT':  '📅 Événement',

@@ -220,6 +220,28 @@ def raya_draft_action(
                 "subject":  payload["subject"],
                 "body":     payload["body"],
             }, outlook_token)
+        elif action_type == "SEND_GMAIL":
+            # Brouillon Gmail via API
+            try:
+                import base64
+                from email.mime.multipart import MIMEMultipart
+                from email.mime.text import MIMEText
+                from app.connectors.gmail_connector import get_gmail_service
+                service = get_gmail_service(username)
+                if not service:
+                    return {"ok": False, "message": "Gmail non connecté"}
+                body_html = payload["body"].replace('\n', '<br>\n')
+                msg = MIMEMultipart("alternative")
+                msg["To"] = payload["to_email"]
+                msg["Subject"] = payload["subject"]
+                if payload.get("from_email"):
+                    msg["From"] = payload["from_email"]
+                msg.attach(MIMEText(body_html, "html", "utf-8"))
+                raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+                service.users().drafts().create(userId="me", body={"message": {"raw": raw}}).execute()
+                r = {"status": "ok"}
+            except Exception as e:
+                return {"ok": False, "message": f"Erreur brouillon Gmail : {str(e)[:150]}"}
         elif action_type == "REPLY":
             r = perform_outlook_action("create_reply_draft", {
                 "message_id": payload["message_id"],

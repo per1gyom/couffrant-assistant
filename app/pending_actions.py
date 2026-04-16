@@ -21,6 +21,8 @@ from app.database import get_pg_conn
 # Actions qui necessitent confirmation obligatoire (irreversibles ou a fort impact)
 SENSITIVE_ACTIONS = {
     "REPLY",
+    "SEND_MAIL",
+    "SEND_GMAIL",
     "TEAMS_MSG",
     "TEAMS_REPLYCHAT",
     "TEAMS_SENDCHANNEL",

@@ -30,6 +30,7 @@ GMAIL_REDIRECT_URI = os.getenv("GMAIL_REDIRECT_URI", "").strip()
 
 GMAIL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
     "https://www.googleapis.com/auth/userinfo.email",
     "openid",
 ]
@@ -262,3 +263,63 @@ def _update_history_id(username: str, history_id: str) -> None:
         logger.error(f"[Gmail] Erreur update historyId {username}: {e}")
     finally:
         if conn: conn.close()
+
+
+def send_gmail_message(username: str, to_email: str, subject: str, html_body: str) -> dict:
+    """
+    Envoie un mail depuis la boîte Gmail de l'utilisateur.
+    Retourne {"ok": True, "message_id": ...} ou {"ok": False, "error": ...}.
+    Nécessite le scope gmail.send — si absent, retourne une erreur avec lien de re-auth.
+    """
+    service = get_gmail_service(username)
+    if not service:
+        return {"ok": False, "error": "Gmail non connecté — reconnecte ta boîte Gmail via Paramètres."}
+
+    import base64
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+
+    # Récupérer l'adresse Gmail de l'expéditeur
+    gmail_email = ""
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
+        row = c.fetchone()
+        if row and row[0]:
+            gmail_email = row[0]
+    except Exception:
+        pass
+    finally:
+        if conn: conn.close()
+
+    try:
+        # Injecter la signature
+        from app.email_signature import get_email_signature
+        signature = get_email_signature(username, gmail_email)
+        full_body = f'<div style="font-family:Arial,sans-serif;font-size:14px;color:#222;">{html_body}</div>{signature}'
+
+        msg = MIMEMultipart("alternative")
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        if gmail_email:
+            msg["From"] = gmail_email
+        msg.attach(MIMEText(full_body, "html", "utf-8"))
+
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        result = service.users().messages().send(
+            userId="me",
+            body={"raw": raw}
+        ).execute()
+
+        return {"ok": True, "message_id": result.get("id"), "from": gmail_email or "Gmail"}
+
+    except Exception as e:
+        err_str = str(e)
+        if "insufficient" in err_str.lower() or "scope" in err_str.lower() or "403" in err_str:
+            return {
+                "ok": False,
+                "error": "Permissions insuffisantes — reconnecte ta boîte Gmail pour autoriser l'envoi (/login/gmail)."
+            }
+        return {"ok": False, "error": f"Erreur envoi Gmail : {err_str[:150]}"}

@@ -191,4 +191,34 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
         )
         log_activity(username, "mail_send_queued", to_email, subject[:100], tenant_id=tenant_id)
 
+    # SEND_GMAIL : nouveau mail depuis Gmail (boite perso) — mise en queue + confirmation
+    _seen_gmail = set()
+    for match in re.finditer(r'\[ACTION:SEND_GMAIL:([^\|\]]+)\|([^\|\]]+)\|(.+?)\]', response, re.DOTALL):
+        to_email = match.group(1).strip()
+        subject  = match.group(2).strip()
+        body     = match.group(3).strip().replace('\\n', '\n')
+        dedup_key = (to_email.lower(), subject.lower())
+        if dedup_key in _seen_gmail:
+            continue
+        _seen_gmail.add(dedup_key)
+        # Récupérer l'email Gmail de l'expéditeur
+        gmail_from = ""
+        try:
+            from app.database import get_pg_conn as _gpc
+            _c = _gpc(); cur = _c.cursor()
+            cur.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
+            row = cur.fetchone()
+            if row and row[0]: gmail_from = row[0]
+            _c.close()
+        except Exception:
+            pass
+        label = f"Gmail → {to_email} — {subject[:50]}"
+        action_id = queue_action(
+            tenant_id=tenant_id, username=username, action_type="SEND_GMAIL",
+            payload={"to_email": to_email, "subject": subject, "body": body,
+                     "from_email": gmail_from},
+            label=label, conversation_id=conversation_id,
+        )
+        log_activity(username, "gmail_send_queued", to_email, subject[:100], tenant_id=tenant_id)
+
     return confirmed
