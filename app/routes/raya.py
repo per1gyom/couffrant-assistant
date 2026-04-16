@@ -56,7 +56,8 @@ from app.routes.deps import require_user
 from app.rate_limiter import check_rate_limit
 from app.routes.raya_helpers import _raya_core, _build_user_content, RayaQuery, FeedbackPayload  # noqa
 
-from app.routes.raya_helpers import _raya_core, _build_user_content, RayaQuery, FeedbackPayload  # noqa
+logger = get_logger("raya.core")
+router = APIRouter(tags=["raya"])
 
 
 # --- ENDPOINTS ---
