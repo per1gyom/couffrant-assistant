@@ -39,37 +39,31 @@ async def login_app_post(
     ip = request.client.host if request.client else "unknown"
     login_input = username.strip()
 
-    # Résoudre le vrai username (login par email ou identifiant)
     real_username = resolve_username(login_input) or login_input
 
-    # 1. Rate limit IP (anti-bot)
     allowed, msg_ip = check_rate_limit(ip)
     if not allowed:
         return HTMLResponse(LOGIN_PAGE_HTML.format(
             error_block=f'<div class="error">{msg_ip}</div>'
         ))
 
-    # 2. Compte définitivement bloqué (DB)
     if is_account_locked_db(real_username):
         return HTMLResponse(LOGIN_PAGE_HTML.format(
             error_block='<div class="error">Ce compte est bloqué. Contactez votre administrateur.</div>'
         ))
 
-    # 3. Verrouillage temporaire en cours (mémoire)
     ok, msg_lock, permanent = check_user_lockout(real_username)
     if not ok:
         return HTMLResponse(LOGIN_PAGE_HTML.format(
             error_block=f'<div class="error">{msg_lock}</div>'
         ))
 
-    # 4. Authentification (accepte username OU email)
     if authenticate(login_input, password):
         clear_attempts(ip)
         clear_user_attempts(real_username)
         update_last_login(real_username)
         scope = get_user_scope(real_username)
         tenant_id = get_tenant_id(real_username)
-        # 4b. Vérification suspension utilisateur
         from app.suspension import check_suspension
         suspended, reason = check_suspension(real_username, tenant_id)
         if suspended:
@@ -85,7 +79,6 @@ async def login_app_post(
             return RedirectResponse("/forced-reset", status_code=303)
         return RedirectResponse("/chat", status_code=303)
 
-    # 5. Échec
     record_failed_attempt(ip)
     result = record_user_failed(real_username, ip)
 
@@ -125,17 +118,24 @@ def chat(request: Request):
     if must_reset_password_check(username):
         request.session["must_reset"] = True
         return RedirectResponse("/forced-reset")
+    # Récupérer le nom d'affichage depuis la DB (display_name ou username capitalisé)
+    display_name = username[0].upper() + username[1:] if username else username
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("SELECT display_name FROM users WHERE username=%s", (username,))
+        row = c.fetchone()
+        conn.close()
+        if row and row[0] and row[0].strip():
+            display_name = row[0].strip()
+    except Exception:
+        pass
     with open("app/templates/raya_chat.html", "r", encoding="utf-8") as f:
         content = f.read()
-    # Injection côté serveur du nom d'utilisateur — visible immédiatement sans JS
-    safe_name = _html.escape(username)
+    safe_name = _html.escape(display_name)
     content = content.replace(
         'id="logoUserName"></span>',
         f'id="logoUserName">{safe_name}</span>'
-    )
-    content = content.replace(
-        'id="headerUser"></span>',
-        f'id="headerUser">{safe_name}</span>'
     )
     return HTMLResponse(content=content)
 
@@ -174,36 +174,30 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     return RedirectResponse(state or "/chat")
 
 
-# ─── GMAIL OAuth2 (sans PKCE) ───
+# ─── GMAIL OAuth2 ───
 
 @router.get("/login/gmail")
 def login_gmail(request: Request):
-    """Démarre le flux OAuth2 Gmail. Redirige vers Google."""
     gmail_redirect = os.getenv("GMAIL_REDIRECT_URI", "").strip()
     if not gmail_redirect:
-        logger.error("[Gmail] GMAIL_REDIRECT_URI non configuré")
         return HTMLResponse(
             "<h2>Erreur configuration Gmail</h2>"
             "<p>La variable <code>GMAIL_REDIRECT_URI</code> n'est pas configurée sur Railway.</p>"
             "<p><a href='/chat'>\u2190 Retour au chat</a></p>",
             status_code=500,
         )
-
     from app.connectors.gmail_connector import get_gmail_auth_url, is_configured
     if not is_configured():
-        logger.error("[Gmail] GMAIL_CLIENT_ID ou GMAIL_CLIENT_SECRET manquant")
         return HTMLResponse(
             "<h2>Erreur configuration Gmail</h2>"
             "<p>GMAIL_CLIENT_ID / GMAIL_CLIENT_SECRET manquants dans Railway.</p>"
             "<p><a href='/chat'>\u2190 Retour au chat</a></p>",
             status_code=500,
         )
-
     try:
         auth_url = get_gmail_auth_url()
         return RedirectResponse(auth_url)
     except Exception as e:
-        logger.error(f"[Gmail] Erreur génération URL auth: {e}")
         return HTMLResponse(
             f"<h2>Erreur Gmail</h2><p>{e}</p><p><a href='/chat'>\u2190 Retour</a></p>",
             status_code=500,
@@ -212,15 +206,10 @@ def login_gmail(request: Request):
 
 @router.get("/auth/gmail/callback")
 def auth_gmail_callback(request: Request, code: str | None = None, error: str | None = None):
-    """Callback Google OAuth2. Échange le code, sauvegarde, redirige vers /chat."""
     if error:
-        logger.warning(f"[Gmail] Callback erreur Google: {error}")
         return RedirectResponse(f"/chat?gmail_error={error}")
-
     if not code:
-        logger.error("[Gmail] Callback reçu sans code")
         return HTMLResponse("Code OAuth manquant", status_code=400)
-
     from app.connectors.gmail_connector import exchange_code_for_tokens
     username = request.session.get("user")
     if not username:
@@ -229,18 +218,13 @@ def auth_gmail_callback(request: Request, code: str | None = None, error: str | 
             "<p><a href='/login-app'>Se reconnecter</a></p>",
             status_code=401,
         )
-
     try:
         tokens = exchange_code_for_tokens(code)
     except Exception as e:
-        logger.error(f"[Gmail] Erreur exchange_code_for_tokens: {e}")
         return HTMLResponse(
-            f"<h2>Erreur connexion Gmail</h2>"
-            f"<p>{e}</p>"
-            f"<p><a href='/chat'>\u2190 Retour au chat</a></p>",
+            f"<h2>Erreur connexion Gmail</h2><p>{e}</p><p><a href='/chat'>\u2190 Retour</a></p>",
             status_code=500,
         )
-
     email = tokens.get("email", f"{username}@gmail.com")
     try:
         save_google_token(
@@ -249,8 +233,6 @@ def auth_gmail_callback(request: Request, code: str | None = None, error: str | 
             refresh_token=tokens.get("refresh_token", ""),
             email=email,
         )
-        logger.info(f"[Gmail] Tokens sauvegardés pour {username} ({email})")
     except Exception as e:
         logger.error(f"[Gmail] Erreur sauvegarde tokens {username}: {e}")
-
     return RedirectResponse("/chat?gmail_connected=1")

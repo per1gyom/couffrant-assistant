@@ -3,6 +3,7 @@ Endpoints profil de l'utilisateur connecté.
   GET  /profile
   PUT  /profile/email
   PUT  /profile/password
+  PUT  /profile/display-name
 """
 from fastapi import APIRouter, Request, Body, Depends
 
@@ -21,11 +22,20 @@ def get_profile(request: Request, user: dict = Depends(require_user)):
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT username, email, scope, tenant_id FROM users WHERE username=%s", (username,))
+        c.execute(
+            "SELECT username, email, scope, tenant_id, display_name FROM users WHERE username=%s",
+            (username,)
+        )
         row = c.fetchone()
         if not row:
             return {"error": "Utilisateur introuvable."}
-        return {"username": row[0], "email": row[1] or "", "scope": row[2], "tenant_id": row[3] or ""}
+        return {
+            "username": row[0],
+            "email": row[1] or "",
+            "scope": row[2],
+            "tenant_id": row[3] or "",
+            "display_name": row[4] or "",
+        }
     except Exception as e:
         return {"error": str(e)[:100]}
     finally:
@@ -47,6 +57,31 @@ def update_profile_email(
         c.execute("UPDATE users SET email=%s WHERE username=%s", (email or None, username))
         conn.commit()
         return {"status": "ok", "message": "Email mis à jour."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:100]}
+    finally:
+        if conn: conn.close()
+
+
+@router.put("/profile/display-name")
+def update_profile_display_name(
+    request: Request,
+    payload: dict = Body(...),
+    user: dict = Depends(require_user),
+):
+    """Permet à l'utilisateur de définir son nom d'affichage personnalisé."""
+    username = user["username"]
+    display_name = payload.get("display_name", "").strip()
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            "UPDATE users SET display_name=%s WHERE username=%s",
+            (display_name or None, username)
+        )
+        conn.commit()
+        return {"status": "ok", "message": "Nom d'affichage mis à jour.", "display_name": display_name or ""}
     except Exception as e:
         return {"status": "error", "message": str(e)[:100]}
     finally:

@@ -98,15 +98,30 @@ def close_pool():
         _pool = None
 
 
-# ─── SCHÉMA ───
+# ─── SCHÉMA + MIGRATIONS ───
 
 def init_postgres():
+    """Crée les tables (idempotent) puis applique toutes les migrations."""
     from app.database_schema import get_schema_statements
+    from app.database_migrations import MIGRATIONS
     conn = get_pg_conn()
     c = conn.cursor()
+    # 1. Schéma (CREATE TABLE IF NOT EXISTS)
     for stmt in get_schema_statements():
-        c.execute(stmt)
-    conn.commit()
+        try:
+            c.execute(stmt)
+            conn.commit()
+        except Exception:
+            try: conn.rollback()
+            except Exception: pass
+    # 2. Migrations (ALTER TABLE, UPDATE, CREATE INDEX…)
+    for mig in MIGRATIONS:
+        try:
+            c.execute(mig)
+            conn.commit()
+        except Exception:
+            try: conn.rollback()
+            except Exception: pass
     conn.close()
     from app.logging_config import get_logger as _gl
-    _gl("raya.db").info("[DB] Schema initialise")
+    _gl("raya.db").info("[DB] Schema + migrations initialises")

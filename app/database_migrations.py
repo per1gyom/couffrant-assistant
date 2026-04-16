@@ -184,10 +184,10 @@ MIGRATIONS = [
 )""",
     "CREATE INDEX IF NOT EXISTS idx_user_topics_user ON user_topics (username, status, updated_at DESC)",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS settings JSONB DEFAULT '{}'",
-    # -- CLOISONNEMENT DRIVE : ajouter sharepoint_site au tenant couffrant_solar --
+    # -- CLOISONNEMENT DRIVE --
     """UPDATE tenants SET settings = settings || '{"sharepoint_site": "Commun"}'::jsonb
        WHERE id = 'couffrant_solar' AND NOT (settings ? 'sharepoint_site')""",
-    # -- SUSPENSION : colonnes pour suspendre utilisateurs et tenants --
+    # -- SUSPENSION --
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended BOOLEAN DEFAULT false",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS suspended_reason TEXT",
     # -- Connecteurs V2 --
@@ -208,5 +208,7 @@ MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_tc_tenant ON tenant_connections(tenant_id)",
     "CREATE INDEX IF NOT EXISTS idx_ca_username ON connection_assignments(username)",
+    # -- DISPLAY NAME : nom d'affichage personnalise --
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT",
     # -- Ajouter les nouvelles migrations sous cette ligne --
 ]

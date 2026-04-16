@@ -160,7 +160,7 @@ def create_user(username: str, password: str, scope: str = SCOPE_USER,
 
 def update_user(username: str, email: str = None, scope: str = None,
                 display_name: str = None, phone: str = None) -> dict:
-    """Met à jour email, scope et/ou phone d'un utilisateur."""
+    """Met à jour email, scope, display_name et/ou phone d'un utilisateur."""
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -170,6 +170,8 @@ def update_user(username: str, email: str = None, scope: str = None,
             c.execute("UPDATE users SET scope=%s WHERE username=%s", (scope, username))
         if phone is not None:
             c.execute("UPDATE users SET phone=%s WHERE username=%s", (phone or None, username))
+        if display_name is not None:
+            c.execute("UPDATE users SET display_name=%s WHERE username=%s", (display_name or None, username))
         conn.commit()
         return {"status": "ok"}
     except Exception as e:
@@ -229,7 +231,7 @@ def list_users() -> list:
         c.execute("""
             SELECT username, email, scope, tenant_id, last_login, created_at,
                    COALESCE(account_locked, false), COALESCE(must_reset_password, false), phone,
-                   COALESCE(suspended, false), suspended_reason
+                   COALESCE(suspended, false), suspended_reason, display_name
             FROM users ORDER BY tenant_id, created_at
         """)
         return [{
@@ -238,6 +240,7 @@ def list_users() -> list:
             "account_locked": bool(r[6]), "must_reset_password": bool(r[7]),
             "phone": r[8] or "",
             "suspended": bool(r[9]), "suspended_reason": r[10] or "",
+            "display_name": r[11] or "",
         } for r in c.fetchall()]
     except Exception:
         return []
