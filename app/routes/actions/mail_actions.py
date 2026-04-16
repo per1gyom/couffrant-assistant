@@ -88,8 +88,13 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
         except Exception:
             pass
 
+    # Dédup REPLY par message_id pour éviter le double-queue si le LLM génère 2 tags
+    _seen_reply_ids = set()
     for match in re.finditer(r'\[ACTION:REPLY:([^\:\]]{20,}):(.+?)\]', response, re.DOTALL):
         msg_id = match.group(1).strip()
+        if msg_id in _seen_reply_ids:
+            continue
+        _seen_reply_ids.add(msg_id)
         reply_text = match.group(2).strip()
         # Normaliser les sauts de ligne (LLM ecrit parfois \n litteral)
         reply_text = reply_text.replace('\\n', '\n')
@@ -148,10 +153,16 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
             pass
 
     # SEND_MAIL : nouveau mail (pas une reponse) — mise en queue + confirmation
+    # Dédup par (to_email, subject) pour éviter le double-queue si le LLM génère 2 tags
+    _seen_send_mail = set()
     for match in re.finditer(r'\[ACTION:SEND_MAIL:([^\|\]]+)\|([^\|\]]+)\|(.+?)\]', response, re.DOTALL):
         to_email    = match.group(1).strip()
         subject     = match.group(2).strip()
         body        = match.group(3).strip().replace('\\n', '\n')
+        dedup_key   = (to_email.lower(), subject.lower())
+        if dedup_key in _seen_send_mail:
+            continue
+        _seen_send_mail.add(dedup_key)
         label       = f"Envoyer un mail a {to_email} — {subject[:50]}"
         action_id   = queue_action(
             tenant_id=tenant_id, username=username, action_type="SEND_MAIL",

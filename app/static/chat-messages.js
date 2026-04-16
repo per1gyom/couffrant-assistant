@@ -206,6 +206,11 @@ const _shownActionIds = new Set();
 
 function appendPendingActionToChat(action) {
   if (_shownActionIds.has(action.id)) return;
+  // Double check DOM — évite les doublons si le Set est réinitialisé (reload partiel)
+  if (messagesEl && messagesEl.querySelector(`[data-action-id="${action.id}"]`)) {
+    _shownActionIds.add(action.id);
+    return;
+  }
   _shownActionIds.add(action.id);
 
   const row = document.createElement('div');

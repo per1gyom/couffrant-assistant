@@ -18,7 +18,7 @@ _ASK_CHOICE_PREFIX = "__CHOICE__:"
 
 
 def _get_user_email(username: str) -> str:
-    """Retourne l'email de l'utilisateur depuis la table users (boite Microsoft principale)."""
+    """Retourne l'email Outlook de l'utilisateur (filtre les emails internes raya-ia.fr)."""
     try:
         from app.database import get_pg_conn
         conn = get_pg_conn()
@@ -26,9 +26,14 @@ def _get_user_email(username: str) -> str:
         c.execute("SELECT email FROM users WHERE username = %s LIMIT 1", (username,))
         row = c.fetchone()
         conn.close()
-        return row[0] if row and row[0] else ""
+        if row and row[0]:
+            email = row[0]
+            # Ne pas afficher les emails internes de l'application
+            if 'raya-ia.fr' not in email and '@' in email:
+                return email
     except Exception:
-        return ""
+        pass
+    return ""
 
 
 def execute_actions(
