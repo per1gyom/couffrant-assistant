@@ -1,26 +1,15 @@
-// Raya Chat — Topics (sujets utilisateur)
-// Panneau latéral pour gérer les sujets/projets
-// Endpoints : GET/POST/PATCH/DELETE /topics, PATCH /topics/settings
+// chat-topics.js v2 — Sujets intégrés dans la sidebar (plus de drawer noir)
 
-let _topicsOpen = false;
 let _topicsData = { section_title: 'Mes sujets', topics: [] };
 
-function toggleTopics() {
-  _topicsOpen ? closeTopics() : openTopics();
-}
+// Stubs compatibilité (anciens appels peuvent subsister)
+function toggleTopics() {}
+function openTopics() { initTopicsSidebar(); }
+function closeTopics() {}
 
-async function openTopics() {
-  _topicsOpen = true;
+async function initTopicsSidebar() {
   await loadTopics();
-  renderTopicsPanel();
-  document.getElementById('topicsOverlay').classList.add('open');
-  document.getElementById('topicsPanel').classList.add('open');
-}
-
-function closeTopics() {
-  _topicsOpen = false;
-  document.getElementById('topicsOverlay').classList.remove('open');
-  document.getElementById('topicsPanel').classList.remove('open');
+  renderTopicsSidebar();
 }
 
 async function loadTopics() {
@@ -30,44 +19,36 @@ async function loadTopics() {
   } catch(e) { console.warn('[Topics] load error:', e); }
 }
 
-function renderTopicsPanel() {
-  const panel = document.getElementById('topicsList');
-  if (!panel) return;
-  const { section_title, topics } = _topicsData;
-  let html = '';
-  // Titre section éditable
-  html += `<div class="topics-section-title" onclick="editSectionTitle(this)">${section_title} ✏️</div>`;
-  // Bouton créer
-  html += `<div class="topics-add">
+function renderTopicsSidebar() {
+  const el = document.getElementById('topicsSidebarList');
+  if (!el) return;
+  const { topics } = _topicsData;
+  let html = `<div class="topics-sidebar-add">
     <input type="text" id="newTopicInput" placeholder="Nouveau sujet…" maxlength="255"
       onkeydown="if(event.key==='Enter')createTopic()">
-    <button onclick="createTopic()">+</button>
+    <button onclick="createTopic()" title="Ajouter">+</button>
   </div>`;
-  // Liste
   if (topics.length === 0) {
-    html += '<div class="topics-empty">Aucun sujet pour le moment.<br>Crée ton premier sujet ci-dessus.</div>';
+    html += '<div style="font-size:12px;color:var(--text-muted);padding:2px 8px 6px;">Aucun sujet pour le moment.</div>';
   } else {
     topics.forEach(t => {
-      const statusClass = t.status === 'active' ? 'active' : t.status === 'paused' ? 'paused' : 'archived';
-      const statusLabel = t.status === 'active' ? '🟢' : t.status === 'paused' ? '⏸️' : '📦';
-      html += `<div class="topic-card ${statusClass}" data-id="${t.id}">
-        <div class="topic-main" onclick="askAboutTopic('${t.title.replace(/'/g, "\\'")}')">
-          <span class="topic-status">${statusLabel}</span>
-          <span class="topic-title">${t.title}</span>
-        </div>
-        <div class="topic-actions">
+      const st = t.status === 'active' ? '\uD83D\uDFE2' : t.status === 'paused' ? '\u23F8' : '\uD83D\uDCE6';
+      const op = t.status === 'archived' ? 'opacity:0.45;' : t.status === 'paused' ? 'opacity:0.65;' : '';
+      html += `<div class="topic-sidebar-item" style="${op}">
+        <span class="topic-sb-status">${st}</span>
+        <span class="topic-sb-title" onclick="askAboutTopic('${t.title.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" title="${t.title}">${t.title}</span>
+        <div class="topic-sidebar-actions">
           <button onclick="cycleTopic(${t.id},'${t.status}')" title="Changer statut">🔄</button>
-          <button onclick="renameTopic(${t.id},'${t.title.replace(/'/g, "\\'")}')" title="Renommer">✏️</button>
-          <button onclick="deleteTopic(${t.id})" title="Supprimer">🗑️</button>
+          <button onclick="renameTopic(${t.id},'${t.title.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" title="Renommer">✏️</button>
+          <button onclick="deleteTopic(${t.id})" title="Supprimer" style="color:var(--text-muted);font-size:13px">✕</button>
         </div>
       </div>`;
     });
   }
-  panel.innerHTML = html;
+  el.innerHTML = html;
 }
 
 function askAboutTopic(title) {
-  closeTopics();
   if (typeof inputEl !== 'undefined') {
     inputEl.value = 'Fais-moi un point sur le sujet : ' + title;
     sendMessage();
@@ -86,7 +67,7 @@ async function createTopic() {
     if (r.ok) {
       input.value = '';
       await loadTopics();
-      renderTopicsPanel();
+      renderTopicsSidebar();
       showToast('Sujet créé : ' + title, 'ok', 2000);
     }
   } catch(e) { showToast('Erreur création sujet', 'err', 3000); }
@@ -97,7 +78,7 @@ async function deleteTopic(id) {
   try {
     await fetch('/topics/' + id, { method: 'DELETE' });
     await loadTopics();
-    renderTopicsPanel();
+    renderTopicsSidebar();
   } catch(e) { showToast('Erreur suppression', 'err', 3000); }
 }
 
@@ -109,7 +90,7 @@ async function cycleTopic(id, current) {
       body: JSON.stringify({ status: next })
     });
     await loadTopics();
-    renderTopicsPanel();
+    renderTopicsSidebar();
   } catch(e) { showToast('Erreur changement statut', 'err', 3000); }
 }
 
@@ -122,74 +103,6 @@ async function renameTopic(id, currentTitle) {
       body: JSON.stringify({ title: newTitle.trim() })
     });
     await loadTopics();
-    renderTopicsPanel();
+    renderTopicsSidebar();
   } catch(e) { showToast('Erreur renommage', 'err', 3000); }
 }
-
-async function editSectionTitle(el) {
-  const current = _topicsData.section_title || 'Mes sujets';
-  const newTitle = prompt('Titre de la section :', current);
-  if (!newTitle || newTitle.trim() === current) return;
-  try {
-    await fetch('/topics/settings', {
-      method: 'PATCH', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ section_title: newTitle.trim() })
-    });
-    _topicsData.section_title = newTitle.trim();
-    renderTopicsPanel();
-  } catch(e) { showToast('Erreur modification titre', 'err', 3000); }
-}
-
-// Injection CSS pour le panneau Topics
-(function() {
-  const style = document.createElement('style');
-  style.textContent = `
-    .topics-drawer { z-index: 1001; }
-    .topics-section-title {
-      font-size: 15px; font-weight: 700; color: var(--accent, #6366f1);
-      padding: 8px 12px; cursor: pointer; border-radius: 8px;
-      transition: background .2s;
-    }
-    .topics-section-title:hover { background: rgba(99,102,241,.08); }
-    .topics-add {
-      display: flex; gap: 8px; padding: 8px 0; margin-bottom: 8px;
-    }
-    .topics-add input {
-      flex: 1; padding: 8px 12px; border: 1px solid var(--border, #e5e7eb);
-      border-radius: 8px; font-size: 14px; background: var(--bg, #fff);
-      color: var(--text, #1e293b);
-    }
-    .topics-add button {
-      width: 38px; height: 38px; border-radius: 8px; border: none;
-      background: var(--accent, #6366f1); color: white; font-size: 20px;
-      cursor: pointer; font-weight: 700;
-    }
-    .topics-empty {
-      text-align: center; color: var(--text-muted, #94a3b8);
-      padding: 24px 12px; font-size: 14px; line-height: 1.5;
-    }
-    .topic-card {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 10px 12px; border-radius: 8px; margin-bottom: 4px;
-      border: 1px solid var(--border, #e5e7eb); transition: all .2s;
-    }
-    .topic-card:hover { border-color: var(--accent, #6366f1); }
-    .topic-card.paused { opacity: 0.7; }
-    .topic-card.archived { opacity: 0.5; }
-    .topic-main {
-      flex: 1; cursor: pointer; display: flex; align-items: center; gap: 8px;
-    }
-    .topic-status { font-size: 12px; }
-    .topic-title { font-size: 14px; font-weight: 500; }
-    .topic-actions {
-      display: flex; gap: 2px; opacity: 0; transition: opacity .2s;
-    }
-    .topic-card:hover .topic-actions { opacity: 1; }
-    .topic-actions button {
-      background: none; border: none; cursor: pointer;
-      font-size: 13px; padding: 4px; border-radius: 4px;
-    }
-    .topic-actions button:hover { background: rgba(0,0,0,.06); }
-  `;
-  document.head.appendChild(style);
-})();

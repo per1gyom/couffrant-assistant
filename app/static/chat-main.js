@@ -16,7 +16,7 @@ async function loadHistory() {
     });
     const sep = document.createElement('div');
     sep.className = 'history-sep';
-    sep.textContent = '— conversation précédente —';
+    sep.textContent = '\u2014 conversation précédente —';
     messagesEl.appendChild(sep);
     scrollToBottom(false);
   } catch(e) {}
@@ -24,7 +24,8 @@ async function loadHistory() {
 
 // --- INIT ---
 async function init() {
-  renderQuickActions();
+  initShortcuts();         // charge depuis DB
+  initTopicsSidebar();     // charge et render dans sidebar
   checkHealth();
   loadUserInfo();
   loadMailCount();
@@ -62,15 +63,15 @@ async function sendMessage() {
     if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'), true);
     if (data.ask_choice) renderAskChoice(data.ask_choice);
     if (data.actions && data.actions.length > 0) {
-      const ok=data.actions.filter(a=>a.startsWith('✅')); const err=data.actions.filter(a=>a.startsWith('❌')); const pend=data.actions.filter(a=>a.startsWith('⏸️'));
-      if (ok.length) showToast(ok[0].replace('✅','').trim(),'ok',3000);
-      if (err.length) showToast(err[0].replace('❌','').trim(),'err',4000);
+      const ok=data.actions.filter(a=>a.startsWith('\u2705')); const err=data.actions.filter(a=>a.startsWith('\u274c')); const pend=data.actions.filter(a=>a.startsWith('\u23f8\ufe0f'));
+      if (ok.length) showToast(ok[0].replace('\u2705','').trim(),'ok',3000);
+      if (err.length) showToast(err[0].replace('\u274c','').trim(),'err',4000);
       if (pend.length) showToast(`${pend.length} action(s) en attente`,'info',4000);
     }
     if (data.pending_actions && data.pending_actions.length>0) renderPendingActions(data.pending_actions);
     else { const zone=document.getElementById('pending-actions-zone'); if(zone) zone.remove(); }
   } catch(e) {
-    loading.remove(); addMessage('Erreur de connexion à Raya. Réessayez.','raya');
+    loading.remove(); addMessage('Erreur de connexion \u00e0 Raya. Réessayez.','raya');
     showToast('Erreur de connexion','err');
   }
   sendBtn.disabled=false;
@@ -85,7 +86,7 @@ function handleFileSelect(e) {
   const reader=new FileReader();
   reader.onload=(ev)=>{
     currentFile={data:ev.target.result.split(',')[1],type:file.type,name:file.name};
-    document.getElementById('attachmentName').textContent='📎 '+file.name;
+    document.getElementById('attachmentName').textContent='\uD83D\uDCCE '+file.name;
     document.getElementById('attachmentPreview').classList.add('visible');
     document.getElementById('attachBtn').classList.add('has-file');
   };
@@ -102,7 +103,7 @@ function removeAttachment() {
 document.addEventListener('keydown', e => {
   if (e.key==='Escape') {
     closeDrawer();
-    document.getElementById('modalShortcuts').classList.remove('open');
+    closeShortcutEdit();
     closeOnboarding();
     _releaseMicFromFeedback();
     document.querySelectorAll('.bug-report-dialog').forEach(el => el.remove());
