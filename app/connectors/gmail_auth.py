@@ -17,6 +17,7 @@ GMAIL_SCOPES = [
     "https://mail.google.com/",
     "https://www.googleapis.com/auth/contacts",
     "https://www.googleapis.com/auth/calendar",
+    "https://www.googleapis.com/auth/drive",
     "https://www.googleapis.com/auth/userinfo.email",
     "openid",
 ]

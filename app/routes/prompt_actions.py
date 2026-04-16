@@ -45,9 +45,12 @@ Filtre mails :
   [ACTION:LEARN:mail_filter|bloquer: promo@xyz.fr]""")
 
     if "drive" in domains:
-        drive_write_lines = "\n  [ACTION:CREATEFOLDER:parent|nom] [ACTION:MOVEDRIVE:item|dest|nom] [ACTION:COPYFILE:source|dest|nom]" if tools.get("drive_write") else ""
-        sections.append(f"""Drive (1_Photovoltaique) — resultat : lien cliquable :
-  [ACTION:LISTDRIVE:] [ACTION:LISTDRIVE:id] [ACTION:READDRIVE:id] [ACTION:SEARCHDRIVE:mot]{drive_write_lines}""")
+        drive_write_lines = "\n  [ACTION:CREATEFOLDER:parent_id|nom] [ACTION:MOVEDRIVE:item_id|dest_id|nom] [ACTION:COPYFILE:source_id|dest_id|nom]" if tools.get("drive_write") else ""
+        sections.append(f"""Drive (tous les drives connectes — SharePoint, Google Drive, ...) :
+  [ACTION:LISTDRIVE:] ou [ACTION:LISTDRIVE:drive|dossier_id]
+    drive = 'sharepoint', 'google' ou vide (auto = premier disponible)
+  [ACTION:READDRIVE:item_id] [ACTION:SEARCHDRIVE:query] ou [ACTION:SEARCHDRIVE:drive|query]{drive_write_lines}
+  Recherche dans TOUS les drives si pas de drive specifie.""")
 
     if "teams" in domains:
         sections.append("""Teams — lecture (immediat) :

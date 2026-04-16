@@ -1,79 +1,99 @@
 """
 Gestion des actions Drive (LISTDRIVE, READDRIVE, SEARCHDRIVE, CREATEFOLDER, MOVEDRIVE, COPYFILE).
-7-ACT : log d'activite apres chaque action.
+Utilise drive_manager pour router vers SharePoint ou Google Drive automatiquement.
 """
 import re
-from app.connectors.drive_connector import (
-    list_drive, read_drive_file, search_drive,
-    create_folder, move_item, copy_item,
-    _find_sharepoint_site_and_drive,
-)
 from app.pending_actions import queue_action
 from app.activity_log import log_activity
 
 
+def _get_drive(username: str, hint: str = ""):
+    """Résout le drive à utiliser pour cet utilisateur."""
+    try:
+        from app.drive_manager import get_drive_for
+        return get_drive_for(username, hint)
+    except Exception:
+        return None
+
+
 def _handle_drive_actions(response, token, drive_write, username, tenant_id, conversation_id):
     confirmed = []
-    # Vérifier si l'utilisateur peut faire des actions directes sur les fichiers
     from app.direct_actions import can_do_direct_actions
     direct_ok = can_do_direct_actions(username, tenant_id)
 
     for match in re.finditer(r'\[ACTION:LISTDRIVE:([^\]]*)]', response):
-        subfolder = match.group(1).strip()
+        # Format : [ACTION:LISTDRIVE:dossier] ou [ACTION:LISTDRIVE:drive:dossier]
+        arg = match.group(1).strip()
+        drive_hint, folder_id = ("", arg)
+        if "|" in arg:
+            parts = arg.split("|", 1)
+            drive_hint, folder_id = parts[0].strip(), parts[1].strip()
         try:
-            r = list_drive(token, subfolder)
-            if r.get("status") == "ok":
-                lines = []
-                for it in r.get("items", []):
-                    icon = "\U0001f4c1" if it.get("type") == "dossier" else "\U0001f4c4"
-                    size_str = f"  ({it.get('taille_ko','')} Ko)" if it.get("taille_ko") else ""
-                    link = it.get("lien", "")
-                    name = it['nom']
-                    lines.append(f"  {icon} [**{name}**]({link}){size_str}" if link else f"  {icon} **{name}**{size_str}")
-                confirmed.append(f"\U0001f5c2\ufe0f {r.get('dossier', '1_Photovoltaique')} ({r['count']}) :\n" + "\n".join(lines))
-                log_activity(username, "drive_list", subfolder or "root", f"{r['count']} items", tenant_id=tenant_id)
+            drive = _get_drive(username, drive_hint)
+            if not drive:
+                confirmed.append("❌ Aucun drive connecté.")
+                continue
+            items = drive.list(folder_id)
+            if items:
+                lines = [f"  {'📁' if i.item_type=='folder' else '📄'} [**{i.name}**]({i.url})" if i.url
+                         else f"  {'📁' if i.item_type=='folder' else '📄'} **{i.name}**"
+                         for i in items[:30]]
+                confirmed.append(f"🗂️ {drive.display_name} ({len(items)}) :\n" + "\n".join(lines))
             else:
-                confirmed.append(f"\u274c {r.get('message', 'Erreur Drive')}")
+                confirmed.append(f"🗂️ {drive.display_name} — dossier vide.")
+            log_activity(username, "drive_list", folder_id or "root", f"{len(items)} items", tenant_id=tenant_id)
         except Exception as e:
-            confirmed.append(f"\u274c Drive : {str(e)[:80]}")
+            confirmed.append(f"❌ Drive : {str(e)[:80]}")
 
     for match in re.finditer(r'\[ACTION:READDRIVE:([^\]]+)\]', response):
         file_ref = match.group(1).strip()
         try:
-            r = read_drive_file(token, file_ref)
-            if r.get("status") == "ok":
-                if r.get("type") == "texte":
-                    confirmed.append(f"\U0001f4c4 {r['fichier']} :\n{r['contenu'][:2000]}")
-                else:
-                    link = r.get("lien", "")
-                    name = r.get('fichier', file_ref)
-                    confirmed.append(
-                        f"\U0001f4c4 [{name}]({link}) \u2014 {r.get('message', '')} {r.get('conseil', '')}" if link
-                        else f"\U0001f4c4 {name} \u2014 {r.get('message', '')} {r.get('conseil', '')}"
-                    )
-                log_activity(username, "drive_read", file_ref[:200], r.get('fichier', '')[:100], tenant_id=tenant_id)
+            drive = _get_drive(username)
+            if not drive:
+                confirmed.append("❌ Aucun drive connecté.")
+                continue
+            content = drive.read(file_ref)
+            if content:
+                confirmed.append(f"📄 Contenu :\n{content[:2000]}")
             else:
-                confirmed.append(f"\u274c {r.get('message')}")
+                # Essayer de trouver via search
+                results = drive.search(file_ref)
+                if results:
+                    i = results[0]
+                    link_text = f"[{i.name}]({i.url})" if i.url else i.name
+                    confirmed.append(f"📄 {link_text}")
+                else:
+                    confirmed.append(f"❌ Fichier '{file_ref}' introuvable.")
+            log_activity(username, "drive_read", file_ref[:200], "", tenant_id=tenant_id)
         except Exception as e:
-            confirmed.append(f"\u274c {str(e)[:80]}")
+            confirmed.append(f"❌ {str(e)[:80]}")
 
     for match in re.finditer(r'\[ACTION:SEARCHDRIVE:([^\]]+)\]', response):
-        q = match.group(1).strip()
+        # Format : [ACTION:SEARCHDRIVE:query] ou [ACTION:SEARCHDRIVE:drive|query]
+        arg = match.group(1).strip()
+        drive_hint, query = ("", arg)
+        if "|" in arg:
+            parts = arg.split("|", 1)
+            drive_hint, query = parts[0].strip(), parts[1].strip()
         try:
-            r = search_drive(token, q)
-            if r.get("status") == "ok":
-                lines = []
-                for it in r.get("items", []):
-                    icon = "\U0001f4c1" if it.get('type') == 'dossier' else "\U0001f4c4"
-                    link = it.get("lien", "")
-                    name = it['nom']
-                    lines.append(f"  {icon} [**{name}**]({link})" if link else f"  {icon} **{name}**")
-                confirmed.append(f"\U0001f50d '{q}' \u2014 {r['count']} resultat(s) :\n" + "\n".join(lines))
-                log_activity(username, "drive_search", q[:200], f"{r['count']} resultats", tenant_id=tenant_id)
+            from app.drive_manager import search_all_drives
+            if drive_hint:
+                drive = _get_drive(username, drive_hint)
+                results = drive.search(query) if drive else []
+                items = [{"name": i.name, "url": i.url, "type": i.item_type,
+                          "source": i.source, "drive_label": i.drive_label} for i in results]
             else:
-                confirmed.append(f"\u274c {r.get('message')}")
+                items = search_all_drives(username, query)
+            if items:
+                lines = [f"  {'📁' if i['type']=='folder' else '📄'} [**{i['name']}**]({i['url']}) — {i.get('drive_label','')}"
+                         if i.get('url') else f"  📄 **{i['name']}**"
+                         for i in items[:20]]
+                confirmed.append(f"🔍 '{query}' — {len(items)} résultat(s) :\n" + "\n".join(lines))
+            else:
+                confirmed.append(f"🔍 '{query}' — aucun résultat.")
+            log_activity(username, "drive_search", query[:200], f"{len(items)} resultats", tenant_id=tenant_id)
         except Exception as e:
-            confirmed.append(f"\u274c {str(e)[:80]}")
+            confirmed.append(f"❌ {str(e)[:80]}")
 
     if drive_write:
         for match in re.finditer(r'\[ACTION:CREATEFOLDER:([^|^\]]+)\|([^\]]+)\]', response):

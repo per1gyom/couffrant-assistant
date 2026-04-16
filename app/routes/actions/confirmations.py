@@ -41,9 +41,6 @@ def _handle_confirmations(response, username, tenant_id, outlook_token, tools):
 
 def _execute_confirmed_action(action: dict, outlook_token: str, tools: dict) -> dict:
     from app.connectors.outlook_connector import perform_outlook_action
-    from app.connectors.drive_connector import (
-        move_item, copy_item, _find_sharepoint_site_and_drive,
-    )
     from app.connectors.teams_connector import (
         send_channel_message, send_chat_message,
         send_message_to_user, create_group_chat,
@@ -125,21 +122,25 @@ def _execute_confirmed_action(action: dict, outlook_token: str, tools: dict) -> 
 
         if action_type == "MOVEDRIVE":
             if not tools.get("drive_write"):
-                return {"ok": False, "error": "Ecriture Drive non autorisee"}
-            _, drive_id, _ = _find_sharepoint_site_and_drive(outlook_token)
-            r = move_item(outlook_token, payload["item_id"], payload["dest_id"],
-                          payload.get("new_name"), drive_id)
-            return {"ok": r.get("status") == "ok", "message": r.get("message", "Deplace"),
-                    "error": r.get("message", "deplacement echoue")}
+                return {"ok": False, "error": "Écriture Drive non autorisée"}
+            from app.drive_manager import get_drive_for
+            drive = get_drive_for(username, payload.get("drive_hint", ""))
+            if not drive:
+                return {"ok": False, "error": "Aucun drive connecté."}
+            result = drive.move(payload["item_id"], payload["dest_id"], payload.get("new_name", ""))
+            return {"ok": result.get("ok", False), "message": result.get("message", "Déplacé"),
+                    "error": result.get("message", "") if not result.get("ok") else ""}
 
         if action_type == "COPYFILE":
             if not tools.get("drive_write"):
-                return {"ok": False, "error": "Ecriture Drive non autorisee"}
-            _, drive_id, _ = _find_sharepoint_site_and_drive(outlook_token)
-            r = copy_item(outlook_token, payload["source_id"], payload["dest_id"],
-                          payload.get("new_name"), drive_id)
-            return {"ok": r.get("status") == "ok", "message": r.get("message", "Copie lancee"),
-                    "error": r.get("message", "copie echouee")}
+                return {"ok": False, "error": "Écriture Drive non autorisée"}
+            from app.drive_manager import get_drive_for
+            drive = get_drive_for(username, payload.get("drive_hint", ""))
+            if not drive:
+                return {"ok": False, "error": "Aucun drive connecté."}
+            result = drive.copy(payload["source_id"], payload["dest_id"], payload.get("new_name", ""))
+            return {"ok": result.get("ok", False), "message": result.get("message", "Copié"),
+                    "error": result.get("message", "") if not result.get("ok") else ""}
 
         if action_type == "CREATEEVENT":
             # Utiliser le manager unifié (Microsoft + Google Calendar)
