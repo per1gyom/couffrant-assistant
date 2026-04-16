@@ -1,5 +1,6 @@
 import os
 import time
+import html as _html
 
 from fastapi import APIRouter, Request, Form
 from fastapi.responses import RedirectResponse, HTMLResponse
@@ -114,7 +115,6 @@ def chat(request: Request):
         return RedirectResponse("/login-app")
     username = request.session.get("user")
     tenant_id = request.session.get("tenant_id", "")
-    # Vérifier suspension — déconnexion immédiate si suspendu
     from app.suspension import check_suspension
     suspended, reason = check_suspension(username, tenant_id)
     if suspended:
@@ -126,7 +126,18 @@ def chat(request: Request):
         request.session["must_reset"] = True
         return RedirectResponse("/forced-reset")
     with open("app/templates/raya_chat.html", "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
+        content = f.read()
+    # Injection côté serveur du nom d'utilisateur — visible immédiatement sans JS
+    safe_name = _html.escape(username)
+    content = content.replace(
+        'id="logoUserName"></span>',
+        f'id="logoUserName">{safe_name}</span>'
+    )
+    content = content.replace(
+        'id="headerUser"></span>',
+        f'id="headerUser">{safe_name}</span>'
+    )
+    return HTMLResponse(content=content)
 
 
 @router.get("/login")
