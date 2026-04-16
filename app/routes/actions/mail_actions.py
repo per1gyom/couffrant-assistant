@@ -29,8 +29,27 @@ def _build_delete_label(subjects: list) -> str:
 def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_mails,
                          username, tenant_id, conversation_id, from_email=""):
     confirmed = []
-    # FIX-MAIL-DUP : tracker les IDs deja traites pour eviter DELETE+ARCHIVE sur le meme mail
     processed_ids = set()
+
+    # SEARCH_CONTACTS : cherche l'email d'un contact (direct, résultat injecté)
+    for match in re.finditer(r'\[ACTION:SEARCH_CONTACTS:([^\]]+)\]', response):
+        query = match.group(1).strip()
+        try:
+            r = perform_outlook_action("search_contacts", {"query": query}, token)
+            items = r.get("items", [])
+            if items:
+                contact = items[0]
+                name = contact.get("displayName", "")
+                emails = contact.get("emailAddresses", [])
+                email = emails[0].get("address", "") if emails else ""
+                if email:
+                    confirmed.append(f"📇 Contact trouvé : {name} → {email}")
+                else:
+                    confirmed.append(f"📇 Contact trouvé sans email : {name}")
+            else:
+                confirmed.append(f"📇 Contact '{query}' introuvable — demande l'adresse à l'utilisateur.")
+        except Exception as e:
+            confirmed.append(f"📇 Recherche contact échouée : {str(e)[:80]}")
 
     if mail_can_delete:
         delete_ids = []

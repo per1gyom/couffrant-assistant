@@ -31,6 +31,10 @@ Interactif (immediat) :
   [ACTION:SEND_MAIL:destinataire@email.fr|sujet|corps] -> envoyer un NOUVEAU mail (pas une reponse)
     Exemple : [ACTION:SEND_MAIL:per1.guillaume@gmail.com|Test Raya|Bonjour, ceci est un test.]
     -> met en queue + confirmation requise avant envoi (l'utilisateur peut aussi choisir "Brouillon")
+  [ACTION:SEARCH_CONTACTS:prenom nom] -> cherche l'adresse email d'un contact dans Microsoft Contacts
+    A utiliser OBLIGATOIREMENT avant SEND_MAIL ou REPLY quand tu ne connais pas l'adresse exacte.
+    Exemples : [ACTION:SEARCH_CONTACTS:Charlotte] ou [ACTION:SEARCH_CONTACTS:Ducasse Simon]
+    -> retourne le nom et l'email trouve, ou vide si inconnu
 Filtre mails :
   [ACTION:LEARN:mail_filter|autoriser: email@domaine.fr]
   [ACTION:LEARN:mail_filter|bloquer: promo@xyz.fr]""")

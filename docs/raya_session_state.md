@@ -136,6 +136,7 @@ App iOS fonctionnelle sur simulateur. Ne pas toucher au dossier `flutter/`.
 
 ### Priorité immédiate
 - [ ] **Connecteurs v2 Phase C** — `get_user_connections()` dans `_raya_core()`, remplace `load_user_tools()`
+- [ ] **Panel admin — onglet Signatures par utilisateur** : depuis la fiche admin d'un utilisateur, pouvoir éditer ses signatures selon ses boîtes mail connectées (même éditeur WYSIWYG que côté user)
 - [ ] Investiguer bug reports #1 et #2 (archivage mail 404)
 - [ ] Tester les 3 niveaux d'accès complets (super admin / tenant admin / user)
 

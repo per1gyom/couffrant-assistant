@@ -125,18 +125,43 @@ def get_mailboxes(user: dict = Depends(require_user)):
     conn = None
     try:
         conn = _get_conn(); c = conn.cursor()
-        # Email Microsoft (oauth_tokens provider=microsoft)
+
+        # Email Microsoft — users.email d'abord, sinon Graph /me
         c.execute("SELECT email FROM users WHERE username=%s LIMIT 1", (username,))
         row = c.fetchone()
         ms_email = (row[0] if row and row[0] and 'raya-ia.fr' not in row[0] else None)
+
+        if not ms_email:
+            # Fallback : lire depuis Microsoft Graph /me
+            try:
+                from app.token_manager import get_valid_microsoft_token
+                from app.graph_client import graph_get
+                token = get_valid_microsoft_token(username)
+                if token:
+                    me = graph_get(token, "/me", params={"$select": "mail,userPrincipalName"})
+                    candidate = me.get("mail") or me.get("userPrincipalName") or ""
+                    if candidate and '@' in candidate and 'raya-ia.fr' not in candidate:
+                        ms_email = candidate
+                        # Auto-mise à jour DB
+                        c.execute(
+                            "UPDATE users SET email=%s WHERE username=%s "
+                            "AND (email IS NULL OR email ILIKE '%%raya-ia.fr%%')",
+                            (ms_email, username)
+                        )
+                        conn.commit()
+            except Exception:
+                pass
+
         if ms_email:
-            mailboxes.append({"address": ms_email, "label": "Outlook (boîte pro)", "provider": "microsoft"})
-        # Gmail (oauth_tokens provider=google)
+            mailboxes.append({"address": ms_email, "label": f"Outlook — {ms_email}", "provider": "microsoft"})
+
+        # Gmail
         c.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
         row = c.fetchone()
         if row and row[0]:
-            mailboxes.append({"address": row[0], "label": f"Gmail ({row[0]})", "provider": "gmail"})
-        # Boîtes extra depuis user_tools
+            mailboxes.append({"address": row[0], "label": f"Gmail — {row[0]}", "provider": "gmail"})
+
+        # Boîtes extra (user_tools config)
         from app.app_security import get_user_tools
         tools = get_user_tools(username)
         extra = tools.get("outlook", {}).get("config", {}).get("mailboxes", [])
