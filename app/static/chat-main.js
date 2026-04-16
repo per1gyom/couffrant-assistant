@@ -56,12 +56,11 @@ function _renderTokenBanner(warnings) {
   }
   banner.style.display = 'flex';
   banner.innerHTML = warnings.map(w => {
-    const isEmail = w.mailbox && w.mailbox.includes('@');
-    const label = isEmail ? w.mailbox : w.provider;
-    const sub = isEmail ? '' : `<span class="token-warning-sub">${w.provider}</span>`;
+    const email = (w.mailbox && w.mailbox !== w.provider && w.mailbox.includes('@')) ? w.mailbox : '';
     return `<div class="token-warning-pill">
       <span class="token-warning-icon">⚠️</span>
-      <span class="token-warning-label">${label}</span>${sub}
+      <span class="token-warning-label">${w.provider}</span>
+      ${email ? `<span class="token-warning-email">${email}</span>` : ''}
       <span class="token-warning-msg">Connexion expirée</span>
       <a href="${w.action_url}" class="token-warning-btn">Reconnecter →</a>
     </div>`;

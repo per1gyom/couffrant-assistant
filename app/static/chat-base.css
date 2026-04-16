@@ -207,3 +207,4 @@ textarea#input.interim { color: var(--text-muted); font-style: italic; }
   0%, 100% { box-shadow: 0 0 0 0 rgba(249,115,22,0.4); }
   50% { box-shadow: 0 0 0 5px rgba(249,115,22,0); }
 }
+.token-warning-email { font-size: 11px; color: #c2410c; font-family: monospace; }

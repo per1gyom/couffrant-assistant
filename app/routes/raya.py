@@ -103,17 +103,9 @@ def token_status(request: Request, user: dict = Depends(require_user)):
                     "severity": "error",
                 })
         else:
-            # Legacy — lire email depuis gmail_tokens ET oauth_tokens
+            # Legacy — lire email depuis gmail_tokens
             conn = _gpc(); c = conn.cursor()
-            c.execute("""
-                SELECT COALESCE(gt.email, ot.username)
-                FROM oauth_tokens ot
-                LEFT JOIN gmail_tokens gt ON gt.username = ot.username
-                WHERE ot.provider='google' AND ot.username=%s
-                UNION
-                SELECT email FROM gmail_tokens WHERE username=%s
-                LIMIT 1
-            """, (username, username))
+            c.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
             row = c.fetchone(); conn.close()
             if row and row[0]:
                 gmail_email = row[0]
