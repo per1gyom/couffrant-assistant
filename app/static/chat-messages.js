@@ -246,13 +246,54 @@ function renderPendingActions(pendingList) {
     }
 
     const btns = document.createElement('div'); btns.className = 'pending-btns';
+
     const confirmBtn = document.createElement('button'); confirmBtn.className = 'pending-btn confirm';
     confirmBtn.innerHTML = '&#10003; Envoyer';
-    confirmBtn.onclick = () => { if (confirmBtn.disabled) return; confirmBtn.disabled=true; confirmBtn.textContent='⏳'; card.querySelectorAll('button').forEach(b=>b.disabled=true); inputEl.value=`Confirme l'action ${action.id}`; sendMessage(); };
+    confirmBtn.onclick = async () => {
+      if (confirmBtn.disabled) return;
+      card.querySelectorAll('button').forEach(b => { b.disabled = true; });
+      confirmBtn.innerHTML = '&#8987;';
+      try {
+        const r = await fetch(`/raya/confirm/${action.id}`, { method: 'POST' });
+        const data = await r.json();
+        if (data.ok) {
+          showToast('\u2705 ' + data.message, 'ok', 3500);
+        } else {
+          showToast('\u274c ' + data.message, 'err', 4000);
+          card.querySelectorAll('button').forEach(b => { b.disabled = false; });
+          confirmBtn.innerHTML = '&#10003; Envoyer';
+          return;
+        }
+      } catch(e) {
+        showToast('\u274c Erreur réseau', 'err', 4000);
+        card.querySelectorAll('button').forEach(b => { b.disabled = false; });
+        confirmBtn.innerHTML = '&#10003; Envoyer';
+        return;
+      }
+      card.remove();
+      const zone = document.getElementById('pending-actions-zone');
+      if (zone && zone.querySelectorAll('.pending-card').length === 0) zone.remove();
+    };
     btns.appendChild(confirmBtn);
+
     const cancelBtn = document.createElement('button'); cancelBtn.className = 'pending-btn cancel';
     cancelBtn.innerHTML = '&#10005; Annuler';
-    cancelBtn.onclick = () => { if (cancelBtn.disabled) return; cancelBtn.disabled=true; cancelBtn.textContent='⏳'; card.querySelectorAll('button').forEach(b=>b.disabled=true); inputEl.value=`Annule l'action ${action.id}`; sendMessage(); };
+    cancelBtn.onclick = async () => {
+      if (cancelBtn.disabled) return;
+      card.querySelectorAll('button').forEach(b => { b.disabled = true; });
+      cancelBtn.innerHTML = '&#8987;';
+      try {
+        const r = await fetch(`/raya/cancel/${action.id}`, { method: 'POST' });
+        const data = await r.json();
+        showToast(data.ok ? '\u23f9\ufe0f ' + data.message : '\u274c ' + data.message,
+                  data.ok ? 'info' : 'err', 3000);
+      } catch(e) {
+        showToast('\u274c Erreur réseau', 'err', 4000);
+      }
+      card.remove();
+      const zone = document.getElementById('pending-actions-zone');
+      if (zone && zone.querySelectorAll('.pending-card').length === 0) zone.remove();
+    };
     btns.appendChild(cancelBtn);
     card.appendChild(btns); zone.appendChild(card);
   });

@@ -183,4 +183,43 @@ def raya_why(
     return {"status": "ok", **meta}
 
 
+@router.post("/raya/confirm/{action_id}")
+def raya_confirm_action(
+    action_id: int,
+    user: dict = Depends(require_user),
+):
+    """Confirme et execute une action en attente — sans passer par le chat."""
+    username = user["username"]
+    tenant_id = user["tenant_id"]
+    from app.pending_actions import confirm_action, mark_executed, mark_failed
+    from app.routes.actions.confirmations import _execute_confirmed_action
+    action = confirm_action(action_id, username, tenant_id)
+    if not action:
+        return {"ok": False, "message": "Action introuvable, deja traitee ou expiree."}
+    outlook_token = get_valid_microsoft_token(username)
+    tools = load_user_tools(username)
+    result = _execute_confirmed_action(action, outlook_token, tools)
+    if result.get("ok"):
+        mark_executed(action_id, result)
+        return {"ok": True, "message": result.get("message", "Action executee")}
+    else:
+        mark_failed(action_id, result.get("error", ""))
+        return {"ok": False, "message": result.get("error", "Echec de l'action")}
+
+
+@router.post("/raya/cancel/{action_id}")
+def raya_cancel_action(
+    action_id: int,
+    user: dict = Depends(require_user),
+):
+    """Annule une action en attente — sans passer par le chat."""
+    username = user["username"]
+    tenant_id = user["tenant_id"]
+    from app.pending_actions import cancel_action, get_action
+    action_info = get_action(action_id, username, tenant_id)
+    label = (action_info.get("label") if action_info else None) or f"#{action_id}"
+    ok = cancel_action(action_id, username, tenant_id, reason="Annule par l'utilisateur")
+    return {"ok": ok, "message": f"Annule : {label}" if ok else "Action introuvable."}
+
+
 # --- CORE ---

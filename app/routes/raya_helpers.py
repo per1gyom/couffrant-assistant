@@ -160,17 +160,8 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     clean_response = re.sub(r'\|?\["[^"]*"(?:,"[^"]*")*\](?:\|?\d*\]?)?', '', clean_response)
     clean_response = re.sub(r'^\s*\|?\["[^"]+".*$', '', clean_response, flags=re.MULTILINE)
     clean_response = re.sub(r'\n{3,}', '\n\n', clean_response).strip()
-    if actions_confirmed:
-        new_actions = []
-        response_lower = clean_response.lower()
-        for act in actions_confirmed:
-            if 'corbeille' in act.lower() and 'corbeille' in response_lower:
-                continue
-            if 'archive' in act.lower() and 'archiv' in response_lower:
-                continue
-            new_actions.append(act)
-        if new_actions:
-            clean_response += "\n\n" + "\n".join(new_actions)
+    # Les confirmations d'actions (CONFIRM/CANCEL) sont maintenant gérées via /raya/confirm et /raya/cancel
+    # → on n'appende plus les messages d'actions dans la réponse chat (évite le bruit et les doublons)
 
     # 10. Sauvegarde
     aria_memory_id = None
