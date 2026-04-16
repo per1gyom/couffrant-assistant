@@ -174,8 +174,18 @@
     <button class="btn btn-primary" onclick="saveDisplayName()">Enregistrer le nom</button>
   </div>
   <div class="profile-card">
+    <div class="profile-section-title">🔗 Mes connexions mail</div>
+    <div class="profile-info">Re-connectez vos boîtes mail. La connexion Gmail est nécessaire pour l'envoi depuis la boîte perso — elle doit être re-faite pour obtenir la permission d'envoi.</div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:12px">
+      <a href="/login" class="btn btn-primary" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">🔵 Microsoft 365 — Connecter / Reconnecter</a>
+      <a href="/login/gmail" class="btn btn-accent" style="text-decoration:none;display:inline-flex;align-items:center;gap:6px">✉️ Gmail — Connecter / Reconnecter</a>
+    </div>
+    <div id="conn-status-block" style="margin-top:12px;font-size:12px;font-family:var(--mono);color:var(--text3)">
+      <span class="loader"></span> Vérification…
+    </div>
+  </div>
+  <div class="profile-card">
     <div class="profile-section-title">🔑 Changer le mot de passe</div>
-    <div class="profile-info">Critères : 12 caractères min · majuscule · minuscule · chiffre · caractère spécial.</div>
     <div id="password-alert" class="alert"></div>
     <div class="form-group"><label>Mot de passe actuel</label><input type="password" id="current-password" placeholder="Votre mot de passe actuel" autocomplete="current-password"></div>
     <div class="form-group"><label>Nouveau mot de passe</label><input type="password" id="new-password" placeholder="12 caract. min + maj + chiffre + spécial" autocomplete="new-password"></div>
@@ -362,6 +372,21 @@
   window.loadProfile=async function(){
     await _origProf();
     try{const d=await(await fetch('/profile')).json();const el=document.getElementById('profile-display-name');if(el)el.value=d.display_name||'';}catch(e){}
+    // Vérifier l'état des connexions
+    try{
+      const el=document.getElementById('conn-status-block');
+      if(!el) return;
+      const d=await(await fetch('/token-status')).json();
+      const mails=await(await fetch('/signatures/mailboxes')).json();
+      const msBox=mails.find(m=>m.provider==='microsoft');
+      const gmailBox=mails.find(m=>m.provider==='gmail');
+      const msOk=!d.warnings||!d.warnings.some(w=>w.provider==='Microsoft 365');
+      el.innerHTML=
+        `<div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
+          <div>${msOk?'🟢':'🔴'} <strong>Microsoft 365</strong> : ${msOk?(msBox?msBox.address:'connecté'):'token expiré — reconnectez-vous'}</div>
+          <div>${gmailBox?'🟢':'⚫'} <strong>Gmail</strong> : ${gmailBox?gmailBox.address:'non connecté'}</div>
+        </div>`;
+    }catch(e){}
   };
   window.saveDisplayName=async function(){
     const el=document.getElementById('profile-display-name');
