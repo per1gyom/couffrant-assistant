@@ -33,7 +33,9 @@ def _build_email_html(body: str, username: str = "guillaume") -> str:
     """Corps HTML du mail avec signature. EMAIL-SIGNATURE : deleguee a get_email_signature()."""
     from app.email_signature import get_email_signature
     signature = get_email_signature(username)
-    return f'<div style="font-family:Arial,sans-serif;font-size:14px;color:#222;"><div style="white-space:pre-line;">{body}</div>{signature}</div>'
+    # Convertir les sauts de ligne en <br> — white-space:pre-line est ignore par Gmail/Outlook
+    body_html = body.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '<br>\n')
+    return f'<div style="font-family:Arial,sans-serif;font-size:14px;color:#222;">{body_html}</div>{signature}'
 
 
 # Re-exports Drive
