@@ -206,7 +206,6 @@ const _shownActionIds = new Set();
 
 function appendPendingActionToChat(action) {
   if (_shownActionIds.has(action.id)) return;
-  // Double check DOM — évite les doublons si le Set est réinitialisé (reload partiel)
   if (messagesEl && messagesEl.querySelector(`[data-action-id="${action.id}"]`)) {
     _shownActionIds.add(action.id);
     return;
@@ -214,7 +213,8 @@ function appendPendingActionToChat(action) {
   _shownActionIds.add(action.id);
 
   const row = document.createElement('div');
-  row.className = 'message-row action-pending';
+  const isDone = action.status && action.status !== 'pending';
+  row.className = isDone ? 'message-row action-done' : 'message-row action-pending';
   row.dataset.actionId = String(action.id);
 
   const card = document.createElement('div');
@@ -290,6 +290,15 @@ function appendPendingActionToChat(action) {
 
   btns.appendChild(confirmBtn); btns.appendChild(cancelBtn);
   card.appendChild(btns);
+  // Si action déjà terminée (depuis historique), afficher le statut sans boutons
+  if (isDone) {
+    btns.remove();
+    const statusEl = document.createElement('div');
+    statusEl.className = 'action-done-status';
+    const icon = action.status === 'executed' ? '✅' : (action.status === 'cancelled' ? '⏹️' : '❌');
+    statusEl.textContent = `${icon} ${action.label || action.action_type}`;
+    card.appendChild(statusEl);
+  }
   row.appendChild(card);
   messagesEl.appendChild(row);
   scrollToBottom();

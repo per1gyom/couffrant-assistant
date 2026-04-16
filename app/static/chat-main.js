@@ -15,6 +15,12 @@ async function loadHistory() {
     history.forEach(item => {
       if (item.user) addMessage(item.user, 'user', null, null, item.created_at || item.ts);
       if (item.raya) addMessage(item.raya, 'raya', null, item.id, item.created_at || item.ts);
+      // Réinjecter les action cards liées à cet échange
+      if (item.actions && item.actions.length > 0) {
+        item.actions.forEach(a => {
+          if (typeof appendPendingActionToChat === 'function') appendPendingActionToChat(a);
+        });
+      }
     });
     const sep = document.createElement('div');
     sep.className = 'history-sep';

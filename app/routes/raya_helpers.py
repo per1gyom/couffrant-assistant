@@ -122,48 +122,23 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     log_llm_usage(result, username=username, tenant_id=tenant_id,
                   purpose="raya_main_conversation")
 
-    # 7. Execution des actions
-    actions_raw = execute_actions(
-        raya_response=raya_response, username=username, tenant_id=tenant_id,
-        outlook_token=outlook_token, mails_from_db=db_ctx["mails_from_db"],
-        live_mails=live_mails, tools=tools, conversation_id=None,
-    )
-
-    # 8. Extraction ASK_CHOICE du flux confirmed
-    ask_choice = None
-    actions_confirmed = []
-    for item in actions_raw:
-        if item.startswith(_ASK_CHOICE_PREFIX):
-            try:
-                ask_choice = json.loads(item[len(_ASK_CHOICE_PREFIX):])
-            except Exception:
-                pass
-        else:
-            actions_confirmed.append(item)
-
-    # 9. Reponse propre — retire TOUTES les balises techniques du texte
+    # 7→9. Reponse propre — retire TOUTES les balises techniques du texte
     clean_response = raya_response
     clean_response = re.sub(r'\[ACTION:[A-Z_]+:[^\]]*\]', '', clean_response)
     clean_response = re.sub(r'\[ACTION:[A-Z_]+\]', '', clean_response)
-    # Extraire [SPEAK_SPEED:X.X] avant de le supprimer — transmis en champ JSON séparé
     speak_speed = None
     speed_match = re.search(r'\[SPEAK_SPEED:([\d.]+)\]', clean_response)
     if speed_match:
         speak_speed = float(speed_match.group(1))
     clean_response = re.sub(r'\[SPEAK_SPEED:[\d.]+\]', '', clean_response)
-    # Nettoyer toute syntaxe technique résiduelle que le LLM aurait laissé passer
     clean_response = re.sub(r'`?\[ACTION:[^\]]*\]`?', '', clean_response)
     clean_response = re.sub(r'`?\[SPEAK_SPEED:[^\]]*\]`?', '', clean_response)
-    # Supprimer les lignes vides excessives + backticks vides
     clean_response = re.sub(r'``', '', clean_response)
-    # FIX-ODOO : nettoyer les fragments Odoo/JSON bruts (inline ou en debut de ligne)
     clean_response = re.sub(r'\|?\["[^"]*"(?:,"[^"]*")*\](?:\|?\d*\]?)?', '', clean_response)
     clean_response = re.sub(r'^\s*\|?\["[^"]+".*$', '', clean_response, flags=re.MULTILINE)
     clean_response = re.sub(r'\n{3,}', '\n\n', clean_response).strip()
-    # Les confirmations d'actions (CONFIRM/CANCEL) sont maintenant gérées via /raya/confirm et /raya/cancel
-    # → on n'appende plus les messages d'actions dans la réponse chat (évite le bruit et les doublons)
 
-    # 10. Sauvegarde
+    # 7→10. Sauvegarde AVANT execute_actions pour avoir l'aria_memory_id comme conversation_id
     aria_memory_id = None
     conn = None
     try:
@@ -177,6 +152,25 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         conn.commit()
     finally:
         if conn: conn.close()
+
+    # 7. Execution des actions (avec aria_memory_id pour lier les cartes à l'échange)
+    actions_raw = execute_actions(
+        raya_response=raya_response, username=username, tenant_id=tenant_id,
+        outlook_token=outlook_token, mails_from_db=db_ctx["mails_from_db"],
+        live_mails=live_mails, tools=tools, conversation_id=aria_memory_id,
+    )
+
+    # 8. Extraction ASK_CHOICE du flux confirmed
+    ask_choice = None
+    actions_confirmed = []
+    for item in actions_raw:
+        if item.startswith(_ASK_CHOICE_PREFIX):
+            try:
+                ask_choice = json.loads(item[len(_ASK_CHOICE_PREFIX):])
+            except Exception:
+                pass
+        else:
+            actions_confirmed.append(item)
 
     # 10b. Log d'activite (7-ACT)
     try:
