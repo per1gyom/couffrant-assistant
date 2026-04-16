@@ -213,4 +213,9 @@ MIGRATIONS = [
     # -- SUPPRESSION COMPTE : workflow validation admin --
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS deletion_requested_at TIMESTAMP DEFAULT NULL",
     # -- Ajouter les nouvelles migrations sous cette ligne --
+    # -- SIGNATURES v2 : nom + multi-boites + defaut --
+    "ALTER TABLE email_signatures ADD COLUMN IF NOT EXISTS name TEXT",
+    "ALTER TABLE email_signatures ADD COLUMN IF NOT EXISTS apply_to_emails TEXT[] DEFAULT '{}'",
+    "ALTER TABLE email_signatures ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false",
+    "ALTER TABLE email_signatures ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
 ]

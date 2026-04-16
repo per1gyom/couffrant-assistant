@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes, minimum-scale=0.5, maximum-scale=5">
 <title>Raya</title>
-<link rel="manifest" href="/static/manifest.json?v=45">
+<link rel="manifest" href="/static/manifest.json?v=46">
 <meta name="theme-color" content="#0057b8">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
-<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=45">
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=46">
 <script>
 window.__RAYA_V = 28;
 if ('serviceWorker' in navigator) {
@@ -17,11 +17,11 @@ if ('serviceWorker' in navigator) {
   caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
 }
 </script>
-<link rel="stylesheet" href="/static/chat-base.css?v=45">
-<link rel="stylesheet" href="/static/chat-components.css?v=45">
-<link rel="stylesheet" href="/static/chat-drawer.css?v=45">
-<link rel="stylesheet" href="/static/onboarding.css?v=45">
-<link rel="stylesheet" href="/static/mobile.css?v=45">
+<link rel="stylesheet" href="/static/chat-base.css?v=46">
+<link rel="stylesheet" href="/static/chat-components.css?v=46">
+<link rel="stylesheet" href="/static/chat-drawer.css?v=46">
+<link rel="stylesheet" href="/static/onboarding.css?v=46">
+<link rel="stylesheet" href="/static/mobile.css?v=46">
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -186,6 +186,95 @@ if ('serviceWorker' in navigator) {
       <a href="/legal" target="_blank" style="font-size:12px;color:var(--text-muted);text-decoration:none"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg> Mentions légales &amp; Confidentialité</a>
     </div>
 
+    <!-- ─── ONGLET SIGNATURES ─── -->
+    <div style="padding:14px 0;border-top:1px solid var(--border);margin-top:8px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px">
+        <span style="display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:50%;background:rgba(0,87,184,0.10);color:#0057b8;flex-shrink:0">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        </span>
+        <span style="font-size:14px;font-weight:600;color:var(--text)">Signatures email</span>
+        <button onclick="openSigEditor(null)" style="margin-left:auto;padding:5px 12px;background:var(--accent);color:#fff;border:none;border-radius:7px;font-size:12px;font-weight:600;cursor:pointer">+ Nouvelle</button>
+      </div>
+
+      <!-- Liste des signatures -->
+      <div id="sigListZone" style="margin-bottom:12px"></div>
+
+      <!-- Éditeur (caché par défaut) -->
+      <div id="sigEditorZone" style="display:none;border:1.5px solid var(--border);border-radius:10px;padding:14px;background:var(--bg)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <span id="sigEditorTitle" style="font-size:13px;font-weight:700;color:var(--text)">Nouvelle signature</span>
+          <button onclick="closeSigEditor()" style="background:none;border:none;font-size:18px;color:var(--text-muted);cursor:pointer">×</button>
+        </div>
+
+        <!-- Nom -->
+        <div style="margin-bottom:10px">
+          <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:4px">Nom de la signature</label>
+          <input id="sigName" type="text" placeholder="ex : Pro, Perso, Couffrant Solar…" maxlength="80"
+            style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit;background:var(--bg);color:var(--text);outline:none;box-sizing:border-box">
+        </div>
+
+        <!-- Boîtes mail -->
+        <div style="margin-bottom:10px">
+          <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:6px">Boîtes mail associées</label>
+          <div id="sigMailboxes" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+        </div>
+
+        <!-- Par défaut -->
+        <div style="margin-bottom:12px;display:flex;align-items:center;gap:8px">
+          <input type="checkbox" id="sigDefault" style="width:15px;height:15px;cursor:pointer">
+          <label for="sigDefault" style="font-size:13px;color:var(--text);cursor:pointer">Signature par défaut (si aucune règle ne correspond)</label>
+        </div>
+
+        <!-- Toolbar WYSIWYG -->
+        <div class="sig-toolbar">
+          <select onchange="sigFont(this)" title="Police" style="max-width:110px">
+            <option value="">Police…</option>
+            <option value="Arial, Helvetica, sans-serif">Arial</option>
+            <option value="Georgia, serif">Georgia</option>
+            <option value="'Times New Roman', Times, serif">Times New Roman</option>
+            <option value="Calibri, sans-serif">Calibri</option>
+            <option value="Verdana, Geneva, sans-serif">Verdana</option>
+            <option value="Tahoma, Geneva, sans-serif">Tahoma</option>
+            <option value="'Courier New', Courier, monospace">Courier</option>
+          </select>
+          <select onchange="sigSize(this)" title="Taille">
+            <option value="">Taille…</option>
+            <option value="1">10</option><option value="2">13</option>
+            <option value="3">16</option><option value="4">18</option>
+            <option value="5">24</option><option value="6">32</option>
+          </select>
+          <button onclick="sigCmd('bold')" title="Gras"><b>G</b></button>
+          <button onclick="sigCmd('italic')" title="Italique"><i>I</i></button>
+          <button onclick="sigCmd('underline')" title="Souligné"><u>S</u></button>
+          <label title="Couleur texte" style="display:inline-flex;align-items:center;gap:2px;cursor:pointer;font-size:12px">
+            A <input type="color" value="#000000" oninput="sigColor(this)" style="width:22px;height:18px;padding:0;border:none;cursor:pointer">
+          </label>
+          <button onclick="sigCmd('justifyLeft')" title="Gauche">⬛◻️</button>
+          <button onclick="sigCmd('justifyCenter')" title="Centre">◻️⬛◻️</button>
+          <button onclick="sigInsertImage()" title="Image">🖼️</button>
+          <button onclick="sigCmd('insertHorizontalRule')" title="Séparateur">─</button>
+          <button onclick="sigCmd('removeFormat')" title="Effacer format" style="color:var(--danger)">✕</button>
+        </div>
+
+        <!-- Emojis -->
+        <div class="sig-emoji-bar" id="sigEmojiBar">
+          <div style="font-size:10px;color:var(--text-muted);margin-bottom:4px;font-weight:600;text-transform:uppercase">Symboles & Emojis</div>
+          <div style="display:flex;flex-wrap:wrap;gap:3px" id="sigEmojiGrid"></div>
+        </div>
+
+        <!-- Zone d'édition -->
+        <div id="sigEditor" contenteditable="true" class="sig-editor-zone"
+          placeholder="Rédigez votre signature ici…"
+          oninput="_activateImgResize && _activateImgResize()"></div>
+
+        <!-- Footer éditeur -->
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+          <button onclick="closeSigEditor()" class="settings-btn-ghost">Annuler</button>
+          <button onclick="saveSig()" class="settings-btn-primary">Enregistrer</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Footer sticky -->
     <div style="position:sticky;bottom:0;background:var(--surface);border-top:1px solid var(--border);padding:14px 0 0;margin-top:8px;display:flex;gap:10px;justify-content:flex-end">
       <button onclick="closeUserSettings()" class="settings-btn-ghost">Annuler</button>
@@ -311,16 +400,17 @@ if ('serviceWorker' in navigator) {
   </div>
 </div>
 
-<script src="/static/chat-onboarding.js?v=45"></script>
-<script src="/static/chat-shortcuts.js?v=45"></script>
-<script src="/static/chat-voice.js?v=45"></script>
-<script src="/static/chat-feedback.js?v=45"></script>
-<script src="/static/chat-triage.js?v=45"></script>
-<script src="/static/chat-admin.js?v=45"></script>
-<script src="/static/chat-topics.js?v=45"></script>
-<script src="/static/chat-core.js?v=45"></script>
-<script src="/static/chat-messages.js?v=45"></script>
-<script src="/static/chat-main.js?v=45"></script>
+<script src="/static/chat-onboarding.js?v=46"></script>
+<script src="/static/chat-shortcuts.js?v=46"></script>
+<script src="/static/chat-signatures.js?v=46"></script>
+<script src="/static/chat-voice.js?v=46"></script>
+<script src="/static/chat-feedback.js?v=46"></script>
+<script src="/static/chat-triage.js?v=46"></script>
+<script src="/static/chat-admin.js?v=46"></script>
+<script src="/static/chat-topics.js?v=46"></script>
+<script src="/static/chat-core.js?v=46"></script>
+<script src="/static/chat-messages.js?v=46"></script>
+<script src="/static/chat-main.js?v=46"></script>
 
 <script>
   // ─── MODAL PARAMÈTRES UTILISATEUR ───
@@ -344,6 +434,24 @@ if ('serviceWorker' in navigator) {
     }).catch(()=>{});
     // Synchro toggle lecture auto
     updateSpeakToggleUI();
+    // Initialiser les signatures et les emojis
+    if (typeof initSignaturesTab === 'function') initSignaturesTab();
+    _initSigEmojis();
+  }
+
+  function _initSigEmojis() {
+    const grid = document.getElementById('sigEmojiGrid');
+    if (!grid || grid.dataset.init) return;
+    grid.dataset.init = '1';
+    if (typeof SIG_EMOJIS === 'undefined') return;
+    SIG_EMOJIS.forEach(e => {
+      const btn = document.createElement('button');
+      btn.textContent = e;
+      btn.title = 'Insérer ' + e;
+      btn.style.cssText = 'background:none;border:1px solid var(--border);border-radius:4px;padding:2px 5px;font-size:15px;cursor:pointer;line-height:1.4';
+      btn.onclick = () => { if(typeof sigInsertEmoji==='function') sigInsertEmoji(e); };
+      grid.appendChild(btn);
+    });
   }
   function closeUserSettings() {
     document.getElementById('modalUserSettings').classList.remove('open');

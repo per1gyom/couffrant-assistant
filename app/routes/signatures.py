@@ -1,0 +1,150 @@
+"""
+CRUD signatures email utilisateur.
+GET  /signatures              → liste
+POST /signatures              → créer
+PATCH /signatures/{id}        → modifier
+DELETE /signatures/{id}       → supprimer
+GET  /signatures/mailboxes    → boîtes mail disponibles
+"""
+from fastapi import APIRouter, Request, Depends
+from fastapi.responses import JSONResponse
+from app.routes.deps import require_user
+from app.logging_config import get_logger
+
+logger = get_logger("raya.signatures")
+router = APIRouter(tags=["signatures"])
+
+
+def _get_conn():
+    from app.database import get_pg_conn
+    return get_pg_conn()
+
+
+@router.get("/signatures")
+def list_signatures(user: dict = Depends(require_user)):
+    username = user["username"]
+    conn = None
+    try:
+        conn = _get_conn(); c = conn.cursor()
+        c.execute("""
+            SELECT id, name, signature_html, apply_to_emails, is_default, updated_at
+            FROM email_signatures WHERE username = %s ORDER BY is_default DESC, updated_at DESC
+        """, (username,))
+        rows = c.fetchall()
+        return [{"id": r[0], "name": r[1] or f"Signature {r[0]}",
+                 "signature_html": r[2], "apply_to_emails": r[3] or [],
+                 "is_default": r[4] or False,
+                 "updated_at": str(r[5]) if r[5] else ""} for r in rows]
+    except Exception as e:
+        return JSONResponse({"error": str(e)[:100]}, status_code=500)
+    finally:
+        if conn: conn.close()
+
+
+@router.post("/signatures")
+async def create_signature(request: Request, user: dict = Depends(require_user)):
+    username = user["username"]
+    tenant_id = user.get("tenant_id", "couffrant_solar")
+    data = await request.json()
+    name = (data.get("name") or "Nouvelle signature").strip()[:100]
+    html = data.get("signature_html", "").strip()
+    emails = data.get("apply_to_emails", [])
+    is_default = bool(data.get("is_default", False))
+    if not html:
+        return JSONResponse({"error": "signature_html requis"}, status_code=400)
+    conn = None
+    try:
+        conn = _get_conn(); c = conn.cursor()
+        if is_default:
+            c.execute("UPDATE email_signatures SET is_default=false WHERE username=%s", (username,))
+        c.execute("""
+            INSERT INTO email_signatures
+              (username, tenant_id, name, signature_html, apply_to_emails, is_default, updated_at)
+            VALUES (%s,%s,%s,%s,%s,%s,NOW()) RETURNING id
+        """, (username, tenant_id, name, html, emails, is_default))
+        new_id = c.fetchone()[0]
+        conn.commit()
+        return {"ok": True, "id": new_id}
+    except Exception as e:
+        return JSONResponse({"error": str(e)[:100]}, status_code=500)
+    finally:
+        if conn: conn.close()
+
+
+@router.patch("/signatures/{sig_id}")
+async def update_signature(sig_id: int, request: Request, user: dict = Depends(require_user)):
+    username = user["username"]
+    data = await request.json()
+    conn = None
+    try:
+        conn = _get_conn(); c = conn.cursor()
+        c.execute("SELECT id FROM email_signatures WHERE id=%s AND username=%s", (sig_id, username))
+        if not c.fetchone():
+            return JSONResponse({"error": "Introuvable"}, status_code=404)
+        fields, vals = [], []
+        for key, col in [("name","name"), ("signature_html","signature_html"),
+                         ("apply_to_emails","apply_to_emails"), ("is_default","is_default")]:
+            if key in data:
+                fields.append(f"{col}=%s"); vals.append(data[key])
+        if not fields:
+            return {"ok": True}
+        if "is_default" in data and data["is_default"]:
+            c.execute("UPDATE email_signatures SET is_default=false WHERE username=%s AND id!=%s",
+                      (username, sig_id))
+        vals += [sig_id, username]
+        c.execute(f"UPDATE email_signatures SET {','.join(fields)},updated_at=NOW() "
+                  f"WHERE id=%s AND username=%s", vals)
+        conn.commit()
+        return {"ok": True}
+    except Exception as e:
+        return JSONResponse({"error": str(e)[:100]}, status_code=500)
+    finally:
+        if conn: conn.close()
+
+
+@router.delete("/signatures/{sig_id}")
+def delete_signature(sig_id: int, user: dict = Depends(require_user)):
+    username = user["username"]
+    conn = None
+    try:
+        conn = _get_conn(); c = conn.cursor()
+        c.execute("DELETE FROM email_signatures WHERE id=%s AND username=%s", (sig_id, username))
+        conn.commit()
+        return {"ok": True}
+    except Exception as e:
+        return JSONResponse({"error": str(e)[:100]}, status_code=500)
+    finally:
+        if conn: conn.close()
+
+
+@router.get("/signatures/mailboxes")
+def get_mailboxes(user: dict = Depends(require_user)):
+    """Retourne toutes les boîtes mail connectées de l'utilisateur."""
+    username = user["username"]
+    mailboxes = []
+    conn = None
+    try:
+        conn = _get_conn(); c = conn.cursor()
+        # Email Microsoft (oauth_tokens provider=microsoft)
+        c.execute("SELECT email FROM users WHERE username=%s LIMIT 1", (username,))
+        row = c.fetchone()
+        ms_email = (row[0] if row and row[0] and 'raya-ia.fr' not in row[0] else None)
+        if ms_email:
+            mailboxes.append({"address": ms_email, "label": "Outlook (boîte pro)", "provider": "microsoft"})
+        # Gmail (oauth_tokens provider=google)
+        c.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
+        row = c.fetchone()
+        if row and row[0]:
+            mailboxes.append({"address": row[0], "label": f"Gmail ({row[0]})", "provider": "gmail"})
+        # Boîtes extra depuis user_tools
+        from app.app_security import get_user_tools
+        tools = get_user_tools(username)
+        extra = tools.get("outlook", {}).get("config", {}).get("mailboxes", [])
+        for addr in extra:
+            if addr and addr not in [m["address"] for m in mailboxes]:
+                mailboxes.append({"address": addr, "label": addr, "provider": "microsoft"})
+    except Exception:
+        pass
+    finally:
+        if conn: conn.close()
+    return mailboxes

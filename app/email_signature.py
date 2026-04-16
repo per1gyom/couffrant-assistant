@@ -45,9 +45,10 @@ def get_email_signature(username: str, from_address: str = None) -> str:
     Retourne la signature HTML pour un utilisateur.
 
     Ordre de résolution :
-      1. DB : email_signatures WHERE username = %s AND email_address = %s (match exact adresse)
-      2. DB : email_signatures WHERE username = %s AND email_address IS NULL (signature générique)
-      3. Fallback statique Guillaume
+      1. DB : signature dont apply_to_emails contient from_address (match exact)
+      2. DB : signature is_default = true
+      3. DB : signature générique (email_address IS NULL, ancienne logique)
+      4. Fallback statique
     """
     conn = None
     try:
@@ -55,8 +56,17 @@ def get_email_signature(username: str, from_address: str = None) -> str:
         conn = get_pg_conn()
         c = conn.cursor()
 
-        # 1. Match exact sur l'adresse email
         if from_address:
+            # Nouvelle logique : array apply_to_emails
+            c.execute("""
+                SELECT signature_html FROM email_signatures
+                WHERE username = %s AND %s = ANY(apply_to_emails)
+                ORDER BY updated_at DESC LIMIT 1
+            """, (username, from_address))
+            row = c.fetchone()
+            if row:
+                return row[0]
+            # Ancienne logique : colonne email_address
             c.execute("""
                 SELECT signature_html FROM email_signatures
                 WHERE username = %s AND email_address = %s
@@ -66,7 +76,17 @@ def get_email_signature(username: str, from_address: str = None) -> str:
             if row:
                 return row[0]
 
-        # 2. Signature générique (email_address IS NULL)
+        # Signature par défaut
+        c.execute("""
+            SELECT signature_html FROM email_signatures
+            WHERE username = %s AND is_default = true
+            ORDER BY updated_at DESC LIMIT 1
+        """, (username,))
+        row = c.fetchone()
+        if row:
+            return row[0]
+
+        # Signature générique (ancienne logique)
         c.execute("""
             SELECT signature_html FROM email_signatures
             WHERE username = %s AND email_address IS NULL
@@ -82,7 +102,6 @@ def get_email_signature(username: str, from_address: str = None) -> str:
         if conn:
             conn.close()
 
-    # 3. Fallback statique
     return _static_signature(username)
 
 
