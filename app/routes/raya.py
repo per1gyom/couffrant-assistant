@@ -183,6 +183,14 @@ def raya_why(
     return {"status": "ok", **meta}
 
 
+@router.get("/raya/pending")
+def raya_pending(user: dict = Depends(require_user)):
+    """Retourne les actions en attente de confirmation pour l'utilisateur connecté."""
+    username = user["username"]
+    tenant_id = user["tenant_id"]
+    return {"pending_actions": get_pending(username=username, tenant_id=tenant_id, limit=10)}
+
+
 @router.post("/raya/confirm/{action_id}")
 def raya_confirm_action(
     action_id: int,

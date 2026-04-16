@@ -33,6 +33,18 @@ async function init() {
   loadMailCount();
   if (typeof checkTokenStatus === 'function') checkTokenStatus();
   await loadHistory();
+  // Afficher les actions en attente existantes dans le chat (depuis la session précédente)
+  try {
+    const r = await fetch('/raya/pending');
+    if (r.ok) {
+      const data = await r.json();
+      if (data.pending_actions && data.pending_actions.length > 0) {
+        data.pending_actions.forEach(a => {
+          if (typeof appendPendingActionToChat === 'function') appendPendingActionToChat(a);
+        });
+      }
+    }
+  } catch(e) { console.warn('[Raya] Pending actions fetch error', e); }
   if (typeof checkOnboarding === 'function') checkOnboarding();
   const autoSpeakBtn = document.getElementById('autoSpeakBtn');
   if (autoSpeakBtn) autoSpeakBtn.classList.add('active');
@@ -70,8 +82,9 @@ async function sendMessage() {
       if (err.length) showToast(err[0].replace('\u274c','').trim(),'err',4000);
       if (pend.length) showToast(`${pend.length} action(s) en attente`,'info',4000);
     }
-    if (data.pending_actions && data.pending_actions.length>0) renderPendingActions(data.pending_actions);
-    else { const zone=document.getElementById('pending-actions-zone'); if(zone) zone.remove(); }
+    if (data.pending_actions && data.pending_actions.length>0) {
+      data.pending_actions.forEach(a => { if (typeof appendPendingActionToChat==='function') appendPendingActionToChat(a); });
+    } else { const zone=document.getElementById('pending-actions-zone'); if(zone) zone.remove(); }
   } catch(e) {
     loading.remove(); addMessage('Erreur de connexion \u00e0 Raya. Réessayez.','raya');
     showToast('Erreur de connexion','err');

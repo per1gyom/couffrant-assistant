@@ -201,103 +201,109 @@ function renderAskChoice(choiceData) {
   messagesEl.appendChild(zone); scrollToBottom();
 }
 
-// --- ACTIONS EN ATTENTE ---
-function renderPendingActions(pendingList) {
-  const existing = document.getElementById('pending-actions-zone'); if (existing) existing.remove();
-  if (!pendingList || pendingList.length === 0) return;
-  const zone = document.createElement('div'); zone.id = 'pending-actions-zone'; zone.className = 'pending-actions-zone';
+// --- ACTIONS EN ATTENTE (inline dans le chat) ---
+const _shownActionIds = new Set();
 
-  const n = pendingList.length;
-  const title = document.createElement('div'); title.className = 'pending-title';
-  title.innerHTML = `⏸️ ${n} action${n > 1 ? 's' : ''} en attente de confirmation`; zone.appendChild(title);
+function appendPendingActionToChat(action) {
+  if (_shownActionIds.has(action.id)) return;
+  _shownActionIds.add(action.id);
 
-  pendingList.forEach(action => {
-    const card = document.createElement('div'); card.className = 'pending-card';
-    const isReply = action.action_type === 'REPLY';
-    const isSendMail = action.action_type === 'SEND_MAIL';
+  const row = document.createElement('div');
+  row.className = 'message-row action-pending';
+  row.dataset.actionId = String(action.id);
 
-    // Badge d'identification de l'action
-    const idBadge = `<div class="pending-id-badge">#${action.id} — ${action.action_type}</div>`;
+  const card = document.createElement('div');
+  card.className = 'action-card';
 
-    if ((isReply || isSendMail) && action.payload) {
-      const p = action.payload;
-      const senderName = p.sender_name || p.to_email || p.to || '?';
-      const subject    = p.subject || '(sans sujet)';
-      const body       = (p.reply_text || p.body || '').replace(/\\n/g, '\n').replace(/\n/g, '<br>');
-      const toLabel    = isReply ? `À : <strong>${senderName}</strong>` : `À : <strong>${p.to_email || '?'}</strong>`;
+  const isReply    = action.action_type === 'REPLY';
+  const isSendMail = action.action_type === 'SEND_MAIL';
+  const p = action.payload || {};
 
-      card.innerHTML = `
-        ${idBadge}
-        <div class="pending-mail-header">
-          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-          <span class="pending-mail-to">${toLabel}</span>
-        </div>
-        <div class="pending-mail-subject">Sujet : <em>${subject}</em></div>
-        <div class="pending-mail-body">${body}</div>`;
-    } else {
-      card.innerHTML = idBadge;
-      const label = document.createElement('div'); label.className = 'pending-label';
-      label.textContent = action.label || `${action.action_type} #${action.id}`; card.appendChild(label);
-      if (action.payload && (action.payload.reply_text || action.payload.body)) {
-        const preview = document.createElement('div'); preview.className = 'pending-preview';
-        preview.textContent = (action.payload.reply_text || action.payload.body || '').replace(/\\n/g, '\n');
-        card.appendChild(preview);
-      }
+  // Badge #ID
+  const badge = document.createElement('div');
+  badge.className = 'pending-id-badge';
+  badge.textContent = `#${action.id} — ${action.action_type}`;
+  card.appendChild(badge);
+
+  // Contenu selon type
+  if (isReply || isSendMail) {
+    const toName = p.sender_name || p.to_email || p.to || '?';
+    const subject = p.subject || '(sans sujet)';
+    const body    = (p.reply_text || p.body || '').replace(/\\n/g, '\n').replace(/\n/g, '<br>');
+
+    const header = document.createElement('div'); header.className = 'pending-mail-header';
+    header.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> À&nbsp;: <strong>${toName}</strong>`;
+    const subjectEl = document.createElement('div'); subjectEl.className = 'pending-mail-subject';
+    subjectEl.innerHTML = `Sujet&nbsp;: <em>${subject}</em>`;
+    const bodyEl = document.createElement('div'); bodyEl.className = 'pending-mail-body';
+    bodyEl.innerHTML = body;
+    card.appendChild(header); card.appendChild(subjectEl); card.appendChild(bodyEl);
+  } else {
+    const label = document.createElement('div'); label.className = 'pending-label';
+    label.textContent = action.label || `${action.action_type} #${action.id}`;
+    card.appendChild(label);
+  }
+
+  // Boutons
+  const btns = document.createElement('div'); btns.className = 'pending-btns';
+
+  const confirmBtn = document.createElement('button'); confirmBtn.className = 'pending-btn confirm';
+  confirmBtn.innerHTML = '&#10003; Envoyer';
+  confirmBtn.onclick = async () => {
+    if (confirmBtn.disabled) return;
+    btns.querySelectorAll('button').forEach(b => b.disabled = true);
+    confirmBtn.innerHTML = '&#8987;';
+    try {
+      const r = await fetch(`/raya/confirm/${action.id}`, { method: 'POST' });
+      const data = await r.json();
+      _markActionInChat(action.id, data.ok ? 'ok' : 'err', data.message);
+    } catch(e) {
+      _markActionInChat(action.id, 'err', 'Erreur réseau');
     }
+  };
 
-    const btns = document.createElement('div'); btns.className = 'pending-btns';
+  const cancelBtn = document.createElement('button'); cancelBtn.className = 'pending-btn cancel';
+  cancelBtn.innerHTML = '&#10005; Annuler';
+  cancelBtn.onclick = async () => {
+    if (cancelBtn.disabled) return;
+    btns.querySelectorAll('button').forEach(b => b.disabled = true);
+    cancelBtn.innerHTML = '&#8987;';
+    try {
+      const r = await fetch(`/raya/cancel/${action.id}`, { method: 'POST' });
+      const data = await r.json();
+      _markActionInChat(action.id, 'cancelled', data.message);
+    } catch(e) {
+      _markActionInChat(action.id, 'err', 'Erreur réseau');
+    }
+  };
 
-    const confirmBtn = document.createElement('button'); confirmBtn.className = 'pending-btn confirm';
-    confirmBtn.innerHTML = '&#10003; Envoyer';
-    confirmBtn.onclick = async () => {
-      if (confirmBtn.disabled) return;
-      card.querySelectorAll('button').forEach(b => { b.disabled = true; });
-      confirmBtn.innerHTML = '&#8987;';
-      try {
-        const r = await fetch(`/raya/confirm/${action.id}`, { method: 'POST' });
-        const data = await r.json();
-        if (data.ok) {
-          showToast('\u2705 ' + data.message, 'ok', 3500);
-        } else {
-          showToast('\u274c ' + data.message, 'err', 4000);
-          card.querySelectorAll('button').forEach(b => { b.disabled = false; });
-          confirmBtn.innerHTML = '&#10003; Envoyer';
-          return;
-        }
-      } catch(e) {
-        showToast('\u274c Erreur réseau', 'err', 4000);
-        card.querySelectorAll('button').forEach(b => { b.disabled = false; });
-        confirmBtn.innerHTML = '&#10003; Envoyer';
-        return;
-      }
-      card.remove();
-      const zone = document.getElementById('pending-actions-zone');
-      if (zone && zone.querySelectorAll('.pending-card').length === 0) zone.remove();
-    };
-    btns.appendChild(confirmBtn);
+  btns.appendChild(confirmBtn); btns.appendChild(cancelBtn);
+  card.appendChild(btns);
+  row.appendChild(card);
+  messagesEl.appendChild(row);
+  scrollToBottom();
+}
 
-    const cancelBtn = document.createElement('button'); cancelBtn.className = 'pending-btn cancel';
-    cancelBtn.innerHTML = '&#10005; Annuler';
-    cancelBtn.onclick = async () => {
-      if (cancelBtn.disabled) return;
-      card.querySelectorAll('button').forEach(b => { b.disabled = true; });
-      cancelBtn.innerHTML = '&#8987;';
-      try {
-        const r = await fetch(`/raya/cancel/${action.id}`, { method: 'POST' });
-        const data = await r.json();
-        showToast(data.ok ? '\u23f9\ufe0f ' + data.message : '\u274c ' + data.message,
-                  data.ok ? 'info' : 'err', 3000);
-      } catch(e) {
-        showToast('\u274c Erreur réseau', 'err', 4000);
-      }
-      card.remove();
-      const zone = document.getElementById('pending-actions-zone');
-      if (zone && zone.querySelectorAll('.pending-card').length === 0) zone.remove();
-    };
-    btns.appendChild(cancelBtn);
-    card.appendChild(btns); zone.appendChild(card);
-  });
+function _markActionInChat(actionId, status, message) {
+  const row = messagesEl.querySelector(`[data-action-id="${actionId}"]`);
+  if (!row) return;
+  row.className = 'message-row action-done';
+  const card = row.querySelector('.action-card');
+  if (!card) return;
+  // Supprimer tout sauf le badge
+  const badge = card.querySelector('.pending-id-badge');
+  card.innerHTML = '';
+  if (badge) card.appendChild(badge);
+  const statusEl = document.createElement('div');
+  statusEl.className = 'action-done-status';
+  const icon = status === 'ok' ? '✅' : (status === 'cancelled' ? '⏹️' : '❌');
+  const timeStr = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  statusEl.textContent = `${icon} ${message} — ${timeStr}`;
+  card.appendChild(statusEl);
+}
 
-  const inputZone = document.querySelector('.input-zone');
-  inputZone.parentNode.insertBefore(zone, inputZone);
+// Compat descendante (plus utilisé, conservé pour éviter crash si appelé)
+function renderPendingActions(pendingList) {
+  if (!pendingList || pendingList.length === 0) return;
+  pendingList.forEach(a => appendPendingActionToChat(a));
 }

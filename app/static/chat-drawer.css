@@ -103,6 +103,33 @@
   margin-bottom: 8px;
   color: #92400e;
 }
+/* ── ACTIONS EN ATTENTE INLINE (dans le flux chat) ── */
+.message-row.action-pending,
+.message-row.action-done {
+  display: flex;
+  justify-content: flex-start;
+  padding: 0 12px 0 48px;
+  margin-bottom: 8px;
+}
+.action-card {
+  background: var(--bg);
+  border: 1.5px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 12px;
+  padding: 14px 16px;
+  max-width: 680px;
+  width: 100%;
+}
+.message-row.action-done .action-card {
+  border-left-color: #9ca3af;
+  opacity: 0.75;
+}
+.action-done-status {
+  font-size: 13px;
+  color: var(--text);
+  margin-top: 6px;
+}
+
 .pending-id-badge {
   display: inline-block;
   font-size: 10px;
