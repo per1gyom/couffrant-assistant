@@ -6,9 +6,11 @@ async function loadHistory() {
   try {
     const r = await fetch('/chat/history?limit=20');
     if (!r.ok) return;
-    const history = await r.json();
-    if (!Array.isArray(history) || history.length === 0) return;
-    const welcome = messagesEl.querySelector('.welcome');
+    const data = await r.json();
+    // data peut être un tableau ou un objet {error: ...}
+    const history = Array.isArray(data) ? data : [];
+    if (history.length === 0) return;
+    const welcome = messagesEl ? messagesEl.querySelector('.welcome') : null;
     if (welcome) welcome.remove();
     history.forEach(item => {
       if (item.user) addMessage(item.user, 'user', null, null, item.created_at || item.ts);
@@ -16,24 +18,25 @@ async function loadHistory() {
     });
     const sep = document.createElement('div');
     sep.className = 'history-sep';
-    sep.textContent = '\u2014 conversation précédente —';
-    messagesEl.appendChild(sep);
+    sep.textContent = '\u2014 conversation précédente \u2014';
+    if (messagesEl) messagesEl.appendChild(sep);
     scrollToBottom(false);
-  } catch(e) {}
+  } catch(e) { console.warn('[History] erreur chargement:', e); }
 }
 
 // --- INIT ---
 async function init() {
-  initShortcuts();         // charge depuis DB
-  initTopicsSidebar();     // charge et render dans sidebar
+  if (typeof initShortcuts === 'function') initShortcuts();
+  if (typeof initTopicsSidebar === 'function') initTopicsSidebar();
   checkHealth();
   loadUserInfo();
   loadMailCount();
-  checkTokenStatus();
+  if (typeof checkTokenStatus === 'function') checkTokenStatus();
   await loadHistory();
-  checkOnboarding();
-  document.getElementById('autoSpeakBtn').classList.add('active');
-  messagesEl.addEventListener('scroll', onMessagesScroll);
+  if (typeof checkOnboarding === 'function') checkOnboarding();
+  const autoSpeakBtn = document.getElementById('autoSpeakBtn');
+  if (autoSpeakBtn) autoSpeakBtn.classList.add('active');
+  if (messagesEl) messagesEl.addEventListener('scroll', onMessagesScroll);
 }
 
 // --- SEND MESSAGE ---
@@ -45,7 +48,6 @@ async function sendMessage() {
   }
   document.querySelectorAll('.ask-choice-zone').forEach(el => el.remove());
   const fileSnapshot = currentFile ? {...currentFile} : null;
-  // Couper le micro AVANT de vider l'input (sinon onresult réécrit dedans)
   if(typeof stopListening==='function'&&isListening) stopListening();
   inputEl.value=''; inputEl.style.height='auto'; inputEl.classList.remove('interim');
   removeAttachment(); sendBtn.disabled=true; stopSpeech();
@@ -102,10 +104,10 @@ function removeAttachment() {
 // --- KEYBOARD ---
 document.addEventListener('keydown', e => {
   if (e.key==='Escape') {
-    closeDrawer();
-    closeShortcutEdit();
-    closeOnboarding();
-    _releaseMicFromFeedback();
+    if(typeof closeDrawer==='function') closeDrawer();
+    if(typeof closeShortcutEdit==='function') closeShortcutEdit();
+    if(typeof closeOnboarding==='function') closeOnboarding();
+    if(typeof _releaseMicFromFeedback==='function') _releaseMicFromFeedback();
     document.querySelectorAll('.bug-report-dialog').forEach(el => el.remove());
   }
 });

@@ -49,10 +49,11 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .sidebar-collapse-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; border-radius: var(--radius-sm); transition: all 0.15s; }
 .sidebar-collapse-btn:hover { color: var(--accent); background: var(--accent-light); }
 .sidebar-footer { margin-top: auto; display: flex; align-items: center; gap: 8px; padding: 12px 10px; border-top: 1px solid var(--border); position: relative; z-index: 500; }
-.sidebar-user { font-size: 12px; color: var(--text-muted); font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 18px; color: var(--text); text-decoration: none; letter-spacing: -0.02em; min-width: 0; flex: 1; }
-.logo-username { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.logo-dot { width: 9px; height: 9px; background: var(--success); border-radius: 50%; animation: pulse 2.5s ease-in-out infinite; flex-shrink: 0; }
+.sidebar-user { font-size: 13px; color: var(--text); font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Logo : dot vert + nom session */
+.logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; color: var(--text); letter-spacing: -0.02em; min-width: 0; flex: 1; }
+.logo-username { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.logo-dot { width: 10px; height: 10px; background: var(--success); border-radius: 50%; animation: pulse 2.5s ease-in-out infinite; flex-shrink: 0; }
 .logo-dot.off { background: #f87171; animation: none; }
 @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.4} }
 
@@ -91,7 +92,7 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 /* SÉPARATEUR HISTORIQUE */
 .history-sep { text-align: center; color: var(--text-muted, #999); font-size: 11px; margin: 16px 0; opacity: 0.5; user-select: none; }
 
-/* ONBOARDING — lien Passer discret */
+/* ONBOARDING */
 .onb-chat-skip { text-align: center; font-size: 12px; margin-top: -10px; margin-bottom: 4px; padding: 4px 0; }
 .onb-chat-skip a { color: var(--text-muted); text-decoration: none; transition: color 0.15s; }
 .onb-chat-skip a:hover { color: var(--accent); text-decoration: underline; }
