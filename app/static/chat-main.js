@@ -74,7 +74,16 @@ async function init() {
   checkHealth();
   loadUserInfo();
   loadMailCount();
-  if (typeof checkTokenStatus === 'function') checkTokenStatus();
+  // Si retour OAuth Gmail → afficher succès + masquer le bandeau immédiatement
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('gmail_connected') === '1') {
+    showToast('Gmail connecté ✅', 'ok', 4000);
+    const banner = document.getElementById('tokenBanner');
+    if (banner) { banner.innerHTML = ''; banner.style.display = 'none'; }
+    window.history.replaceState({}, '', '/chat');
+  } else {
+    checkTokenStatus();
+  }
   await loadHistory();
   // Afficher les actions en attente existantes dans le chat (depuis la session précédente)
   try {

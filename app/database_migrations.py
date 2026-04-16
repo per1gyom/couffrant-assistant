@@ -223,4 +223,6 @@ MIGRATIONS = [
     "ALTER TABLE tenant_connections ADD COLUMN IF NOT EXISTS oauth_state TEXT",
     # -- PENDING_ACTIONS : conversation_id (lien avec aria_memory) --
     "ALTER TABLE pending_actions ADD COLUMN IF NOT EXISTS conversation_id INTEGER",
+    # -- GMAIL_TOKENS : colonne email pour affichage bandeau --
+    "ALTER TABLE gmail_tokens ADD COLUMN IF NOT EXISTS email TEXT",
 ]
