@@ -329,7 +329,40 @@ def admin_remove_tool(
     return result
 
 
-@router.get("/init-db")
+@router.get("/admin/connections-audit")
+def admin_connections_audit(request: Request, _: dict = Depends(require_admin)):
+    """Audit de l'état des connexions — legacy + V2 — pour tous les tenants."""
+    conn = None
+    try:
+        from app.database import get_pg_conn
+        conn = get_pg_conn(); c = conn.cursor()
+
+        # Legacy oauth_tokens
+        c.execute("SELECT provider, username, expires_at FROM oauth_tokens ORDER BY provider, username")
+        oauth = [{"provider": r[0], "username": r[1], "expires_at": str(r[2])[:16]} for r in c.fetchall()]
+
+        # Legacy gmail_tokens
+        c.execute("SELECT username, email FROM gmail_tokens")
+        gmail = [{"username": r[0], "email": r[1]} for r in c.fetchall()]
+
+        # V2 tenant_connections
+        c.execute("""SELECT id, tenant_id, tool_type, label, status, connected_email, created_at
+                     FROM tenant_connections ORDER BY tenant_id, tool_type""")
+        v2 = [{"id": r[0], "tenant_id": r[1], "tool_type": r[2], "label": r[3],
+                "status": r[4], "email": r[5], "created_at": str(r[6])[:16]} for r in c.fetchall()]
+
+        # V2 assignments
+        c.execute("""SELECT ca.username, tc.tenant_id, tc.tool_type, tc.label, ca.access_level
+                     FROM connection_assignments ca
+                     JOIN tenant_connections tc ON tc.id = ca.connection_id
+                     ORDER BY tc.tenant_id, ca.username""")
+        assignments = [{"username": r[0], "tenant_id": r[1], "tool_type": r[2],
+                        "label": r[3], "access_level": r[4]} for r in c.fetchall()]
+
+        return {"oauth_tokens": oauth, "gmail_tokens": gmail,
+                "v2_connections": v2, "v2_assignments": assignments}
+    finally:
+        if conn: conn.close()
 def init_db_now(request: Request, _: dict = Depends(require_admin)):
     init_postgres()
     try:
