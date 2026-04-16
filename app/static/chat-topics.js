@@ -1,8 +1,9 @@
-// chat-topics.js v2 — Sujets intégrés dans la sidebar (plus de drawer noir)
+// chat-topics.js v3 — Design miroir des raccourcis (sans statuts actif/pause)
 
-let _topicsData = { section_title: 'Mes sujets', topics: [] };
+let _topicsData = { topics: [] };
+let topicsEditMode = false;
 
-// Stubs compatibilité (anciens appels peuvent subsister)
+// Stubs compatibilité
 function toggleTopics() {}
 function openTopics() { initTopicsSidebar(); }
 function closeTopics() {}
@@ -22,80 +23,83 @@ async function loadTopics() {
 function renderTopicsSidebar() {
   const el = document.getElementById('topicsSidebarList');
   if (!el) return;
-  const { topics } = _topicsData;
-  let html = `<div class="topics-sidebar-add">
-    <input type="text" id="newTopicInput" placeholder="Nouveau sujet…" maxlength="255"
-      onkeydown="if(event.key==='Enter')createTopic()">
-    <button onclick="createTopic()" title="Ajouter">+</button>
-  </div>`;
-  if (topics.length === 0) {
-    html += '<div style="font-size:12px;color:var(--text-muted);padding:2px 8px 6px;">Aucun sujet pour le moment.</div>';
-  } else {
-    topics.forEach(t => {
-      const st = t.status === 'active' ? '\uD83D\uDFE2' : t.status === 'paused' ? '\u23F8' : '\uD83D\uDCE6';
-      const op = t.status === 'archived' ? 'opacity:0.45;' : t.status === 'paused' ? 'opacity:0.65;' : '';
-      html += `<div class="topic-sidebar-item" style="${op}">
-        <span class="topic-sb-status">${st}</span>
-        <span class="topic-sb-title" onclick="askAboutTopic('${t.title.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" title="${t.title}">${t.title}</span>
-        <div class="topic-sidebar-actions">
-          <button onclick="cycleTopic(${t.id},'${t.status}')" title="Changer statut">🔄</button>
-          <button onclick="renameTopic(${t.id},'${t.title.replace(/'/g,"\\'").replace(/"/g,'&quot;')}')" title="Renommer">✏️</button>
-          <button onclick="deleteTopic(${t.id})" title="Supprimer" style="color:var(--text-muted);font-size:13px">✕</button>
-        </div>
-      </div>`;
-    });
-  }
-  el.innerHTML = html;
+  const topics = _topicsData.topics || _topicsData || [];
+  el.innerHTML = '';
+
+  topics.forEach(t => {
+    const btn = document.createElement('button');
+    btn.className = 'quick-btn' + (topicsEditMode ? ' edit-mode' : '');
+    if (topicsEditMode) {
+      btn.innerHTML = `<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.title}</span><span class="shortcut-x">\u2715</span>`;
+      btn.querySelector('.shortcut-x').onclick = (e) => { e.stopPropagation(); deleteTopic(t.id); };
+      btn.onclick = () => renameTopic(t.id, t.title);
+      btn.title = 'Cliquer pour renommer';
+    } else {
+      btn.innerHTML = `<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.title}</span>`;
+      btn.onclick = () => askAboutTopic(t.title);
+      btn.title = t.title;
+    }
+    el.appendChild(btn);
+  });
+
+  const addBtn = document.createElement('button');
+  addBtn.className = 'quick-add-btn';
+  addBtn.textContent = '+ Ajouter';
+  addBtn.style.display = topicsEditMode ? 'inline-flex' : 'none';
+  addBtn.onclick = () => createTopic();
+  el.appendChild(addBtn);
+
+  const editBtn = document.createElement('button');
+  editBtn.className = 'quick-edit-btn';
+  editBtn.innerHTML = topicsEditMode
+    ? '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>'
+    : '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+  editBtn.title = topicsEditMode ? 'Terminer' : 'G\u00e9rer mes sujets';
+  editBtn.onclick = toggleTopicsEdit;
+  el.appendChild(editBtn);
+}
+
+function toggleTopicsEdit() {
+  topicsEditMode = !topicsEditMode;
+  renderTopicsSidebar();
+  if (topicsEditMode) showToast('Clic\u00a0= renommer \u00b7 \u2715\u00a0= supprimer', 'info', 2500);
 }
 
 function askAboutTopic(title) {
-  if (typeof inputEl !== 'undefined') {
-    inputEl.value = 'Fais-moi un point sur le sujet : ' + title;
-    sendMessage();
+  const inp = document.getElementById('input');
+  if (inp) {
+    inp.value = 'Fais-moi un point sur le sujet\u00a0: ' + title;
+    if (typeof sendMessage === 'function') sendMessage();
   }
 }
 
 async function createTopic() {
-  const input = document.getElementById('newTopicInput');
-  const title = (input ? input.value : '').trim();
-  if (!title) return;
+  const title = prompt('Nom du nouveau sujet\u00a0:');
+  if (!title || !title.trim()) return;
   try {
     const r = await fetch('/topics', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ title })
+      body: JSON.stringify({ title: title.trim() })
     });
     if (r.ok) {
-      input.value = '';
       await loadTopics();
       renderTopicsSidebar();
-      showToast('Sujet créé : ' + title, 'ok', 2000);
+      showToast('Sujet cr\u00e9\u00e9\u00a0: ' + title.trim(), 'ok', 2000);
     }
-  } catch(e) { showToast('Erreur création sujet', 'err', 3000); }
+  } catch(e) { showToast('Erreur cr\u00e9ation sujet', 'err', 3000); }
 }
 
 async function deleteTopic(id) {
-  if (!confirm('Supprimer ce sujet ?')) return;
   try {
     await fetch('/topics/' + id, { method: 'DELETE' });
     await loadTopics();
     renderTopicsSidebar();
+    showToast('Sujet supprim\u00e9', 'ok', 2000);
   } catch(e) { showToast('Erreur suppression', 'err', 3000); }
 }
 
-async function cycleTopic(id, current) {
-  const next = current === 'active' ? 'paused' : current === 'paused' ? 'archived' : 'active';
-  try {
-    await fetch('/topics/' + id, {
-      method: 'PATCH', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ status: next })
-    });
-    await loadTopics();
-    renderTopicsSidebar();
-  } catch(e) { showToast('Erreur changement statut', 'err', 3000); }
-}
-
 async function renameTopic(id, currentTitle) {
-  const newTitle = prompt('Nouveau nom du sujet :', currentTitle);
+  const newTitle = prompt('Nouveau nom du sujet\u00a0:', currentTitle);
   if (!newTitle || newTitle.trim() === currentTitle) return;
   try {
     await fetch('/topics/' + id, {
@@ -106,3 +110,6 @@ async function renameTopic(id, currentTitle) {
     renderTopicsSidebar();
   } catch(e) { showToast('Erreur renommage', 'err', 3000); }
 }
+
+// Stub compatibilité descendante
+async function cycleTopic(id, current) {}

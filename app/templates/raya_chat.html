@@ -6,15 +6,15 @@
 <title>Raya</title>
 
 <!-- PWA -->
-<link rel="manifest" href="/static/manifest.json?v=25">
+<link rel="manifest" href="/static/manifest.json?v=26">
 <meta name="theme-color" content="#6366f1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
-<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=25">
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=26">
 <script>
 // ANTI-CACHE: nettoyer les SW et forcer le rechargement si fichiers perimés
-window.__RAYA_V = 17;
+window.__RAYA_V = 18;
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(r => r.forEach(sw => sw.unregister()));
   caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
@@ -22,11 +22,11 @@ if ('serviceWorker' in navigator) {
 </script>
 
 <!-- CSS -->
-<link rel="stylesheet" href="/static/chat-base.css?v=25">
-<link rel="stylesheet" href="/static/chat-components.css?v=25">
-<link rel="stylesheet" href="/static/chat-drawer.css?v=25">
-<link rel="stylesheet" href="/static/onboarding.css?v=25">
-<link rel="stylesheet" href="/static/mobile.css?v=25">
+<link rel="stylesheet" href="/static/chat-base.css?v=26">
+<link rel="stylesheet" href="/static/chat-components.css?v=26">
+<link rel="stylesheet" href="/static/chat-drawer.css?v=26">
+<link rel="stylesheet" href="/static/onboarding.css?v=26">
+<link rel="stylesheet" href="/static/mobile.css?v=26">
 
 <!-- marked.js + DOMPurify (CDN versionné, stable) -->
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
@@ -243,16 +243,16 @@ if ('serviceWorker' in navigator) {
 </div>
 
 <!-- Modules JS -->
-<script src="/static/chat-onboarding.js?v=25"></script>
-<script src="/static/chat-shortcuts.js?v=25"></script>
-<script src="/static/chat-voice.js?v=25"></script>
-<script src="/static/chat-feedback.js?v=25"></script>
-<script src="/static/chat-triage.js?v=25"></script>
-<script src="/static/chat-admin.js?v=25"></script>
-<script src="/static/chat-topics.js?v=25"></script>
-<script src="/static/chat-core.js?v=25"></script>
-<script src="/static/chat-messages.js?v=25"></script>
-<script src="/static/chat-main.js?v=25"></script>
+<script src="/static/chat-onboarding.js?v=26"></script>
+<script src="/static/chat-shortcuts.js?v=26"></script>
+<script src="/static/chat-voice.js?v=26"></script>
+<script src="/static/chat-feedback.js?v=26"></script>
+<script src="/static/chat-triage.js?v=26"></script>
+<script src="/static/chat-admin.js?v=26"></script>
+<script src="/static/chat-topics.js?v=26"></script>
+<script src="/static/chat-core.js?v=26"></script>
+<script src="/static/chat-messages.js?v=26"></script>
+<script src="/static/chat-main.js?v=26"></script>
 
 <script>
   // Fermer le menu 3 points en cliquant ailleurs
