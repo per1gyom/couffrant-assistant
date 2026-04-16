@@ -64,6 +64,9 @@ function _renderTokenBanner(warnings) {
     </div>
   `).join('');
 }
+
+// --- INIT ---
+async function init() {
   if (typeof initShortcuts === 'function') initShortcuts();
   if (typeof initTopicsSidebar === 'function') initTopicsSidebar();
   checkHealth();
