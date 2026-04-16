@@ -91,24 +91,26 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
     for match in re.finditer(r'\[ACTION:REPLY:([^\:\]]{20,}):(.+?)\]', response, re.DOTALL):
         msg_id = match.group(1).strip()
         reply_text = match.group(2).strip()
+        # Normaliser les sauts de ligne (LLM ecrit parfois \n litteral)
+        reply_text = reply_text.replace('\\n', '\n')
         if not is_valid_outlook_id(msg_id): continue
-        orig = next((m for m in live_mails + mails_from_db if m.get('message_id') == msg_id), {})
-        label = f"Repondre a '{orig.get('subject', msg_id[:30])}' ({orig.get('from_email', '?')})"
+        # Lookup tolerant : exact d'abord, puis par prefixe de 20 chars
+        orig = next((m for m in live_mails + mails_from_db if m.get('message_id') == msg_id), None)
+        if orig is None:
+            orig = next((m for m in live_mails + mails_from_db
+                         if m.get('message_id', '')[:20] == msg_id[:20]), {})
+        sender_name = orig.get('from_name') or orig.get('sender') or orig.get('from_email') or '?'
+        subject     = orig.get('subject', '')
+        to_email    = orig.get('from_email', orig.get('sender_email', ''))
+        label = f"Repondre a {sender_name}" + (f" — {subject[:50]}" if subject else "")
         action_id = queue_action(
             tenant_id=tenant_id, username=username, action_type="REPLY",
             payload={"message_id": msg_id, "reply_text": reply_text,
-                     "subject": orig.get('subject', ''), "to": orig.get('from_email', '')},
+                     "subject": subject, "to": to_email,
+                     "sender_name": sender_name},
             label=label, conversation_id=conversation_id,
         )
-        log_activity(username, "mail_reply_queued", msg_id, orig.get('subject', '')[:100], tenant_id=tenant_id)
-        preview = reply_text[:300] + ("..." if len(reply_text) > 300 else "")
-        confirmed.append(
-            f"\u23f8\ufe0f Action #{action_id} en attente \u2014 Reponse a envoyer :\n"
-            f"   A : {orig.get('from_email', '?')}\n"
-            f"   Sujet : {orig.get('subject', '?')}\n"
-            f"   Message : {preview}\n"
-            f"   Pour envoyer : dites \"confirme action {action_id}\" \u00b7 Pour annuler : \"annule action {action_id}\""
-        )
+        log_activity(username, "mail_reply_queued", msg_id, subject[:100], tenant_id=tenant_id)
 
     for msg_id in re.findall(r'\[ACTION:READBODY:([^\]]+)\]', response):
         msg_id = msg_id.strip()

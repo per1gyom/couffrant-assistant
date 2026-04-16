@@ -206,25 +206,51 @@ function renderPendingActions(pendingList) {
   const existing = document.getElementById('pending-actions-zone'); if (existing) existing.remove();
   if (!pendingList || pendingList.length === 0) return;
   const zone = document.createElement('div'); zone.id = 'pending-actions-zone'; zone.className = 'pending-actions-zone';
+
+  const n = pendingList.length;
   const title = document.createElement('div'); title.className = 'pending-title';
-  title.textContent = `⏸️ ${pendingList.length} action(s) en attente de confirmation`; zone.appendChild(title);
+  title.innerHTML = `⏸️ ${n} action${n > 1 ? 's' : ''} en attente de confirmation`; zone.appendChild(title);
+
   pendingList.forEach(action => {
     const card = document.createElement('div'); card.className = 'pending-card';
-    const label = document.createElement('div'); label.className = 'pending-label';
-    label.textContent = action.label || `${action.action_type} #${action.id}`; card.appendChild(label);
-    if (action.payload && action.payload.reply_text) {
-      const preview = document.createElement('div'); preview.className = 'pending-preview';
-      preview.textContent = action.payload.reply_text.substring(0, 300); card.appendChild(preview);
+    const isReply = action.action_type === 'REPLY';
+
+    if (isReply && action.payload) {
+      // ── Carte email propre ──
+      const p = action.payload;
+      const senderName = p.sender_name || p.to || '?';
+      const subject    = p.subject || '(sans sujet)';
+      const body       = (p.reply_text || '').replace(/\\n/g, '\n').replace(/\n/g, '<br>');
+
+      card.innerHTML = `
+        <div class="pending-mail-header">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          <span class="pending-mail-to">À : <strong>${senderName}</strong></span>
+        </div>
+        <div class="pending-mail-subject">Sujet : <em>${subject}</em></div>
+        <div class="pending-mail-body">${body}</div>`;
+    } else {
+      const label = document.createElement('div'); label.className = 'pending-label';
+      label.textContent = action.label || `${action.action_type} #${action.id}`; card.appendChild(label);
+      if (action.payload && action.payload.reply_text) {
+        const preview = document.createElement('div'); preview.className = 'pending-preview';
+        preview.textContent = (action.payload.reply_text || '').replace(/\\n/g, '\n');
+        card.appendChild(preview);
+      }
     }
+
     const btns = document.createElement('div'); btns.className = 'pending-btns';
-    const confirmBtn = document.createElement('button'); confirmBtn.className = 'pending-btn confirm'; confirmBtn.textContent = '✓ Confirmer';
-    confirmBtn.onclick = () => { if (confirmBtn.disabled) return; confirmBtn.disabled=true; confirmBtn.textContent='⏳ En cours...'; card.querySelectorAll('button').forEach(b=>b.disabled=true); inputEl.value=`Confirme l'action ${action.id}`; sendMessage(); };
+    const confirmBtn = document.createElement('button'); confirmBtn.className = 'pending-btn confirm';
+    confirmBtn.innerHTML = '&#10003; Envoyer';
+    confirmBtn.onclick = () => { if (confirmBtn.disabled) return; confirmBtn.disabled=true; confirmBtn.textContent='⏳'; card.querySelectorAll('button').forEach(b=>b.disabled=true); inputEl.value=`Confirme l'action ${action.id}`; sendMessage(); };
     btns.appendChild(confirmBtn);
-    const cancelBtn = document.createElement('button'); cancelBtn.className = 'pending-btn cancel'; cancelBtn.textContent = '✕ Annuler';
-    cancelBtn.onclick = () => { if (cancelBtn.disabled) return; cancelBtn.disabled=true; cancelBtn.textContent='⏳ En cours...'; card.querySelectorAll('button').forEach(b=>b.disabled=true); inputEl.value=`Annule l'action ${action.id}`; sendMessage(); };
+    const cancelBtn = document.createElement('button'); cancelBtn.className = 'pending-btn cancel';
+    cancelBtn.innerHTML = '&#10005; Annuler';
+    cancelBtn.onclick = () => { if (cancelBtn.disabled) return; cancelBtn.disabled=true; cancelBtn.textContent='⏳'; card.querySelectorAll('button').forEach(b=>b.disabled=true); inputEl.value=`Annule l'action ${action.id}`; sendMessage(); };
     btns.appendChild(cancelBtn);
     card.appendChild(btns); zone.appendChild(card);
   });
+
   const inputZone = document.querySelector('.input-zone');
   inputZone.parentNode.insertBefore(zone, inputZone);
 }

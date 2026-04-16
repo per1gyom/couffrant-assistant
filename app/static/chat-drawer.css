@@ -104,39 +104,69 @@
   color: #92400e;
 }
 .pending-card {
-  background: white;
-  border-radius: 8px;
-  padding: 10px 12px;
+  background: var(--bg);
+  border-radius: 10px;
+  padding: 12px 14px;
   margin-bottom: 8px;
-  border: 1px solid rgba(0,0,0,0.08);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
 }
 .pending-card:last-child { margin-bottom: 0; }
-.pending-label { font-weight: 500; font-size: 0.92em; margin-bottom: 6px; }
+.pending-label { font-weight: 600; font-size: 0.9em; margin-bottom: 6px; color: var(--text); }
 .pending-preview {
-  font-size: 0.85em;
+  font-size: 0.84em;
   color: var(--text-muted);
   background: rgba(0,0,0,0.03);
-  padding: 6px 8px;
-  border-radius: 5px;
-  margin-bottom: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  margin-bottom: 10px;
   white-space: pre-wrap;
   max-height: 120px;
   overflow-y: auto;
+  line-height: 1.55;
 }
-.pending-btns { display: flex; gap: 8px; }
+/* Carte email propre */
+.pending-mail-header {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 0.88em; color: var(--text-muted); margin-bottom: 4px;
+}
+.pending-mail-to { font-size: 0.9em; color: var(--text); }
+.pending-mail-subject {
+  font-size: 0.84em; color: var(--text-muted);
+  margin-bottom: 8px; font-style: italic;
+}
+.pending-mail-body {
+  font-size: 0.88em; color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 10px 12px;
+  line-height: 1.6;
+  margin-bottom: 10px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+/* Boutons */
+.pending-btns { display: flex; gap: 8px; justify-content: flex-end; }
 .pending-btn {
-  flex: 1;
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: none;
-  font-weight: 500;
+  padding: 7px 18px;
+  border-radius: 7px;
+  font-weight: 600;
   cursor: pointer;
-  font-size: 0.88em;
-  transition: opacity 0.15s;
+  font-size: 0.85em;
+  font-family: var(--font);
+  transition: all 0.15s;
 }
-.pending-btn.confirm { background: #16a34a; color: white; }
-.pending-btn.cancel  { background: #dc2626; color: white; }
-.pending-btn:hover   { opacity: 0.85; }
+.pending-btn.confirm {
+  background: var(--accent); color: white; border: none;
+}
+.pending-btn.confirm:hover { background: var(--accent-hover); }
+.pending-btn.cancel {
+  background: none; color: var(--text-muted);
+  border: 1.5px solid var(--border);
+}
+.pending-btn.cancel:hover { border-color: var(--danger); color: var(--danger); }
+.pending-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ─── FEEDBACK 👍👎 + POURQUOI ? ─── */
 .bubble-actions-sep {
