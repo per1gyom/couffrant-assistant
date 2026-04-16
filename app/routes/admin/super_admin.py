@@ -331,10 +331,6 @@ def admin_panel(request: Request):
         require_tenant_admin(request)
     except HTTPException:
         return RedirectResponse("/login-app")
-    # Vérifier re-auth admin (10 min)
-    admin_auth_at = request.session.get("admin_auth_at", 0)
-    if time.time() - admin_auth_at > ADMIN_AUTH_TIMEOUT:
-        return HTMLResponse(ADMIN_LOGIN_PAGE.format(error_block="", next_url="/admin/panel"))
     with open("app/templates/admin_panel.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
