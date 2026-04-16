@@ -249,3 +249,29 @@ def _refresh_v2_token(connection_id: int, tool_type: str, refresh_token: str, cr
     except Exception as e:
         logger.error("[ConnTokens] Refresh error for #%s: %s", connection_id, e)
         return None
+
+
+def get_all_users_with_tool_connections(tool_type: str) -> list[str]:
+    """
+    Retourne tous les usernames ayant une connexion V2 active pour un tool_type donné.
+    Remplace l'ancienne get_all_users_with_tokens() du token_manager legacy.
+    """
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("""
+            SELECT DISTINCT ca.username
+            FROM connection_assignments ca
+            JOIN tenant_connections tc ON tc.id = ca.connection_id
+            WHERE tc.tool_type = %s
+              AND tc.status = 'connected'
+              AND ca.enabled = true
+        """, (tool_type,))
+        return [row[0] for row in c.fetchall()]
+    except Exception as e:
+        logger.error("[ConnTokens] get_all_users_with_tool_connections error: %s", e)
+        return []
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass

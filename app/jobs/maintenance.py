@@ -68,11 +68,15 @@ def _job_webhook_renewal():
 
 
 def _job_token_refresh():
+    """Vérifie que tous les tokens Microsoft V2 sont valides, alerte si révoqués."""
     try:
-        from app.token_manager import get_valid_microsoft_token, get_all_users_with_tokens
-        for username in get_all_users_with_tokens():
+        from app.connection_token_manager import (
+            get_all_users_with_tool_connections, get_connection_token
+        )
+        users = get_all_users_with_tool_connections("microsoft")
+        for username in users:
             try:
-                token = get_valid_microsoft_token(username)
+                token = get_connection_token(username, "microsoft")
                 if not token:
                     logger.error(f"[Scheduler] token_refresh ECHEC {username}")
                     try:
@@ -81,7 +85,7 @@ def _job_token_refresh():
                     except Exception:
                         pass
                 else:
-                    logger.info(f"[Scheduler] token_refresh {username}: OK")
+                    logger.debug(f"[Scheduler] token_refresh {username}: OK")
             except Exception as e:
                 logger.error(f"[Scheduler] token_refresh erreur {username}: {e}")
     except Exception as e:

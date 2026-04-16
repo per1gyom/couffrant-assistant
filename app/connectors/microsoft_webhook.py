@@ -150,17 +150,24 @@ def get_subscription_info(subscription_id: str) -> dict | None:
 def ensure_all_subscriptions():
     """
     Appelé au démarrage et toutes les 6h.
-    Pour chaque utilisateur avec token valide :
+    Pour chaque utilisateur avec token Microsoft V2 valide :
     - Crée l'abonnement s'il n'existe pas
     - Renouvelle si expiration < 24h
     - Recrée si renouvellement échoue
     """
-    from app.token_manager import get_all_users_with_tokens, get_valid_microsoft_token
-    users = get_all_users_with_tokens()
+    from app.connection_token_manager import get_all_users_with_tool_connections
     now = datetime.now(timezone.utc)
+
+    try:
+        users = get_all_users_with_tool_connections("microsoft")
+    except Exception as e:
+        print(f"[Webhook] Erreur récupération users V2: {e}")
+        return
+
     for username in users:
         try:
-            token = get_valid_microsoft_token(username)
+            from app.connection_token_manager import get_connection_token
+            token = get_connection_token(username, "microsoft")
             if not token:
                 continue
             subs = get_subscriptions_for_user(username)
