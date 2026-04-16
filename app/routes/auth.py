@@ -6,7 +6,6 @@ from fastapi import APIRouter, Request, Form
 from fastapi.responses import RedirectResponse, HTMLResponse
 from app.auth import build_msal_app
 from app.config import GRAPH_SCOPES, REDIRECT_URI
-from app.token_manager import save_microsoft_token, save_google_token
 from app.app_security import (
     authenticate, update_last_login, get_user_scope,
     get_tenant_id, LOGIN_PAGE_HTML,
@@ -276,12 +275,8 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
             "<h2>Session expirée</h2><p><a href='/login-app'>Se reconnecter</a></p>",
             status_code=401,
         )
-    # Écrire dans tenant_connections (V2) + oauth_tokens (legacy fallback)
+    # Écrire uniquement en V2 (tenant_connections)
     _save_ms_token_v2(username, result)
-    save_microsoft_token(
-        username, result["access_token"],
-        result.get("refresh_token", ""), result.get("expires_in", 3600),
-    )
     return RedirectResponse(state or "/chat")
 
 
@@ -356,14 +351,6 @@ def auth_gmail_callback(request: Request, code: str | None = None, error: str | 
         return RedirectResponse(f"/admin/panel?oauth_ok=1&email={email}&view=companies")
 
     # Flux per-user : sauvegarder en V2 (tenant_connections) + legacy (oauth_tokens)
+    # Écrire uniquement en V2 (tenant_connections)
     _save_gmail_token_v2(username, tokens, email)
-    try:
-        save_google_token(
-            username=username,
-            access_token=tokens.get("access_token", ""),
-            refresh_token=tokens.get("refresh_token", ""),
-            email=email or f"{username}@gmail.com",
-        )
-    except Exception as e:
-        logger.error(f"[Gmail] Erreur sauvegarde legacy {username}: {e}")
     return RedirectResponse("/chat?gmail_connected=1")

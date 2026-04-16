@@ -121,6 +121,7 @@ def get_schema_statements() -> list[str]:
     """,
         """
         CREATE TABLE IF NOT EXISTS oauth_tokens (
+            -- DEPRECATED : migré vers tenant_connections. Ne plus écrire ici.
             id SERIAL PRIMARY KEY, provider TEXT, username TEXT DEFAULT 'guillaume',
             access_token TEXT, refresh_token TEXT, expires_at TIMESTAMP,
             updated_at TIMESTAMP DEFAULT NOW(), UNIQUE(provider, username)
@@ -150,6 +151,7 @@ def get_schema_statements() -> list[str]:
     """,
         """
         CREATE TABLE IF NOT EXISTS gmail_tokens (
+            -- DEPRECATED : migré vers tenant_connections. Ne plus écrire ici.
             id SERIAL PRIMARY KEY, username TEXT DEFAULT 'guillaume',
             email TEXT, access_token TEXT, refresh_token TEXT,
             created_at TIMESTAMP DEFAULT NOW(), UNIQUE(username)

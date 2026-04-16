@@ -49,7 +49,7 @@ def get_user_mailboxes(username: str) -> list[MailboxConnector]:
     seen_emails = set()
     provider_map = _get_provider_map()
 
-    # 1. Connexions V2 (tenant_connections)
+    # Connexions V2 (tenant_connections) — source de vérité unique
     try:
         from app.connection_token_manager import get_user_tool_connections
         v2 = get_user_tool_connections(username)
@@ -65,39 +65,14 @@ def get_user_mailboxes(username: str) -> list[MailboxConnector]:
                 continue
             seen_emails.add(email)
             connectors.append(cls(username=username, email=email, token=token))
-            logger.debug("[MailboxMgr] V2 connector: %s (%s)", tool_type, email)
+            logger.debug("[MailboxMgr] connector: %s (%s)", tool_type, email)
     except Exception as e:
-        logger.warning("[MailboxMgr] V2 error: %s", e)
+        logger.warning("[MailboxMgr] erreur résolution connecteurs: %s", e)
 
-    # 2. Fallback legacy — Microsoft (oauth_tokens provider='microsoft')
-    try:
-        from app.token_manager import get_valid_microsoft_token
-        from app.connectors.microsoft_connector import MicrosoftConnector
-        ms_token = get_valid_microsoft_token(username)
-        if ms_token:
-            ms_email = _get_legacy_ms_email(username)
-            if ms_email not in seen_emails:
-                seen_emails.add(ms_email)
-                connectors.append(MicrosoftConnector(username=username, email=ms_email, token=ms_token))
-                logger.debug("[MailboxMgr] Legacy MS connector: %s", ms_email)
-    except Exception as e:
-        logger.warning("[MailboxMgr] Legacy MS error: %s", e)
-
-    # 3. Fallback legacy — Gmail (oauth_tokens provider='google')
-    try:
-        from app.token_manager import get_valid_google_token
-        from app.connectors.gmail_connector2 import GmailConnector
-        g_token = get_valid_google_token(username)
-        if g_token:
-            g_email = _get_legacy_gmail_email(username)
-            if g_email not in seen_emails:
-                seen_emails.add(g_email)
-                connectors.append(GmailConnector(username=username, email=g_email, token=g_token))
-                logger.debug("[MailboxMgr] Legacy Gmail connector: %s", g_email)
-    except Exception as e:
-        logger.warning("[MailboxMgr] Legacy Gmail error: %s", e)
-
-    logger.info("[MailboxMgr] %s: %d connecteur(s) actif(s)", username, len(connectors))
+    if not connectors:
+        logger.info("[MailboxMgr] %s: aucun connecteur — migration requise ou boîtes non configurées.", username)
+    else:
+        logger.info("[MailboxMgr] %s: %d connecteur(s) actif(s)", username, len(connectors))
     return connectors
 
 
@@ -221,27 +196,6 @@ def execute_calendar_action(
     elif action == "delete":
         return connector.delete_event(kwargs.get("event_id", ""))
     return {"ok": False, "message": f"Action calendrier inconnue : {action}"}
-    try:
-        from app.database import get_pg_conn
-        conn = get_pg_conn(); c = conn.cursor()
-        c.execute("SELECT email FROM users WHERE username=%s LIMIT 1", (username,))
-        row = c.fetchone(); conn.close()
-        if row and row[0] and "raya-ia.fr" not in (row[0] or ""):
-            return row[0]
-    except Exception:
-        pass
-    return ""
-
-
-def _get_legacy_gmail_email(username: str) -> str:
-    try:
-        from app.database import get_pg_conn
-        conn = get_pg_conn(); c = conn.cursor()
-        c.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
-        row = c.fetchone(); conn.close()
-        return row[0] if row and row[0] else ""
-    except Exception:
-        return ""
 
 
 def get_connector_for_mailbox(username: str, hint: str = "") -> "MailboxConnector | None":
