@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 17/04/2026 03h00** — Opus
+**Dernière mise à jour : 17/04/2026 09h00** — Opus
 
 ---
 
@@ -15,7 +15,7 @@
 - Fichiers Python < 10KB (sauf database_schema.py, database_migrations.py, tools_seed_data.py = données pures)
 - Desktop Commander local path : `/Users/per1guillaume/couffrant-assistant`
 - Template chat : `app/templates/raya_chat.html`
-- Cache-bust : `?v=12` (actuel)
+- Cache-bust : `?v=24` (actuel)
 - Français, vocabulaire Terminal, concis
 - Git config local : `per1guillaume@mac-1.home`
 - **⚠️ ARCHITECTURE ADMIN** : Les routes admin sont dans le **package** `app/routes/admin/` (pas le fichier `admin.py` qui est shadowed). Toute nouvelle route admin doit être ajoutée dans `super_admin.py`, `tenant_admin.py` ou `profile.py`.
@@ -30,10 +30,32 @@ FastAPI Python 3.13, Railway, PostgreSQL+pgvector, Anthropic 3 tiers, OpenAI emb
 URL : `https://app.raya-ia.fr` — Repo : `per1gyom/couffrant-assistant` branche `main`
 
 ## 2-9. INFRASTRUCTURE ✅
-Connectivité 5/5, Outils création (PDF, Excel, DALL-E), PWA v=12, Sécurité (anti-injection, GUARDRAILS, CSP, bcrypt, lockout), Signature email v2, SAV/Bug report, RGPD complet, Backup manuel.
+Connectivité 5/5, Outils création (PDF, Excel, DALL-E), PWA v=24, Sécurité (anti-injection, GUARDRAILS, CSP, bcrypt, lockout), Signature email v2, SAV/Bug report, RGPD complet, Backup manuel.
+**Service Worker** : DÉSACTIVÉ (cause racine des bugs d'affichage au refresh). Le HTML nettoie les anciens SW + purge les caches à chaque chargement. Anti-cache double couche (unregister + reload si `marked` absent).
 
-## 10. UX CHAT ✅
+## 10. UX CHAT ✅ + REDESIGN V2 ✅
 Nettoyage actions brutes, horodatage messages, style conversationnel naturel (UX-TONE), 👍 confirme pending, bug report commentaire optionnel, DELETE/ARCHIVE mutuellement exclusifs, nettoyage fragments Odoo inline.
+
+### Redesign v2 (session 16-17/04)
+- **Typo** : Inter (Google Fonts) + JetBrains Mono pour code
+- **Palette** : indigo #4f46e5, fond #fafbfd, borders #e2e6ef (Guillaume veut changer, pas de violet)
+- **Icônes** : TOUTES les emojis remplacées par des SVG Lucide inline (micro, attach, send, speak, feedback, bookmark, shield, settings, logout, volume, etc.)
+- **Réponses Raya** : pleine page (pas de bulle), fond transparent, width 100%. Seuls les prompts user en bulle indigo.
+- **Avatar Raya** : masqué (inutile en pleine page)
+- **Markdown** : `marked.parse()` avec `breaks:true, gfm:true`, DOMPurify ALLOWED_URI_REGEXP élargi pour blob URLs. Tables avec header gris, code blocks sombres, headers hiérarchisés.
+- **Prompt système** : instruction ABSOLUE de ne jamais montrer les codes `[ACTION:...]` ou `[SPEAK_SPEED:...]`. Erreurs user-friendly.
+- **Layout sidebar** : header supprimé, sidebar gauche 220px (logo+mails+sujets+raccourcis déroulants), menu ⋮ 3 points en bas sidebar (position:fixed z-index:9999), sidebar repliable avec bouton expand.
+- **Input** : compact (padding réduit), fond transparent, auto-scroll dictée, max-height 160px.
+- **Raccourcis** : pastilles colorées (plus d'emojis), fermés par défaut, boutons SVG edit/check.
+- **Quick actions** : boutons pill dans sidebar, hover indigo.
+- **Toasts** : backdrop-blur, transparence.
+
+### PENDING UX (prochaine session)
+- [ ] **Raccourcis éditables** : clic → modale avec titre séparé + prompt personnalisé + sélecteur couleur (12 couleurs) + supprimer. Croix ✕ en mode édition. Stockage en DB au lieu de localStorage.
+- [ ] **Sujets en sidebar** : remplacer le drawer noir (archaïque) par une section déroulante dans la sidebar, ouverte par défaut. Même style que raccourcis.
+- [ ] **Palette couleurs** : remplacer le violet/indigo par une palette que Guillaume validera.
+- [ ] **Micro/send** : icônes disparues en bas de sidebar (bug partiel à vérifier).
+- [ ] **Bouton "Mes sujets"** : doit ouvrir la section dans la sidebar, pas le drawer noir.
 
 ## 11. TOPICS ✅
 5 endpoints CRUD + PWA (bouton 🔖 dans header + panneau latéral `chat-topics.js`) + RGPD couvert + Flutter prêt (TopicsService à switcher vers API).
@@ -60,7 +82,7 @@ Nettoyage actions brutes, horodatage messages, style conversationnel naturel (UX
 ### Accès panel par rôle
 - Super admin : voit tous les onglets (Mémoire, Utilisateurs, Règles, Insights, Actions, Sociétés, Profil)
 - Tenant admin : voit seulement Sociétés (sa société) + Mon profil. Onglets super-admin masqués.
-- 2 boutons dans le header du chat : `🔑 Super Admin` (super admin uniquement) + `⚙️ Ma société` (admin + tenant_admin)
+- **Layout v3** : sidebar gauche (logo, mails, sujets, raccourcis). Menu ⋮ en bas sidebar (Lecture auto, Paramètres, Ma société, Super Admin, Déconnexion).
 
 ### Re-authentification admin (SECURITY) ✅
 - Accès au panel protégé par **re-saisie du mot de passe** même si la session web est active
@@ -136,17 +158,13 @@ App iOS fonctionnelle sur simulateur (login, chat, TTS, feedback). Specs dans `d
 
 ## 23. ROADMAP
 
-### Priorité immédiate (prochaine session)
-- [x] Créer compte Charlotte (tenant `juillet`, `tenant_admin`) ✅
-- [x] Tester bouton actions directes ON/OFF en prod ✅
-- [x] Suspension feedback + badges ✅
-- [x] Nettoyer dead code `admin_tenants.py` ✅
+### Priorité immédiate (session 17/04)
+- [ ] **Raccourcis éditables v2** : modale titre + prompt personnalisé + sélecteur couleur + suppression + croix en mode edit
+- [ ] **Sujets intégrés sidebar** : remplacer le drawer noir par section déroulante dans sidebar (ouverte par défaut)
+- [ ] **Palette couleurs** : choisir et appliquer une palette sans violet
 - [ ] Tester les 3 niveaux d'accès complets (super admin / tenant admin / user)
+- [ ] Connecteurs v2 Phase C (Raya Core utilise les nouvelles connexions)
 - [ ] Investiguer bug reports #1 et #2 (archivage mail 404)
-- [ ] Tester Gmail OAuth + outils en prod
-- [ ] Tester 💌 signatures en prod
-- [ ] UX admin : repenser le drawer admin (trop de fonctions, certaines inutiles pour les non-super-admin)
-- [ ] Vérifier que Charlotte voit bien sa société dans le panel admin
 
 ### Commercial (Bloc C)
 - [ ] **Connecteurs v2** — spec validée (`docs/spec_connecteurs_v2.md`) :
@@ -170,6 +188,8 @@ App iOS fonctionnelle sur simulateur (login, chat, TTS, feedback). Specs dans `d
 - Fichiers > 10KB = risque timeout MCP. Cible < 10KB pour tous les fichiers Python.
 - **Routes admin** : toujours dans le package `app/routes/admin/`, jamais dans le fichier `admin.py`.
 - **Connecteurs v2** (validé 16/04) : chaque connexion (OAuth, API, SharePoint) est une instance partageable, assignable/révocable dynamiquement à 1-N users par l'admin. Spec dans `docs/spec_connecteurs_v2.md`.
+- **Layout** (validé 17/04) : sidebar gauche, pas de header horizontal, menu ⋮ en bas sidebar, réponses Raya en pleine page (pas de bulle), raccourcis avec pastilles colorées (plus d'emojis). Guillaume ne veut PAS de violet.
+- **Service Worker** (validé 17/04) : DÉSACTIVÉ définitivement (trop de bugs de cache). Le HTML nettoie les anciens SW à chaque chargement.
 
 ## 25. HISTORIQUE
 
