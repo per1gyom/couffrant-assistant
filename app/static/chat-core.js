@@ -39,8 +39,13 @@ async function loadUserInfo() {
   try {
     const d = await (await fetch('/profile')).json();
     const scope = d.scope || '';
+    const name = d.username || d.email || '';
+    // Nom dans le footer (à côté des 3 points)
     const userEl = document.getElementById('headerUser');
-    if (userEl) userEl.textContent = d.username || d.email || '';
+    if (userEl) userEl.textContent = name;
+    // Nom dans le logo en haut (remplace "Raya")
+    const logoEl = document.getElementById('logoUserName');
+    if (logoEl) logoEl.textContent = name;
     if (scope === 'admin') {
       isAdmin = true;
       document.getElementById('superAdminBtn').style.display = 'inline-flex';
@@ -49,13 +54,11 @@ async function loadUserInfo() {
       isAdmin = true;
       document.getElementById('adminPanelBtn').style.display = 'inline-flex';
     }
-    // Masquer les sections super-admin du drawer pour les tenant_admin
     if (scope === 'tenant_admin') {
       document.querySelectorAll('.d-group').forEach(g => {
         const title = (g.querySelector('.d-group-title') || {}).textContent || '';
         if (['Mémoire', 'État du', 'Actions sensibles', 'Urgence'].some(k => title.includes(k))) g.style.display = 'none';
       });
-      // Masquer aussi les séparateurs orphelins
       document.querySelectorAll('.d-sep').forEach((s, i) => { if (i < 3) s.style.display = 'none'; });
     }
   } catch(e) {}
@@ -66,7 +69,10 @@ async function loadMailCount() {
     const r = await fetch('/memory-status');
     const d = await r.json();
     const count = (d.niveau_2 || {}).mail_memory || 0;
-    if (count > 0) { const el = document.getElementById('mailCount'); el.textContent = count > 99 ? '99+' : count; el.classList.add('visible'); }
+    if (count > 0) {
+      const el = document.getElementById('mailCount');
+      if (el) { el.textContent = count > 99 ? '99+' : count; el.classList.add('visible'); }
+    }
   } catch(e) {}
 }
 
