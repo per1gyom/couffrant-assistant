@@ -25,7 +25,7 @@ router = APIRouter(tags=["signature"])
 def _static_signature(username: str) -> str:
     """Signature statique Guillaume — fallback si rien en DB."""
     base_url = os.getenv("APP_BASE_URL", "https://app.raya-ia.fr").rstrip("/")
-    banner_url = f"{base_url}/static/couffrant_solar_logo.png"
+    banner_url = f"{base_url}/static/couffrant_solar_banner.jpg"
     return f"""
 <br><br>
 <table cellpadding="0" cellspacing="0" style="font-family: Helvetica, Arial, sans-serif; font-size: 14px; color: #333;">
