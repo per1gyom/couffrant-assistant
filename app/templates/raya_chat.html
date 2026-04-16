@@ -2,26 +2,26 @@
 <html lang="fr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes, minimum-scale=0.5, maximum-scale=5">
 <title>Raya</title>
-<link rel="manifest" href="/static/manifest.json?v=32">
+<link rel="manifest" href="/static/manifest.json?v=33">
 <meta name="theme-color" content="#0057b8">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
-<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=32">
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=33">
 <script>
-window.__RAYA_V = 24;
+window.__RAYA_V = 25;
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(r => r.forEach(sw => sw.unregister()));
   caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
 }
 </script>
-<link rel="stylesheet" href="/static/chat-base.css?v=32">
-<link rel="stylesheet" href="/static/chat-components.css?v=32">
-<link rel="stylesheet" href="/static/chat-drawer.css?v=32">
-<link rel="stylesheet" href="/static/onboarding.css?v=32">
-<link rel="stylesheet" href="/static/mobile.css?v=32">
+<link rel="stylesheet" href="/static/chat-base.css?v=33">
+<link rel="stylesheet" href="/static/chat-components.css?v=33">
+<link rel="stylesheet" href="/static/chat-drawer.css?v=33">
+<link rel="stylesheet" href="/static/onboarding.css?v=33">
+<link rel="stylesheet" href="/static/mobile.css?v=33">
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -137,7 +137,7 @@ if ('serviceWorker' in navigator) {
       <div style="display:flex;gap:8px">
         <input type="text" id="settingsDisplayName" placeholder="ex : Guillaume D." maxlength="80"
           style="flex:1;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;background:var(--bg);color:var(--text);outline:none">
-        <button onclick="settingsSaveDisplayName()" class="settings-btn-primary">Enregistrer</button>
+
       </div>
       <div id="settingsDnMsg" style="font-size:11px;margin-top:6px;color:var(--success);display:none">✅ Enregistré — reconnectez-vous pour l’effet.</div>
     </div>
@@ -148,7 +148,7 @@ if ('serviceWorker' in navigator) {
       <div style="display:flex;gap:8px">
         <input type="email" id="settingsEmail" placeholder="votre@email.fr"
           style="flex:1;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;background:var(--bg);color:var(--text);outline:none">
-        <button onclick="settingsSaveEmail()" class="settings-btn-primary">Enregistrer</button>
+
       </div>
       <div id="settingsEmailMsg" style="font-size:11px;margin-top:6px;display:none"></div>
     </div>
@@ -163,9 +163,7 @@ if ('serviceWorker' in navigator) {
           style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;background:var(--bg);color:var(--text);outline:none">
         <input type="password" id="settingsPwdConfirm" placeholder="Confirmer"
           style="padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;background:var(--bg);color:var(--text);outline:none">
-        <div style="display:flex;gap:8px;justify-content:flex-end">
-          <button onclick="settingsSavePwd()" class="settings-btn-primary">Mettre à jour</button>
-        </div>
+
         <div id="settingsPwdMsg" style="font-size:11px;display:none"></div>
       </div>
     </div>
@@ -186,6 +184,12 @@ if ('serviceWorker' in navigator) {
     <!-- Legal -->
     <div style="padding:14px 0 4px">
       <a href="/legal" target="_blank" style="font-size:12px;color:var(--text-muted);text-decoration:none">&#128220; Mentions légales &amp; Confidentialité</a>
+    </div>
+
+    <!-- Footer sticky -->
+    <div style="position:sticky;bottom:0;background:var(--surface);border-top:1px solid var(--border);padding:14px 0 0;margin-top:8px;display:flex;gap:10px;justify-content:flex-end">
+      <button onclick="closeUserSettings()" class="settings-btn-ghost">Annuler</button>
+      <button onclick="settingsValider()" class="settings-btn-primary" style="padding:10px 24px">Valider</button>
     </div>
   </div>
 </div>
@@ -307,16 +311,16 @@ if ('serviceWorker' in navigator) {
   </div>
 </div>
 
-<script src="/static/chat-onboarding.js?v=32"></script>
-<script src="/static/chat-shortcuts.js?v=32"></script>
-<script src="/static/chat-voice.js?v=32"></script>
-<script src="/static/chat-feedback.js?v=32"></script>
-<script src="/static/chat-triage.js?v=32"></script>
-<script src="/static/chat-admin.js?v=32"></script>
-<script src="/static/chat-topics.js?v=32"></script>
-<script src="/static/chat-core.js?v=32"></script>
-<script src="/static/chat-messages.js?v=32"></script>
-<script src="/static/chat-main.js?v=32"></script>
+<script src="/static/chat-onboarding.js?v=33"></script>
+<script src="/static/chat-shortcuts.js?v=33"></script>
+<script src="/static/chat-voice.js?v=33"></script>
+<script src="/static/chat-feedback.js?v=33"></script>
+<script src="/static/chat-triage.js?v=33"></script>
+<script src="/static/chat-admin.js?v=33"></script>
+<script src="/static/chat-topics.js?v=33"></script>
+<script src="/static/chat-core.js?v=33"></script>
+<script src="/static/chat-messages.js?v=33"></script>
+<script src="/static/chat-main.js?v=33"></script>
 
 <script>
   // ─── MODAL PARAMÈTRES UTILISATEUR ───
@@ -397,6 +401,55 @@ if ('serviceWorker' in navigator) {
     if(msg){msg.style.display='block';msg.style.color=d.status==='ok'?'var(--success)':'var(--danger)';msg.textContent=d.status==='ok'?'✅ '+d.message:'❌ '+(d.message||'Erreur');}
     if(d.status==='ok'){setTimeout(()=>{closeModal_('modalDeleteAccount');openUserSettings();},1800);}
   }
+  // Valider tous les paramètres et fermer
+  async function settingsValider() {
+    const errors = [];
+
+    // Display name
+    const dn = document.getElementById('settingsDisplayName')?.value.trim();
+    const dnR = await (await fetch('/profile/display-name', {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({display_name: dn || null})
+    })).json();
+    if (dnR.status !== 'ok') errors.push('Nom : ' + (dnR.message || 'erreur'));
+
+    // Email
+    const em = document.getElementById('settingsEmail')?.value.trim();
+    if (em) {
+      const emR = await (await fetch('/profile/email', {
+        method: 'PUT', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({email: em})
+      })).json();
+      if (emR.status !== 'ok') errors.push('Email : ' + (emR.message || 'erreur'));
+    }
+
+    // Mot de passe (uniquement si le champ actuel est rempli)
+    const cur = document.getElementById('settingsPwdCurrent')?.value;
+    if (cur) {
+      const nw = document.getElementById('settingsPwdNew')?.value;
+      const conf = document.getElementById('settingsPwdConfirm')?.value;
+      if (nw !== conf) {
+        errors.push('Mot de passe : les deux nouveaux mots de passe ne correspondent pas.');
+      } else {
+        const pwR = await (await fetch('/profile/password', {
+          method: 'PUT', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({current_password: cur, new_password: nw})
+        })).json();
+        if (pwR.status !== 'ok') errors.push('Mot de passe : ' + (pwR.message || 'erreur'));
+      }
+    }
+
+    if (errors.length > 0) {
+      showToast(errors[0], 'err', 5000);
+      return; // ne pas fermer si erreur
+    }
+
+    // Succès
+    if (typeof loadUserInfo === 'function') loadUserInfo();
+    closeUserSettings();
+    showToast('Paramètres enregistrés.', 'ok');
+  }
+
   async function settingsCancelDelete() {
     await fetch('/account/delete/cancel',{method:'DELETE'});
     openUserSettings();
