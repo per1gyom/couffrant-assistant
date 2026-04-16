@@ -18,7 +18,11 @@ _ASK_CHOICE_PREFIX = "__CHOICE__:"
 
 
 def _get_user_email(username: str) -> str:
-    """Retourne l'email Outlook de l'utilisateur (filtre les emails internes raya-ia.fr)."""
+    """
+    Retourne l'email Microsoft (Outlook) de l'utilisateur.
+    Ordre : users.email (si pas interne) → Graph /me → mise à jour auto users.email.
+    """
+    # 1. Table users — filtre les emails internes de l'app
     try:
         from app.database import get_pg_conn
         conn = get_pg_conn()
@@ -26,13 +30,38 @@ def _get_user_email(username: str) -> str:
         c.execute("SELECT email FROM users WHERE username = %s LIMIT 1", (username,))
         row = c.fetchone()
         conn.close()
-        if row and row[0]:
-            email = row[0]
-            # Ne pas afficher les emails internes de l'application
-            if 'raya-ia.fr' not in email and '@' in email:
+        if row and row[0] and 'raya-ia.fr' not in row[0] and '@' in row[0]:
+            return row[0]
+    except Exception:
+        pass
+
+    # 2. Fallback : Microsoft Graph /me (live, puis mise à jour auto en DB)
+    try:
+        from app.token_manager import get_valid_microsoft_token
+        from app.graph_client import graph_get
+        token = get_valid_microsoft_token(username)
+        if token:
+            me = graph_get(token, "/me", params={"$select": "mail,userPrincipalName"})
+            email = me.get("mail") or me.get("userPrincipalName") or ""
+            if email and '@' in email:
+                # Auto-mise à jour users.email pour ne plus avoir à rappeler Graph
+                try:
+                    from app.database import get_pg_conn
+                    conn = get_pg_conn()
+                    c = conn.cursor()
+                    c.execute(
+                        "UPDATE users SET email = %s WHERE username = %s "
+                        "AND (email IS NULL OR email ILIKE '%raya-ia.fr%')",
+                        (email, username)
+                    )
+                    conn.commit()
+                    conn.close()
+                except Exception:
+                    pass
                 return email
     except Exception:
         pass
+
     return ""
 
 
