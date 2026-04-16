@@ -14,8 +14,9 @@ GMAIL_CLIENT_ID     = os.getenv("GMAIL_CLIENT_ID", "").strip()
 GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET", "").strip()
 GMAIL_REDIRECT_URI  = os.getenv("GMAIL_REDIRECT_URI", "").strip()
 GMAIL_SCOPES = [
-    "https://mail.google.com/",          # Accès complet mail
-    "https://www.googleapis.com/auth/contacts",  # Lecture + création contacts
+    "https://mail.google.com/",
+    "https://www.googleapis.com/auth/contacts",
+    "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/userinfo.email",
     "openid",
 ]

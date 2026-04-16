@@ -79,15 +79,27 @@ def load_live_mails(outlook_token: str, username: str) -> list:
         return []
 
 
-def load_agenda(outlook_token: str) -> list:
+def load_agenda(outlook_token: str, username: str = "") -> list:
+    """
+    Charge les événements de TOUS les calendriers connectés (Microsoft + Gmail + ...).
+    Fallback sur Microsoft seul si username non fourni.
+    """
+    if username:
+        try:
+            from app.mailbox_manager import load_agenda_all
+            return load_agenda_all(username, days=7)
+        except Exception as e:
+            pass  # fallback ci-dessous
+
+    # Fallback legacy Microsoft seulement
     if not outlook_token:
         return []
     try:
         now = datetime.now(timezone.utc)
         start = now.replace(hour=0, minute=0, second=0).isoformat()
-        end = now.replace(hour=23, minute=59, second=59).isoformat()
+        end = (now + __import__('datetime').timedelta(days=7)).replace(hour=23, minute=59, second=59).isoformat()
         result = perform_outlook_action("list_calendar_events",
-            {"start": start, "end": end, "top": 10}, outlook_token)
+            {"start": start, "end": end, "top": 20}, outlook_token)
         return result.get("items", [])
     except Exception:
         return []

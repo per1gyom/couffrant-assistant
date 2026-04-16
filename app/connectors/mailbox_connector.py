@@ -42,12 +42,16 @@ class MailMessage:
 
 @dataclass
 class CalendarEvent:
-    id:       str = ""
-    title:    str = ""
-    start:    str = ""
-    end:      str = ""
-    location: str = ""
-    source:   str = ""
+    id:             str = ""
+    title:          str = ""
+    start:          str = ""   # ISO 8601
+    end:            str = ""   # ISO 8601
+    location:       str = ""
+    description:    str = ""
+    attendees:      list = field(default_factory=list)  # ["email1", "email2"]
+    all_day:        bool = False
+    source:         str = ""   # 'microsoft' | 'gmail'
+    calendar_email: str = ""   # boîte concernée
 
 
 # ─── INTERFACE ABSTRAITE ───────────────────────────────────────────
@@ -105,8 +109,13 @@ class MailboxConnector(ABC):
     def get_agenda(self, days: int = 7) -> list[CalendarEvent]:
         return []
 
-    def create_event(self, title: str, start: str, end: str, **kwargs) -> dict:
+    def create_event(self, title: str, start: str, end: str,
+                     location: str = "", description: str = "",
+                     attendees: list = None) -> dict:
         return {"ok": False, "message": f"create_event non implémenté pour {self.provider}"}
+
+    def update_event(self, event_id: str, **kwargs) -> dict:
+        return {"ok": False, "message": f"update_event non implémenté pour {self.provider}"}
 
     def delete_event(self, event_id: str) -> dict:
         return {"ok": False, "message": f"delete_event non implémenté pour {self.provider}"}

@@ -153,7 +153,74 @@ def create_contact_best(username: str, name: str, email: str, phone: str = "") -
 
 # ─── HELPERS LEGACY ────────────────────────────────────────────────
 
-def _get_legacy_ms_email(username: str) -> str:
+def load_agenda_all(username: str, days: int = 7) -> list[dict]:
+    """
+    Charge les événements de TOUS les calendriers connectés.
+    Retourne une liste triée par date, avec source et calendar_email.
+    """
+    all_events = []
+    for connector in get_user_mailboxes(username):
+        try:
+            events = connector.get_agenda(days=days)
+            for e in events:
+                all_events.append({
+                    "id":             e.id,
+                    "title":          e.title,
+                    "start":          e.start,
+                    "end":            e.end,
+                    "location":       e.location,
+                    "description":    e.description,
+                    "attendees":      e.attendees,
+                    "all_day":        e.all_day,
+                    "source":         e.source,
+                    "calendar_email": e.calendar_email,
+                })
+        except Exception as ex:
+            logger.warning("[MailboxMgr] get_agenda error (%s): %s", connector.provider, ex)
+    # Trier par date de début
+    all_events.sort(key=lambda e: e.get("start", "") or "")
+    return all_events
+
+
+def execute_calendar_action(
+    username: str,
+    action: str,
+    provider_hint: str = "",
+    **kwargs,
+) -> dict:
+    """
+    Exécute une action calendrier sur le bon connecteur.
+    provider_hint : 'microsoft' | 'gmail' | '' (auto = premier disponible)
+    action : 'create' | 'update' | 'delete'
+    """
+    mailboxes = get_user_mailboxes(username)
+    if not mailboxes:
+        return {"ok": False, "message": "Aucun calendrier connecté."}
+
+    # Choisir le bon connecteur
+    connector = None
+    if provider_hint:
+        for m in mailboxes:
+            if m.provider == provider_hint or m.email == provider_hint:
+                connector = m
+                break
+    if not connector:
+        connector = mailboxes[0]  # premier disponible
+
+    if action == "create":
+        return connector.create_event(
+            title=kwargs.get("title", ""),
+            start=kwargs.get("start", ""),
+            end=kwargs.get("end", ""),
+            location=kwargs.get("location", ""),
+            description=kwargs.get("description", ""),
+            attendees=kwargs.get("attendees", []),
+        )
+    elif action == "update":
+        return connector.update_event(kwargs.get("event_id", ""), **kwargs)
+    elif action == "delete":
+        return connector.delete_event(kwargs.get("event_id", ""))
+    return {"ok": False, "message": f"Action calendrier inconnue : {action}"}
     try:
         from app.database import get_pg_conn
         conn = get_pg_conn(); c = conn.cursor()

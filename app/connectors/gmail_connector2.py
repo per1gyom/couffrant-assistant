@@ -96,7 +96,95 @@ class GmailConnector(MailboxConnector):
         except Exception as e:
             return {"ok": False, "message": str(e)[:100]}
 
-    # --- HELPERS ---
+    # --- AGENDA (Google Calendar) ---
+
+    def get_agenda(self, days: int = 7) -> list[CalendarEvent]:
+        try:
+            from datetime import datetime, timezone, timedelta
+            now = datetime.now(timezone.utc)
+            end = now + timedelta(days=days)
+            data = self._get("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+                "timeMin": now.isoformat(),
+                "timeMax": end.isoformat(),
+                "orderBy": "startTime",
+                "singleEvents": "true",
+                "maxResults": "50",
+            })
+            events = []
+            for e in data.get("items", []):
+                start_data = e.get("start", {})
+                end_data   = e.get("end",   {})
+                start = start_data.get("dateTime") or start_data.get("date", "")
+                end   = end_data.get("dateTime")   or end_data.get("date", "")
+                all_day = "date" in start_data and "dateTime" not in start_data
+                attendees = [a.get("email", "") for a in e.get("attendees", []) if a.get("email")]
+                events.append(CalendarEvent(
+                    id=e.get("id", ""),
+                    title=e.get("summary", ""),
+                    start=start,
+                    end=end,
+                    location=e.get("location", ""),
+                    description=e.get("description", ""),
+                    attendees=attendees,
+                    all_day=all_day,
+                    source="gmail",
+                    calendar_email=self.email,
+                ))
+            return events
+        except Exception as e:
+            logger.warning("[GmailConnector] get_agenda: %s", e)
+            return []
+
+    def create_event(self, title: str, start: str, end: str,
+                     location: str = "", description: str = "",
+                     attendees: list = None) -> dict:
+        try:
+            body = {
+                "summary": title,
+                "start":   {"dateTime": start, "timeZone": "Europe/Paris"},
+                "end":     {"dateTime": end,   "timeZone": "Europe/Paris"},
+            }
+            if location:    body["location"] = location
+            if description: body["description"] = description
+            if attendees:
+                body["attendees"] = [{"email": a} for a in attendees if "@" in a]
+            data = self._post(
+                "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+                body
+            )
+            return {"ok": True, "message": f"Événement '{title}' créé dans Google Calendar.", "id": data.get("id", "")}
+        except Exception as e:
+            return {"ok": False, "message": str(e)[:100]}
+
+    def update_event(self, event_id: str, **kwargs) -> dict:
+        try:
+            import requests
+            body = {}
+            if "title"    in kwargs: body["summary"]  = kwargs["title"]
+            if "location" in kwargs: body["location"] = kwargs["location"]
+            if "start"    in kwargs: body["start"] = {"dateTime": kwargs["start"], "timeZone": "Europe/Paris"}
+            if "end"      in kwargs: body["end"]   = {"dateTime": kwargs["end"],   "timeZone": "Europe/Paris"}
+            url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events/{event_id}"
+            r = requests.patch(url, headers={"Authorization": f"Bearer {self.token}",
+                               "Content-Type": "application/json"}, json=body, timeout=10)
+            if r.status_code == 403:
+                return {"ok": False, "message": "Scope calendar manquant — reconnectez Gmail."}
+            r.raise_for_status()
+            return {"ok": True, "message": "Événement mis à jour."}
+        except Exception as e:
+            return {"ok": False, "message": str(e)[:100]}
+
+    def delete_event(self, event_id: str) -> dict:
+        try:
+            import requests
+            url = f"https://www.googleapis.com/calendar/v3/calendars/primary/events/{event_id}"
+            r = requests.delete(url, headers={"Authorization": f"Bearer {self.token}"}, timeout=10)
+            if r.status_code == 403:
+                return {"ok": False, "message": "Scope calendar manquant — reconnectez Gmail."}
+            r.raise_for_status()
+            return {"ok": True, "message": "Événement supprimé."}
+        except Exception as e:
+            return {"ok": False, "message": str(e)[:100]}
 
     def _parse_people(self, results: list) -> list[Contact]:
         contacts = []

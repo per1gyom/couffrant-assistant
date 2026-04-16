@@ -141,12 +141,43 @@ def _execute_confirmed_action(action: dict, outlook_token: str, tools: dict) -> 
                     "error": r.get("message", "copie echouee")}
 
         if action_type == "CREATEEVENT":
-            r = perform_outlook_action("create_calendar_event", {
-                "subject": payload["subject"], "start": payload["start"],
-                "end": payload["end"], "attendees": payload.get("attendees", []),
-            }, outlook_token)
-            return {"ok": r.get("status") == "ok", "message": "RDV cree",
-                    "error": r.get("message", "creation RDV echouee")}
+            # Utiliser le manager unifié (Microsoft + Google Calendar)
+            from app.mailbox_manager import execute_calendar_action
+            provider = payload.get("calendar_provider", "")  # 'microsoft' | 'gmail' | ''
+            result = execute_calendar_action(
+                username=username,
+                action="create",
+                provider_hint=provider,
+                title=payload.get("subject", ""),
+                start=payload.get("start", ""),
+                end=payload.get("end", ""),
+                location=payload.get("location", ""),
+                description=payload.get("description", ""),
+                attendees=payload.get("attendees", []),
+            )
+            return {"ok": result.get("ok", False), "message": result.get("message", "Événement créé"),
+                    "error": result.get("message", "") if not result.get("ok") else ""}
+
+        if action_type == "UPDATE_EVENT":
+            from app.mailbox_manager import execute_calendar_action
+            result = execute_calendar_action(
+                username=username, action="update",
+                provider_hint=payload.get("calendar_provider", ""),
+                event_id=payload.get("event_id", ""),
+                **{k: v for k, v in payload.items() if k not in ("event_id", "calendar_provider")}
+            )
+            return {"ok": result.get("ok", False), "message": result.get("message", ""),
+                    "error": result.get("message", "") if not result.get("ok") else ""}
+
+        if action_type == "DELETE_EVENT":
+            from app.mailbox_manager import execute_calendar_action
+            result = execute_calendar_action(
+                username=username, action="delete",
+                provider_hint=payload.get("calendar_provider", ""),
+                event_id=payload.get("event_id", ""),
+            )
+            return {"ok": result.get("ok", False), "message": result.get("message", ""),
+                    "error": result.get("message", "") if not result.get("ok") else ""}
 
         return {"ok": False, "error": f"Type d'action inconnu : {action_type}"}
     except Exception as e:

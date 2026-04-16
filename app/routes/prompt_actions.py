@@ -32,10 +32,10 @@ Interactif (immediat) :
   [ACTION:SEND_GMAIL:destinataire@email.fr|sujet|corps] -> envoyer depuis la boite Gmail (boite perso)
     Utiliser SEND_GMAIL quand l'utilisateur dit "boite perso", "Gmail", "per1.guillaume@gmail.com", etc.
     Les deux actions mettent en queue et necessitent confirmation.
-  [ACTION:SEARCH_CONTACTS:prenom nom] -> cherche l'adresse email d'un contact dans Microsoft Contacts
-    A utiliser OBLIGATOIREMENT avant SEND_MAIL ou REPLY quand tu ne connais pas l'adresse exacte.
-    Exemples : [ACTION:SEARCH_CONTACTS:Charlotte] ou [ACTION:SEARCH_CONTACTS:Ducasse Simon]
-    -> retourne le nom et l'email trouve, ou vide si inconnu
+  [ACTION:SEARCH_CONTACTS:prenom nom] -> cherche dans TOUTES les boites connectees (Microsoft + Gmail + ...)
+    A utiliser OBLIGATOIREMENT avant SEND_MAIL ou SEND_GMAIL quand tu ne connais pas l'adresse exacte.
+    Retourne le nom, l'email trouve et la source ('microsoft' ou 'gmail'), ou vide si inconnu.
+  [ACTION:CREATE_CONTACT:Nom|email|telephone_opt] -> cree dans la boite la plus adaptee (Gmail en priorite)
 Filtre mails :
   [ACTION:LEARN:mail_filter|autoriser: email@domaine.fr]
   [ACTION:LEARN:mail_filter|bloquer: promo@xyz.fr]""")
@@ -60,8 +60,14 @@ Teams — memoire (immediat) :
   [ACTION:TEAMS_MARK:chat_id|message_id|label?|type?]""")
 
     if "calendar" in domains:
-        sections.append("""Calendrier :
-  [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants]""")
+        sections.append("""Calendrier (toutes boites connectees) :
+  [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|lieu_opt|participants_opt|calendrier_opt]
+    calendrier_opt = 'microsoft' ou 'gmail' (vide = premier disponible)
+    Exemple : [ACTION:CREATEEVENT:Reunion Dupont|2026-04-17T14:00:00|2026-04-17T15:00:00|Paris|client@email.fr|microsoft]
+  [ACTION:UPDATE_EVENT:event_id|champ=valeur]
+    Exemples : title=Nouveau titre  ou  start=2026-04-17T15:00:00  ou  location=Lyon
+  [ACTION:DELETE_EVENT:event_id|calendrier_opt]
+  Ces actions necessitent confirmation avant execution.""")
 
     if "memory" in domains:
         sections.append("""Memoire (immediat) :

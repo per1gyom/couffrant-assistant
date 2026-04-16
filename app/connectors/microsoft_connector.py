@@ -80,17 +80,81 @@ class MicrosoftConnector(MailboxConnector):
             now = datetime.now(timezone.utc)
             end = now + timedelta(days=days)
             data = self._get("/me/calendarView", {
-                "startDateTime": now.isoformat(), "endDateTime": end.isoformat(),
-                "$select": "id,subject,start,end,location", "$top": "20",
+                "startDateTime": now.isoformat(),
+                "endDateTime": end.isoformat(),
+                "$select": "id,subject,start,end,location,bodyPreview,attendees,isAllDay",
+                "$top": "50",
                 "$orderby": "start/dateTime",
             })
-            return [CalendarEvent(
-                id=e.get("id",""), title=e.get("subject",""),
-                start=e.get("start",{}).get("dateTime",""),
-                end=e.get("end",{}).get("dateTime",""),
-                location=e.get("location",{}).get("displayName",""),
-                source="microsoft"
-            ) for e in data.get("value",[])]
+            events = []
+            for e in data.get("value", []):
+                attendees = [
+                    a.get("emailAddress", {}).get("address", "")
+                    for a in e.get("attendees", [])
+                    if a.get("emailAddress", {}).get("address")
+                ]
+                events.append(CalendarEvent(
+                    id=e.get("id", ""),
+                    title=e.get("subject", ""),
+                    start=e.get("start", {}).get("dateTime", ""),
+                    end=e.get("end", {}).get("dateTime", ""),
+                    location=e.get("location", {}).get("displayName", ""),
+                    description=e.get("bodyPreview", ""),
+                    attendees=attendees,
+                    all_day=e.get("isAllDay", False),
+                    source="microsoft",
+                    calendar_email=self.email,
+                ))
+            return events
         except Exception as e:
             logger.warning("[MSConnector] get_agenda: %s", e)
             return []
+
+    def create_event(self, title: str, start: str, end: str,
+                     location: str = "", description: str = "",
+                     attendees: list = None) -> dict:
+        try:
+            body = {
+                "subject": title,
+                "start": {"dateTime": start, "timeZone": "Europe/Paris"},
+                "end":   {"dateTime": end,   "timeZone": "Europe/Paris"},
+            }
+            if location:
+                body["location"] = {"displayName": location}
+            if description:
+                body["body"] = {"contentType": "text", "content": description}
+            if attendees:
+                body["attendees"] = [
+                    {"emailAddress": {"address": a}, "type": "required"}
+                    for a in attendees if "@" in a
+                ]
+            result = self._post("/me/events", body)
+            return {"ok": True, "message": f"Événement '{title}' créé dans Outlook.", "id": result.get("id", "")}
+        except Exception as e:
+            return {"ok": False, "message": str(e)[:100]}
+
+    def update_event(self, event_id: str, **kwargs) -> dict:
+        try:
+            import requests
+            body = {}
+            if "title" in kwargs:   body["subject"] = kwargs["title"]
+            if "start" in kwargs:   body["start"] = {"dateTime": kwargs["start"], "timeZone": "Europe/Paris"}
+            if "end" in kwargs:     body["end"]   = {"dateTime": kwargs["end"],   "timeZone": "Europe/Paris"}
+            if "location" in kwargs: body["location"] = {"displayName": kwargs["location"]}
+            r = requests.patch(f"{_GRAPH}/me/events/{event_id}",
+                               headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
+                               json=body, timeout=10)
+            r.raise_for_status()
+            return {"ok": True, "message": "Événement mis à jour."}
+        except Exception as e:
+            return {"ok": False, "message": str(e)[:100]}
+
+    def delete_event(self, event_id: str) -> dict:
+        try:
+            import requests
+            r = requests.delete(f"{_GRAPH}/me/events/{event_id}",
+                                headers={"Authorization": f"Bearer {self.token}"}, timeout=10)
+            r.raise_for_status()
+            return {"ok": True, "message": "Événement supprimé."}
+        except Exception as e:
+            return {"ok": False, "message": str(e)[:100]}

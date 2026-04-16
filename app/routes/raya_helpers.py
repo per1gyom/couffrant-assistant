@@ -62,7 +62,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     pool = _SHARED_POOL
     if True:
         f_mails  = pool.submit(load_live_mails, outlook_token, username)
-        f_agenda = pool.submit(load_agenda, outlook_token)
+        f_agenda = pool.submit(load_agenda, outlook_token, username)
         f_teams  = pool.submit(load_teams_context, username)
         f_filter = pool.submit(load_mail_filter_summary, username)
         try: live_mails  = f_mails.result(timeout=8)
