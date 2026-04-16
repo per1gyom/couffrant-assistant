@@ -32,7 +32,7 @@ def _get_pool() -> ThreadedConnectionPool:
         with _pool_lock:
             if _pool is None:
                 try:
-                    _pool = ThreadedConnectionPool(2, 8, DATABASE_URL)
+                    _pool = ThreadedConnectionPool(2, 15, DATABASE_URL)
                 except Exception as e:
                     logger.warning("[DB] Pool non initialisé (%s) — fallback connexions directes", e)
     return _pool

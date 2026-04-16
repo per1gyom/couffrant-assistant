@@ -82,20 +82,13 @@ def search_similar(
     tenant_id: str = None,
     tenant_ids: list[str] = None,
     extra_filter: str = "",
+    precomputed_vec: list = None,
 ) -> list:
     """
-    Recherche sémantique dans une table par similarité cosinus.
-    Retourne les lignes les plus proches du texte de requête.
-
-    Supporte le mode multi-tenant (5D-2b) :
-      - tenant_id  : filtre sur un seul tenant (comportement original)
-      - tenant_ids : filtre sur plusieurs tenants (mode dirigeant)
-      - Si les deux sont fournis, tenant_ids prend la priorité.
-
-    Si pas de vecteur disponible (clé manquante), retourne [].
-    L'appelant doit gérer le fallback vers une recherche textuelle.
+    Recherche sémantique par similarité cosinus.
+    Si precomputed_vec est fourni, l'embedding n'est pas recalculé (perf).
     """
-    query_vec = embed(query_text)
+    query_vec = precomputed_vec if precomputed_vec is not None else embed(query_text)
     if query_vec is None:
         return []
 

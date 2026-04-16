@@ -5,11 +5,16 @@ Extrait de aria_context.py — REFACTOR-3.
 """
 import os
 from datetime import datetime, timezone
+import app.cache as cache
 from app.routes.prompt_blocks_extra import build_team_block, build_topics_block, build_web_info, build_ton_block  # noqa
 
 
 def build_maturity_block(username: str, display_name: str) -> tuple:
     """5G-3 : comportement adaptatif selon la maturite. Retourne (maturity_block, adaptive)."""
+    cache_key = f"maturity:{username}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
     maturity_block = ""
     adaptive = {}
     try:
@@ -50,11 +55,17 @@ Tu connais {display_name} en profondeur. Comportement attendu :
 - Sois proactive : anticipe les besoins avant qu'il les exprime"""
     except Exception:
         pass
-    return maturity_block, adaptive
+    result = (maturity_block, adaptive)
+    cache.set(cache_key, result, ttl=120)   # 2 min — phase change lentement
+    return result
 
 
 def build_patterns_block(username: str, adaptive: dict, maturity_block: str) -> str:
     """5G-5 : injection des patterns comportementaux (consolidation + maturity)."""
+    cache_key = f"patterns:{username}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
     patterns_block = ""
     try:
         if maturity_block:
@@ -90,6 +101,7 @@ def build_patterns_block(username: str, adaptive: dict, maturity_block: str) -> 
                     )
     except Exception:
         pass
+    cache.set(cache_key, patterns_block, ttl=120)
     return patterns_block
 
 
@@ -144,6 +156,10 @@ def build_alerts_block(username: str) -> str:
 
 def build_report_block(username: str) -> str:
     """7-6D : rapport du jour disponible."""
+    cache_key = f"report:{username}"
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
     report_block = ""
     try:
         from app.routes.actions.report_actions import get_today_report
@@ -164,5 +180,6 @@ def build_report_block(username: str) -> str:
             )
     except Exception:
         pass
+    cache.set(cache_key, report_block, ttl=300)   # 5 min
     return report_block
 

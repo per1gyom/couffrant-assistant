@@ -62,9 +62,9 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     f_agenda = _SHARED_POOL.submit(load_agenda, outlook_token, username)
     f_teams  = _SHARED_POOL.submit(load_teams_context, username)
     f_filter = _SHARED_POOL.submit(load_mail_filter_summary, username)
-    try: live_mails  = f_mails.result(timeout=8)
+    try: live_mails  = f_mails.result(timeout=5)
     except Exception: pass
-    try: agenda      = f_agenda.result(timeout=8)
+    try: agenda      = f_agenda.result(timeout=5)
     except Exception: pass
     try: teams_ctx   = f_teams.result(timeout=5)
     except Exception: pass

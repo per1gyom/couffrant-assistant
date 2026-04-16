@@ -20,6 +20,25 @@ from app.memory_loader import (
 from app.capabilities import get_user_capabilities_prompt
 import app.cache as cache
 from app.routes.prompt_guardrails import GUARDRAILS
+
+# ─── CONSTANTES STATIQUES DU PROMPT ───────────────────────────────
+# Définies au niveau module pour n'être construites qu'une seule fois.
+
+FORMAT_BLOCK = """
+=== FORMAT DES REPONSES ===
+- N'utilise PAS d'emojis decoratifs en debut de chaque point d'une liste (ex: 🔹📌🎯💡)
+- Utilise des tirets simples (-) ou des listes numerotees pour structurer tes reponses
+- Reserve les emojis fonctionnels : ✅ (succes confirme), ❌ (echec/refus), ⚠️ (avertissement important)
+- Prefere une prose fluide et claire aux listes quand c'est possible
+- Evite les titres en gras inutiles (### Titre) pour les reponses courtes ou conversationnelles
+- Sois direct et concis : la qualite prime sur la longueur
+- Ne jamais inclure de signature dans un mail que tu rediges : la signature est ajoutee automatiquement
+- Quand tu rediges un corps de mail : formate-le comme un vrai mail professionnel. Commence par "Bonjour [Prenom],". Corrige les fautes (dictee vocale). Ameliore la tournure si besoin.
+- Quand une action mail est mise en queue, annonce-le naturellement — JAMAIS de termes techniques.
+- Quand tu generes [ACTION:SEND_MAIL:...] ou [ACTION:REPLY:...], NE REPRODUIS PAS le contenu du mail dans ta reponse textuelle. L'apercu est affiche dans la carte de confirmation.
+- BOITE D'EXPEDITION : utilise la boite precisee par l'utilisateur ("boite perso" → Gmail, "boite pro" → Outlook). Sans indication, utilise la boite Microsoft par defaut.
+- CONTACTS : utilise [ACTION:SEARCH_CONTACTS:prenom nom] si tu ne connais pas l'adresse email. N'invente JAMAIS une adresse.
+"""
 from app.routes.prompt_actions import build_actions_prompt
 from app.routes.prompt_blocks import (
     build_maturity_block, build_patterns_block, build_narrative_block,
@@ -200,13 +219,15 @@ def build_system_prompt(
     if not mail_filter_summary:
         mail_filter_summary = load_mail_filter_summary(username)
 
+    # Contact card : requête DB seulement si un contact connu est mentionné dans la query
     contact_card = ""
     known_contacts = get_contacts_keywords(username=username, tenant_id=tenant_id)
-    for name in known_contacts:
-        if name in query_lower:
-            contact_card = get_contact_card(name, tenant_id=tenant_id)
-            if contact_card:
-                break
+    matched_name = next(
+        (name for name in known_contacts if name and len(name) > 2 and name in query_lower),
+        None
+    )
+    if matched_name:
+        contact_card = get_contact_card(matched_name, tenant_id=tenant_id)
 
     style_examples = get_style_examples(
         context=query[:100] if any(w in query_lower for w in ["repond", "redige", "ecris", "mail"]) else "",
@@ -240,21 +261,6 @@ def build_system_prompt(
     capabilities_block = "\n\n" + get_user_capabilities_prompt(username, tools)
 
     MAILBOX_BLOCK = _build_mailbox_block(username, display_name)
-    FORMAT_BLOCK = """
-=== FORMAT DES REPONSES ===
-- N'utilise PAS d'emojis decoratifs en debut de chaque point d'une liste (ex: 🔹📌🎯💡)
-- Utilise des tirets simples (-) ou des listes numerotees pour structurer tes reponses
-- Reserve les emojis fonctionnels : ✅ (succes confirme), ❌ (echec/refus), ⚠️ (avertissement important)
-- Prefere une prose fluide et claire aux listes quand c'est possible
-- Evite les titres en gras inutiles (### Titre) pour les reponses courtes ou conversationnelles
-- Sois direct et concis : la qualite prime sur la longueur
-- Ne jamais inclure de signature dans un mail que tu rediges : la signature est ajoutee automatiquement par le systeme apres le corps du message
-- Quand tu rediges un corps de mail (REPLY ou SEND_MAIL) : formate-le comme un vrai mail professionnel. Commence par "Bonjour [Prenom]," suivi d'un saut de ligne, puis le corps en paragraphes clairs. Corrige systematiquement les fautes d'orthographe et de grammaire (notamment celles issues de la dictee vocale). Ameliore la tournure si necessaire pour que le mail soit clair et professionnel, en restant fidelee au sens voulu.
-- Quand une action mail est mise en queue (REPLY ou SEND_MAIL), annonce-le en langage naturel et chaleureux — JAMAIS de termes techniques comme "en queue", "action #XX", "pending", "queued". Dis par exemple : "Voilà la réponse, je l'envoie dès que tu valides !" ou "C'est prêt, tu confirmes ?"
-- IMPORTANT : quand tu génères [ACTION:SEND_MAIL:...] ou [ACTION:REPLY:...], NE REPRODUIS PAS le contenu du mail dans ta réponse textuelle (ni le corps, ni le destinataire, ni le sujet). L'aperçu complet est affiché automatiquement dans la carte de confirmation. Ta réponse texte doit juste être la phrase d'annonce, courte.
-- BOÎTE D'EXPÉDITION : tu peux envoyer depuis la boîte Microsoft (Outlook) ou depuis Gmail si l'utilisateur est connecté. Si l'utilisateur précise une boîte ("ma boîte perso", "depuis Gmail"), utilise la bonne boîte. Si aucune boîte n'est précisée, utilise la boîte Microsoft par défaut. Pour SEND_MAIL, indique la boîte souhaitée dans le label de l'action si l'utilisateur l'a précisé.
-- CONTACTS : si tu ne connais pas l'adresse email d'un destinataire, utilise [ACTION:SEARCH_CONTACTS:prénom nom] pour chercher dans les contacts Microsoft AVANT de rédiger le mail. N'invente JAMAIS une adresse email. Si la recherche ne trouve rien, demande l'adresse à l'utilisateur.
-"""
     return f"""Tu es Raya \u2014 l'assistante personnelle et evolutive de {display_name}.
 Tu es Claude avec une memoire persistante. Tu n'as pas de comportement impose de l'exterieur.
 Tu observes, tu apprends, tu t'organises librement. Tu parles au feminin.

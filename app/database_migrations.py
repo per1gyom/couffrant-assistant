@@ -225,4 +225,16 @@ MIGRATIONS = [
     "ALTER TABLE pending_actions ADD COLUMN IF NOT EXISTS conversation_id INTEGER",
     # -- GMAIL_TOKENS : colonne email pour affichage bandeau --
     "ALTER TABLE gmail_tokens ADD COLUMN IF NOT EXISTS email TEXT",
+    # -- PERFORMANCE : index manquants identifiés par audit --
+    # aria_memory : tri par id DESC pour l'historique (croît avec le temps)
+    "CREATE INDEX IF NOT EXISTS idx_aria_memory_username_id ON aria_memory (username, id DESC)",
+    # pending_actions : filtre status + expiry le plus fréquent
+    "CREATE INDEX IF NOT EXISTS idx_pending_actions_user_status ON pending_actions (username, tenant_id, status, expires_at)",
+    # llm_usage : filtre par date pour l'onglet Utilisation
+    "CREATE INDEX IF NOT EXISTS idx_llm_usage_created_at ON llm_usage (created_at DESC, tenant_id)",
+    # aria_rules : filtre active + category (les 2 champs absents de l'index existant)
+    "CREATE INDEX IF NOT EXISTS idx_aria_rules_active_cat ON aria_rules (username, active, category, confidence DESC)",
+    # -- SOFT-DELETE synthèse : colonne archived sur aria_memory --
+    "ALTER TABLE aria_memory ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT false",
+    "CREATE INDEX IF NOT EXISTS idx_aria_memory_archived ON aria_memory (username, archived) WHERE archived = false",
 ]
