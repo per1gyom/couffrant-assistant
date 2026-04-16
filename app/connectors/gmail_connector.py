@@ -29,8 +29,7 @@ GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET", "").strip()
 GMAIL_REDIRECT_URI = os.getenv("GMAIL_REDIRECT_URI", "").strip()
 
 GMAIL_SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/gmail.send",
+    "https://mail.google.com/",          # Accès complet : lecture, envoi, suppression, labels, archive, corbeille
     "https://www.googleapis.com/auth/userinfo.email",
     "openid",
 ]
