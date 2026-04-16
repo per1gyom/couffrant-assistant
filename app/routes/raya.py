@@ -65,18 +65,42 @@ router = APIRouter(tags=["raya"])
 def token_status(request: Request, user: dict = Depends(require_user)):
     username = user["username"]
     warnings = []
+
+    # Vérification Microsoft 365
     try:
         token = get_valid_microsoft_token(username)
         if not token:
             warnings.append({
                 "provider": "Microsoft 365",
-                "message": "Token expire \u2014 mails, Teams et agenda inaccessibles.",
-                "action": "Se reconnecter",
+                "mailbox": "Outlook (boîte pro)",
+                "message": "Token expiré — mails, agenda et Teams inaccessibles.",
                 "action_url": "/login",
                 "severity": "error",
             })
     except Exception:
         pass
+
+    # Vérification Gmail
+    try:
+        from app.connectors.gmail_connector import get_gmail_service
+        from app.database import get_pg_conn as _gpc
+        conn = _gpc(); c = conn.cursor()
+        c.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
+        row = c.fetchone(); conn.close()
+        if row and row[0]:
+            gmail_email = row[0]
+            service = get_gmail_service(username)
+            if not service:
+                warnings.append({
+                    "provider": "Gmail",
+                    "mailbox": gmail_email,
+                    "message": "Token Gmail expiré — envoi et lecture depuis la boîte perso impossible.",
+                    "action_url": "/login/gmail",
+                    "severity": "error",
+                })
+    except Exception:
+        pass
+
     return {"warnings": warnings, "ok": len(warnings) == 0}
 
 

@@ -30,8 +30,40 @@ async function loadHistory() {
   } catch(e) { console.warn('[History] erreur chargement:', e); }
 }
 
-// --- INIT ---
-async function init() {
+// --- TOKEN STATUS — pastilles persistantes boîtes mail expirées ---
+let _tokenCheckInterval = null;
+
+async function checkTokenStatus() {
+  try {
+    const r = await fetch('/token-status');
+    if (!r.ok) return;
+    const data = await r.json();
+    _renderTokenBanner(data.warnings || []);
+    // Polling toutes les 3 min pour auto-disparaître quand reconnecté
+    if (!_tokenCheckInterval) {
+      _tokenCheckInterval = setInterval(checkTokenStatus, 3 * 60 * 1000);
+    }
+  } catch(e) {}
+}
+
+function _renderTokenBanner(warnings) {
+  const banner = document.getElementById('tokenBanner');
+  if (!banner) return;
+  if (!warnings || warnings.length === 0) {
+    banner.innerHTML = '';
+    banner.style.display = 'none';
+    return;
+  }
+  banner.style.display = 'flex';
+  banner.innerHTML = warnings.map(w => `
+    <div class="token-warning-pill">
+      <span class="token-warning-icon">⚠️</span>
+      <span class="token-warning-label">${w.mailbox || w.provider}</span>
+      <span class="token-warning-msg">Token expiré</span>
+      <a href="${w.action_url}" class="token-warning-btn">Reconnecter →</a>
+    </div>
+  `).join('');
+}
   if (typeof initShortcuts === 'function') initShortcuts();
   if (typeof initTopicsSidebar === 'function') initTopicsSidebar();
   checkHealth();

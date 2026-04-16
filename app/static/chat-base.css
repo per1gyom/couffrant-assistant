@@ -165,3 +165,45 @@ textarea#input.interim { color: var(--text-muted); font-style: italic; }
 .bubble code { font-family: var(--font-mono); font-size: 13px; background: var(--surface2); padding: 2px 6px; border-radius: 4px; color: var(--accent); }
 .bubble pre { margin: 10px 0; background: #1e1e2e; color: #cdd6f4; padding: 14px 16px; border-radius: var(--radius-sm); overflow-x: auto; font-size: 13px; line-height: 1.5; }
 .bubble pre code { background: none; padding: 0; color: inherit; border-radius: 0; }
+
+/* ── TOKEN WARNING BANNER ── */
+.token-banner {
+  display: none;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #fff8f0;
+  border-bottom: 2px solid #f97316;
+  z-index: 100;
+  position: relative;
+}
+.token-warning-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: #fff;
+  border: 1.5px solid #f97316;
+  border-radius: 20px;
+  font-size: 12px;
+  animation: token-pulse 2s ease-in-out infinite;
+}
+.token-warning-icon { font-size: 13px; }
+.token-warning-label { font-weight: 700; color: #c2410c; }
+.token-warning-msg { color: #7c3f00; }
+.token-warning-btn {
+  margin-left: 4px;
+  padding: 2px 10px;
+  background: #f97316;
+  color: #fff;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 11px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.token-warning-btn:hover { background: #ea580c; }
+@keyframes token-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(249,115,22,0.4); }
+  50% { box-shadow: 0 0 0 5px rgba(249,115,22,0); }
+}
