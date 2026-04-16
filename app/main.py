@@ -219,6 +219,12 @@ def startup_event():
         init_default_user()
     except Exception as e:
         logger.error(f"[Raya] Erreur init_default_user: {e}")
+    # Migration tokens legacy → tenant_connections (idempotent)
+    try:
+        from app.token_migration import migrate_tokens_to_v2
+        migrate_tokens_to_v2()
+    except Exception as e:
+        logger.warning(f"[Migration] Erreur migration tokens: {e}")
     try:
         from app.seeding import seed_tenant, is_tenant_seeded
         admin_username = os.getenv("APP_USERNAME", "guillaume").strip()

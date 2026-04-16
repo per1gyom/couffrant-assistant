@@ -25,6 +25,116 @@ logger = get_logger("raya.auth")
 router = APIRouter(tags=["auth"])
 
 
+def _save_ms_token_v2(username: str, oauth_result: dict):
+    """Upsert le token Microsoft dans tenant_connections (V2)."""
+    try:
+        from app.connection_token_manager import save_connection_oauth_token
+        from app.connections import list_connections
+        from app.database import get_pg_conn
+        from app.app_security import get_tenant_id
+        from app.crypto import encrypt_token
+        import json
+
+        tenant_id = get_tenant_id(username)
+        if not tenant_id:
+            return
+
+        # Récupérer l'email via Graph
+        email = ""
+        try:
+            from app.graph_client import graph_get
+            me = graph_get(oauth_result["access_token"], "/me",
+                           params={"$select": "mail,userPrincipalName"})
+            email = me.get("mail") or me.get("userPrincipalName") or ""
+        except Exception:
+            pass
+
+        # Trouver ou créer la connexion Microsoft pour ce user
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("""
+            SELECT tc.id FROM tenant_connections tc
+            JOIN connection_assignments ca ON ca.connection_id = tc.id
+            WHERE tc.tenant_id = %s AND tc.tool_type = 'microsoft' AND ca.username = %s
+            LIMIT 1
+        """, (tenant_id, username))
+        row = c.fetchone()
+        if row:
+            conn_id = row[0]
+        else:
+            label = email or f"Microsoft ({username})"
+            c.execute("""
+                INSERT INTO tenant_connections
+                    (tenant_id, tool_type, label, auth_type, status, created_by)
+                VALUES (%s, 'microsoft', %s, 'oauth', 'connected', 'oauth_callback')
+                RETURNING id
+            """, (tenant_id, label))
+            conn_id = c.fetchone()[0]
+            c.execute("""
+                INSERT INTO connection_assignments (connection_id, username, access_level, enabled)
+                VALUES (%s, %s, 'full', true)
+                ON CONFLICT (connection_id, username) DO NOTHING
+            """, (conn_id, username))
+        conn.commit(); conn.close()
+
+        save_connection_oauth_token(
+            connection_id=conn_id,
+            access_token=oauth_result["access_token"],
+            refresh_token=oauth_result.get("refresh_token", ""),
+            email=email,
+            expires_in=oauth_result.get("expires_in", 3600),
+        )
+    except Exception as e:
+        logger.warning("[Auth] _save_ms_token_v2 error: %s", e)
+
+
+def _save_gmail_token_v2(username: str, tokens: dict, email: str):
+    """Upsert le token Gmail dans tenant_connections (V2)."""
+    try:
+        from app.connection_token_manager import save_connection_oauth_token
+        from app.database import get_pg_conn
+        from app.app_security import get_tenant_id
+
+        tenant_id = get_tenant_id(username)
+        if not tenant_id:
+            return
+
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("""
+            SELECT tc.id FROM tenant_connections tc
+            JOIN connection_assignments ca ON ca.connection_id = tc.id
+            WHERE tc.tenant_id = %s AND tc.tool_type = 'gmail' AND ca.username = %s
+            LIMIT 1
+        """, (tenant_id, username))
+        row = c.fetchone()
+        if row:
+            conn_id = row[0]
+        else:
+            label = email or f"Gmail ({username})"
+            c.execute("""
+                INSERT INTO tenant_connections
+                    (tenant_id, tool_type, label, auth_type, status, created_by)
+                VALUES (%s, 'gmail', %s, 'oauth', 'connected', 'oauth_callback')
+                RETURNING id
+            """, (tenant_id, label))
+            conn_id = c.fetchone()[0]
+            c.execute("""
+                INSERT INTO connection_assignments (connection_id, username, access_level, enabled)
+                VALUES (%s, %s, 'full', true)
+                ON CONFLICT (connection_id, username) DO NOTHING
+            """, (conn_id, username))
+        conn.commit(); conn.close()
+
+        save_connection_oauth_token(
+            connection_id=conn_id,
+            access_token=tokens.get("access_token", ""),
+            refresh_token=tokens.get("refresh_token", ""),
+            email=email,
+            expires_in=3600,
+        )
+    except Exception as e:
+        logger.warning("[Auth] _save_gmail_token_v2 error: %s", e)
+
+
 @router.get("/login-app", response_class=HTMLResponse)
 def login_app_get(request: Request):
     if request.session.get("user"):
@@ -163,10 +273,11 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     username = request.session.get("user")
     if not username:
         return HTMLResponse(
-            "<h2>Session expirée</h2><p>Votre session a expiré pendant la connexion Microsoft.</p>"
-            "<p><a href='/login-app'>Se reconnecter</a></p>",
+            "<h2>Session expirée</h2><p><a href='/login-app'>Se reconnecter</a></p>",
             status_code=401,
         )
+    # Écrire dans tenant_connections (V2) + oauth_tokens (legacy fallback)
+    _save_ms_token_v2(username, result)
     save_microsoft_token(
         username, result["access_token"],
         result.get("refresh_token", ""), result.get("expires_in", 3600),
@@ -244,7 +355,8 @@ def auth_gmail_callback(request: Request, code: str | None = None, error: str | 
         logger.info(f"[Gmail/Admin] Connexion #{conn_id} sauvegardée pour {email} (tenant={tenant_id})")
         return RedirectResponse(f"/admin/panel?oauth_ok=1&email={email}&view=companies")
 
-    # Flux per-user : sauvegarder dans oauth_tokens + gmail_tokens
+    # Flux per-user : sauvegarder en V2 (tenant_connections) + legacy (oauth_tokens)
+    _save_gmail_token_v2(username, tokens, email)
     try:
         save_google_token(
             username=username,
@@ -253,5 +365,5 @@ def auth_gmail_callback(request: Request, code: str | None = None, error: str | 
             email=email or f"{username}@gmail.com",
         )
     except Exception as e:
-        logger.error(f"[Gmail] Erreur sauvegarde tokens {username}: {e}")
+        logger.error(f"[Gmail] Erreur sauvegarde legacy {username}: {e}")
     return RedirectResponse("/chat?gmail_connected=1")
