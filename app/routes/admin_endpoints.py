@@ -363,6 +363,9 @@ def admin_connections_audit(request: Request, _: dict = Depends(require_admin)):
                 "v2_connections": v2, "v2_assignments": assignments}
     finally:
         if conn: conn.close()
+
+
+@router.get("/init-db")
 def init_db_now(request: Request, _: dict = Depends(require_admin)):
     init_postgres()
     try:
