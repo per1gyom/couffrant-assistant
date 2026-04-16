@@ -178,7 +178,7 @@ def save_google_token(username: str, access_token: str, refresh_token: str,
                       email: str = "", expires_in: int = 3600):
     """
     Sauvegarde un token Google chiffré dans oauth_tokens.
-    gmail_tokens n'est plus alimenté (table dépréciée).
+    Met aussi à jour gmail_tokens.email pour que le bandeau affiche l'adresse.
     """
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
     conn = None
@@ -194,6 +194,16 @@ def save_google_token(username: str, access_token: str, refresh_token: str,
                 expires_at = EXCLUDED.expires_at,
                 updated_at = NOW()
         """, (username, encrypt_token(access_token), encrypt_token(refresh_token), expires_at))
+        # Sauvegarder aussi l'email dans gmail_tokens pour affichage dans le bandeau
+        if email:
+            c.execute("""
+                INSERT INTO gmail_tokens (username, access_token, refresh_token, email)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (username) DO UPDATE SET
+                    access_token = EXCLUDED.access_token,
+                    refresh_token = EXCLUDED.refresh_token,
+                    email = EXCLUDED.email
+            """, (username, encrypt_token(access_token), encrypt_token(refresh_token), email))
         conn.commit()
     finally:
         if conn: conn.close()

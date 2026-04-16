@@ -89,36 +89,49 @@ def token_status(request: Request, user: dict = Depends(require_user)):
     try:
         from app.connection_token_manager import get_user_tool_connections
         from app.database import get_pg_conn as _gpc
-        gmail_email = ""
+        from datetime import datetime, timezone, timedelta
         # V2
         v2 = get_user_tool_connections(username)
         if "gmail" in v2:
             gmail_email = v2["gmail"].get("email", "")
             if not v2["gmail"].get("token"):
                 warnings.append({
-                    "provider": "Gmail",
-                    "mailbox": gmail_email or "Gmail",
-                    "message": "Token Gmail expiré.",
-                    "action_url": "/login/gmail",
-                    "severity": "error",
+                    "provider": "Gmail", "mailbox": gmail_email or "Gmail",
+                    "message": "Connexion expirée.",
+                    "action_url": "/login/gmail", "severity": "error",
                 })
         else:
-            # Legacy — lire email depuis gmail_tokens
+            # Legacy — vérifie expiry dans oauth_tokens, affiche email depuis gmail_tokens
             conn = _gpc(); c = conn.cursor()
             c.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
-            row = c.fetchone(); conn.close()
-            if row and row[0]:
-                gmail_email = row[0]
-                from app.connectors.gmail_connector import get_gmail_service
-                service = get_gmail_service(username)
-                if not service:
-                    warnings.append({
-                        "provider": "Gmail",
-                        "mailbox": gmail_email,
-                        "message": "Connexion expirée — reconnectez votre boîte Gmail.",
-                        "action_url": "/login/gmail",
-                        "severity": "error",
-                    })
+            row = c.fetchone()
+            gmail_email = (row[0] if row and row[0] else "")
+            c.execute("""
+                SELECT expires_at FROM oauth_tokens
+                WHERE provider='google' AND username=%s
+                ORDER BY updated_at DESC LIMIT 1
+            """, (username,))
+            ot = c.fetchone()
+            conn.close()
+            if ot:
+                expires_at = ot[0]
+                now = datetime.now(timezone.utc)
+                if expires_at:
+                    if expires_at.tzinfo is None:
+                        expires_at = expires_at.replace(tzinfo=timezone.utc)
+                    if expires_at < now - timedelta(minutes=5):
+                        warnings.append({
+                            "provider": "Gmail", "mailbox": gmail_email or "Gmail",
+                            "message": "Connexion expirée.",
+                            "action_url": "/login/gmail", "severity": "error",
+                        })
+            elif gmail_email:
+                # gmail_tokens existe mais pas oauth_tokens → token legacy expiré
+                warnings.append({
+                    "provider": "Gmail", "mailbox": gmail_email,
+                    "message": "Connexion expirée.",
+                    "action_url": "/login/gmail", "severity": "error",
+                })
     except Exception:
         pass
 
