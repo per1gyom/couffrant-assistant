@@ -6,12 +6,12 @@
 <title>Raya</title>
 
 <!-- PWA -->
-<link rel="manifest" href="/static/manifest.json?v=17">
+<link rel="manifest" href="/static/manifest.json?v=18">
 <meta name="theme-color" content="#6366f1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
-<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=17">
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=18">
 <script>
 // ANTI-CACHE: nettoyer les SW et forcer le rechargement si fichiers périmés
 window.__RAYA_V = 16;
@@ -22,11 +22,11 @@ if ('serviceWorker' in navigator) {
 </script>
 
 <!-- CSS -->
-<link rel="stylesheet" href="/static/chat-base.css?v=17">
-<link rel="stylesheet" href="/static/chat-components.css?v=17">
-<link rel="stylesheet" href="/static/chat-drawer.css?v=17">
-<link rel="stylesheet" href="/static/onboarding.css?v=17">
-<link rel="stylesheet" href="/static/mobile.css?v=17">
+<link rel="stylesheet" href="/static/chat-base.css?v=18">
+<link rel="stylesheet" href="/static/chat-components.css?v=18">
+<link rel="stylesheet" href="/static/chat-drawer.css?v=18">
+<link rel="stylesheet" href="/static/onboarding.css?v=18">
+<link rel="stylesheet" href="/static/mobile.css?v=18">
 
 <!-- marked.js + DOMPurify (CDN versionné, stable) -->
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
@@ -61,9 +61,11 @@ if ('serviceWorker' in navigator) {
 
   <div class="token-banner" id="tokenBanner"></div>
 
-  <div class="quick-wrap">
-    <div class="quick-row" id="quickRow"></div>
-  </div>
+  <div class="main-layout">
+    <div class="quick-wrap">
+      <div class="quick-row" id="quickRow"></div>
+    </div>
+    <div class="chat-column">
 
   <div class="messages-wrap">
     <div class="messages" id="messages">
@@ -99,6 +101,8 @@ if ('serviceWorker' in navigator) {
     <div class="mic-status" id="micStatus">🎩 En écoute… parle, je t'entends</div>
     <input type="file" id="fileInput" accept="image/*,.pdf" onchange="handleFileSelect(event)">
   </div>
+    </div><!-- /chat-column -->
+  </div><!-- /main-layout -->
 </div>
 
 <div id="toast-container"></div>
@@ -217,16 +221,16 @@ if ('serviceWorker' in navigator) {
 </div>
 
 <!-- Modules JS -->
-<script src="/static/chat-onboarding.js?v=17"></script>
-<script src="/static/chat-shortcuts.js?v=17"></script>
-<script src="/static/chat-voice.js?v=17"></script>
-<script src="/static/chat-feedback.js?v=17"></script>
-<script src="/static/chat-triage.js?v=17"></script>
-<script src="/static/chat-admin.js?v=17"></script>
-<script src="/static/chat-topics.js?v=17"></script>
-<script src="/static/chat-core.js?v=17"></script>
-<script src="/static/chat-messages.js?v=17"></script>
-<script src="/static/chat-main.js?v=17"></script>
+<script src="/static/chat-onboarding.js?v=18"></script>
+<script src="/static/chat-shortcuts.js?v=18"></script>
+<script src="/static/chat-voice.js?v=18"></script>
+<script src="/static/chat-feedback.js?v=18"></script>
+<script src="/static/chat-triage.js?v=18"></script>
+<script src="/static/chat-admin.js?v=18"></script>
+<script src="/static/chat-topics.js?v=18"></script>
+<script src="/static/chat-core.js?v=18"></script>
+<script src="/static/chat-messages.js?v=18"></script>
+<script src="/static/chat-main.js?v=18"></script>
 
 <script>
   // Supprimer TOUS les Service Workers — ils causent des problèmes de cache
