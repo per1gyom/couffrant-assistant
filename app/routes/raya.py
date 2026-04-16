@@ -287,9 +287,7 @@ async def raya_confirm_action(
     user: dict = Depends(require_user),
 ):
     """Confirme et execute une action en attente — avec payload_override optionnel."""
-    username = user["username"]
-    tenant_id = user["tenant_id"]
-    username = user["username"]
+    username  = user["username"]
     tenant_id = user["tenant_id"]
     from app.pending_actions import confirm_action, mark_executed, mark_failed
     from app.routes.actions.confirmations import _execute_confirmed_action
@@ -306,6 +304,9 @@ async def raya_confirm_action(
     if not action:
         return {"ok": False, "message": "Action introuvable, deja traitee ou expiree."}
 
+    # Mémoriser le corps ORIGINAL avant modification (pour apprentissage)
+    original_payload = dict(action.get("payload", {}))
+
     # Appliquer les modifications de l'utilisateur sur le payload
     if payload_override:
         action["payload"] = {**action.get("payload", {}), **payload_override}
@@ -313,8 +314,43 @@ async def raya_confirm_action(
     outlook_token = _get_ms_token(username)
     tools = load_user_tools(username)
     result = _execute_confirmed_action(action, outlook_token, tools)
+
     if result.get("ok"):
         mark_executed(action_id, result)
+
+        # ── APPRENTISSAGE depuis la correction ──────────────────────────
+        # Si l'utilisateur a modifié le corps avant envoi → Raya apprend
+        action_type = action.get("action_type", "")
+        if payload_override and action_type in ("SEND_MAIL", "SEND_GMAIL", "REPLY"):
+            original_body = original_payload.get("body", "") or original_payload.get("reply_text", "")
+            final_body    = action["payload"].get("body", "") or action["payload"].get("reply_text", "")
+            if original_body and final_body and original_body.strip() != final_body.strip():
+                import threading
+                def _learn():
+                    try:
+                        from app.memory_style import learn_from_correction, save_reply_learning
+                        context = f"mail à {action['payload'].get('to_email','')}"
+                        learn_from_correction(
+                            original=original_body,
+                            corrected=final_body,
+                            context=context,
+                            username=username,
+                        )
+                        save_reply_learning(
+                            mail_subject=action["payload"].get("subject", ""),
+                            mail_from=action["payload"].get("from_email", ""),
+                            ai_reply=original_body,
+                            final_reply=final_body,
+                            username=username,
+                        )
+                        # Invalider le cache style pour que la prochaine réponse
+                        # bénéficie immédiatement de l'exemple appris
+                        import app.cache as _cache
+                        _cache.invalidate_prefix(f"style:{username}")
+                    except Exception as e:
+                        logger.warning("[Confirm] learn_from_correction échoué: %s", e)
+                threading.Thread(target=_learn, daemon=True).start()
+
         return {"ok": True, "message": result.get("message", "Action executee")}
     else:
         mark_failed(action_id, result.get("error", ""))
