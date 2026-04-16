@@ -78,12 +78,10 @@ async function init() {
   const params = new URLSearchParams(window.location.search);
   if (params.get('gmail_connected') === '1') {
     showToast('Gmail connecté ✅', 'ok', 4000);
-    const banner = document.getElementById('tokenBanner');
-    if (banner) { banner.innerHTML = ''; banner.style.display = 'none'; }
     window.history.replaceState({}, '', '/chat');
-  } else {
-    checkTokenStatus();
   }
+  // checkTokenStatus désactivé temporairement (faux positifs fréquents)
+  // checkTokenStatus();
   await loadHistory();
   // Afficher les actions en attente existantes dans le chat (depuis la session précédente)
   try {

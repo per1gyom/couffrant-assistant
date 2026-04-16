@@ -240,22 +240,52 @@ function appendPendingActionToChat(action) {
 
   // Contenu selon type
   if (isReply || isSendMail) {
-    const toName    = p.sender_name || p.to_email || p.to || '?';
+    const toName    = p.sender_name || p.to_email || p.to || '';
     const fromEmail = p.from_email || '';
     const subject   = p.subject || '(sans sujet)';
-    const body      = (p.reply_text || p.body || '').replace(/\\n/g, '\n').replace(/\n/g, '<br>');
+    const body      = (p.reply_text || p.body || '').replace(/\\n/g, '\n');
 
-    if (fromEmail) {
-      const fromEl = document.createElement('div'); fromEl.className = 'pending-mail-from';
-      fromEl.innerHTML = `De&nbsp;: <strong>${fromEmail}</strong>`;
-      card.appendChild(fromEl);
-    }
+    // Champ De — select chargé dynamiquement depuis /signatures/mailboxes
+    const fromRow = document.createElement('div'); fromRow.className = 'pending-mail-from';
+    const fromSelect = document.createElement('select');
+    fromSelect.className = 'mail-edit-from';
+    fromSelect.innerHTML = `<option value="${fromEmail}">${fromEmail || 'Chargement…'}</option>`;
+    fromRow.innerHTML = 'De&nbsp;: ';
+    fromRow.appendChild(fromSelect);
+    card.appendChild(fromRow);
+    // Charger les boîtes disponibles
+    fetch('/signatures/mailboxes').then(r => r.json()).then(boxes => {
+      fromSelect.innerHTML = '';
+      if (!boxes.length) { fromSelect.innerHTML = `<option value="${fromEmail}">${fromEmail || '(aucune boîte)'}</option>`; return; }
+      boxes.forEach(b => {
+        const opt = document.createElement('option');
+        opt.value = b.address; opt.textContent = b.label || b.address;
+        if (b.address === fromEmail) opt.selected = true;
+        fromSelect.appendChild(opt);
+      });
+      if (fromEmail && !boxes.find(b => b.address === fromEmail)) {
+        const opt = document.createElement('option'); opt.value = fromEmail; opt.textContent = fromEmail; opt.selected = true;
+        fromSelect.prepend(opt);
+      }
+    }).catch(() => {});
+
+    // Champ À — input éditable
     const header = document.createElement('div'); header.className = 'pending-mail-header';
-    header.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> À&nbsp;: <strong>${toName}</strong>`;
+    const toInput = document.createElement('input');
+    toInput.type = 'email'; toInput.className = 'mail-edit-to';
+    toInput.value = toName; toInput.placeholder = 'destinataire@email.com';
+    header.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg> À&nbsp;: `;
+    header.appendChild(toInput);
+
+    // Sujet — statique
     const subjectEl = document.createElement('div'); subjectEl.className = 'pending-mail-subject';
     subjectEl.innerHTML = `Sujet&nbsp;: <em>${subject}</em>`;
-    const bodyEl = document.createElement('div'); bodyEl.className = 'pending-mail-body';
-    bodyEl.innerHTML = body;
+
+    // Corps — textarea éditable
+    const bodyEl = document.createElement('textarea'); bodyEl.className = 'mail-edit-body';
+    bodyEl.value = body;
+    bodyEl.rows = 6;
+
     card.appendChild(header); card.appendChild(subjectEl); card.appendChild(bodyEl);
   } else {
     const label = document.createElement('div'); label.className = 'pending-label';
@@ -272,8 +302,29 @@ function appendPendingActionToChat(action) {
     if (confirmBtn.disabled) return;
     btns.querySelectorAll('button').forEach(b => b.disabled = true);
     confirmBtn.innerHTML = '&#8987;';
+    // Lire les valeurs éditées si la carte est une carte mail
+    let payloadOverride = null;
+    if (isReply || isSendMail) {
+      const toInput = card.querySelector('.mail-edit-to');
+      const fromSel = card.querySelector('.mail-edit-from');
+      const bodyTA  = card.querySelector('.mail-edit-body');
+      if (toInput || fromSel || bodyTA) {
+        payloadOverride = {
+          to_email:   toInput  ? toInput.value.trim()  : (p.to_email || p.to || ''),
+          from_email: fromSel  ? fromSel.value         : (p.from_email || ''),
+          body:       bodyTA   ? bodyTA.value           : (p.body || p.reply_text || ''),
+          subject:    p.subject || '',
+          reply_text: bodyTA   ? bodyTA.value           : (p.reply_text || ''),
+          message_id: p.message_id || '',
+        };
+      }
+    }
     try {
-      const r = await fetch(`/raya/confirm/${action.id}`, { method: 'POST' });
+      const r = await fetch(`/raya/confirm/${action.id}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payloadOverride ? {payload_override: payloadOverride} : {})
+      });
       const data = await r.json();
       _markActionInChat(action.id, data.ok ? 'ok' : 'err', data.message);
     } catch(e) {

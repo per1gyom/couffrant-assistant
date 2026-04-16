@@ -286,3 +286,45 @@
 .why-cat { color: var(--accent); font-weight: 500; margin-right: 4px; }
 .why-conf { color: var(--success); font-size: 11px; margin-left: 4px; }
 .why-empty { color: var(--text-muted); font-style: italic; font-size: 12px; }
+
+/* Champs éditables dans la carte mail */
+.mail-edit-from {
+  background: var(--bg1, #f5f7fa);
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 13px;
+  color: var(--text1, #111);
+  cursor: pointer;
+  max-width: 100%;
+}
+.mail-edit-to {
+  background: var(--bg1, #f5f7fa);
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 13px;
+  color: var(--text1, #111);
+  flex: 1;
+  min-width: 200px;
+}
+.mail-edit-body {
+  width: 100%;
+  min-height: 100px;
+  background: var(--bg1, #f5f7fa);
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--text1, #111);
+  line-height: 1.5;
+  resize: vertical;
+  font-family: inherit;
+  margin-top: 6px;
+  box-sizing: border-box;
+}
+.mail-edit-from:focus, .mail-edit-to:focus, .mail-edit-body:focus {
+  outline: none;
+  border-color: var(--accent, #3b82f6);
+  background: #fff;
+}

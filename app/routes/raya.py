@@ -320,18 +320,33 @@ def raya_draft_action(
 
 
 @router.post("/raya/confirm/{action_id}")
-def raya_confirm_action(
+async def raya_confirm_action(
     action_id: int,
+    request: Request,
     user: dict = Depends(require_user),
 ):
-    """Confirme et execute une action en attente — sans passer par le chat."""
+    """Confirme et execute une action en attente — avec payload_override optionnel."""
     username = user["username"]
     tenant_id = user["tenant_id"]
     from app.pending_actions import confirm_action, mark_executed, mark_failed
     from app.routes.actions.confirmations import _execute_confirmed_action
+
+    # Lire le payload_override s'il est fourni
+    payload_override = None
+    try:
+        body = await request.json()
+        payload_override = body.get("payload_override") if body else None
+    except Exception:
+        pass
+
     action = confirm_action(action_id, username, tenant_id)
     if not action:
         return {"ok": False, "message": "Action introuvable, deja traitee ou expiree."}
+
+    # Appliquer les modifications de l'utilisateur sur le payload
+    if payload_override:
+        action["payload"] = {**action.get("payload", {}), **payload_override}
+
     outlook_token = _get_ms_token(username)
     tools = load_user_tools(username)
     result = _execute_confirmed_action(action, outlook_token, tools)
