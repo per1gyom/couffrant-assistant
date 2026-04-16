@@ -31,23 +31,17 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
     confirmed = []
     processed_ids = set()
 
-    # SEARCH_CONTACTS : cherche l'email d'un contact (direct, résultat injecté)
+    # SEARCH_CONTACTS : cherche dans TOUTES les boîtes connectées de l'utilisateur
     for match in re.finditer(r'\[ACTION:SEARCH_CONTACTS:([^\]]+)\]', response):
         query = match.group(1).strip()
         try:
-            r = perform_outlook_action("search_contacts", {"query": query}, token)
-            items = r.get("items", [])
-            if items:
-                contact = items[0]
-                name = contact.get("displayName", "")
-                emails = contact.get("emailAddresses", [])
-                email = emails[0].get("address", "") if emails else ""
-                if email:
-                    confirmed.append(f"📇 Contact trouvé : {name} → {email}")
-                else:
-                    confirmed.append(f"📇 Contact trouvé sans email : {name}")
+            from app.mailbox_manager import search_contacts_all
+            results = search_contacts_all(username, query)
+            if results:
+                c = results[0]
+                confirmed.append(f"📇 Contact trouvé ({c['source']}) : {c['name']} → {c['email']}")
             else:
-                confirmed.append(f"📇 Contact '{query}' introuvable — demande l'adresse à l'utilisateur.")
+                confirmed.append(f"📇 Contact '{query}' introuvable dans aucune boîte connectée — demande l'adresse à l'utilisateur.")
         except Exception as e:
             confirmed.append(f"📇 Recherche contact échouée : {str(e)[:80]}")
 
@@ -220,5 +214,17 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
             label=label, conversation_id=conversation_id,
         )
         log_activity(username, "gmail_send_queued", to_email, subject[:100], tenant_id=tenant_id)
+
+    # CREATE_CONTACT : [ACTION:CREATE_CONTACT:Nom|email|téléphone_optionnel]
+    for match in re.finditer(r'\[ACTION:CREATE_CONTACT:([^\|\]]+)\|([^\|\]]+)(?:\|([^\]]*))?\]', response):
+        name  = match.group(1).strip()
+        email = match.group(2).strip()
+        phone = (match.group(3) or "").strip()
+        try:
+            from app.mailbox_manager import create_contact_best
+            result = create_contact_best(username, name, email, phone)
+            confirmed.append(f"📇 {result['message']}")
+        except Exception as e:
+            confirmed.append(f"📇 Erreur création contact : {str(e)[:80]}")
 
     return confirmed

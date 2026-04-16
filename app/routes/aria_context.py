@@ -40,6 +40,15 @@ __all__ = [
 ]
 
 
+def _get_mailbox_summary(username: str) -> str:
+    """Résumé des boîtes connectées pour le prompt."""
+    try:
+        from app.mailbox_manager import get_mailbox_summary
+        return get_mailbox_summary(username)
+    except Exception:
+        return "Non disponible"
+
+
 def build_system_prompt(
     username: str,
     tenant_id: str,
@@ -204,6 +213,7 @@ Tu ne connais PAS le mot "Jarvis" et tu ne l'utilises JAMAIS. Tu es Raya, c'est 
 {MAILBOX_BLOCK}
 === AUJOURD'HUI \u2014 {datetime.now().strftime('%A %d %B %Y')} ===
 {"Microsoft 365 connecte." if outlook_token else f"Microsoft non connecte \u2014 {display_name} doit se reconnecter via /login."}{odoo_line}{mailboxes_line}
+Boites mail connectees : {_get_mailbox_summary(username)}
 Agenda :
 <donnees_externes>{json.dumps(agenda, ensure_ascii=False, default=str) if agenda else "Aucun RDV."}</donnees_externes>
 Inbox ({len(live_mails)}) :
