@@ -96,7 +96,7 @@ def list_connections(tenant_id: str) -> list:
         c = conn.cursor()
         c.execute("""
             SELECT tc.id, tc.tool_type, tc.label, tc.auth_type, tc.config,
-                   tc.status, tc.created_by, tc.created_at
+                   tc.status, tc.created_by, tc.created_at, tc.connected_email
             FROM tenant_connections tc
             WHERE tc.tenant_id = %s
             ORDER BY tc.tool_type, tc.label
@@ -114,6 +114,7 @@ def list_connections(tenant_id: str) -> list:
                 "auth_type": row[3], "config": row[4] or {},
                 "status": row[5], "created_by": row[6],
                 "created_at": str(row[7]) if row[7] else None,
+                "connected_email": row[8] or "",
                 "assignments": assignments,
                 "user_count": len(assignments),
             })

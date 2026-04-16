@@ -122,51 +122,73 @@ def get_mailboxes(user: dict = Depends(require_user)):
     """Retourne toutes les boîtes mail connectées de l'utilisateur."""
     username = user["username"]
     mailboxes = []
+    seen = set()
+
+    # 1. Connexions V2 (tenant_connections) — source principale
+    try:
+        from app.connection_token_manager import get_user_tool_connections
+        conns = get_user_tool_connections(username)
+        for tool_type, info in conns.items():
+            if tool_type in ("microsoft", "outlook") and info.get("email"):
+                addr = info["email"]
+                if addr not in seen:
+                    seen.add(addr)
+                    mailboxes.append({"address": addr, "label": f"Outlook — {addr}", "provider": "microsoft"})
+            elif tool_type in ("gmail", "google") and info.get("email"):
+                addr = info["email"]
+                if addr not in seen:
+                    seen.add(addr)
+                    mailboxes.append({"address": addr, "label": f"Gmail — {addr}", "provider": "gmail"})
+    except Exception:
+        pass
+
+    # 2. Fallback legacy si aucune connexion V2
     conn = None
     try:
         conn = _get_conn(); c = conn.cursor()
 
-        # Email Microsoft — users.email d'abord, sinon Graph /me
-        c.execute("SELECT email FROM users WHERE username=%s LIMIT 1", (username,))
-        row = c.fetchone()
-        ms_email = (row[0] if row and row[0] and 'raya-ia.fr' not in row[0] else None)
+        # Microsoft — via Graph /me si absent
+        if not any(m["provider"] == "microsoft" for m in mailboxes):
+            c.execute("SELECT email FROM users WHERE username=%s LIMIT 1", (username,))
+            row = c.fetchone()
+            ms_email = (row[0] if row and row[0] and 'raya-ia.fr' not in row[0] else None)
+            if not ms_email:
+                try:
+                    from app.token_manager import get_valid_microsoft_token
+                    from app.graph_client import graph_get
+                    token = get_valid_microsoft_token(username)
+                    if token:
+                        me = graph_get(token, "/me", params={"$select": "mail,userPrincipalName"})
+                        candidate = me.get("mail") or me.get("userPrincipalName") or ""
+                        if candidate and '@' in candidate and 'raya-ia.fr' not in candidate:
+                            ms_email = candidate
+                            c.execute(
+                                "UPDATE users SET email=%s WHERE username=%s "
+                                "AND (email IS NULL OR email ILIKE '%%raya-ia.fr%%')",
+                                (ms_email, username)
+                            )
+                            conn.commit()
+                except Exception:
+                    pass
+            if ms_email and ms_email not in seen:
+                seen.add(ms_email)
+                mailboxes.append({"address": ms_email, "label": f"Outlook — {ms_email}", "provider": "microsoft"})
 
-        if not ms_email:
-            # Fallback : lire depuis Microsoft Graph /me
-            try:
-                from app.token_manager import get_valid_microsoft_token
-                from app.graph_client import graph_get
-                token = get_valid_microsoft_token(username)
-                if token:
-                    me = graph_get(token, "/me", params={"$select": "mail,userPrincipalName"})
-                    candidate = me.get("mail") or me.get("userPrincipalName") or ""
-                    if candidate and '@' in candidate and 'raya-ia.fr' not in candidate:
-                        ms_email = candidate
-                        # Auto-mise à jour DB
-                        c.execute(
-                            "UPDATE users SET email=%s WHERE username=%s "
-                            "AND (email IS NULL OR email ILIKE '%%raya-ia.fr%%')",
-                            (ms_email, username)
-                        )
-                        conn.commit()
-            except Exception:
-                pass
-
-        if ms_email:
-            mailboxes.append({"address": ms_email, "label": f"Outlook — {ms_email}", "provider": "microsoft"})
-
-        # Gmail
-        c.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
-        row = c.fetchone()
-        if row and row[0]:
-            mailboxes.append({"address": row[0], "label": f"Gmail — {row[0]}", "provider": "gmail"})
+        # Gmail legacy
+        if not any(m["provider"] == "gmail" for m in mailboxes):
+            c.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
+            row = c.fetchone()
+            if row and row[0] and row[0] not in seen:
+                seen.add(row[0])
+                mailboxes.append({"address": row[0], "label": f"Gmail — {row[0]}", "provider": "gmail"})
 
         # Boîtes extra (user_tools config)
         from app.app_security import get_user_tools
         tools = get_user_tools(username)
         extra = tools.get("outlook", {}).get("config", {}).get("mailboxes", [])
         for addr in extra:
-            if addr and addr not in [m["address"] for m in mailboxes]:
+            if addr and addr not in seen:
+                seen.add(addr)
                 mailboxes.append({"address": addr, "label": addr, "provider": "microsoft"})
     except Exception:
         pass

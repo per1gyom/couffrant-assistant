@@ -20,22 +20,17 @@ _ASK_CHOICE_PREFIX = "__CHOICE__:"
 def _get_user_email(username: str) -> str:
     """
     Retourne l'email Microsoft (Outlook) de l'utilisateur.
-    Ordre : users.email (si pas interne) → Graph /me → mise à jour auto users.email.
+    Priorité : connexion V2 tenant_connections → Graph /me → users.email.
     """
-    # 1. Table users — filtre les emails internes de l'app
+    # 1. Connexion V2 tenant_connections
     try:
-        from app.database import get_pg_conn
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("SELECT email FROM users WHERE username = %s LIMIT 1", (username,))
-        row = c.fetchone()
-        conn.close()
-        if row and row[0] and 'raya-ia.fr' not in row[0] and '@' in row[0]:
-            return row[0]
+        from app.connection_token_manager import get_connection_email
+        email = get_connection_email(username, "microsoft")
+        if email:
+            return email
     except Exception:
         pass
-
-    # 2. Fallback : Microsoft Graph /me (live, puis mise à jour auto en DB)
+    # 2. Graph /me en direct (auto-update users.email)
     try:
         from app.token_manager import get_valid_microsoft_token
         from app.graph_client import graph_get
@@ -44,24 +39,20 @@ def _get_user_email(username: str) -> str:
             me = graph_get(token, "/me", params={"$select": "mail,userPrincipalName"})
             email = me.get("mail") or me.get("userPrincipalName") or ""
             if email and '@' in email:
-                # Auto-mise à jour users.email pour ne plus avoir à rappeler Graph
                 try:
                     from app.database import get_pg_conn
-                    conn = get_pg_conn()
-                    c = conn.cursor()
+                    conn = get_pg_conn(); c = conn.cursor()
                     c.execute(
                         "UPDATE users SET email = %s WHERE username = %s "
                         "AND (email IS NULL OR email ILIKE '%raya-ia.fr%')",
                         (email, username)
                     )
-                    conn.commit()
-                    conn.close()
+                    conn.commit(); conn.close()
                 except Exception:
                     pass
                 return email
     except Exception:
         pass
-
     return ""
 
 

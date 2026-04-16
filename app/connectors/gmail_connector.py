@@ -37,8 +37,8 @@ GMAIL_SCOPES = [
 
 def get_gmail_service(username: str):
     """
-    Retourne un service Gmail authentifié pour l'utilisateur.
-    Rafraîchit automatiquement le token si expiré.
+    Retourne un service Gmail authentifié.
+    Priorité : tenant_connections V2 → oauth_tokens → gmail_tokens (legacy).
     """
     if not is_configured():
         return None
@@ -50,41 +50,45 @@ def get_gmail_service(username: str):
         logger.warning("[Gmail] google-api-python-client non installé")
         return None
 
-    conn = None
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("""
-            SELECT access_token, refresh_token
-            FROM gmail_tokens WHERE username = %s
-        """, (username,))
-        row = c.fetchone()
-    except Exception as e:
-        logger.error(f"[Gmail] Erreur lecture gmail_tokens {username}: {e}")
-        return None
-    finally:
-        if conn: conn.close()
+    # 1. Essayer connexion V2 (tenant_connections)
+    access_token, refresh_token = _get_v2_gmail_tokens(username)
 
-    if not row:
-        # Fallback : essayer users.gmail_credentials pour compatibilité
+    # 2. Fallback : oauth_tokens (google)
+    if not refresh_token:
+        conn = None
         try:
             conn = get_pg_conn()
             c = conn.cursor()
-            c.execute("SELECT gmail_credentials FROM users WHERE username = %s", (username,))
-            row2 = c.fetchone()
-            conn.close()
-            if row2 and row2[0]:
-                cred_data = row2[0]
-                row = (
-                    cred_data.get("token", ""),
-                    cred_data.get("refresh_token", ""),
-                )
-            else:
-                return None
+            c.execute("""
+                SELECT access_token, refresh_token
+                FROM oauth_tokens WHERE provider = 'google' AND username = %s
+                ORDER BY updated_at DESC LIMIT 1
+            """, (username,))
+            row = c.fetchone()
+            if row:
+                from app.crypto import decrypt_token
+                access_token = decrypt_token(row[0] or "")
+                refresh_token = decrypt_token(row[1] or "")
         except Exception:
-            return None
+            pass
+        finally:
+            if conn: conn.close()
 
-    access_token, refresh_token = row
+    # 3. Fallback : gmail_tokens (legacy)
+    if not refresh_token:
+        conn = None
+        try:
+            conn = get_pg_conn()
+            c = conn.cursor()
+            c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE username = %s LIMIT 1", (username,))
+            row = c.fetchone()
+            if row:
+                access_token, refresh_token = row[0] or "", row[1] or ""
+        except Exception:
+            pass
+        finally:
+            if conn: conn.close()
+
     if not refresh_token:
         return None
 
@@ -111,6 +115,33 @@ def get_gmail_service(username: str):
     except Exception as e:
         logger.error(f"[Gmail] Erreur build service {username}: {e}")
         return None
+
+
+def _get_v2_gmail_tokens(username: str) -> tuple:
+    """Lit access_token + refresh_token depuis tenant_connections V2."""
+    try:
+        from app.database import get_pg_conn as _gpc
+        from app.crypto import decrypt_token
+        conn = _gpc(); c = conn.cursor()
+        c.execute("""
+            SELECT tc.credentials
+            FROM connection_assignments ca
+            JOIN tenant_connections tc ON tc.id = ca.connection_id
+            WHERE ca.username = %s AND ca.enabled = true
+              AND tc.tool_type = 'gmail' AND tc.status = 'connected'
+            ORDER BY tc.updated_at DESC LIMIT 1
+        """, (username,))
+        row = c.fetchone(); conn.close()
+        if not row or not row[0]:
+            return "", ""
+        import json
+        creds = row[0] if isinstance(row[0], dict) else json.loads(row[0])
+        return (
+            decrypt_token(creds.get("access_token", "")),
+            decrypt_token(creds.get("refresh_token", "")),
+        )
+    except Exception:
+        return "", ""
 
 
 def _save_refreshed_credentials(username: str, creds) -> None:

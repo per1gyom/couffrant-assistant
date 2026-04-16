@@ -71,7 +71,7 @@ def token_status(request: Request, user: dict = Depends(require_user)):
     username = user["username"]
     warnings = []
 
-    # Vérification Microsoft 365
+    # Vérification Microsoft — V2 d'abord, fallback legacy
     try:
         token = _get_ms_token(username)
         if not token:
@@ -85,24 +85,40 @@ def token_status(request: Request, user: dict = Depends(require_user)):
     except Exception:
         pass
 
-    # Vérification Gmail
+    # Vérification Gmail — V2 d'abord, fallback legacy
     try:
-        from app.connectors.gmail_connector import get_gmail_service
+        from app.connection_token_manager import get_user_tool_connections
         from app.database import get_pg_conn as _gpc
-        conn = _gpc(); c = conn.cursor()
-        c.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
-        row = c.fetchone(); conn.close()
-        if row and row[0]:
-            gmail_email = row[0]
-            service = get_gmail_service(username)
-            if not service:
+        gmail_email = ""
+        # V2
+        v2 = get_user_tool_connections(username)
+        if "gmail" in v2:
+            gmail_email = v2["gmail"].get("email", "")
+            if not v2["gmail"].get("token"):
                 warnings.append({
                     "provider": "Gmail",
-                    "mailbox": gmail_email,
-                    "message": "Token Gmail expiré — envoi et lecture depuis la boîte perso impossible.",
+                    "mailbox": gmail_email or "Gmail",
+                    "message": "Token Gmail expiré.",
                     "action_url": "/login/gmail",
                     "severity": "error",
                 })
+        else:
+            # Legacy
+            conn = _gpc(); c = conn.cursor()
+            c.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
+            row = c.fetchone(); conn.close()
+            if row and row[0]:
+                gmail_email = row[0]
+                from app.connectors.gmail_connector import get_gmail_service
+                service = get_gmail_service(username)
+                if not service:
+                    warnings.append({
+                        "provider": "Gmail",
+                        "mailbox": gmail_email,
+                        "message": "Token Gmail expiré — reconnectez votre boîte perso.",
+                        "action_url": "/login/gmail",
+                        "severity": "error",
+                    })
     except Exception:
         pass
 
