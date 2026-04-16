@@ -1,5 +1,5 @@
 // Raya Chat — Core (globales, DOM refs, utilitaires)
-// Chargé EN PREMIER dans raya_chat.html
+// Chargé dans raya_chat.html — après chat-shortcuts.js
 
 // --- ETAT GLOBAL ---
 const messagesEl = document.getElementById('messages');
@@ -18,7 +18,6 @@ let autoSpeak=true;
 let currentFile=null;
 let currentUser='';
 let isAdmin=false;
-let shortcutsEditMode=false;
 let pendingShortcuts=[];
 let _onboardingActive = false;
 let _micTarget = null;
