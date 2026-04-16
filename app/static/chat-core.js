@@ -45,7 +45,7 @@ async function loadUserInfo() {
     // Nom dans le logo en haut (remplace "Raya")
     const logoEl = document.getElementById('logoUserName');
     if (logoEl) logoEl.textContent = name;
-    if (scope === 'admin' || scope === 'super_admin') {
+    if (scope === 'admin' || scope === 'super_admin' || scope === 'couffrant_solar') {
       isAdmin = true;
       const sa = document.getElementById('superAdminBtn');
       const ap = document.getElementById('adminPanelBtn');

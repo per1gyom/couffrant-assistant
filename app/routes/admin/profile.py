@@ -22,20 +22,30 @@ def get_profile(request: Request, user: dict = Depends(require_user)):
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute(
-            "SELECT username, email, scope, tenant_id, display_name FROM users WHERE username=%s",
-            (username,)
-        )
-        row = c.fetchone()
-        if not row:
-            return {"error": "Utilisateur introuvable."}
-        return {
-            "username": row[0],
-            "email": row[1] or "",
-            "scope": row[2],
-            "tenant_id": row[3] or "",
-            "display_name": row[4] or "",
-        }
+        # Essai avec display_name
+        try:
+            c.execute(
+                "SELECT username, email, scope, tenant_id, display_name, deletion_requested_at FROM users WHERE username=%s",
+                (username,)
+            )
+            row = c.fetchone()
+            if not row:
+                return {"error": "Utilisateur introuvable."}
+            return {
+                "username": row[0],
+                "email": row[1] or "",
+                "scope": row[2] or "",
+                "tenant_id": row[3] or "",
+                "display_name": row[4] or "",
+                "deletion_requested_at": str(row[5]) if row[5] else None,
+            }
+        except Exception:
+            # Fallback sans colonnes optionnelles
+            c.execute("SELECT username, email, scope, tenant_id FROM users WHERE username=%s", (username,))
+            row = c.fetchone()
+            if not row:
+                return {"error": "Utilisateur introuvable."}
+            return {"username": row[0], "email": row[1] or "", "scope": row[2] or "", "tenant_id": row[3] or ""}
     except Exception as e:
         return {"error": str(e)[:100]}
     finally:
