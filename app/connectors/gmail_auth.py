@@ -3,9 +3,22 @@ Authentification OAuth2 Gmail.
 Extrait de gmail_connector.py -- SPLIT-C4.
 """
 import os
+import json
+import urllib.parse
+import requests as http_requests
 from app.database import get_pg_conn
 from app.logging_config import get_logger
 logger=get_logger("raya.gmail")
+
+GMAIL_CLIENT_ID     = os.getenv("GMAIL_CLIENT_ID", "").strip()
+GMAIL_CLIENT_SECRET = os.getenv("GMAIL_CLIENT_SECRET", "").strip()
+GMAIL_REDIRECT_URI  = os.getenv("GMAIL_REDIRECT_URI", "").strip()
+GMAIL_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/userinfo.email",
+    "openid",
+]
 
 
 def is_configured() -> bool:
