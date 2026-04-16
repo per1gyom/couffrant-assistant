@@ -207,6 +207,9 @@ def login_gmail(request: Request):
 @router.get("/auth/gmail/callback")
 def auth_gmail_callback(request: Request, code: str | None = None, error: str | None = None):
     if error:
+        conn_id = request.session.get("oauth_conn_id")
+        if conn_id:
+            return RedirectResponse(f"/admin/panel?oauth_err=gmail:{error}&view=companies")
         return RedirectResponse(f"/chat?gmail_error={error}")
     if not code:
         return HTMLResponse("Code OAuth manquant", status_code=400)
@@ -214,8 +217,7 @@ def auth_gmail_callback(request: Request, code: str | None = None, error: str | 
     username = request.session.get("user")
     if not username:
         return HTMLResponse(
-            "<h2>Session expirée</h2><p>Votre session a expiré pendant la connexion Gmail.</p>"
-            "<p><a href='/login-app'>Se reconnecter</a></p>",
+            "<h2>Session expirée</h2><p><a href='/login-app'>Se reconnecter</a></p>",
             status_code=401,
         )
     try:
@@ -225,13 +227,30 @@ def auth_gmail_callback(request: Request, code: str | None = None, error: str | 
             f"<h2>Erreur connexion Gmail</h2><p>{e}</p><p><a href='/chat'>\u2190 Retour</a></p>",
             status_code=500,
         )
-    email = tokens.get("email", f"{username}@gmail.com")
+    email = tokens.get("email", "")
+
+    # Flux admin : sauvegarder dans tenant_connections
+    conn_id = request.session.pop("oauth_conn_id", None)
+    tenant_id = request.session.pop("oauth_conn_tenant", None)
+    if conn_id:
+        from app.connection_token_manager import save_connection_oauth_token
+        save_connection_oauth_token(
+            connection_id=conn_id,
+            access_token=tokens.get("access_token", ""),
+            refresh_token=tokens.get("refresh_token", ""),
+            email=email,
+            expires_in=3600,
+        )
+        logger.info(f"[Gmail/Admin] Connexion #{conn_id} sauvegardée pour {email} (tenant={tenant_id})")
+        return RedirectResponse(f"/admin/panel?oauth_ok=1&email={email}&view=companies")
+
+    # Flux per-user : sauvegarder dans oauth_tokens + gmail_tokens
     try:
         save_google_token(
             username=username,
             access_token=tokens.get("access_token", ""),
             refresh_token=tokens.get("refresh_token", ""),
-            email=email,
+            email=email or f"{username}@gmail.com",
         )
     except Exception as e:
         logger.error(f"[Gmail] Erreur sauvegarde tokens {username}: {e}")

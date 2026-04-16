@@ -70,8 +70,9 @@ def admin_oauth_gmail_start(
     label: str = "Boîte Gmail",
     admin: dict = Depends(require_admin),
 ):
-    """Lance le flux OAuth Gmail pour connecter une boîte Gmail."""
-    from app.connectors.gmail_auth import is_configured, get_gmail_auth_url
+    """Lance le flux OAuth Gmail pour connecter une boîte Gmail à un tenant."""
+    from app.connectors.gmail_auth import is_configured, GMAIL_CLIENT_ID, GMAIL_SCOPES
+    import urllib.parse
     if not is_configured():
         return HTMLResponse(
             "<h2>Gmail non configuré</h2>"
@@ -87,13 +88,15 @@ def admin_oauth_gmail_start(
             return HTMLResponse(f"<h2>Erreur création connexion</h2><p>{result['message']}</p>", 500)
         connection_id = result["connection_id"]
 
+    # Stocker le flag admin en session — le callback /auth/gmail/callback le détectera
     request.session["oauth_conn_tenant"] = tenant_id
     request.session["oauth_conn_id"] = connection_id
 
-    # Construire l'URL avec redirect vers la route connexion (pas /auth/gmail/callback)
-    import urllib.parse
-    from app.connectors.gmail_auth import GMAIL_CLIENT_ID, GMAIL_SCOPES
-    gmail_redirect = f"{_RETURN_URL}/auth/connection/gmail/callback"
+    # Utiliser le MÊME redirect_uri que le flux per-user (déjà enregistré dans Google Cloud Console)
+    gmail_redirect = os.getenv("GMAIL_REDIRECT_URI", "").strip()
+    if not gmail_redirect:
+        return HTMLResponse("<h2>GMAIL_REDIRECT_URI manquant dans Railway</h2>", 500)
+
     params = {
         "client_id": GMAIL_CLIENT_ID,
         "redirect_uri": gmail_redirect,
