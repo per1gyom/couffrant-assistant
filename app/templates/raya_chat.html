@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes, minimum-scale=0.5, maximum-scale=5">
 <title>Raya</title>
-<link rel="manifest" href="/static/manifest.json?v=48">
+<link rel="manifest" href="/static/manifest.json?v=49">
 <meta name="theme-color" content="#0057b8">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
-<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=48">
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=49">
 <script>
 window.__RAYA_V = 28;
 if ('serviceWorker' in navigator) {
@@ -17,11 +17,11 @@ if ('serviceWorker' in navigator) {
   caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
 }
 </script>
-<link rel="stylesheet" href="/static/chat-base.css?v=48">
-<link rel="stylesheet" href="/static/chat-components.css?v=48">
-<link rel="stylesheet" href="/static/chat-drawer.css?v=48">
-<link rel="stylesheet" href="/static/onboarding.css?v=48">
-<link rel="stylesheet" href="/static/mobile.css?v=48">
+<link rel="stylesheet" href="/static/chat-base.css?v=49">
+<link rel="stylesheet" href="/static/chat-components.css?v=49">
+<link rel="stylesheet" href="/static/chat-drawer.css?v=49">
+<link rel="stylesheet" href="/static/onboarding.css?v=49">
+<link rel="stylesheet" href="/static/mobile.css?v=49">
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -59,6 +59,7 @@ if ('serviceWorker' in navigator) {
           </button>
           <div class="dotmenu-dropdown">
             <button class="dotmenu-item" onclick="openUserSettings()"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg> Paramètres</button>
+            <button class="dotmenu-item" onclick="document.querySelector('.dotmenu-wrap')?.classList.remove('open');openDrawer()"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg> Administration</button>
             <a class="dotmenu-item" href="/admin/panel?view=company" id="adminPanelBtn" style="display:none"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg> Ma société</a>
             <a class="dotmenu-item" href="/admin/panel" id="superAdminBtn" style="display:none"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Super Admin</a>
             <div class="dotmenu-sep"></div>
@@ -400,17 +401,17 @@ if ('serviceWorker' in navigator) {
   </div>
 </div>
 
-<script src="/static/chat-onboarding.js?v=48"></script>
-<script src="/static/chat-shortcuts.js?v=48"></script>
-<script src="/static/chat-signatures.js?v=48"></script>
-<script src="/static/chat-voice.js?v=48"></script>
-<script src="/static/chat-feedback.js?v=48"></script>
-<script src="/static/chat-triage.js?v=48"></script>
-<script src="/static/chat-admin.js?v=48"></script>
-<script src="/static/chat-topics.js?v=48"></script>
-<script src="/static/chat-core.js?v=48"></script>
-<script src="/static/chat-messages.js?v=48"></script>
-<script src="/static/chat-main.js?v=48"></script>
+<script src="/static/chat-onboarding.js?v=49"></script>
+<script src="/static/chat-shortcuts.js?v=49"></script>
+<script src="/static/chat-signatures.js?v=49"></script>
+<script src="/static/chat-voice.js?v=49"></script>
+<script src="/static/chat-feedback.js?v=49"></script>
+<script src="/static/chat-triage.js?v=49"></script>
+<script src="/static/chat-admin.js?v=49"></script>
+<script src="/static/chat-topics.js?v=49"></script>
+<script src="/static/chat-core.js?v=49"></script>
+<script src="/static/chat-messages.js?v=49"></script>
+<script src="/static/chat-main.js?v=49"></script>
 
 <script>
   // ─── MODAL PARAMÈTRES UTILISATEUR ───
