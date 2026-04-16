@@ -47,8 +47,8 @@ async function loadUserInfo() {
     if (logoEl) logoEl.textContent = name;
     if (scope === 'admin') {
       isAdmin = true;
+      // Super admin : uniquement le bouton Super Admin, pas Ma société
       document.getElementById('superAdminBtn').style.display = 'inline-flex';
-      document.getElementById('adminPanelBtn').style.display = 'inline-flex';
     } else if (scope === 'tenant_admin') {
       isAdmin = true;
       document.getElementById('adminPanelBtn').style.display = 'inline-flex';

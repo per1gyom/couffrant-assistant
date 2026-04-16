@@ -89,6 +89,14 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
 .welcome h2 { font-size: 22px; font-weight: 700; color: var(--text); margin-bottom: 8px; letter-spacing: -0.03em; }
 .welcome p { font-size: 14px; max-width: 400px; margin: 0 auto; line-height: 1.7; color: var(--text-muted); }
 
+/* MODAL PARAMÈTRES — boutons inline */
+.settings-btn-primary { padding:8px 14px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:var(--font);white-space:nowrap;transition:background .15s; }
+.settings-btn-primary:hover { background:var(--accent-hover); }
+.settings-btn-ghost { padding:7px 13px;background:none;color:var(--text);border:1.5px solid var(--border);border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;font-family:var(--font);white-space:nowrap;text-decoration:none;display:inline-block;transition:border-color .15s; }
+.settings-btn-ghost:hover { border-color:var(--accent);color:var(--accent); }
+.settings-btn-danger { padding:7px 13px;background:none;color:var(--danger);border:1.5px solid var(--danger);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:var(--font);white-space:nowrap;transition:all .15s; }
+.settings-btn-danger:hover { background:var(--danger);color:#fff; }
+
 /* SÉPARATEUR HISTORIQUE */
 .history-sep { text-align: center; color: var(--text-muted, #999); font-size: 11px; margin: 16px 0; opacity: 0.5; user-select: none; }
 
