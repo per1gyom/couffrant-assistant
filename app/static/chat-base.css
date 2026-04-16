@@ -16,23 +16,42 @@
 html, body { height: 100%; background: var(--bg); color: var(--text); font-family: var(--font); font-size: 15px; line-height: 1.65; -webkit-font-smoothing: antialiased; }
 .app { display: flex; flex-direction: column; height: 100vh; width: 100%; max-width: 100%; margin: 0; padding: 0; }
 
-/* HEADER */
-.header { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--border); background: var(--surface); flex-shrink: 0; box-shadow: 0 1px 3px rgba(0,0,0,0.03); position: relative; z-index: 10; }
-.logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 18px; color: var(--text); text-decoration: none; letter-spacing: -0.03em; }
+/* TOPBAR (minimal, just 3-dot menu) */
+.topbar { display: flex; align-items: center; padding: 6px 16px; flex-shrink: 0; position: relative; z-index: 10; }
+.topbar-spacer { flex: 1; }
+
+/* 3-DOT MENU */
+.dotmenu-wrap { position: relative; }
+.dotmenu-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 6px; border-radius: var(--radius-sm); transition: all 0.2s; }
+.dotmenu-btn:hover { background: var(--surface2); color: var(--text); }
+.dotmenu-dropdown { display: none; position: absolute; top: 100%; right: 0; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-md); min-width: 200px; padding: 6px; z-index: 100; }
+.dotmenu-wrap.open .dotmenu-dropdown { display: block; }
+.dotmenu-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 12px; font-size: 13px; color: var(--text); background: none; border: none; border-radius: var(--radius-sm); cursor: pointer; text-decoration: none; font-family: var(--font); transition: background 0.15s; }
+.dotmenu-item:hover { background: var(--surface2); }
+.dotmenu-item.danger { color: var(--danger); }
+.dotmenu-item.danger:hover { background: #fef2f2; }
+.dotmenu-sep { height: 1px; background: var(--border); margin: 4px 8px; }
+
+/* SIDEBAR */
+.sidebar { width: 220px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; overflow-y: auto; padding: 16px 12px; gap: 12px; }
+.sidebar-header { display: flex; flex-direction: column; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.sidebar-section { display: flex; flex-direction: column; gap: 2px; }
+.sidebar-item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; font-size: 13px; color: var(--text); background: none; border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer; font-family: var(--font); font-weight: 500; transition: all 0.15s; text-align: left; }
+.sidebar-item:hover { background: var(--accent-light); color: var(--accent); border-color: var(--border); }
+.sidebar-details { }
+.sidebar-section-title { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 10px; cursor: pointer; list-style: none; display: flex; align-items: center; gap: 4px; }
+.sidebar-section-title::before { content: '▸'; font-size: 10px; transition: transform 0.2s; }
+.sidebar-details[open] .sidebar-section-title::before { transform: rotate(90deg); }
+.sidebar-section-title::-webkit-details-marker { display: none; }
+.sidebar-user { margin-top: auto; font-size: 12px; color: var(--text-muted); padding: 8px 10px; font-weight: 500; }
+.logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 20px; color: var(--text); text-decoration: none; letter-spacing: -0.03em; }
 .logo-dot { width: 9px; height: 9px; background: var(--success); border-radius: 50%; animation: pulse 2.5s ease-in-out infinite; flex-shrink: 0; }
 .logo-dot.off { background: #f87171; animation: none; }
 @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.4} }
-.header-sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
-.mail-badge { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted); padding: 3px 9px; border-radius: 20px; border: 1px solid var(--border); background: var(--surface2); cursor: pointer; transition: all 0.15s; user-select: none; }
+.mail-badge { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); padding: 6px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface2); cursor: pointer; transition: all 0.15s; user-select: none; font-weight: 500; }
 .mail-badge:hover { border-color: var(--accent); color: var(--accent); }
 .mail-badge .count { background: var(--danger); color: #fff; border-radius: 10px; padding: 0 6px; font-size: 11px; font-weight: 700; min-width: 18px; text-align: center; display: none; }
 .mail-badge .count.visible { display: inline-block; }
-.header-user { font-size: 12px; color: var(--text-muted); margin-left: auto; font-weight: 500; }
-.h-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); border-radius: var(--radius-full); padding: 5px 13px; font-size: 12px; cursor: pointer; transition: all 0.2s; white-space: nowrap; flex-shrink: 0; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; font-weight: 500; font-family: var(--font); }
-.h-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
-.h-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
-.h-btn.danger:hover { border-color: var(--danger); color: var(--danger); background: #fef2f2; }
-.h-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
 
 /* MESSAGES */
 .main-layout { display: flex; flex: 1; overflow: hidden; }

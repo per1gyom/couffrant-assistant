@@ -28,11 +28,10 @@
 .token-banner-close { position: absolute; top: 8px; right: 12px; background: none; border: none; color: rgba(239,68,68,0.45); cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 4px; border-radius: 4px; transition: color 0.15s; }
 .token-banner-close:hover { color: #ef4444; }
 
-/* QUICK ACTIONS — SIDEBAR */
-.quick-wrap { background: var(--surface); border-right: 1px solid var(--border); flex-shrink: 0; width: 200px; overflow-y: auto; }
-.quick-row { display: flex; flex-direction: column; gap: 4px; padding: 12px 10px; }
+/* QUICK ACTIONS — in sidebar */
+.quick-row { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; }
 .quick-row::-webkit-scrollbar { display: none; }
-.quick-btn { flex-shrink: 0; background: var(--surface); border: 1px solid var(--border); color: var(--text-muted); border-radius: var(--radius-sm, 8px); padding: 8px 12px; font-size: 13px; cursor: pointer; white-space: nowrap; transition: all 0.2s; display: flex; align-items: center; gap: 5px; font-family: var(--font, inherit); font-weight: 500; text-align: left; width: 100%; }
+.quick-btn { flex-shrink: 0; background: none; border: 1px solid transparent; color: var(--text-muted); border-radius: var(--radius-sm, 8px); padding: 7px 10px; font-size: 13px; cursor: pointer; white-space: nowrap; transition: all 0.15s; display: flex; align-items: center; gap: 6px; font-family: var(--font, inherit); font-weight: 500; text-align: left; width: 100%; }
 .quick-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); box-shadow: 0 2px 8px rgba(79,70,229,0.08); }
 .quick-btn.edit-mode { opacity: 0.6; }
 .quick-btn.edit-mode:hover { border-color: var(--danger); color: var(--danger); opacity: 1; }
