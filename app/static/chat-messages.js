@@ -295,7 +295,29 @@ function appendPendingActionToChat(action) {
     }
   };
 
-  btns.appendChild(confirmBtn); btns.appendChild(cancelBtn);
+  btns.appendChild(confirmBtn);
+
+  // Bouton Brouillon (REPLY et SEND_MAIL seulement)
+  if (isReply || isSendMail) {
+    const draftBtn = document.createElement('button'); draftBtn.className = 'pending-btn draft';
+    draftBtn.innerHTML = '&#128196; Brouillon';
+    draftBtn.title = 'Enregistrer dans Outlook Drafts pour révision';
+    draftBtn.onclick = async () => {
+      if (draftBtn.disabled) return;
+      btns.querySelectorAll('button').forEach(b => b.disabled = true);
+      draftBtn.innerHTML = '&#8987;';
+      try {
+        const r = await fetch(`/raya/draft/${action.id}`, { method: 'POST' });
+        const data = await r.json();
+        _markActionInChat(action.id, data.ok ? 'draft' : 'err', data.message);
+      } catch(e) {
+        _markActionInChat(action.id, 'err', 'Erreur réseau');
+      }
+    };
+    btns.appendChild(draftBtn);
+  }
+
+  btns.appendChild(cancelBtn);
   card.appendChild(btns);
   // Si action déjà terminée (depuis historique), afficher le statut sans boutons
   if (isDone) {
@@ -323,7 +345,7 @@ function _markActionInChat(actionId, status, message) {
   // Ajouter le statut horodaté en bas de la carte
   const statusEl = document.createElement('div');
   statusEl.className = 'action-done-status';
-  const icon = status === 'ok' ? '✅' : (status === 'cancelled' ? '⏹️' : '❌');
+  const icon = status === 'ok' ? '✅' : status === 'draft' ? '📁' : (status === 'cancelled' ? '⏹️' : '❌');
   const timeStr = new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   statusEl.textContent = `${icon} ${message} — ${timeStr}`;
   card.appendChild(statusEl);

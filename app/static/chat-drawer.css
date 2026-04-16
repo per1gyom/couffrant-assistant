@@ -210,6 +210,15 @@
   background: var(--accent); color: white; border: none;
 }
 .pending-btn.confirm:hover { background: var(--accent-hover); }
+.pending-btn.draft {
+  background: var(--bg);
+  color: var(--text-muted);
+  border: 1.5px solid var(--border);
+}
+.pending-btn.draft:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .pending-btn.cancel {
   background: none; color: var(--text-muted);
   border: 1.5px solid var(--border);

@@ -30,7 +30,7 @@ Interactif (immediat) :
   [ACTION:CREATE_TASK:titre]{delete_line}
   [ACTION:SEND_MAIL:destinataire@email.fr|sujet|corps] -> envoyer un NOUVEAU mail (pas une reponse)
     Exemple : [ACTION:SEND_MAIL:per1.guillaume@gmail.com|Test Raya|Bonjour, ceci est un test.]
-    -> met en queue + confirmation requise avant envoi
+    -> met en queue + confirmation requise avant envoi (l'utilisateur peut aussi choisir "Brouillon")
 Filtre mails :
   [ACTION:LEARN:mail_filter|autoriser: email@domaine.fr]
   [ACTION:LEARN:mail_filter|bloquer: promo@xyz.fr]""")

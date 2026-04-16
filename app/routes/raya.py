@@ -191,6 +191,54 @@ def raya_pending(user: dict = Depends(require_user)):
     return {"pending_actions": get_pending(username=username, tenant_id=tenant_id, limit=10)}
 
 
+@router.post("/raya/draft/{action_id}")
+def raya_draft_action(
+    action_id: int,
+    user: dict = Depends(require_user),
+):
+    """Sauvegarde l'action comme brouillon Outlook (sans envoyer) et l'annule de la queue."""
+    username = user["username"]
+    tenant_id = user["tenant_id"]
+    from app.pending_actions import get_action, cancel_action
+    from app.connectors.outlook_connector import perform_outlook_action
+
+    action = get_action(action_id, username, tenant_id)
+    if not action or action["status"] != "pending":
+        return {"ok": False, "message": "Action introuvable, déjà traitée ou expirée."}
+
+    outlook_token = get_valid_microsoft_token(username)
+    if not outlook_token:
+        return {"ok": False, "message": "Token Microsoft manquant."}
+
+    action_type = action["action_type"]
+    payload = action["payload"]
+
+    try:
+        if action_type == "SEND_MAIL":
+            r = perform_outlook_action("create_draft_mail", {
+                "to_email": payload["to_email"],
+                "subject":  payload["subject"],
+                "body":     payload["body"],
+            }, outlook_token)
+        elif action_type == "REPLY":
+            r = perform_outlook_action("create_reply_draft", {
+                "message_id": payload["message_id"],
+                "reply_body": payload["reply_text"],
+            }, outlook_token)
+        else:
+            return {"ok": False, "message": f"Type {action_type} non supporté en brouillon."}
+
+        if r.get("status") != "ok":
+            return {"ok": False, "message": r.get("message", "Erreur création brouillon")}
+
+        # Annuler l'action de la queue (elle est maintenant dans Outlook Drafts)
+        cancel_action(action_id, username, tenant_id, reason="Sauvegardé en brouillon Outlook")
+        return {"ok": True, "message": "Brouillon enregistré dans Outlook"}
+
+    except Exception as e:
+        return {"ok": False, "message": str(e)[:200]}
+
+
 @router.post("/raya/confirm/{action_id}")
 def raya_confirm_action(
     action_id: int,
