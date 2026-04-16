@@ -60,7 +60,7 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
       if (memoryNotes.length > 0) {
         const memDiv = document.createElement('div');
         memDiv.style.cssText = 'margin-top:6px;padding:4px 10px;background:rgba(34,197,94,0.1);border-radius:6px;font-size:12px;color:#16a34a;cursor:pointer;display:inline-block;';
-        memDiv.innerHTML = `✅ ${memoryNotes.length} règle(s) mise(s) à jour`;
+        memDiv.innerHTML = `✅ ${memoryNotes.length} ${memoryNotes.length > 1 ? 'règles mises' : 'règle mise'} à jour`;
         const detailDiv = document.createElement('div');
         detailDiv.style.cssText = 'display:none;margin-top:4px;font-size:11px;color:#666;';
         detailDiv.innerHTML = memoryNotes.map(n => n.replace(/🧠\s*Memorise\s*[+~]\s*/i, '').replace(/🧠\s*/g, '')).join('<br>');
