@@ -4,6 +4,60 @@
 
 ---
 
+## Session 16/04/2026 suite — 17h00 (Opus + Guillaume)
+
+### Signature email — système complet ✅
+- `app/connectors/outlook_calendar.py::_build_email_html` → appelle `get_email_signature(username)` (déjà en place)
+- Logo `app/static/5AEA8C3F-2F59-4ED0-8AAA-3B324C3498DF.png` présent et référencé dans `_static_signature`
+- `app/routes/aria_context.py::FORMAT_BLOCK` : ajout instruction "Ne jamais inclure de signature dans un mail que tu rédiges : la signature est ajoutée automatiquement par le système"
+- Raya ne signe plus elle-même — chaîne complète opérationnelle
+
+### Docs mis à jour
+- `docs/raya_session_state.md` : réécriture complète (cache-bust v=36, tâches session 16/04 documentées, signature, display_name, palette, roadmap à jour)
+- `docs/raya_changelog.md` : présente entrée
+
+---
+
+## Session 16/04/2026 matin suite — 07h00→12h54 (Opus + Guillaume — ~35 commits)
+
+### Raccourcis éditables v2 ✅
+- `529b412` — Table `user_shortcuts` + CRUD API `/shortcuts` (GET/POST/PATCH/DELETE)
+- `5dd7a8f` — UI modale titre + prompt personnalisé + sélecteur 12 couleurs + delete
+- `228a032` — Fix Safari : `let shortcutsEditMode` dupliqué supprimé (crash showToast)
+
+### Sujets intégrés sidebar ✅
+- `5dd7a8f` — `topicsSidebarList` dans HTML `<details open>`, `chat-topics.js` v3 miroir raccourcis
+- `4e3d6be` — Design final : triangle sidebar agrandi, topics v3 aligné raccourcis
+
+### Palette couleurs ✅
+- `47e28bc` — Palette 6 "Bleu Roi Saturé" `#0057b8` appliquée (v=27)
+- `53deb1d` — Fond pastel `#f5f9ff`, borders `#bdd6ff` (v=30)
+
+### display_name ✅
+- `08b1e3e` — Migration DB, `/profile/display-name`, `list_users`, `/chat` inject
+- `19bcfcf` — UI modal admin, carte profil, logo italic bleu, footer sans username
+- `0be7a90` — `loadUserInfo()` priorité display_name sur username
+
+### Modal Paramètres refonte ✅
+- `8a8885` — Lecture auto + display_name + email + MDP + RGPD + Valider/Annuler sticky (v=32)
+- `d527f79` — Zoom viewport autorisé, modal 65vw/85vh scrollable (v=33)
+- `90db119` — SVG Lucide dans Paramètres, puces modernes réponses Raya (v=34)
+
+### Suppression compte avec validation admin ✅
+- `e808ad6` — Workflow request/confirm/reject/cancel, MDP requis
+
+### Fixes mails ✅
+- `ea8026e` — Raya ne répète plus les règles après LEARN + nommage boîtes mail permanent
+- `6008a6a` — Pluralisation "règles mises à jour" + interdire `__email__` dans réponses
+- `a859d55` — Réponse mail : carte propre, `\n` corrigé, lookup tolérant, UX modernisée (v=36)
+
+### Fixes UX
+- `221adf3` — textarea overflow-y:hidden (supprime scrollbars vides dans la saisie)
+- `64c5c87` — Ma société restauré pour super admin
+- `cdc76c6` — username injecté côté serveur + page login palette bleue v2
+
+---
+
 ## Session 16/04/2026 (Opus + Guillaume — ~10 commits)
 
 ### FIX-CRITICAL : Package admin/ shadow

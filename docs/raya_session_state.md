@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 17/04/2026 09h00** — Opus
+**Dernière mise à jour : 16/04/2026 17h00** — Opus (nouvelle session post-saturation)
 
 ---
 
@@ -15,7 +15,7 @@
 - Fichiers Python < 10KB (sauf database_schema.py, database_migrations.py, tools_seed_data.py = données pures)
 - Desktop Commander local path : `/Users/per1guillaume/couffrant-assistant`
 - Template chat : `app/templates/raya_chat.html`
-- Cache-bust : `?v=24` (actuel)
+- Cache-bust : `?v=36` (actuel)
 - Français, vocabulaire Terminal, concis
 - Git config local : `per1guillaume@mac-1.home`
 - **⚠️ ARCHITECTURE ADMIN** : Les routes admin sont dans le **package** `app/routes/admin/` (pas le fichier `admin.py` qui est shadowed). Toute nouvelle route admin doit être ajoutée dans `super_admin.py`, `tenant_admin.py` ou `profile.py`.
@@ -30,147 +30,116 @@ FastAPI Python 3.13, Railway, PostgreSQL+pgvector, Anthropic 3 tiers, OpenAI emb
 URL : `https://app.raya-ia.fr` — Repo : `per1gyom/couffrant-assistant` branche `main`
 
 ## 2-9. INFRASTRUCTURE ✅
-Connectivité 5/5, Outils création (PDF, Excel, DALL-E), PWA v=24, Sécurité (anti-injection, GUARDRAILS, CSP, bcrypt, lockout), Signature email v2, SAV/Bug report, RGPD complet, Backup manuel.
+Connectivité 5/5, Outils création (PDF, Excel, DALL-E), PWA v=36, Sécurité (anti-injection, GUARDRAILS, CSP, bcrypt, lockout), Signature email v2, SAV/Bug report, RGPD complet, Backup manuel.
 **Service Worker** : DÉSACTIVÉ (cause racine des bugs d'affichage au refresh). Le HTML nettoie les anciens SW + purge les caches à chaque chargement. Anti-cache double couche (unregister + reload si `marked` absent).
 
 ## 10. UX CHAT ✅ + REDESIGN V2 ✅
 Nettoyage actions brutes, horodatage messages, style conversationnel naturel (UX-TONE), 👍 confirme pending, bug report commentaire optionnel, DELETE/ARCHIVE mutuellement exclusifs, nettoyage fragments Odoo inline.
 
-### Redesign v2 (session 16-17/04)
+### Redesign v2 (session 16/04)
 - **Typo** : Inter (Google Fonts) + JetBrains Mono pour code
-- **Palette** : indigo #4f46e5, fond #fafbfd, borders #e2e6ef (Guillaume veut changer, pas de violet)
+- **Palette** : Bleu Roi Saturé `#0057b8`, fond pastel `#f5f9ff`, borders `#bdd6ff` (Guillaume a validé palette 6 — PLUS de violet)
 - **Icônes** : TOUTES les emojis remplacées par des SVG Lucide inline (micro, attach, send, speak, feedback, bookmark, shield, settings, logout, volume, etc.)
-- **Réponses Raya** : pleine page (pas de bulle), fond transparent, width 100%. Seuls les prompts user en bulle indigo.
+- **Réponses Raya** : pleine page (pas de bulle), fond transparent, width 100%. Seuls les prompts user en bulle bleue.
 - **Avatar Raya** : masqué (inutile en pleine page)
 - **Markdown** : `marked.parse()` avec `breaks:true, gfm:true`, DOMPurify ALLOWED_URI_REGEXP élargi pour blob URLs. Tables avec header gris, code blocks sombres, headers hiérarchisés.
 - **Prompt système** : instruction ABSOLUE de ne jamais montrer les codes `[ACTION:...]` ou `[SPEAK_SPEED:...]`. Erreurs user-friendly.
-- **Layout sidebar** : header supprimé, sidebar gauche 220px (logo+mails+sujets+raccourcis déroulants), menu ⋮ 3 points en bas sidebar (position:fixed z-index:9999), sidebar repliable avec bouton expand.
-- **Input** : compact (padding réduit), fond transparent, auto-scroll dictée, max-height 160px.
-- **Raccourcis** : pastilles colorées (plus d'emojis), fermés par défaut, boutons SVG edit/check.
-- **Quick actions** : boutons pill dans sidebar, hover indigo.
+- **Layout sidebar** : header supprimé, sidebar gauche 220px (logo+sujets+raccourcis déroulants), menu ⋮ 3 points en bas sidebar (position:fixed z-index:9999), sidebar repliable avec bouton expand.
+- **Input** : compact (padding réduit), fond transparent, auto-scroll dictée, max-height 160px, overflow-y:hidden (pas de scrollbars vides).
+- **Raccourcis** : pastilles colorées arc-en-ciel (12 couleurs), fermés par défaut, boutons SVG edit/check.
+- **Quick actions** : boutons pill dans sidebar, hover bleu.
 - **Toasts** : backdrop-blur, transparence.
+- **display_name** : migration DB, champ modal admin, carte profil, logo italic bleu, footer sans username.
 
-### PENDING UX (prochaine session)
-- [ ] **Raccourcis éditables** : clic → modale avec titre séparé + prompt personnalisé + sélecteur couleur (12 couleurs) + supprimer. Croix ✕ en mode édition. Stockage en DB au lieu de localStorage.
-- [ ] **Sujets en sidebar** : remplacer le drawer noir (archaïque) par une section déroulante dans la sidebar, ouverte par défaut. Même style que raccourcis.
-- [ ] **Palette couleurs** : remplacer le violet/indigo par une palette que Guillaume validera.
-- [ ] **Micro/send** : icônes disparues en bas de sidebar (bug partiel à vérifier).
-- [ ] **Bouton "Mes sujets"** : doit ouvrir la section dans la sidebar, pas le drawer noir.
+## 11. RACCOURCIS ÉDITABLES v2 ✅ (session 16/04)
+- Table `user_shortcuts` en DB (pas localStorage) — migration appliquée
+- API CRUD : `GET/POST /shortcuts`, `PATCH/DELETE /shortcuts/{id}`
+- UI modale titre + prompt personnalisé (peut être long, dictable) + sélecteur 12 couleurs
+- Mode édition : bouton stylo → mode edit → croix ✕ pour supprimer, clic = éditer
+- Fix Safari : `let shortcutsEditMode` dupliqué supprimé (`228a032`)
+- Fichier : `app/static/chat-shortcuts.js`
 
-## 11. TOPICS ✅
-5 endpoints CRUD + PWA (bouton 🔖 dans header + panneau latéral `chat-topics.js`) + RGPD couvert + Flutter prêt (TopicsService à switcher vers API).
+## 12. SUJETS INTÉGRÉS SIDEBAR ✅ (session 16/04)
+- `<details class="sidebar-details" id="topicsSidebarSection" open>` dans le HTML — section ouverte par défaut
+- `chat-topics.js` v3 — miroir exact du design raccourcis (même classes, même icônes SVG)
+- `initTopicsSidebar()` appelé dans `init()` de `chat-main.js`
+- Drawer noir topics : supprimé. Stubs de compatibilité descendante conservés.
+- Renommer topic : `prompt()` natif (à améliorer plus tard en modale)
 
-## 12. REFACTORING ARCHITECTURE ✅ (COMPLET)
-30+ splits Python — tous les fichiers Python < 10KB. 6 hotfixes imports circulaires (HOTFIX-1 à HOTFIX-6). CSS splitté en 3 fichiers (chat-base.css + chat-components.css + chat-drawer.css). Admin panel splitté (admin-panel.css + admin-panel.js extraits). 8 fichiers morts supprimés.
+## 13. SIGNATURE EMAIL ✅ (session 16/04)
+- `app/email_signature.py` : `get_email_signature(username, from_address=None)`
+  - Ordre lookup : 1) DB email_signatures (match adresse exacte) → 2) signature générique → 3) fallback statique Guillaume
+  - Fallback statique : "Solairement, Guillaume Perrin, 📞 06 49 43 09 17, 🌐 couffrant-solar.fr, logo PNG"
+- **Logo** : `app/static/5AEA8C3F-2F59-4ED0-8AAA-3B324C3498DF.png` (913KB) — accessible via `https://app.raya-ia.fr/static/5AEA8C3F-2F59-4ED0-8AAA-3B324C3498DF.png`
+- **`_build_email_html`** (outlook_calendar.py) → appelle `get_email_signature(username)` → appende la signature automatiquement à chaque envoi
+- **outlook_actions.py** → `send_reply`, `send_new_mail`, `create_reply_draft` appellent tous `_build_email_html`
+- **System prompt** (aria_context.py `FORMAT_BLOCK`) : "Ne jamais inclure de signature dans un mail que tu rédiges : la signature est ajoutée automatiquement par le système"
+- **Note** : `from_address` non passé pour l'instant (default None → fallback statique Guillaume). À améliorer quand d'autres boîtes seront configurées.
+- Extraction auto depuis mails envoyés : endpoint `POST /admin/extract-signatures` (bouton dans tiroir admin)
 
-**⚠️ Package admin/** : Le refactoring du 12/04 a créé `app/routes/admin/` (package) qui shadow `app/routes/admin.py` (fichier). Les routes ajoutées dans `admin.py` après le 12/04 étaient mortes en prod jusqu'au fix du 16/04. Toutes les routes sont maintenant dans le package : `super_admin.py`, `super_admin_users.py`, `super_admin_system.py`, `tenant_admin.py`, `profile.py`.
+## 14. CARTE DE CONFIRMATION REPLY ✅ (session 16/04)
+- `mail_actions.py` : lookup tolérant (exact puis 20 premiers chars), `\n` littéral → vrai saut de ligne
+- `chat-messages.js` : carte REPLY avec "À : Prénom Nom", "Sujet : Re: ...", corps formaté `white-space:pre-line`
+- `chat-drawer.css` : bordure gauche bleue, boutons plats (fini les gros boutons vert/rouge)
 
-## 13. MULTI-TENANT ✅
+## 15. MODAL PARAMÈTRES UTILISATEUR ✅ (session 16/04)
+- Accessible via menu ⋮ → Paramètres
+- Sections : lecture auto (toggle) + display_name + email + mot de passe + RGPD
+- Footer sticky : boutons Annuler / Valider (sauvegarde tout en un clic)
+- SVG Lucide pour chaque section
+
+## 16. SUPPRESSION COMPTE AVEC VALIDATION ADMIN ✅ (session 16/04)
+- Workflow : request → confirm (admin) → reject/cancel
+- Mot de passe requis pour soumettre la demande
+- Compte reste actif jusqu'à validation admin
+
+## 17. TOPICS ✅
+5 endpoints CRUD + sidebar déroulante (voir §12) + RGPD couvert + Flutter prêt.
+
+## 18. REFACTORING ARCHITECTURE ✅ (COMPLET)
+30+ splits Python — tous les fichiers Python < 10KB. 6 hotfixes imports circulaires. CSS splitté. Admin panel splitté. 8 fichiers morts supprimés.
+
+**⚠️ Package admin/** : `app/routes/admin/` (package) shadow `app/routes/admin.py` (fichier). Toutes les routes sont dans le package : `super_admin.py`, `super_admin_users.py`, `super_admin_system.py`, `tenant_admin.py`, `profile.py`.
+
+## 19. MULTI-TENANT ✅
 - Tenant `couffrant_solar` : Guillaume (super_admin) — 5 utilisateurs
 - Tenant `juillet` : Charlotte (tenant_admin) — créé le 15/04, testable
 
-## 14. PANEL ADMIN — REFONTE ✅
-### Création société
-- Nom → ID auto-généré (normalisé), SIRET obligatoire (14 chiffres), adresse 3 champs (rue/CP/ville), forme juridique (dropdown), fournisseur email configurable.
+## 20. PANEL ADMIN — REFONTE ✅
+### Création société + utilisateur + double confirmation + accès par rôle ✅
+### Re-authentification admin (SECURITY) ✅ — timeout 10 min
+### Layout v3 : sidebar gauche, menu ⋮ en bas
 
-### Création utilisateur
-- Formulaire avec sélecteur société + profil métier (8 profils). Bouton "➕ Ajouter un collaborateur" dans chaque fiche. Seeding auto après création.
+## 21. SUSPENSION DE COMPTES ✅
+Migration DB 16/04, check login + API, boutons panel admin, badges ⏸️.
 
-### Double confirmation suppressions
-- Société : modale → champ "Tapez SUPPRIMER" → bouton grisé. User : modale → champ "Tapez le nom".
+## 22. ACTIONS DIRECTES (FICHIERS) ✅
+Par défaut OFF. Toggle tenant_admin. Corbeille = action directe (récupérable).
 
-### Accès panel par rôle
-- Super admin : voit tous les onglets (Mémoire, Utilisateurs, Règles, Insights, Actions, Sociétés, Profil)
-- Tenant admin : voit seulement Sociétés (sa société) + Mon profil. Onglets super-admin masqués.
-- **Layout v3** : sidebar gauche (logo, mails, sujets, raccourcis). Menu ⋮ en bas sidebar (Lecture auto, Paramètres, Ma société, Super Admin, Déconnexion).
+## 23. CLOISONNEMENT ✅
+Drive défauts neutres. OAuth : session vide → erreur 401 (plus de fallback Guillaume).
 
-### Re-authentification admin (SECURITY) ✅
-- Accès au panel protégé par **re-saisie du mot de passe** même si la session web est active
-- Timeout : **10 minutes** (`ADMIN_AUTH_TIMEOUT = 600`). Après expiration → re-saisie obligatoire
-- Page de login admin dédiée (design dark, formulaire simple)
-- Endpoint `POST /admin/auth` : vérifie le mot de passe, écrit `admin_auth_at` en session
-- Protection contre les sessions laissées ouvertes : personne ne peut accéder au panel sans le mot de passe
+## 24. CONNECTEURS V2 ✅ (Phase A+B)
+- `tenant_connections` + `connection_assignments`
+- `app/connections.py` : create/update/delete/list/assign/unassign/get_user_connections
+- 14 endpoints API, UI panel admin
+- **Phase C restante** : `get_user_connections()` dans `_raya_core()` remplace `load_user_tools()`
 
-## 15. SUSPENSION DE COMPTES ✅
-- `app/suspension.py` : check_suspension(), suspend_user(), unsuspend_user(), suspend_tenant(), unsuspend_tenant()
-- **Migration DB exécutée le 16/04** : colonnes `suspended BOOLEAN` + `suspended_reason TEXT` sur table users
-- Tenants : `suspended` + `suspended_reason` dans le JSONB `settings`
-- Vérification au login web (`auth.py`) + tous les endpoints API (`deps.py`) : HTTP 403
-- Super admin : suspend n'importe quel user ou tenant. Tenant admin : suspend users de sa société.
-- Panel admin : boutons ⏸️ / ▶️ par utilisateur + par société. Badges ⏸️ SUSPENDU.
-- **Feedback** : alertes dirigées vers l'onglet actif (companies-alert ou user-alert). Cartes sociétés restent ouvertes après action.
+## 25. BUGS CONNUS / REPORTÉS
+- Bug report #2 (Guillaume, 14/04) : Erreur 404 archivage mail (MS Graph) → non investigué
+- Bug report #1 (Guillaume, 14/04) : Erreur archivage mail (iPhone) → non investigué
 
-## 16. ACTIONS DIRECTES (FICHIERS) ✅
-- `app/direct_actions.py` : priorité user override > tenant setting > défaut (False)
-- Par défaut OFF. Corbeille mail reste en action directe (récupérable).
-- **Changement de spec (16/04)** : cette fonction est réservée au **tenant_admin** (pas au super admin)
-- Toggle par société : 🟢 ON / 🔴 OFF visible dans la fiche société (uniquement pour tenant admin)
-- Toggle par utilisateur : bouton 📂 ON / 📂 OFF / 📂 = (hérité) avec cycle au clic (`cycleUserDirectActions`)
-- Le super admin ne voit **plus** le toggle actions directes dans sa vue sociétés
+## 26. FLUTTER — EN PARALLÈLE
+App iOS fonctionnelle sur simulateur. Ne pas toucher au dossier `flutter/`.
 
-## 17. CLOISONNEMENT ✅
-### Drive
-- `drive_connector.py` : défauts neutres, plus de fallback vers Couffrant Solar. Lazy `__getattr__` (HOTFIX-5).
+## 27. ROADMAP
 
-### OAuth (FIX-CRITICAL 16/04)
-- **Avant** : `request.session.get("user", "guillaume")` dans les callbacks OAuth Microsoft ET Gmail → si session vide, token sauvé sous Guillaume
-- **Après** : Session vide → page d'erreur 401 "Session expirée" avec lien de reconnexion. Aucun fallback.
-- Charlotte confirmée : aucun `oauth_token` hérité en DB. Ses connexions Microsoft/Gmail sont vierges (à configurer).
-
-## 18. SEEDING PROFILS (DEMO uniquement)
-8 profils dans `app/seeding.py`. Endpoint `POST /admin/seed-user`. Bouton 🌱 par utilisateur.
-DÉCISION : seeding = DEMO. Vrais clients → questionnaire admin + questionnaire utilisateur (à coder).
-
-## 19. MATRICE DES DROITS (MISE À JOUR 16/04)
-| Fonctionnalité | Super Admin | Admin Tenant | Utilisateur |
-|---|---|---|---|
-| Voir toutes les sociétés | ✅ | ❌ (que la sienne) | ❌ |
-| Créer/Supprimer société | ✅ | ❌ | ❌ |
-| Suspendre société | ✅ | ❌ | ❌ |
-| Suspendre utilisateur | ✅ (tous) | ✅ (sa société) | ❌ |
-| Créer/Supprimer utilisateur | ✅ (tous) | ✅ (sa société) | ❌ |
-| Toggle actions directes | ❌ (retiré) | ✅ (sa société) | ❌ |
-| Seeder un profil | ✅ | ✅ (sa société) | ❌ |
-| Chat Raya | ✅ | ✅ | ✅ |
-| Tiroir admin chat | ✅ (complet) | ✅ (connexions + onboarding) | ❌ (masqué) |
-| Panel admin (🔑 Super Admin) | ✅ (tous les onglets) | ❌ | ❌ |
-| Panel admin (⚙️ Ma société) | ✅ (sa société) | ✅ (sa société) | ❌ |
-| Accès panel | 🔒 Re-auth MDP (10 min) | 🔒 Re-auth MDP (10 min) | ❌ |
-
-## 20. CONNECTEURS V2 ✅ (Phase A+B)
-- Spec dans `docs/spec_connecteurs_v2.md` (validée 16/04)
-- **Modèle** : chaque connexion = instance d'outil avec credentials + config + statut, assignable à 1-N users
-- `tenant_connections` : id, tenant_id, tool_type, label, auth_type, credentials, config, status
-- `connection_assignments` : connection_id, username, access_level, enabled (UNIQUE)
-- Module `app/connections.py` : create/update/delete/list/assign/unassign/get_user_connections
-- 14 endpoints API (7 admin + 7 tenant)
-- UI panel : section 📡 Connexions dans chaque fiche société, créer/supprimer/renommer, dropdown users avec Tous/Aucun, >5 users = déroulant compact
-- Migration existant : 4 connexions Couffrant Solar (Drive, Outlook, Odoo, Gmail)
-- **Phase C restante** : intégration dans `_raya_core()` — `get_user_connections()` remplace `load_user_tools()`
-
-## 21. BUGS CONNUS / REPORTÉS
-- **Bug report #3 (Charlotte, 15/04)** : "Le micro reste ouvert" → FIX `eaa7d00` : `SpeechRecognition.stop()` manquant, objet rec stocké en global `currentRecognition`.
-- **Bug report #2 (Guillaume, 14/04)** : Erreur 404 archivage mail (MS Graph) → non investigué.
-- **Bug report #1 (Guillaume, 14/04)** : Erreur archivage mail (iPhone) → non investigué.
-
-## 22. FLUTTER — EN PARALLÈLE
-App iOS fonctionnelle sur simulateur (login, chat, TTS, feedback). Specs dans `docs/raya_flutter_ux_specs.md`. Ne pas toucher au dossier `flutter/`.
-
-## 23. ROADMAP
-
-### Priorité immédiate (session 17/04)
-- [ ] **Raccourcis éditables v2** : modale titre + prompt personnalisé + sélecteur couleur + suppression + croix en mode edit
-- [ ] **Sujets intégrés sidebar** : remplacer le drawer noir par section déroulante dans sidebar (ouverte par défaut)
-- [ ] **Palette couleurs** : choisir et appliquer une palette sans violet
-- [ ] Tester les 3 niveaux d'accès complets (super admin / tenant admin / user)
-- [ ] Connecteurs v2 Phase C (Raya Core utilise les nouvelles connexions)
+### Priorité immédiate
+- [ ] **Connecteurs v2 Phase C** — `get_user_connections()` dans `_raya_core()`, remplace `load_user_tools()`
 - [ ] Investiguer bug reports #1 et #2 (archivage mail 404)
+- [ ] Tester les 3 niveaux d'accès complets (super admin / tenant admin / user)
 
 ### Commercial (Bloc C)
-- [ ] **Connecteurs v2** — spec validée (`docs/spec_connecteurs_v2.md`) :
-  - ✅ Phase A : Schema DB `tenant_connections` + `connection_assignments` + CRUD + migration + endpoints
-  - ✅ Phase B : Panel admin UI — créer/assigner/révoquer/renommer connexions, dropdown users Tous/Aucun
-  - [ ] Phase C : Intégration Raya Core — multi-connexions par user dans le chat
 - [ ] C4 : WhatsApp production (sortir sandbox Twilio)
 - [ ] C5 : Facturation Stripe
 - [ ] Onboarding amélioré (questionnaire admin + questionnaire utilisateur)
@@ -179,34 +148,37 @@ App iOS fonctionnelle sur simulateur (login, chat, TTS, feedback). Specs dans `d
 - [ ] Backup auto S3 (Scaleway)
 - **Objectif : premier client payant juillet 2026**
 
-## 24. DÉCISIONS CLÉS
-- Seeding = DEMO uniquement. Vrais clients → questionnaire admin + questionnaire utilisateur.
-- Actions directes fichiers OFF par défaut. **Tenant admin toggle** (pas super admin).
-- Corbeille mail reste en action directe (récupérable + données personnelles).
-- Panel admin protégé par re-auth mot de passe (10 min timeout).
-- 2 boutons : 🔑 Super Admin (tous les onglets) + ⚙️ Ma société (vue société).
-- Fichiers > 10KB = risque timeout MCP. Cible < 10KB pour tous les fichiers Python.
-- **Routes admin** : toujours dans le package `app/routes/admin/`, jamais dans le fichier `admin.py`.
-- **Connecteurs v2** (validé 16/04) : chaque connexion (OAuth, API, SharePoint) est une instance partageable, assignable/révocable dynamiquement à 1-N users par l'admin. Spec dans `docs/spec_connecteurs_v2.md`.
-- **Layout** (validé 17/04) : sidebar gauche, pas de header horizontal, menu ⋮ en bas sidebar, réponses Raya en pleine page (pas de bulle), raccourcis avec pastilles colorées (plus d'emojis). Guillaume ne veut PAS de violet.
-- **Service Worker** (validé 17/04) : DÉSACTIVÉ définitivement (trop de bugs de cache). Le HTML nettoie les anciens SW à chaque chargement.
+## 28. DÉCISIONS CLÉS
+- Seeding = DEMO uniquement. Vrais clients → questionnaire.
+- Actions directes OFF par défaut. Tenant admin toggle.
+- Panel admin protégé par re-auth MDP (10 min timeout).
+- Palette validée : Bleu Roi Saturé `#0057b8` (PLUS de violet).
+- Signature email : injected automatiquement via `_build_email_html` → `get_email_signature`. Raya ne signe JAMAIS elle-même.
+- Service Worker : DÉSACTIVÉ définitivement.
+- Routes admin : toujours dans le package `app/routes/admin/`.
+- display_name : champ séparé de username, affiché dans logo et modal.
 
-## 25. HISTORIQUE
+## 29. HISTORIQUE
 
-### Session 16-17/04/2026 (~40 commits)
-**Connecteurs v2 Phase A+B** : tables `tenant_connections`+`connection_assignments`, CRUD `app/connections.py`, 14 endpoints, migration 4 connexions Couffrant Solar, UI panel admin (créer/supprimer/renommer/assigner), dropdown users Tous/Aucun, >5 users déroulant, panneau reste ouvert. **Fix micro** : `stopListening()` dans sendMessage + input vidé. **Fix vitesse élocution** : speak_speed en champ JSON séparé. **Timeout silence** : 3s→10s. **Prompt** : codes techniques interdits d'affichage + erreurs user-friendly. **REDESIGN COMPLET** : Inter font, icônes SVG Lucide (tous les emojis remplacés), palette indigo, markdown tables+code dans bulles, réponses Raya pleine page (pas de bulle), zone élargie 1100px, avatar masqué. **Layout sidebar** : header supprimé, sidebar gauche (logo+mails+sujets+raccourcis déroulants), menu ⋮ 3 points en bas sidebar, sidebar repliable avec bouton expand. **Input** : compact, auto-scroll dictée, flottant transparent. **SW fix** : service worker désactivé (cause racine des bugs d'affichage au refresh), anti-cache double couche (unregister+purge+reload auto). **Raccourcis** : pastilles colorées, fermés par défaut, boutons SVG edit/check.
+### Session 16/04/2026 (~50+ commits)
+**Rappel session précédente (16/04 matin, ~40 commits)** : Connecteurs v2 Phase A+B, redesign complet UI (palette indigo→bleu, sidebar, SVG icons, markdown, SW désactivé).
 
-### Session 15/04/2026 soir (~15 commits)
-8 fichiers morts supprimés. PWA Topics (bouton 🔖 + panneau latéral). Split CSS + admin_panel.html. Split Python batch final (13 splits Sonnet + 6 hotfixes Opus). Seeding 8 profils + endpoint seed-user. Refonte panel admin (SIRET, adresse, ID auto, double confirmation, bouton collaborateur). Cloisonnement Drive. Suspension comptes. Actions directes on/off. FIX-CRITICAL 16 décorateurs admin_endpoints.py.
-
-### Session 15/04/2026 matin (~70 commits)
-TOPICS 5/5. FIX-CLEAN + TIMESTAMP. RENAME raya_chat. 3 bugs chat. Refactoring BATCH 1+2+3 (19 splits). UX-TONE. Bug report amélioré. 👍 confirme pending. 3 hotfixes imports.
-
-### Session 14/04/2026 (~45 commits)
-AUDIT COMPLET. P0-1 anti-injection. SAV. Bloc A. B1 B3 B4. C3 RGPD. FIX-LEARN. Split aria_context + security_users. Lancement Flutter.
+**Session 16/04 suite** (commits à partir de 07:08) :
+- Raccourcis éditables v2 complets (table DB, CRUD API, modale, fix Safari)
+- Sujets intégrés sidebar (topicsSidebarList, chat-topics.js v3)
+- Palette bleu roi saturé `#0057b8` appliquée (palette 6 validée)
+- display_name : migration DB, API, UI admin, logo
+- Modal Paramètres refonte (lecture auto + display_name + email + MDP + RGPD + Valider sticky)
+- Suppression compte avec validation admin (request/confirm/reject/cancel)
+- Fix réponse mail : carte propre, lookup tolérant, `\n` normalisé, UX modernisée
+- Fix Raya ne répète plus les règles après LEARN
+- Fix boîtes mail nommées (Couffrant Solar / perso)
+- Fix textarea overflow-y:hidden
+- Système signature email : logo uploadé, `_build_email_html` → `get_email_signature`, instruction system prompt
+- Cache-bust final : **v=36**
 
 ### Sessions précédentes
-13-14/04 nuit : ~50 commits. 13/04 : Connectivité 5/5. 12-13/04 : ~55 tâches. 12/04 : Refactor admin en package.
+16/04 matin, 15/04 soir+matin, 14/04 — voir historique complet dans `raya_changelog.md`.
 
-## 26. REPRISE
+## 30. REPRISE
 « Bonjour Opus. Projet Raya, Guillaume Perrin (Couffrant Solar). On se tutoie, en français, vocabulaire Terminal, concis. Lis `docs/raya_session_state.md` sur `per1gyom/couffrant-assistant` main. Reprends où on en était. »
