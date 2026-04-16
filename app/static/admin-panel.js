@@ -162,7 +162,23 @@ async function loadConnections(tenantId,idx){
     if(!conns.length){el.innerHTML='<span style="color:var(--text3)">Aucune connexion configurée.</span>';return;}
     el.innerHTML=conns.map(c=>{
       const icon=TOOL_ICONS[c.tool_type]||'🔌';
-      const statusBadge=c.status==='connected'?'<span class="badge badge-green" style="font-size:9px">connecté</span>':c.status==='expired'?'<span class="badge badge-red" style="font-size:9px">expiré</span>':'<span class="badge badge-gray" style="font-size:9px">non configuré</span>';
+      const statusBadge=c.status==='connected'?`<span class="badge badge-green" style="font-size:9px">✅ ${c.connected_email||'connecté'}</span>`:c.status==='expired'?'<span class="badge badge-red" style="font-size:9px">⚠️ expiré</span>':'<span class="badge badge-gray" style="font-size:9px">non connecté</span>';
+      // Bouton connexion OAuth selon le type
+      let oauthBtn = '';
+      if (c.status !== 'connected') {
+        if (c.tool_type === 'microsoft') {
+          oauthBtn = `<a href="/admin/connections/${tenantId}/oauth/microsoft/start?connection_id=${c.id}" class="btn btn-primary" style="padding:2px 10px;font-size:10px;text-decoration:none">🔵 Connecter Microsoft</a>`;
+        } else if (c.tool_type === 'gmail') {
+          oauthBtn = `<a href="/admin/connections/${tenantId}/oauth/gmail/start?connection_id=${c.id}" class="btn btn-accent" style="padding:2px 10px;font-size:10px;text-decoration:none">✉️ Connecter Gmail</a>`;
+        }
+      } else {
+        // Déjà connecté — proposer de reconnecter
+        if (c.tool_type === 'microsoft') {
+          oauthBtn = `<a href="/admin/connections/${tenantId}/oauth/microsoft/start?connection_id=${c.id}" class="btn btn-ghost" style="padding:2px 10px;font-size:10px;text-decoration:none">🔄 Reconnecter</a>`;
+        } else if (c.tool_type === 'gmail') {
+          oauthBtn = `<a href="/admin/connections/${tenantId}/oauth/gmail/start?connection_id=${c.id}" class="btn btn-ghost" style="padding:2px 10px;font-size:10px;text-decoration:none">🔄 Reconnecter</a>`;
+        }
+      }
       const userBadges=c.assignments.map(a=>`<span class="badge ${a.enabled?'badge-blue':'badge-gray'}" style="font-size:9px;cursor:pointer" title="${a.access_level}" onclick="unassignConn(${c.id},'${a.username}','${tenantId}',${idx})">${a.username} ✕</span>`);
       const usersInline=c.assignments.length<=5;
       const usersHtml=!c.assignments.length?'<span style="color:var(--text3);font-size:10px">aucun user assigné</span>'
@@ -170,8 +186,10 @@ async function loadConnections(tenantId,idx){
         :`<details style="display:inline"><summary style="cursor:pointer;font-size:10px;color:var(--accent)">${c.assignments.length} utilisateurs ▾</summary><div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">${userBadges.join(' ')}</div></details>`;
       return `<div style="padding:8px 12px;background:var(--bg1);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <span style="font-size:16px">${icon}</span>
           <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px;cursor:pointer;border-bottom:1px dashed var(--text3)" onclick="renameConn(${c.id},'${tenantId}',${idx},'${c.label.replace(/'/g,"\\'")}')" title="Cliquer pour renommer">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span> ${statusBadge}</div>
+          ${oauthBtn}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
           <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
         </div>

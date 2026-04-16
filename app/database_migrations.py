@@ -218,4 +218,7 @@ MIGRATIONS = [
     "ALTER TABLE email_signatures ADD COLUMN IF NOT EXISTS apply_to_emails TEXT[] DEFAULT '{}'",
     "ALTER TABLE email_signatures ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false",
     "ALTER TABLE email_signatures ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
+    # -- CONNECTEURS V2 : email + oauth_state sur tenant_connections --
+    "ALTER TABLE tenant_connections ADD COLUMN IF NOT EXISTS connected_email TEXT",
+    "ALTER TABLE tenant_connections ADD COLUMN IF NOT EXISTS oauth_state TEXT",
 ]

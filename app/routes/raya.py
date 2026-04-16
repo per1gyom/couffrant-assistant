@@ -31,7 +31,12 @@ from pydantic import BaseModel
 from app.llm_client import llm_complete, log_llm_usage
 from app.router import route_query_tier, detect_session_theme, detect_query_domains
 from app.database import get_pg_conn
-from app.token_manager import get_valid_microsoft_token
+from app.token_manager import get_valid_microsoft_token as _legacy_ms_token
+from app.connection_token_manager import get_connection_token
+
+
+def _get_ms_token(username: str) -> str | None:
+    return get_connection_token(username, "microsoft")
 from app.memory_loader import MEMORY_OK, synthesize_session
 from app.rule_engine import get_memoire_param
 from app.feedback_store import get_global_instructions
@@ -68,7 +73,7 @@ def token_status(request: Request, user: dict = Depends(require_user)):
 
     # Vérification Microsoft 365
     try:
-        token = get_valid_microsoft_token(username)
+        token = _get_ms_token(username)
         if not token:
             warnings.append({
                 "provider": "Microsoft 365",
@@ -230,7 +235,7 @@ def raya_draft_action(
     if not action or action["status"] != "pending":
         return {"ok": False, "message": "Action introuvable, déjà traitée ou expirée."}
 
-    outlook_token = get_valid_microsoft_token(username)
+    outlook_token = _get_ms_token(username)
     if not outlook_token:
         return {"ok": False, "message": "Token Microsoft manquant."}
 
@@ -298,7 +303,7 @@ def raya_confirm_action(
     action = confirm_action(action_id, username, tenant_id)
     if not action:
         return {"ok": False, "message": "Action introuvable, deja traitee ou expiree."}
-    outlook_token = get_valid_microsoft_token(username)
+    outlook_token = _get_ms_token(username)
     tools = load_user_tools(username)
     result = _execute_confirmed_action(action, outlook_token, tools)
     if result.get("ok"):

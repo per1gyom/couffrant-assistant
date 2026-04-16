@@ -1,0 +1,251 @@
+"""
+Connection Token Manager — Connecteurs V2 Phase C.
+
+get_connection_token(username, tool_type) :
+  → cherche le token dans tenant_connections (v2) via connection_assignments
+  → fallback oauth_tokens (legacy per-user) pour compatibilité ascendante
+  → refresh automatique + rechiffrement
+
+get_connection_email(username, tool_type) :
+  → retourne l'email de la connexion (connected_email sur la connexion v2
+    ou email depuis oauth_tokens/users)
+"""
+import json
+from datetime import datetime, timezone, timedelta
+from app.database import get_pg_conn
+from app.crypto import encrypt_token, decrypt_token
+from app.logging_config import get_logger
+
+logger = get_logger("raya.conn_tokens")
+
+
+# ─── RÉSOLUTION PUBLIQUE ───────────────────────────────────────────
+
+def get_connection_token(username: str, tool_type: str) -> str | None:
+    """
+    Retourne un access_token valide pour (username, tool_type).
+    Ordre : tenant_connections V2 → oauth_tokens legacy.
+    """
+    token = _get_v2_token(username, tool_type)
+    if token:
+        return token
+    # Fallback legacy
+    if tool_type == "microsoft":
+        from app.token_manager import get_valid_microsoft_token
+        return get_valid_microsoft_token(username)
+    if tool_type in ("gmail", "google"):
+        from app.token_manager import get_valid_google_token
+        return get_valid_google_token(username)
+    return None
+
+
+def get_connection_email(username: str, tool_type: str) -> str:
+    """
+    Retourne l'email associé à la connexion (boite mail) de l'utilisateur.
+    Ordre : tenant_connections V2 → oauth_tokens/users legacy.
+    """
+    email = _get_v2_email(username, tool_type)
+    if email:
+        return email
+    # Fallback legacy
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        if tool_type == "microsoft":
+            c.execute("SELECT email FROM users WHERE username=%s LIMIT 1", (username,))
+            row = c.fetchone()
+            if row and row[0] and "raya-ia.fr" not in row[0]:
+                return row[0]
+        if tool_type in ("gmail", "google"):
+            c.execute("SELECT email FROM gmail_tokens WHERE username=%s LIMIT 1", (username,))
+            row = c.fetchone()
+            if row and row[0]:
+                return row[0]
+    except Exception:
+        pass
+    finally:
+        if conn: conn.close()
+    return ""
+
+
+def get_user_tool_connections(username: str) -> dict:
+    """
+    Retourne un dict {tool_type: {token, email, connection_id, label}} 
+    pour toutes les connexions actives de l'utilisateur (v2 uniquement).
+    """
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("""
+            SELECT tc.id, tc.tool_type, tc.label, tc.credentials, tc.connected_email, tc.status
+            FROM connection_assignments ca
+            JOIN tenant_connections tc ON tc.id = ca.connection_id
+            WHERE ca.username = %s AND ca.enabled = true AND tc.status = 'connected'
+            ORDER BY tc.tool_type
+        """, (username,))
+        result = {}
+        for row in c.fetchall():
+            cid, tool_type, label, creds_raw, email, status = row
+            creds = creds_raw if isinstance(creds_raw, dict) else (json.loads(creds_raw) if creds_raw else {})
+            token = decrypt_token(creds.get("access_token", "")) if creds.get("access_token") else ""
+            result[tool_type] = {
+                "connection_id": cid,
+                "label": label,
+                "token": token,
+                "email": email or "",
+                "status": status,
+            }
+        return result
+    except Exception as e:
+        logger.warning("[ConnTokens] get_user_tool_connections error: %s", e)
+        return {}
+    finally:
+        if conn: conn.close()
+
+
+# ─── STOCKAGE OAUTH (appelé depuis auth.py) ────────────────────────
+
+def save_connection_oauth_token(
+    connection_id: int,
+    access_token: str,
+    refresh_token: str,
+    email: str = "",
+    expires_in: int = 3600,
+) -> bool:
+    """Sauvegarde un token OAuth dans tenant_connections.credentials."""
+    expires_at = (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat()
+    creds = {
+        "access_token": encrypt_token(access_token),
+        "refresh_token": encrypt_token(refresh_token),
+        "expires_at": expires_at,
+    }
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("""
+            UPDATE tenant_connections
+            SET credentials = %s,
+                connected_email = %s,
+                status = 'connected',
+                updated_at = NOW()
+            WHERE id = %s
+        """, (json.dumps(creds), email or None, connection_id))
+        conn.commit()
+        logger.info("[ConnTokens] Saved OAuth token for connection #%s (%s)", connection_id, email)
+        return True
+    except Exception as e:
+        logger.error("[ConnTokens] Save error for #%s: %s", connection_id, e)
+        return False
+    finally:
+        if conn: conn.close()
+
+
+# ─── INTERNES ──────────────────────────────────────────────────────
+
+def _get_v2_token(username: str, tool_type: str) -> str | None:
+    """Cherche et rafraîchit le token V2 pour (username, tool_type)."""
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("""
+            SELECT tc.id, tc.credentials, tc.tool_type
+            FROM connection_assignments ca
+            JOIN tenant_connections tc ON tc.id = ca.connection_id
+            WHERE ca.username = %s AND ca.enabled = true
+              AND tc.tool_type = %s AND tc.status = 'connected'
+            ORDER BY tc.updated_at DESC LIMIT 1
+        """, (username, tool_type))
+        row = c.fetchone()
+        if not row:
+            return None
+        cid, creds_raw, _ = row
+        creds = creds_raw if isinstance(creds_raw, dict) else (json.loads(creds_raw) if creds_raw else {})
+        if not creds:
+            return None
+        access_enc = creds.get("access_token", "")
+        refresh_enc = creds.get("refresh_token", "")
+        expires_at_str = creds.get("expires_at", "")
+        access_token = decrypt_token(access_enc) if access_enc else ""
+        refresh_token = decrypt_token(refresh_enc) if refresh_enc else ""
+        # Vérifier expiry
+        now = datetime.now(timezone.utc)
+        if expires_at_str:
+            try:
+                expires_at = datetime.fromisoformat(expires_at_str)
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                if expires_at > now + timedelta(minutes=5):
+                    return access_token  # Encore valide
+            except Exception:
+                pass
+        # Refresh nécessaire
+        if not refresh_token:
+            return access_token
+        new_token = _refresh_v2_token(cid, tool_type, refresh_token, creds)
+        return new_token or access_token
+    except Exception as e:
+        logger.warning("[ConnTokens] _get_v2_token error (%s/%s): %s", username, tool_type, e)
+        return None
+    finally:
+        if conn: conn.close()
+
+
+def _get_v2_email(username: str, tool_type: str) -> str:
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("""
+            SELECT tc.connected_email
+            FROM connection_assignments ca
+            JOIN tenant_connections tc ON tc.id = ca.connection_id
+            WHERE ca.username = %s AND ca.enabled = true
+              AND tc.tool_type = %s AND tc.status = 'connected'
+            ORDER BY tc.updated_at DESC LIMIT 1
+        """, (username, tool_type))
+        row = c.fetchone()
+        return row[0] if row and row[0] else ""
+    except Exception:
+        return ""
+    finally:
+        if conn: conn.close()
+
+
+def _refresh_v2_token(connection_id: int, tool_type: str, refresh_token: str, creds: dict) -> str | None:
+    """Rafraîchit le token et met à jour tenant_connections.credentials."""
+    try:
+        if tool_type == "microsoft":
+            from app.auth import refresh_microsoft_token
+            result = refresh_microsoft_token(refresh_token)
+            if not result or "access_token" not in result:
+                return None
+            new_access = result["access_token"]
+            new_refresh = result.get("refresh_token", refresh_token)
+            expires_in = result.get("expires_in", 3600)
+        elif tool_type in ("gmail", "google"):
+            from app.connectors.gmail_connector import refresh_gmail_token
+            new_access = refresh_gmail_token(refresh_token)
+            new_refresh = refresh_token
+            expires_in = 3600
+        else:
+            return None
+
+        expires_at = (datetime.now(timezone.utc) + timedelta(seconds=expires_in)).isoformat()
+        new_creds = {**creds,
+                     "access_token": encrypt_token(new_access),
+                     "refresh_token": encrypt_token(new_refresh),
+                     "expires_at": expires_at}
+        conn = None
+        try:
+            conn = get_pg_conn(); c = conn.cursor()
+            c.execute(
+                "UPDATE tenant_connections SET credentials=%s, updated_at=NOW() WHERE id=%s",
+                (json.dumps(new_creds), connection_id)
+            )
+            conn.commit()
+        finally:
+            if conn: conn.close()
+        logger.info("[ConnTokens] Refreshed token for connection #%s", connection_id)
+        return new_access
+    except Exception as e:
+        logger.error("[ConnTokens] Refresh error for #%s: %s", connection_id, e)
+        return None

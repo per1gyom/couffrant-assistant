@@ -7,7 +7,13 @@ from fastapi import Request
 from app.llm_client import llm_complete,log_llm_usage
 from app.router import route_query_tier,detect_session_theme,detect_query_domains
 from app.database import get_pg_conn
-from app.token_manager import get_valid_microsoft_token
+from app.token_manager import get_valid_microsoft_token as _legacy_ms_token
+from app.connection_token_manager import get_connection_token
+
+
+def _get_microsoft_token(username: str) -> str | None:
+    """Résout le token Microsoft — V2 tenant_connections en priorité, fallback legacy."""
+    return get_connection_token(username, "microsoft")
 from app.memory_loader import MEMORY_OK,synthesize_session
 from app.rule_engine import get_memoire_param
 from app.feedback_store import get_global_instructions
@@ -46,7 +52,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     tools = load_user_tools(username)
     db_ctx = load_db_context(username)
     instructions = get_global_instructions(tenant_id=tenant_id)
-    outlook_token = get_valid_microsoft_token(username)
+    outlook_token = _get_microsoft_token(username)
 
     # 5D-2f : charger les tenants de l'utilisateur
     user_tenants = get_user_tenants(username)

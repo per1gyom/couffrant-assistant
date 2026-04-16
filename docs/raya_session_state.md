@@ -134,10 +134,24 @@ App iOS fonctionnelle sur simulateur. Ne pas toucher au dossier `flutter/`.
 
 ## 27. ROADMAP
 
-### Priorité immédiate
+### Sécurité — cloisonnement tenants (PRIORITÉ HAUTE)
+- [ ] **`list_users()` non filtré** — retourne tous les users de tous les tenants. Créer `list_users_in_tenant(tenant_id)` et l'utiliser dans `/admin/users` pour les `tenant_admin`
+- [ ] **Panel admin accessible sans garde** — `/admin/panel` servi à tout user connecté. Ajouter vérification `require_tenant_admin` à minima sur la route
+- [ ] **`GET /admin/users`** — ajouter filtre tenant si scope = tenant_admin (super_admin voit tout, tenant_admin ne voit que son tenant)
+- [ ] **`GET /admin/tenants-overview`** — vérifier que tenant_admin ne voit que son propre tenant
+- [ ] Audit complet des routes `/admin/*` pour s'assurer qu'elles utilisent `require_admin` ou `require_tenant_admin` + `assert_same_tenant` selon le cas
 - [ ] **Connecteurs v2 Phase C** — `get_user_connections()` dans `_raya_core()`, remplace `load_user_tools()`
 - [ ] **Panel admin — onglet Signatures par utilisateur** : depuis la fiche admin d'un utilisateur, pouvoir éditer ses signatures selon ses boîtes mail connectées (même éditeur WYSIWYG que côté user)
 - [ ] Investiguer bug reports #1 et #2 (archivage mail 404)
+
+### À faire avant commercialisation
+- [ ] **Google OAuth — passer en mode "Externe" + vérification Google**
+  - Actuellement : app OAuth projet ELYO (elyo-493519), org raya-ia.fr
+  - À faire : changer l'audience de "Interne" à "Externe" dans Google Cloud Console → APIs & Services → OAuth consent screen
+  - Ajouter test users dans "Audience" pour les bêta-testeurs (tokens 6 mois)
+  - Soumettre demande de vérification Google (formulaire + vidéo démo + politique de confidentialité) pour tokens permanents tous utilisateurs
+  - Le scope concerné : `https://mail.google.com/` (classé "sensible" par Google, vérification obligatoire pour production publique)
+  - Chaque nouveau client devra reconnecter Gmail après la bascule
 - [ ] Tester les 3 niveaux d'accès complets (super admin / tenant admin / user)
 
 ### Commercial (Bloc C)
@@ -183,3 +197,23 @@ App iOS fonctionnelle sur simulateur. Ne pas toucher au dossier `flutter/`.
 
 ## 30. REPRISE
 « Bonjour Opus. Projet Raya, Guillaume Perrin (Couffrant Solar). On se tutoie, en français, vocabulaire Terminal, concis. Lis `docs/raya_session_state.md` sur `per1gyom/couffrant-assistant` main. Reprends où on en était. »
+
+## Connecteurs V2 — Architecture cible (PRIORITÉ HAUTE)
+**Principe** : un token par compte connecté, stocké dans `tenant_connections.credentials`, invisible entre tenants.
+
+**Tables déjà existantes** :
+- `tenant_connections` (id, tenant_id, tool_type, label, credentials JSONB, status)
+- `connection_assignments` (connection_id, username, access_level, enabled)
+
+**À implémenter** :
+- Route `/admin/connections/{tenant_id}/oauth/gmail` — OAuth depuis panel super admin → token dans `tenant_connections.credentials`
+- Route `/admin/connections/{tenant_id}/oauth/microsoft` — idem Microsoft
+- `_raya_core()` : lire depuis `connection_assignments → tenant_connections` au lieu de `gmail_tokens`/`oauth_tokens`
+- Isolation : tenant_admin → uniquement `/tenant/connections` (son tenant)
+- Migration : déprécier `gmail_tokens` et `oauth_tokens` au profit de `tenant_connections`
+- Panel super admin : UI créer/assigner connexions par tenant
+
+**Règles métier** :
+- Seul le super admin crée les connexions OAuth
+- Le tenant_admin assigne aux utilisateurs
+- Connexions d'un tenant invisibles pour les autres
