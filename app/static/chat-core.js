@@ -85,8 +85,8 @@ function showToast(msg, type='ok', duration=3000) {
 function toggleAutoSpeak() {
   autoSpeak = !autoSpeak;
   const btn = document.getElementById('autoSpeakBtn');
-  if (autoSpeak) { btn.classList.add('active'); btn.textContent='🔊 Auto'; }
-  else { btn.classList.remove('active'); btn.textContent='🔇 Muet'; }
+  if (autoSpeak) { btn.classList.add('active'); btn.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/></svg> Lecture auto'; }
+  else { btn.classList.remove('active'); btn.innerHTML='<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></svg> Muet'; }
 }
 
 // --- SCROLL ---
