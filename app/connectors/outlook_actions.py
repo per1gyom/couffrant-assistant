@@ -98,7 +98,16 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
             return {"status": "ok", "message": f"Mail envoye a {params['to_email']}."}
         except Exception as e: return {"status": "error", "message": f"Echec envoi : {str(e)}"}
 
-    if action == "create_reply_draft":
+    if action == "create_draft_mail":
+        try:
+            draft = _graph_post(token, "/me/messages", {
+                "subject": params.get("subject", ""),
+                "body": {"contentType": "HTML", "content": _build_email_html(params.get("body", ""))},
+                "toRecipients": [{"emailAddress": {"address": params["to_email"]}}],
+            })
+            return {"status": "ok", "draft_id": draft.get("id"), "message": f"Brouillon cree pour {params['to_email']}."}
+        except Exception as e:
+            return {"status": "error", "message": f"Echec creation brouillon : {str(e)}"}
         draft = _graph_post(token, f"/me/messages/{params['message_id']}/createReply", {})
         draft_id = draft.get("id")
         if not draft_id: return {"status": "error", "message": "Impossible de creer le brouillon."}
