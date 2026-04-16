@@ -38,7 +38,7 @@ async function loadUserInfo() {
   try {
     const d = await (await fetch('/profile')).json();
     const scope = d.scope || '';
-    const name = d.username || d.email || '';
+    const name = d.display_name || d.username || d.email || '';
     // Nom dans le footer (à côté des 3 points)
     const userEl = document.getElementById('headerUser');
     if (userEl) userEl.textContent = name;
