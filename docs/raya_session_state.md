@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 16/04/2026 22h00** — Opus
+**Dernière mise à jour : 17/04/2026 03h00** — Opus
 
 ---
 
@@ -173,8 +173,8 @@ App iOS fonctionnelle sur simulateur (login, chat, TTS, feedback). Specs dans `d
 
 ## 25. HISTORIQUE
 
-### Session 16/04/2026 (~25 commits)
-**FIX-CRITICAL package admin/** : Routes suspension/direct-actions/seed mortes en prod depuis le 12/04 (package shadow), injectées dans `super_admin.py`. **FIX-CRITICAL OAuth** : fallback `"guillaume"` supprimé (Microsoft + Gmail). **Migration DB** : `suspended`+`suspended_reason` ajoutées en prod. **Fix micro** : `rec.stop()` + `stopListening()` dans `sendMessage()` + input vidé après envoi. **Suspension** : feedback alerte ciblée + cartes restent ouvertes + déconnexion session immédiate sur `/chat`. **Actions directes** : retirées du super admin, per-user toggle cycle hérité/ON/OFF. **Panel admin** : `require_tenant_admin` + drawer filtré + 2 boutons (`🔑 Super Admin` / `⚙️ Ma société` avec `?view=company`) + re-auth MDP 10 min. **Cloisonnement SharePoint** : fallbacks "Commun/Photovoltaïque" supprimés, vide par défaut. **UX** : onglet Utilisateurs supprimé (doublon) + barre recherche société/user. **Outils 🔧** : bouton par user, panneau inline, add/toggle/remove/level, endpoints tenant POST/DELETE. **Connecteurs v2** : spec validée, Phase A (tables + CRUD + migration + endpoints) + Phase B (UI dans fiche société, créer/supprimer/assigner/révoquer, dropdown users Tous/Aucun, rename labels, >5 users déroulant, panneau reste ouvert).
+### Session 16-17/04/2026 (~40 commits)
+**Connecteurs v2 Phase A+B** : tables `tenant_connections`+`connection_assignments`, CRUD `app/connections.py`, 14 endpoints, migration 4 connexions Couffrant Solar, UI panel admin (créer/supprimer/renommer/assigner), dropdown users Tous/Aucun, >5 users déroulant, panneau reste ouvert. **Fix micro** : `stopListening()` dans sendMessage + input vidé. **Fix vitesse élocution** : speak_speed en champ JSON séparé. **Timeout silence** : 3s→10s. **Prompt** : codes techniques interdits d'affichage + erreurs user-friendly. **REDESIGN COMPLET** : Inter font, icônes SVG Lucide (tous les emojis remplacés), palette indigo, markdown tables+code dans bulles, réponses Raya pleine page (pas de bulle), zone élargie 1100px, avatar masqué. **Layout sidebar** : header supprimé, sidebar gauche (logo+mails+sujets+raccourcis déroulants), menu ⋮ 3 points en bas sidebar, sidebar repliable avec bouton expand. **Input** : compact, auto-scroll dictée, flottant transparent. **SW fix** : service worker désactivé (cause racine des bugs d'affichage au refresh), anti-cache double couche (unregister+purge+reload auto). **Raccourcis** : pastilles colorées, fermés par défaut, boutons SVG edit/check.
 
 ### Session 15/04/2026 soir (~15 commits)
 8 fichiers morts supprimés. PWA Topics (bouton 🔖 + panneau latéral). Split CSS + admin_panel.html. Split Python batch final (13 splits Sonnet + 6 hotfixes Opus). Seeding 8 profils + endpoint seed-user. Refonte panel admin (SIRET, adresse, ID auto, double confirmation, bouton collaborateur). Cloisonnement Drive. Suspension comptes. Actions directes on/off. FIX-CRITICAL 16 décorateurs admin_endpoints.py.
