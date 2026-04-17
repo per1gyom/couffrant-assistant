@@ -179,7 +179,21 @@ retrieve_tool_knowledge(query, tenant_id)
 - [ ] Index documents Drive (résumés des fichiers)
 - [ ] Graphe de contacts (qui contacte qui, fréquence, sujets)
 - [ ] Vocabulaire métier (termes extraits des conversations)
-- [ ] Blueprints connecteurs (templates réutilisables)
+- [ ] Blueprints connecteurs (templates réutilisables Odoo, Salesforce...)
+
+### Roadmap proactivité (VISION PRIORITAIRE)
+Principe : Raya ne doit PAS attendre qu'on l'interroge. Elle analyse en continu
+et alerte quand c'est pertinent. Elle croise TOUTES ses sources à chaque événement.
+
+Cas cible : mail de SARL DES MOINES → croise Odoo (facture 81k€) + Teams (échanges)
++ Drive (devis) → alerte Guillaume + prévient Arlène automatiquement.
+
+Architecture : ÉVÉNEMENT → ENRICHISSEMENT CROSS-SOURCE (RAG) → ÉVALUATION (règles) → ACTION
+
+Canaux d'alerte : chat, WhatsApp, app mobile (push), mail proactif.
+Règles utilisateur : "si facture impayée > 10k€ + mail paiement → préviens Arlène"
+
+NOTE DEV : /admin/reset-history est DEV ONLY — en production, mémoire préservée.
 
 ---
 
