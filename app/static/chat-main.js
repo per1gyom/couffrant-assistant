@@ -185,6 +185,22 @@ async function sendMessage() {
       signal: _abortController.signal,
     });
     const data = await response.json(); loading.remove();
+    // Anchor anti-sursaut : après loading.remove() la hauteur du DOM change,
+    // ce qui fait visuellement remonter/disparaître la bulle user. On re-verrouille
+    // la position de userMsgRow en mode 'instant' (pas smooth) pour que ce soit
+    // imperceptible. Appelé aussi après addMessage plus bas.
+    const _anchorToQuestion = () => {
+      try {
+        if (!messagesEl || !userMsgRow) return;
+        const rowRect = userMsgRow.getBoundingClientRect();
+        const containerRect = messagesEl.getBoundingClientRect();
+        const delta = rowRect.top - containerRect.top - 12;
+        if (Math.abs(delta) > 2) {
+          messagesEl.scrollTo({ top: messagesEl.scrollTop + delta, behavior: 'instant' });
+        }
+      } catch(_) {}
+    };
+    _anchorToQuestion();
     if (data.answer) {
       if (data.speak_speed) { setSpeakSpeed(data.speak_speed); }
     }
@@ -197,10 +213,13 @@ async function sendMessage() {
       errorRow.classList.add('raya-error-transient');
       showToast('Raya met plus de temps que prévu, je surveille sa réponse…', 'info', 4000);
       _pollGhostResponse(text || (fileSnapshot ? 'Analyse ce fichier.' : ''), errorRow);
+      requestAnimationFrame(_anchorToQuestion);
     } else if (data.is_error) {
       addMessage(data.answer, 'raya');
+      requestAnimationFrame(_anchorToQuestion);
     } else {
       const msgRow = addMessage(data.answer,'raya',null,data.aria_memory_id||null);
+      requestAnimationFrame(_anchorToQuestion);
       if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'), true);
       if (data.ask_choice) renderAskChoice(data.ask_choice);
       if (data.actions && data.actions.length > 0) {
