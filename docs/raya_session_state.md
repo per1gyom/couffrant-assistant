@@ -172,6 +172,7 @@ retrieve_tool_knowledge(query, tenant_id)
 ### Routes admin
 - `POST /admin/discover/{tenant_id}/odoo` → lance la découverte
 - `GET /admin/discovery-status/{tenant_id}` → état de la découverte
+- `GET /admin/reset-history/{username}` → archive l'historique conversation (DEV ONLY — à supprimer en production, la mémoire continue doit être préservée)
 
 ### Roadmap connaissance vectorisée
 - [x] Schémas Odoo (auto-découverte)

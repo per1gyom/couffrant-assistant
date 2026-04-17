@@ -355,3 +355,25 @@ def admin_reject_delete(
     finally:
         if conn:
             conn.close()
+
+
+
+@router.api_route("/admin/reset-history/{target}", methods=["GET", "POST"])
+def admin_reset_history(
+    request: Request,
+    target: str,
+    _: dict = Depends(require_admin),
+):
+    """Archive l'historique de conversation d'un utilisateur (reset sans suppression)."""
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("UPDATE aria_memory SET archived = true WHERE username = %s AND archived = false", (target,))
+        count = c.rowcount
+        conn.commit()
+        return {"status": "ok", "archived": count, "message": f"{count} message(s) archivé(s) pour {target}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:200]}
+    finally:
+        if conn: conn.close()

@@ -42,7 +42,7 @@ def load_db_context(username: str) -> dict:
         columns = [desc[0] for desc in c.description]
         mails_from_db = [dict(zip(columns, row)) for row in c.fetchall()]
 
-        c.execute("SELECT user_input, aria_response FROM aria_memory WHERE username = %s ORDER BY id DESC LIMIT 30",
+        c.execute("SELECT user_input, aria_response FROM aria_memory WHERE username = %s AND archived = false ORDER BY id DESC LIMIT 30",
                   (username,))
         columns = [desc[0] for desc in c.description]
         history = [dict(zip(columns, row)) for row in c.fetchall()]
