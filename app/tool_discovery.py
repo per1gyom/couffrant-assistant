@@ -18,8 +18,9 @@ logger = get_logger("raya.discovery")
 
 
 # ─── MODÈLES ODOO PERTINENTS ─────────────────────────────────────
-# On ne vectorise pas les 500+ modèles techniques d'Odoo,
-# seulement ceux qui ont du sens business pour un dirigeant.
+# Liste prioritaire (gros ROI, toujours indexés en premier).
+# Elle est complétée dynamiquement par _discover_relevant_odoo_models() qui
+# détecte aussi les modules métier installés (planning, mrp, hr.leave...).
 ODOO_RELEVANT_MODELS = [
     "res.partner", "res.company", "res.users",
     "sale.order", "sale.order.line",
@@ -34,6 +35,55 @@ ODOO_RELEVANT_MODELS = [
     "mail.message",
 ]
 
+# Préfixes de modèles Odoo toujours exclus (techniques, jamais business)
+_ODOO_EXCLUDED_PREFIXES = (
+    "ir.", "base.", "res.config", "res.partner.bank", "res.groups",
+    "bus.", "mail.template", "mail.channel", "mail.activity.type",
+    "web.", "website.", "digest.", "auth_", "l10n_", "account.tax",
+    "report.", "resource.", "decimal.precision", "analytic.",
+)
+
+# Modules métier importants (ajoutés s'ils sont installés côté Odoo).
+# Le critère : "présent et a au moins un enregistrement".
+_ODOO_EXTRA_CANDIDATES = [
+    "planning.slot", "planning.planning", "planning.role",
+    "hr.leave", "hr.leave.type", "hr.attendance",
+    "mrp.production", "mrp.bom",
+    "maintenance.request", "maintenance.equipment",
+    "fleet.vehicle",
+    "helpdesk.ticket",
+    "sign.request", "documents.document",
+    "pos.order",
+]
+
+
+def _discover_relevant_odoo_models() -> list[str]:
+    """
+    Liste les modèles Odoo business pertinents, dynamiquement.
+    Combine :
+      - ODOO_RELEVANT_MODELS (priorité)
+      - _ODOO_EXTRA_CANDIDATES filtrés sur présence réelle (ir.model)
+    Permet de capter planning.slot et autres modules métier sans hardcode.
+    """
+    from app.connectors.odoo_connector import odoo_call
+    models = list(ODOO_RELEVANT_MODELS)
+    try:
+        # Vérifier la présence des candidats supplémentaires dans ir.model
+        existing = odoo_call(
+            model="ir.model", method="search_read",
+            kwargs={
+                "domain": [["model", "in", _ODOO_EXTRA_CANDIDATES]],
+                "fields": ["model"],
+                "limit": len(_ODOO_EXTRA_CANDIDATES),
+            }
+        )
+        for m in (existing or []):
+            if m["model"] not in models:
+                models.append(m["model"])
+    except Exception as e:
+        logger.warning("[Discovery] Détection modèles extras échouée : %s", e)
+    return models
+
 
 def discover_odoo(tenant_id: str, connection_id: int = None) -> dict:
     """
@@ -45,12 +95,15 @@ def discover_odoo(tenant_id: str, connection_id: int = None) -> dict:
     discovered = 0
     errors = []
 
+    # Liste dynamique : ODOO_RELEVANT_MODELS + modules métier installés détectés
+    models_to_explore = _discover_relevant_odoo_models()
+
     # 1. Lister les modèles accessibles
     try:
         all_models = odoo_call(
             model="ir.model", method="search_read",
             kwargs={
-                "domain": [["model", "in", ODOO_RELEVANT_MODELS]],
+                "domain": [["model", "in", models_to_explore]],
                 "fields": ["model", "name", "info"],
                 "limit": 100,
             }
@@ -100,7 +153,7 @@ def discover_odoo(tenant_id: str, connection_id: int = None) -> dict:
             key_fields = [f"{v['label']} ({fname})" for fname, v in useful_fields.items()
                          if v.get("required") or fname in ("name", "email", "phone",
                          "amount_total", "state", "date", "partner_id", "user_id")][:15]
-            rel_targets = list(set(r["target"] for r in relationships if r["target"] in ODOO_RELEVANT_MODELS))
+            rel_targets = list(set(r["target"] for r in relationships if r["target"] in models_to_explore))
 
             description = (
                 f"{display} ({model_name}) dans Odoo. "

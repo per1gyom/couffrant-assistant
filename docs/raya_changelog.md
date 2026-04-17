@@ -4,6 +4,53 @@
 
 ---
 
+## Session 17/04/2026 soir — Chat solide + Auto-découverte élargie + Architecture capabilities
+
+### Fixes chat (solidification)
+- `13ef8a5` — Cartes mail insérées au bon endroit : colonne `conversation_id`
+  exposée par `pending_actions.get_pending` + `chat_history`, côté frontend
+  `addMessage` pose `data-aria-memory-id` et `appendPendingActionToChat`
+  utilise `insertAdjacentElement('afterend')` avec smart fallback.
+- `5e63167` — Chat solide :
+  - Backend timeout 30 → 90 s (résout le bug fantôme Opus 4.7 + 8192 tokens)
+  - Polling côté client si timeout : surveille `/chat/history` 90 s et
+    remplace l'erreur par la vraie réponse si elle arrive.
+  - UX : scroll auto, question remonte en haut du viewport dès que Raya réfléchit.
+  - Nouveau loader : sigle ✦ pulsé + texte italique rotatif (6 phrases).
+  - Timezone fix : `parseServerTimestamp` + toLocaleString Europe/Paris.
+  - Flag `is_error` + `error_type` sur les réponses d'erreur.
+
+### Tests automatisés (doc)
+- `51e24c8` — Création `docs/raya_test_protocol.md` : 5 batteries de tests
+  via Claude in Chrome (CHAT-BASELINE, CARTES-MAIL, GRAPHE, ODOO-ACTIONS,
+  UX-SCROLL) avec règles validation humaine + rate limit respecté.
+
+### Scheduler
+- `e041e5d` — Ajout du wrapper `_job_confidence_decay` manquant (import
+  échoué silencieusement au démarrage du scheduler Railway).
+
+### Auto-découverte élargie Drive / Calendar / Contacts
+- `d3bb5cf` — 3 nouvelles fonctions `discover_*` dans `tool_discovery.py` +
+  3 `populate_from_*` dans `entity_graph.py`. Route admin
+  `/admin/discover/{tenant_id}/{tool_type}` étendue à drive / calendar /
+  contacts. Bouton 🔍 Découvrir étendu aux connexions Microsoft / Gmail
+  (enchaîne drive → calendar → contacts automatiquement).
+- Détection dynamique des modèles Odoo (planning.slot, hr.leave, etc.)
+  au lieu de la liste hardcodée.
+
+### Architecture — Matrice de capabilities (doc de design)
+- Nouveau `docs/raya_capabilities_matrix.md` — socle d'autorisation à
+  3 niveaux (default → admin → user) avec verrouillage, stratégie prompt
+  "ultra-minimaliste actionnable" (Stratégie 4), tests de non-régression,
+  plan d'implémentation par étapes A-F.
+- Mise à jour `session_state.md` : section CONTEXTE MÉTIER COUFFRANT SOLAR
+  (OpenFire vs Odoo, ressources planning, couleurs chantiers) +
+  philosophie découverte 360°.
+- Chantiers A (`populate` planning Odoo) + B (instruction prompt) + C
+  (calendar 360°) en attente du socle capabilities.
+
+---
+
 ## Session 18/04/2026 — Refonte intelligence + Graphe de relations (~20 commits)
 
 ### Refonte intelligence Raya

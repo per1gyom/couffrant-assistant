@@ -45,6 +45,59 @@ LLM-agnostic, tools-agnostic, channel-agnostic, provider-agnostic.
 
 ---
 
+## 🏢 CONTEXTE MÉTIER — COUFFRANT SOLAR
+
+### OpenFire ≠ Odoo (mais Odoo en backend)
+**OpenFire = CRM** utilisé par Guillaume et son équipe (devis, factures, planning
+d'intervention). OpenFire est construit SUR la plateforme Odoo → le backend
+technique est accessible via l'API Odoo standard (xmlrpc / JSON-RPC).
+
+**Vocabulaire à mapper** quand Guillaume parle :
+- "OpenFire" / "planning chantier" / "intervention" → `calendar.event` + `planning.slot` dans Odoo
+- "devis OpenFire" → `sale.order` dans Odoo
+- "facture OpenFire" → `account.move` dans Odoo
+- "client OpenFire" → `res.partner` dans Odoo
+
+### Ressources planning (users Odoo = équipe Couffrant Solar)
+Arlène, Aurélien Le Maistre, Benoît, Guillaume Perrin, Jérôme Couffrant,
+Pierre Couffrant, Sabrina. Chaque événement calendrier a un `user_id` qui
+pointe vers une de ces personnes, et peut avoir des `partner_ids` (clients).
+
+**Règle de ventilation** : quand l'utilisateur demande un planning, Raya doit
+toujours ventiler par **ressource × jour**, pas juste par événement.
+
+### Code couleur planning (module Odoo "Planning d'intervention")
+- Vert = DIVERS / maintenance / réunion
+- Rose = chantiers longs multi-jours / vacances
+- Jaune = chantiers couverture
+- Bleu = visites PV (première visite, supervision)
+
+### Logiciels techniques utilisés par Guillaume (hors Raya)
+- **Vesta.co** : simulation photovoltaïque (dimensionnement)
+- **Archelios / Archelios Calc** : simulation et calculs PV
+Ces outils ne sont pas encore connectés à Raya. Intérêt futur : lire les
+rapports PDF pour extraire automatiquement puissance, production estimée,
+nombre de panneaux, onduleur → pousser dans Odoo sans ressaisie manuelle.
+
+---
+
+## 🧭 PHILOSOPHIE DÉCOUVERTE 360°
+
+**Principe** : à la découverte d'un outil, on explore tout ce que l'API
+expose (pas une liste hardcodée), on peuple un catalogue de capabilities,
+puis on filtre/autorise ensuite via la matrice de permissions.
+
+Avantages :
+- Aucune fonctionnalité oubliée par négligence de code.
+- Nouveaux modules Odoo (ex: `planning.slot`, `mrp.production`, `hr.leave`)
+  détectés automatiquement s'ils sont installés.
+- Rapport transparent : Raya peut dire *"J'ai trouvé X capabilities,
+  en voici N bloquées par ton admin, M désactivées par toi"*.
+
+Voir `docs/raya_capabilities_matrix.md` pour le design complet.
+
+---
+
 ## ARCHITECTURE CONNECTEURS — SYSTÈME UNIFIÉ ✅
 
 ### Pattern universel (mail, drive, messagerie)
@@ -317,19 +370,32 @@ app/
 
 ## 🔮 Évolutions optionnelles (nice-to-have, non bloquantes)
 
+### En attente du socle "Matrice de capabilities"
+Ces chantiers ont été pré-designés mais DÉPENDENT de l'implémentation de la
+matrice (voir `docs/raya_capabilities_matrix.md`) — à faire après le socle.
+
+- **A — Enrichir `populate_from_odoo` avec planning cross-ressource** :
+  traiter `calendar.event` + `planning.slot` pour créer des liens
+  `entity(user_id)` ET `entity(partner_id)` → `event`. Ça permet à Raya de
+  répondre "qu'est-ce qu'Aurélien fait cette semaine ?" en un lookup graphe.
+  NB : la détection dynamique des modèles Odoo (`planning.slot` inclus) a
+  déjà été ajoutée à `tool_discovery.py`.
+- **B — Instruction prompt "ventile par ressource"** : ajouter dans CORE_RULES
+  que tout planning doit être présenté par ressource × jour, pas juste par
+  événement (éviter les soupes de chantiers sans savoir qui fait quoi).
+- **C — Auto-découverte calendrier 360°** : explorer TOUS les calendriers
+  accessibles (pas seulement primary), capturer tous les champs utiles
+  (user_id, partner_ids, categories, recurrence, responseStatus).
+
 ### UX chat
-- **Loader contextuel** : détecter les mots-clés du prompt utilisateur pour afficher
-  un texte italique adapté pendant la réflexion (ex: "Interrogation Odoo…" si la
-  question parle de devis, "Lecture de tes mails…" si elle parle de mails,
-  "Croisement de tes sources…" pour les synthèses cross-source).
-  Code à modifier : `addLoading()` dans `chat-messages.js`. Ajouter un paramètre
-  `queryHints` passé depuis `sendMessage()` après analyse simple du texte.
+- **Loader contextuel** : détecter les mots-clés du prompt pour afficher
+  un texte italique adapté pendant la réflexion (ex: "Interrogation Odoo…"
+  si la question parle de devis). Code à modifier : `addLoading()` dans
+  `chat-messages.js`, ajouter un paramètre `queryHints` passé depuis
+  `sendMessage()` après analyse simple du texte.
 
 ### Tests automatisés
 - Protocole de tests via Claude in Chrome → voir `docs/raya_test_protocol.md`.
-  Permet à Claude de piloter le navigateur et d'exécuter des batteries de tests
-  (CHAT-BASELINE, CARTES-MAIL, GRAPHE, ODOO-ACTIONS, UX-SCROLL) pour détecter
-  les régressions après chaque déploiement. Validation humaine pour actions sensibles.
 
 ---
 
@@ -339,5 +405,6 @@ app/
 Bonjour Claude. Projet Raya, Guillaume Perrin (Couffrant Solar).
 Tutoiement, français, Terminal, concis.
 Lis docs/raya_session_state.md sur per1gyom/couffrant-assistant main.
-Lis aussi docs/raya_changelog.md et docs/raya_test_protocol.md si pertinent.
+Lis aussi docs/raya_changelog.md, docs/raya_test_protocol.md et
+docs/raya_capabilities_matrix.md si pertinent pour la session.
 ```
