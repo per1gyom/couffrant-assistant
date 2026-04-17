@@ -332,9 +332,14 @@ button:hover{{background:#4f46e5}}
 @router.get("/admin/panel", response_class=HTMLResponse)
 def admin_panel(request: Request):
     try:
-        require_tenant_admin(request)
+        require_admin(request)
     except HTTPException:
-        return RedirectResponse("/login-app")
+        # Si tenant_admin, rediriger vers son panel dédié
+        try:
+            require_tenant_admin(request)
+            return RedirectResponse("/tenant/panel")
+        except HTTPException:
+            return RedirectResponse("/login-app")
     with open("app/templates/admin_panel.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 

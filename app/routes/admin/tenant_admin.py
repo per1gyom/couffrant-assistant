@@ -9,6 +9,7 @@ Endpoints tenant_admin — gestion des utilisateurs du tenant.
   GET    /tenant/rules
 """
 from fastapi import APIRouter, Request, Body, Depends, HTTPException
+from fastapi.responses import HTMLResponse
 
 from app.database import get_pg_conn
 from app.app_security import (
@@ -196,4 +197,15 @@ def tenant_rules(request: Request, user: dict = Depends(require_tenant_admin)):
         if conn: conn.close()
 
 
+# ─── PANEL TENANT ───
+
+@router.get("/tenant/panel", response_class=HTMLResponse)
+def tenant_panel(request: Request):
+    try:
+        require_tenant_admin(request)
+    except HTTPException:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse("/login-app")
+    with open("app/templates/tenant_panel.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
 
