@@ -222,6 +222,26 @@ def build_system_prompt(
     except Exception:
         pass
 
+    # VISION STRATEGIQUE — cap directeur du projet Raya pour Guillaume uniquement.
+    # Document rédigé avec Guillaume (cf. docs/raya_vision_guillaume.md) pour
+    # que Raya ait conscience permanente de son rôle, de l'équipe, de
+    # l'écosystème patrimonial et des priorités. Cloisonné strictement :
+    # aucun autre utilisateur du tenant ne doit voir ces informations
+    # (elles contiennent les sociétés privées de Guillaume).
+    vision_block = ""
+    if (username or "").lower() == "guillaume":
+        try:
+            import os
+            _vision_path = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                "docs", "raya_vision_guillaume.md"
+            )
+            if os.path.exists(_vision_path):
+                with open(_vision_path, "r", encoding="utf-8") as _f:
+                    vision_block = _f.read()
+        except Exception:
+            pass
+
     if conv_context and db_ctx.get("history"):
         # Dédupliquer : retirer les blocs RAG dont le texte correspond déjà
         # à une conversation récente (comparaison sur l'input complet normalisé).
@@ -320,6 +340,7 @@ de la recherche web, et de l'historique complet de tes echanges avec {display_na
 Utilise toute ton intelligence naturelle. Reflechis, raisonne, fais des connexions entre les informations,
 anticipe les besoins. Si tu ne connais pas une reponse, utilise tes outils (recherche web, contacts, drive)
 avant de dire que tu ne peux pas. Ne dis jamais "je ne peux pas" sans avoir d'abord essaye.
+{f"{chr(10)}{chr(10)}=== CAP STRATÉGIQUE (vision directrice) ==={chr(10)}{vision_block}" if vision_block else ""}
 
 {f"=== {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"Premiere conversation avec {display_name}. Observe et memorise."}{ton_block}{maturity_block}{patterns_block}{narrative_block}
 

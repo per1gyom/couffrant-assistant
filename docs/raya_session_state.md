@@ -448,3 +448,98 @@ docs/raya_capabilities_matrix.md si pertinent pour la session.
 ### Abandonné (impact négligeable)
 - `_shownActionIds` jamais vidé : quelques Ko de mémoire navigateur
   par session longue, sans impact perceptible. Ne pas toucher.
+
+## 📜 DOCUMENT VISION STRATÉGIQUE (injecté dans le prompt Raya)
+
+**Fichier** : `docs/raya_vision_guillaume.md`
+
+Document rédigé le 17/04/2026 avec Guillaume pour donner à Raya une
+conscience permanente de son cap : rôle de système nerveux / Jarvis,
+équipe Couffrant Solar (7 personnes), écosystème patrimonial Guillaume
+(SARL + SAS + SCI + holding + perso), principes de fonctionnement,
+priorités de déploiement.
+
+**Injection** :
+- Dans `app/routes/aria_context.py::build_system_prompt()`
+- Bloc `=== CAP STRATÉGIQUE (vision directrice) ===`
+- Position : TOUT EN HAUT du prompt, avant le hot_summary
+- Condition : `username.lower() == 'guillaume'` uniquement. Les autres
+  users du tenant ne voient jamais ce document (contient infos privées
+  sur les sociétés patrimoniales Guillaume).
+
+**Évolutions prévues** (cap produit multi-users) :
+1. v1 (actuel) = rédaction manuelle Claude + Guillaume, injection conditionnelle
+2. v2 = Guillaume rédige un brief long, Claude condense, on itère
+3. v3 = détection automatique en chat ("tu viens d'exprimer une vision
+   stratégique, je la mémorise ?") — s'applique à tous les utilisateurs
+
+Quand d'autres users Raya arriveront (Arlène, Pierre, Sabrina...), la
+v3 sera nécessaire pour que chacun puisse avoir son propre document
+vision sans passer par une rédaction manuelle.
+
+---
+
+## 🧠 ROADMAP MÉMOIRE RAYA (validée 17/04/2026)
+
+### 🟢 Priorité haute — prochains jours/semaines
+
+**1. `pattern_analysis` quotidien (au lieu d'hebdo)**
+- Coût : ~$5/mois supplémentaires
+- Bénéfice : Raya apprend ses patterns comportementaux en 24h au lieu
+  de 7 jours
+- Implémentation : changer le CRON dans `app/scheduler.py` (job
+  `pattern_analysis`), passer de "dimanche 04h00" à "quotidien 04h00"
+- Précaution : réduire la fenêtre analysée à 24-48h pour éviter
+  de ré-analyser en permanence les mêmes données
+
+**2. Document vision v1 (fait — commit 17/04)**
+- `docs/raya_vision_guillaume.md` créé + injection conditionnelle
+
+### 🟡 Priorité moyenne — après le socle capabilities
+
+**3. Vectorisation de l'historique conversationnel (couche 1 augmentée)**
+- Coût : ~$2/mois (embeddings via `voyage-2` ou équivalent)
+- Bénéfice : mémoire épisodique retrouvable par sujet. Raya peut
+  retrouver les conversations passées pertinentes à la question posée,
+  même si elles remontent à plusieurs semaines
+- Infrastructure : table `conversation_embeddings` + hook après chaque
+  échange + fonction `find_similar_conversations(query)` + injection
+  dans `build_system_prompt`
+- Complémentarité avec le graphe entity_links : vectorisation =
+  recherche par SUJET, graphe = recherche par ENTITÉ
+
+**4. Vectorisation des règles + tri sémantique (couche 2 augmentée)**
+- Coût : négligeable
+- Bénéfice : chaque règle a un embedding, seules les règles sémantiquement
+  proches de la question posée sont injectées. Permet de stocker
+  BEAUCOUP plus de règles sans polluer le prompt
+- Supérieur au clustering rigide par thématique (capte les nuances
+  transversales)
+- Même infrastructure d'embeddings que la vectorisation conversationnelle
+- Amène probablement à REVOIR la couche 2 : distinguer les règles
+  FORMELLES (toujours injectées, peu nombreuses) des règles
+  CONTEXTUELLES (vectorisées, injectées conditionnellement)
+
+**5. Révision périodique des règles**
+- Raya propose mensuellement : "Voici les N règles que j'applique sur
+  toi, tu veux en retirer / modifier ?"
+- Détection de conflits à l'insertion de nouvelle règle
+- Évite l'accumulation silencieuse de règles contradictoires
+
+### 🔴 Priorité basse — vision long terme
+
+**6. Détection automatique de vision stratégique en chat (v3 du document)**
+- Raya détecte quand un user exprime un cap/vision long terme
+- Propose "je mémorise ça comme vision stratégique ?"
+- Génère automatiquement un `docs/raya_vision_{username}.md`
+- Injection automatique dans le prompt de CE user uniquement
+- Remplace la rédaction manuelle Claude + Guillaume
+- Nécessaire quand d'autres users Raya arriveront (Arlène, Pierre,
+  Sabrina, etc.)
+
+### Principe général
+
+**L'excellence se construit par itérations.** On n'attend pas d'avoir
+la solution parfaite pour déployer. On met en place une v1 qui marche,
+on observe, on améliore. Chaque trimestre environ, on fait un point
+sur les couches mémoire et on remonte d'un cran.
