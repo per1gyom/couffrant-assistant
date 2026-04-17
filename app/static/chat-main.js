@@ -148,17 +148,33 @@ async function sendMessage() {
   _setSendMode('sending');
   const userMsgRow = addMessage(text||'[Fichier joint]','user',fileSnapshot);
   const loading = addLoading();
-  // UX : faire remonter la question en haut du viewport dès que Raya commence à réfléchir.
-  // addMessage + addLoading appellent chacun scrollToBottom → on doit prendre la main APRÈS
-  // eux avec un délai plus long (150ms) et scroller directement le container messages.
-  // scrollIntoView était concurrencé par scrollToBottom et ne prenait pas effet.
+  // UX : pousser la question tout en haut du viewport dès que Raya commence à réfléchir.
+  // Technique : ajouter un spacer invisible de la hauteur du viewport APRÈS le loader
+  // pour garantir qu'il y a assez de contenu pour scroller, même quand l'historique
+  // est court. Puis scroller la question en haut via getBoundingClientRect (robuste).
+  // Le spacer est retiré quand la nouvelle question arrive (ou reste sans impact).
+  try {
+    const oldSpacer = document.getElementById('raya-scroll-spacer');
+    if (oldSpacer) oldSpacer.remove();
+    const spacer = document.createElement('div');
+    spacer.id = 'raya-scroll-spacer';
+    spacer.setAttribute('aria-hidden', 'true');
+    // Hauteur = viewport du chat - marge pour garder loader visible. Minimum 400px.
+    const vh = messagesEl ? messagesEl.clientHeight : 600;
+    spacer.style.minHeight = Math.max(400, vh - 180) + 'px';
+    spacer.style.pointerEvents = 'none';
+    messagesEl.appendChild(spacer);
+  } catch(_) {}
+  // Scroll smooth avec calcul robuste via getBoundingClientRect (indépendant du DOM parent)
   setTimeout(() => {
     try {
       if (!messagesEl || !userMsgRow) return;
-      const targetTop = userMsgRow.offsetTop - messagesEl.offsetTop - 8;
-      messagesEl.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+      const rowRect = userMsgRow.getBoundingClientRect();
+      const containerRect = messagesEl.getBoundingClientRect();
+      const delta = rowRect.top - containerRect.top - 12;  // 12px de marge en haut
+      messagesEl.scrollTo({ top: messagesEl.scrollTop + delta, behavior: 'smooth' });
     } catch(_) {}
-  }, 150);
+  }, 120);
   try {
     const body = { query: text||(fileSnapshot?'Analyse ce fichier.':'') };
     if (fileSnapshot) { body.file_data=fileSnapshot.data; body.file_type=fileSnapshot.type; body.file_name=fileSnapshot.name; }

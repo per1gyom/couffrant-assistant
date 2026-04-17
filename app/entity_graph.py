@@ -486,3 +486,50 @@ def populate_from_contacts(tenant_id: str, username: str) -> dict:
 
     logger.info("[Graph] Contacts → graphe : %d contacts", stats["contacts"])
     return stats
+
+
+# ─── LECTURE : BLOC ÉQUIPE POUR INJECTION DANS LE PROMPT ────────
+
+def build_team_block(tenant_id: str) -> str:
+    """
+    Retourne un bloc texte listant l'équipe (team_member) du tenant
+    pour injection dans le prompt système de Raya.
+    Source : entity_links peuplée par populate_from_odoo depuis res.users.
+    Format court : 1 ligne par personne, prénom + email.
+    Retourne une chaîne vide si aucun team_member en base.
+    """
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT entity_name, resource_data
+            FROM entity_links
+            WHERE tenant_id = %s AND entity_type = 'team_member'
+              AND resource_type = 'team_member'
+            ORDER BY entity_name ASC
+            LIMIT 50
+        """, (tenant_id,))
+        rows = c.fetchall()
+        if not rows:
+            return ""
+        lines = ["ÉQUIPE INTERNE (source Odoo res.users, mise à jour à chaque Découvrir) :"]
+        for name, data in rows:
+            email = ""
+            if isinstance(data, dict):
+                email = data.get("email") or data.get("login") or ""
+            line = f"  - {name}"
+            if email:
+                line += f" <{email}>"
+            lines.append(line)
+        lines.append(
+            "Quand l'utilisateur te demande qui compose son équipe, "
+            "utilise cette liste (source de vérité). Ne l'enrichis pas avec "
+            "des souvenirs conversationnels qui pourraient être incomplets."
+        )
+        return "\n".join(lines)
+    except Exception as e:
+        logger.warning("[Graph] build_team_block échoué : %s", e)
+        return ""
+    finally:
+        if conn: conn.close()

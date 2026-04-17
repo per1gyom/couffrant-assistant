@@ -14,6 +14,20 @@ function parseServerTimestamp(ts) {
   return new Date(s);
 }
 
+// Insère un élément dans le chat, AVANT le scroll-spacer s'il existe.
+// Le spacer est un div invisible ajouté en fin pour permettre à la question user
+// de remonter en haut du viewport quand Raya réfléchit. Sans cette insertion
+// ciblée, les messages Raya s'ajouteraient après le spacer (donc hors écran).
+function appendToChat(row) {
+  if (!messagesEl) return;
+  const spacer = document.getElementById('raya-scroll-spacer');
+  if (spacer) {
+    messagesEl.insertBefore(row, spacer);
+  } else {
+    messagesEl.appendChild(row);
+  }
+}
+
 // --- MESSAGES ---
 function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null) {
   const welcome = messagesEl.querySelector('.welcome');
@@ -33,7 +47,7 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
     timeEl.className = 'msg-time';
     timeEl.style.cssText = 'font-size:11px;color:#999;text-align:center;width:100%;margin:8px 0 2px;';
     timeEl.textContent = timeStr;
-    messagesEl.appendChild(timeEl);
+    appendToChat(timeEl);
   }
 
   const avatar = document.createElement('div'); avatar.className = 'avatar ' + type + '-avatar';
@@ -157,7 +171,7 @@ function addLoading() {
   const origRemove = row.remove.bind(row);
   row.remove = () => { clearInterval(interval); origRemove(); };
 
-  row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row); scrollToBottom(); return row;
+  row.appendChild(avatar); row.appendChild(bubble); appendToChat(row); scrollToBottom(); return row;
 }
 
 // --- BUG REPORT (P1-4) ---
@@ -242,7 +256,7 @@ function renderAskChoice(choiceData) {
     btn.onclick = () => { zone.querySelectorAll('button').forEach(b => b.disabled = true); zone.style.opacity = '0.5'; inputEl.value = opt; sendMessage(); };
     zone.appendChild(btn);
   });
-  messagesEl.appendChild(zone); scrollToBottom();
+  appendToChat(zone); scrollToBottom();
 }
 
 // --- ACTIONS EN ATTENTE (inline dans le chat) ---
@@ -450,7 +464,7 @@ function appendPendingActionToChat(action) {
       inserted = true;
     }
   }
-  if (!inserted) messagesEl.appendChild(row);
+  if (!inserted) appendToChat(row);
   scrollToBottom();
 }
 
