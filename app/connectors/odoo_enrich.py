@@ -21,7 +21,19 @@ Design :
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from typing import Optional
+
+try:
+    # Python 3.9+ : zoneinfo est stdlib. Gère DST (été/hiver) automatiquement.
+    from zoneinfo import ZoneInfo
+    _PARIS_TZ = ZoneInfo("Europe/Paris")
+    _UTC_TZ = ZoneInfo("UTC")
+except ImportError:
+    # Fallback si zoneinfo pas dispo — décalage fixe (pas idéal mais ça marche).
+    from datetime import timezone, timedelta
+    _PARIS_TZ = timezone(timedelta(hours=2))  # hypothèse été, FIXME si hiver
+    _UTC_TZ = timezone.utc
 
 from app.logging_config import get_logger
 
@@ -131,6 +143,53 @@ def _is_id_list(value) -> bool:
     return all(isinstance(x, int) for x in value)
 
 
+def _looks_like_utc_datetime(v) -> bool:
+    """
+    Détecte si v ressemble à un datetime Odoo au format 'YYYY-MM-DD HH:MM:SS'.
+    Odoo renvoie ses datetime dans ce format, TOUJOURS en UTC (pas de tz).
+    """
+    if not isinstance(v, str) or len(v) < 19:
+        return False
+    return (
+        v[4] == '-' and v[7] == '-' and v[10] == ' '
+        and v[13] == ':' and v[16] == ':'
+        and v[:4].isdigit()
+    )
+
+
+def _convert_utc_to_paris(s: str) -> str:
+    """
+    Convertit 'YYYY-MM-DD HH:MM:SS' UTC → 'YYYY-MM-DD HH:MM' Europe/Paris.
+    Gère automatiquement l'heure d'été/hiver via zoneinfo.
+    Seconde droppée pour lisibilité côté LLM.
+    Fallback : si parsing échoue, retourne la string telle quelle.
+    """
+    try:
+        dt_naive = datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S")
+        dt_utc = dt_naive.replace(tzinfo=_UTC_TZ)
+        dt_paris = dt_utc.astimezone(_PARIS_TZ)
+        return dt_paris.strftime("%Y-%m-%d %H:%M")
+    except (ValueError, TypeError):
+        return s
+
+
+def _convert_datetime_fields(record: dict) -> dict:
+    """
+    Parcourt un record Odoo et convertit tous les champs ressemblant à des
+    datetime UTC en heure locale Europe/Paris. Modifie le record en place.
+
+    Raya recevait des horaires Odoo en UTC (ex: '2026-04-22 06:30:00') et
+    les affichait telles quelles, créant un décalage de 2h en été (ou 1h
+    en hiver). Avec ce fix, elle voit directement l'heure locale.
+    """
+    if not isinstance(record, dict):
+        return record
+    for field, value in record.items():
+        if _looks_like_utc_datetime(value):
+            record[field] = _convert_utc_to_paris(value)
+    return record
+
+
 def resolve_ids(model: str, ids: list[int]) -> dict[int, str]:
     """
     Résout une liste d'IDs en dict {id: name} pour un modèle donné.
@@ -177,15 +236,19 @@ def resolve_ids(model: str, ids: list[int]) -> dict[int, str]:
 
 def enrich_record(model: str, record: dict) -> dict:
     """
-    Enrichit un record Odoo en place : remplace les listes d'IDs bruts
-    par des listes de {id, name}. Retourne le record modifié.
+    Enrichit un record Odoo en place :
+    1. Convertit les datetimes UTC → Europe/Paris (fini le décalage de 2h)
+    2. Remplace les listes d'IDs bruts par des [{id, name}]
 
     Ne touche pas aux champs déjà au format [id, name] (many2one standard).
     Ne touche pas aux champs dont le modèle relation est inconnu.
     """
     if not isinstance(record, dict):
         return record
-    # Collecter les champs à résoudre, groupés par modèle relation
+    # 1. Conversion timezone des champs datetime (passe en premier : pas de
+    # dépendance à l'enrichissement, et ça nettoie avant le formatage LLM)
+    _convert_datetime_fields(record)
+    # 2. Collecter les champs à résoudre, groupés par modèle relation
     # pour batcher les appels Odoo (1 appel par modèle, pas 1 par champ).
     to_resolve: dict[str, set[int]] = {}
     field_model: dict[str, str] = {}
@@ -214,13 +277,18 @@ def enrich_record(model: str, record: dict) -> dict:
 
 def enrich_records(model: str, records: list[dict]) -> list[dict]:
     """
-    Version batch d'enrich_record : groupe toutes les résolutions de tous
-    les records en un minimum d'appels Odoo (1 par modèle relation, tous
-    records confondus).
+    Version batch d'enrich_record :
+    1. Convertit les datetimes UTC → Europe/Paris sur tous les records
+    2. Groupe toutes les résolutions d'IDs de tous les records en un
+       minimum d'appels Odoo (1 par modèle relation, tous records confondus)
     """
     if not records:
         return records
-    # Collecter TOUS les IDs à résoudre à travers TOUS les records
+    # 1. Conversion timezone pass first (indépendant, rapide, pas d'I/O)
+    for rec in records:
+        if isinstance(rec, dict):
+            _convert_datetime_fields(rec)
+    # 2. Collecter TOUS les IDs à résoudre à travers TOUS les records
     to_resolve: dict[str, set[int]] = {}
     for rec in records:
         if not isinstance(rec, dict):
