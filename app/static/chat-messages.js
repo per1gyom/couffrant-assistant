@@ -135,7 +135,7 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
     }
     bubble.appendChild(actions);
   }
-  row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row);
+  row.appendChild(avatar); row.appendChild(bubble); appendToChat(row);
   if (messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 200) scrollToBottom();
   return row;
 }
