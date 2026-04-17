@@ -377,3 +377,53 @@ def admin_reset_history(
         return {"status": "error", "message": str(e)[:200]}
     finally:
         if conn: conn.close()
+
+
+
+@router.get("/admin/debug/last-memories/{target}")
+def admin_debug_last_memories(
+    request: Request,
+    target: str,
+    limit: int = 10,
+    _: dict = Depends(require_admin),
+):
+    """Endpoint de debug : retourne les N derniers aria_memory d'un user.
+    Utile pour diagnostiquer les bugs de perte de contexte conversationnel
+    (voir si la réponse de Raya a bien été stockée avec du contenu ou si
+    elle a été vidée par le nettoyage regex).
+    """
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id, user_input, aria_response, archived, created_at,
+                   LENGTH(COALESCE(aria_response, '')) as response_len,
+                   LENGTH(COALESCE(user_input, '')) as input_len
+            FROM aria_memory
+            WHERE username = %s
+            ORDER BY id DESC LIMIT %s
+        """, (target, max(1, min(50, limit))))
+        rows = c.fetchall()
+        return {
+            "status": "ok",
+            "username": target,
+            "count": len(rows),
+            "entries": [
+                {
+                    "id": r[0],
+                    "user_input": (r[1] or "")[:300],
+                    "aria_response": (r[2] or "")[:800],
+                    "archived": r[3],
+                    "created_at": str(r[4]),
+                    "response_len": r[5],
+                    "input_len": r[6],
+                    "empty_response": not (r[2] and r[2].strip()),
+                }
+                for r in rows
+            ],
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+    finally:
+        if conn: conn.close()

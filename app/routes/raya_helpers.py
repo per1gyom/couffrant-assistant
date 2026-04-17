@@ -163,18 +163,43 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     log_llm_usage(result, username=username, tenant_id=tenant_id,
                   purpose="raya_main_conversation")
 
-    # Nettoyage : retire toutes les balises techniques de la réponse affichée
+    # Nettoyage : retire toutes les balises techniques de la réponse affichée.
+    # IMPORTANT (fix bug perte contexte conversationnel, 18/04/2026) :
+    # - On enlève UNIQUEMENT les vrais tags techniques [ACTION:...] et
+    #   [SPEAK_SPEED:...] qui ne doivent jamais apparaître à l'utilisateur.
+    # - Les anciennes regex "fragments Odoo inline" étaient trop agressives :
+    #   elles supprimaient toute occurrence de ["texte","autre"] dans du
+    #   texte légitime, ce qui vidait parfois entièrement la réponse quand
+    #   Raya formatait des listes JSON. Conséquence : aria_response stocké
+    #   vide ou quasi-vide, et au tour suivant Raya ne voyait plus sa propre
+    #   question précédente → "Je n'ai pas de demande de synthèse en cours".
+    # - Les ACTION tags extraits par _strip_action_tags() matchent déjà les
+    #   crochets imbriqués correctement. Il n'y a plus besoin de regex
+    #   agressives en filet de sécurité.
+    _original_raya = raya_response
     clean_response = _strip_action_tags(raya_response)
     speak_speed = None
     speed_match = re.search(r'\[SPEAK_SPEED:([\d.]+)\]', clean_response)
     if speed_match:
         speak_speed = float(speed_match.group(1))
     clean_response = re.sub(r'`?\[SPEAK_SPEED:[^\]]*\]`?', '', clean_response)
-    # Fragments Odoo inline
-    clean_response = re.sub(r'\|?\["[^"]*"(?:,"[^"]*")*\](?:\|?\d*\]?)?', '', clean_response)
-    clean_response = re.sub(r'^\s*\|?\["[^"]+".*$', '', clean_response, flags=re.MULTILINE)
+    # Backticks doubles (artefacts markdown occasionnels)
     clean_response = re.sub(r'``', '', clean_response)
+    # Lignes vides multiples → 2 max
     clean_response = re.sub(r'\n{3,}', '\n\n', clean_response).strip()
+
+    # GARDE-FOU anti-vide : si le nettoyage a TOUT vidé (cas edge rare mais
+    # déjà observé), on garde au minimum la réponse brute sans les tags
+    # ACTION. Sinon le LLM au tour suivant reçoit un historique avec des
+    # réponses vides et perd le contexte conversationnel.
+    if not clean_response:
+        fallback = _strip_action_tags(_original_raya).strip() or _original_raya.strip()
+        logger.warning(
+            "[Raya] clean_response vidé après nettoyage pour %s "
+            "(original=%d chars) — fallback appliqué (%d chars)",
+            username, len(_original_raya), len(fallback)
+        )
+        clean_response = fallback
 
     # 7→10. Sauvegarde AVANT execute_actions pour avoir l'aria_memory_id comme conversation_id
     aria_memory_id = None
@@ -188,6 +213,12 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         )
         aria_memory_id = c.fetchone()[0]
         conn.commit()
+        # Log diagnostic : permet de vérifier que la réponse stockée n'est
+        # pas vide et de repérer les cas edge (réponse tronquée par nettoyage).
+        logger.info(
+            "[Raya] aria_memory saved id=%d user=%s input_len=%d response_len=%d",
+            aria_memory_id, username, len(payload.query or ""), len(clean_response or "")
+        )
     finally:
         if conn: conn.close()
 
