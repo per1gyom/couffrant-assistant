@@ -102,23 +102,61 @@ async function init() {
 }
 
 // --- SEND MESSAGE ---
+const _SEND_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
+const _STOP_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>';
+
+function _setSendMode(mode) {
+  if (mode === 'sending') {
+    sendBtn.innerHTML = _STOP_ICON;
+    sendBtn.classList.add('stop-mode');
+    sendBtn.onclick = cancelMessage;
+    sendBtn.disabled = false;
+    inputEl.disabled = true;
+    inputEl.placeholder = 'Raya réfléchit…';
+  } else {
+    sendBtn.innerHTML = _SEND_ICON;
+    sendBtn.classList.remove('stop-mode');
+    sendBtn.onclick = sendMessage;
+    sendBtn.disabled = false;
+    inputEl.disabled = false;
+    inputEl.placeholder = 'Envoie un message a Raya...';
+    inputEl.focus();
+  }
+}
+
+function cancelMessage() {
+  if (_abortController) {
+    _abortController.abort();
+    _abortController = null;
+  }
+}
+
 async function sendMessage() {
+  if (_isSending) return;
   const text = inputEl.value.trim(); if (!text && !currentFile) return;
   if (_onboardingActive && text && !currentFile) {
     inputEl.value=''; inputEl.style.height='auto';
     await _sendOnboardingAnswer(text); return;
   }
+  _isSending = true;
+  _abortController = new AbortController();
   document.querySelectorAll('.ask-choice-zone').forEach(el => el.remove());
   const fileSnapshot = currentFile ? {...currentFile} : null;
   if(typeof stopListening==='function'&&isListening) stopListening();
   inputEl.value=''; inputEl.style.height='auto'; inputEl.classList.remove('interim');
-  removeAttachment(); sendBtn.disabled=true; stopSpeech();
+  removeAttachment(); stopSpeech();
+  _setSendMode('sending');
   addMessage(text||'[Fichier joint]','user',fileSnapshot);
   const loading = addLoading();
   try {
     const body = { query: text||(fileSnapshot?'Analyse ce fichier.':'') };
     if (fileSnapshot) { body.file_data=fileSnapshot.data; body.file_type=fileSnapshot.type; body.file_name=fileSnapshot.name; }
-    const response = await fetch('/raya',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const response = await fetch('/raya',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body),
+      signal: _abortController.signal,
+    });
     const data = await response.json(); loading.remove();
     if (data.answer) {
       if (data.speak_speed) { setSpeakSpeed(data.speak_speed); }
@@ -136,10 +174,18 @@ async function sendMessage() {
       data.pending_actions.forEach(a => { if (typeof appendPendingActionToChat==='function') appendPendingActionToChat(a); });
     } else { const zone=document.getElementById('pending-actions-zone'); if(zone) zone.remove(); }
   } catch(e) {
-    loading.remove(); addMessage('Erreur de connexion \u00e0 Raya. Réessayez.','raya');
-    showToast('Erreur de connexion','err');
+    loading.remove();
+    if (e.name === 'AbortError') {
+      addMessage('Requête annulée.','raya');
+      showToast('Annulé','info',2000);
+    } else {
+      addMessage('Erreur de connexion \u00e0 Raya. Réessayez.','raya');
+      showToast('Erreur de connexion','err');
+    }
   }
-  sendBtn.disabled=false;
+  _isSending = false;
+  _abortController = null;
+  _setSendMode('ready');
 }
 
 function quickAsk(text) { inputEl.value=text; sendMessage(); }

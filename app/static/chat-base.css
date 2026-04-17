@@ -208,3 +208,9 @@ textarea#input.interim { color: var(--text-muted); font-style: italic; }
   50% { box-shadow: 0 0 0 5px rgba(249,115,22,0); }
 }
 .token-warning-email { font-size: 11px; color: #c2410c; font-family: monospace; }
+
+/* Stop / Cancel button */
+#sendBtn.stop-mode { background: #ef4444; border-color: #ef4444; }
+#sendBtn.stop-mode svg { width: 16px; height: 16px; fill: #fff; stroke: none; }
+#sendBtn.stop-mode:hover { background: #dc2626; }
+#input:disabled { opacity: 0.5; cursor: not-allowed; }

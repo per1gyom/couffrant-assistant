@@ -22,6 +22,8 @@ let pendingShortcuts=[];
 let _onboardingActive = false;
 let _micTarget = null;
 let _finalTextBaseTarget = '';
+let _isSending = false;
+let _abortController = null;
 
 // --- HORLOGE ---
 function updateClock(){document.getElementById('clock') && (document.getElementById('clock').textContent=new Date().toLocaleString('fr-FR',{weekday:'short',day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit',second:'2-digit'}));}
@@ -109,7 +111,7 @@ function onMessagesScroll() {
 
 // --- INPUT ---
 function autoResize(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,160)+'px'; el.scrollTop=el.scrollHeight; }
-function handleKey(e) { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
+function handleKey(e) { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); if (!_isSending) sendMessage(); } }
 
 function cleanText(t) {
   return t.replace(/#{1,6}\s+/g,'').replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1')
