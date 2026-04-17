@@ -207,6 +207,7 @@ async function loadConnections(tenantId,idx){
           <span style="font-size:16px">${icon}</span>
           <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px;cursor:pointer;border-bottom:1px dashed var(--text3)" onclick="renameConn(${c.id},'${tenantId}',${idx},'${c.label.replace(/'/g,"\\'")}')" title="Cliquer pour renommer">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span> ${statusBadge}</div>
           ${oauthBtn}
+          ${['odoo'].includes(c.tool_type)?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px" onclick="discoverTool('${tenantId}','${c.tool_type}',this)">🔍 Découvrir</button>`:''}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
           <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
         </div>
@@ -227,6 +228,23 @@ async function createConnection(tenantId,idx){
     if(d.status==='ok'){document.getElementById('conn-add-'+idx).style.display='none';document.getElementById('conn-type-'+idx).value='';document.getElementById('conn-label-'+idx).value='';loadConnections(tenantId,idx);}
     else setAlert('companies-alert','❌ '+(d.message||'Erreur'),'err');
   }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
+}
+
+async function discoverTool(tenantId,toolType,btn){
+  const orig=btn.innerHTML;
+  btn.disabled=true;btn.innerHTML='⏳ Exploration…';
+  try{
+    const r=await fetch(`/admin/discover/${tenantId}/${toolType}`);
+    const d=await r.json();
+    if(d.discovered>0){
+      btn.innerHTML=`✅ ${d.discovered} modèle(s)`;
+      showToast(`${d.discovered} schéma(s) ${toolType} découvert(s) et vectorisé(s)`,'ok',4000);
+    }else{
+      btn.innerHTML='❌ Échec';
+      showToast(d.errors?d.errors[0]:'Aucun modèle découvert','err',4000);
+    }
+  }catch(e){btn.innerHTML='❌ Erreur';showToast('Erreur réseau','err');}
+  setTimeout(()=>{btn.innerHTML=orig;btn.disabled=false;},5000);
 }
 
 async function deleteConn(connId,tenantId,idx){

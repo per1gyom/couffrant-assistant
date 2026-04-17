@@ -185,7 +185,7 @@ def admin_diag(request: Request, _: dict = Depends(require_admin)):
 
 # ─── AUTO-DÉCOUVERTE OUTILS ───
 
-@router.post("/admin/discover/{tenant_id}/{tool_type}")
+@router.api_route("/admin/discover/{tenant_id}/{tool_type}", methods=["GET", "POST"])
 def admin_discover_tool(
     request: Request,
     tenant_id: str,
