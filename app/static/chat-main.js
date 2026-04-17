@@ -289,10 +289,32 @@ async function sendMessage() {
   // d'utilité. Suppression en DOUCEUR via transition CSS (max-height +
   // opacity) pour éviter le 'tout redescend' perçu par Guillaume quand
   // on retirait le spacer brutalement (500+ px disparaissent d'un coup).
+  //
+  // FIX 18/04/2026 : même avec la transition, le scroll pouvait sauter en
+  // bas à la fin de la réponse (remarqué par Guillaume sur des réponses
+  // courtes type erreurs Odoo). Cause : la transition réduit max-height
+  // mais le navigateur recalcule la position de scroll une fois le spacer
+  // à 0, ce qui fait remonter naturellement les messages et donne l'impression
+  // d'un "tout redescend".
+  //
+  // Correction : on ancre la position de la question user AVANT la
+  // transition, et on corrige le scroll après la transition pour que la
+  // question reste là où l'user la voyait. De plus, on NE supprime PLUS
+  // le spacer : on le réduit à 0 mais on le laisse dans le DOM, ce qui
+  // évite un 2e recalcul au .remove(). Il sera remove proprement à la
+  // prochaine question par le code ci-dessus qui fait oldSpacer.remove().
   setTimeout(() => {
     try {
       const s = document.getElementById('raya-scroll-spacer');
       if (!s) return;
+      // Ancrage : mémoriser la position de la dernière bulle user pour la
+      // restaurer après l'animation (évite le saut visuel).
+      const lastUserRow = Array.from(
+        messagesEl.querySelectorAll('.message-row.user')
+      ).pop();
+      const userTopBefore = lastUserRow
+        ? lastUserRow.getBoundingClientRect().top
+        : null;
       // Mesurer la hauteur actuelle pour animer proprement
       s.style.maxHeight = s.offsetHeight + 'px';
       s.style.overflow = 'hidden';
@@ -301,7 +323,23 @@ async function sendMessage() {
         s.style.maxHeight = '0';
         s.style.opacity = '0';
       });
-      setTimeout(() => { try { s.remove(); } catch(_) {} }, 550);
+      // Après la transition : corriger le scroll pour que la question reste
+      // ancrée en haut, au lieu de laisser le navigateur recalculer et
+      // potentiellement faire un saut en bas.
+      setTimeout(() => {
+        try {
+          if (lastUserRow && userTopBefore !== null) {
+            const userTopAfter = lastUserRow.getBoundingClientRect().top;
+            const delta = userTopAfter - userTopBefore;
+            if (Math.abs(delta) > 8) {
+              messagesEl.scrollTop += delta;
+            }
+          }
+          // NOTE : on ne fait PAS s.remove() ici. Le spacer réduit à 0 ne
+          // gêne plus rien, et il sera remove par la prochaine question.
+          // Supprimer ici causait parfois un 2e recalcul de scroll.
+        } catch(_) {}
+      }, 550);
     } catch(_) {}
   }, 800);
 }

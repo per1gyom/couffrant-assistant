@@ -14,7 +14,7 @@
 - Desktop Commander local : `/Users/per1guillaume/couffrant-assistant`
 - Repo GitHub : `per1gyom/couffrant-assistant` branche `main`
 - URL prod : `https://app.raya-ia.fr`
-- Cache-bust JS/CSS : **v=31** (admin-panel.js) / **v=78** (chat)
+- Cache-bust JS/CSS : **v=31** (admin-panel.js) / **v=79** (chat)
 - **⚠️ PANELS SÉPARÉS** : `/admin/panel` → super admin only / `/tenant/panel` → tenant admin only
 - **⚠️ ARCHITECTURE ADMIN** : Routes dans le **package** `app/routes/admin/`
 - **⚠️ JAMAIS** supprimer `async function init()` dans `chat-main.js`
