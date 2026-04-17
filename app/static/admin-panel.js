@@ -716,7 +716,9 @@ async function loadUsage() {
     document.getElementById('usage-stats').innerHTML =
       `<div class="stat-card" style="color:var(--red)">❌ ${e.message}</div>`;
   }
-}usernameToDelete=username;document.getElementById('delete-username-label').textContent=username;document.getElementById('delete-user-confirm-input').value='';document.getElementById('delete-user-confirm-input').placeholder=username;document.getElementById('delete-user-btn').disabled=true;openModal('delete-user');}
+}
+
+function askDeleteUser(username){usernameToDelete=username;document.getElementById('delete-username-label').textContent=username;document.getElementById('delete-user-confirm-input').value='';document.getElementById('delete-user-confirm-input').placeholder=username;document.getElementById('delete-user-btn').disabled=true;openModal('delete-user');}
 
 async function adminConfirmDelete() {
   if (!currentEditUser) return;
