@@ -88,7 +88,7 @@ def get_pending(username: str, tenant_id: str, limit: int = 10) -> list:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
-            SELECT id, action_type, action_label, payload_json, created_at, expires_at
+            SELECT id, action_type, action_label, payload_json, created_at, expires_at, conversation_id
             FROM pending_actions
             WHERE username = %s AND tenant_id = %s
               AND status = 'pending'
@@ -104,6 +104,7 @@ def get_pending(username: str, tenant_id: str, limit: int = 10) -> list:
                 "payload": r[3],
                 "created_at": r[4].isoformat() if r[4] else None,
                 "expires_at": r[5].isoformat() if r[5] else None,
+                "conversation_id": r[6],
             }
             for r in c.fetchall()
         ]

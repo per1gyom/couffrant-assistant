@@ -14,11 +14,10 @@
 - Desktop Commander local : `/Users/per1guillaume/couffrant-assistant`
 - Repo GitHub : `per1gyom/couffrant-assistant` branche `main`
 - URL prod : `https://app.raya-ia.fr`
-- Cache-bust JS/CSS : **v=28** (admin-panel.js) / **v=63** (chat)
+- Cache-bust JS/CSS : **v=28** (admin-panel.js) / **v=64** (chat)
 - **⚠️ PANELS SÉPARÉS** : `/admin/panel` → super admin only / `/tenant/panel` → tenant admin only
 - **⚠️ ARCHITECTURE ADMIN** : Routes dans le **package** `app/routes/admin/`
 - **⚠️ JAMAIS** supprimer `async function init()` dans `chat-main.js`
-- **⚠️ BUG** : Les cartes de confirmation mail (pending actions) s'affichent toujours en bas du chat au lieu de s'afficher après le message de Raya qui les a générées. Fix : `appendPendingActionToChat` doit insérer après le message concerné (via `conversation_id`), pas en fin de DOM.
 - **⚠️ TOUJOURS** bumper `v=` lors d'une modif JS/CSS
 
 ---

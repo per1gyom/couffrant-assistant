@@ -56,6 +56,7 @@ def get_chat_history(request: Request, limit: int = 20):
                 actions_by_conv[aconv_id].append({
                     "id": aid, "action_type": atype, "label": alabel,
                     "payload": apayload, "status": astatus,
+                    "conversation_id": aconv_id,
                 })
         except Exception:
             pass  # La colonne conversation_id peut ne pas exister encore

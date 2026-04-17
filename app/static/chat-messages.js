@@ -77,6 +77,7 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
     content.style.whiteSpace = 'pre-wrap'; content.textContent = text;
   }
   bubble.appendChild(content);
+  if (type === 'raya' && ariaMemoryId) row.dataset.ariaMemoryId = String(ariaMemoryId);
   if (type === 'raya') {
     const actions = document.createElement('div'); actions.className = 'bubble-actions';
     const speakBtn = document.createElement('button'); speakBtn.className = 'speak-btn'; speakBtn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 010 7.07"/><path d="M19.07 4.93a10 10 0 010 14.14"/></svg> Écouter';
@@ -216,6 +217,7 @@ function appendPendingActionToChat(action) {
   const isDone = action.status && action.status !== 'pending';
   row.className = isDone ? 'message-row action-done' : 'message-row action-pending';
   row.dataset.actionId = String(action.id);
+  if (action.conversation_id) row.dataset.conversationId = String(action.conversation_id);
 
   const card = document.createElement('div');
   card.className = 'action-card';
@@ -381,7 +383,21 @@ function appendPendingActionToChat(action) {
     card.appendChild(statusEl);
   }
   row.appendChild(card);
-  messagesEl.appendChild(row);
+  // Insérer après le message Raya qui a généré l'action (via conversation_id = aria_memory_id).
+  // S'il y a déjà d'autres cartes liées au même échange, on se place après la dernière.
+  const convId = action.conversation_id;
+  let inserted = false;
+  if (convId && messagesEl) {
+    const siblings = messagesEl.querySelectorAll(
+      `[data-aria-memory-id="${convId}"], [data-conversation-id="${convId}"]`
+    );
+    const lastAnchor = siblings[siblings.length - 1];
+    if (lastAnchor) {
+      lastAnchor.insertAdjacentElement('afterend', row);
+      inserted = true;
+    }
+  }
+  if (!inserted) messagesEl.appendChild(row);
   scrollToBottom();
 }
 
