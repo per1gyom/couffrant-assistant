@@ -38,6 +38,7 @@ function normalizeTenantId(value){
 }
 
 async function loadMemoryStatus(){
+  try{
   const data=await(await fetch('/admin/memory-status')).json();
   const tot=k=>data.reduce((s,u)=>s+(u[k]||0),0);
   document.getElementById('memory-stats').innerHTML=`
@@ -52,6 +53,11 @@ async function loadMemoryStatus(){
     <td class="mono">${fmt(u.conv||u.conversations||0)}</td>
     <td><span class="badge badge-green">${fmt(u.rules||0)}</span></td>
     <td class="mono">${fmt(u.insights||0)}</td><td class="mono">${fmt(u.mails||0)}</td></tr>`).join('');
+  }catch(e){
+    document.getElementById('memory-stats').innerHTML='<div class="stat-card"><div class="stat-label">Erreur</div><div class="stat-value">—</div></div>';
+    document.getElementById('memory-tbody').innerHTML='<tr><td colspan="7" style="color:var(--red)">Erreur de chargement</td></tr>';
+    console.warn('[Admin] loadMemoryStatus:', e);
+  }
 }
 
 async function loadUsers(){
@@ -238,12 +244,12 @@ async function discoverTool(tenantId,toolType,btn){
     const d=await r.json();
     if(d.discovered>0){
       btn.innerHTML=`✅ ${d.discovered} modèle(s)`;
-      showToast(`${d.discovered} schéma(s) ${toolType} découvert(s) et vectorisé(s)`,'ok',4000);
+      setAlert('companies-alert',`${d.discovered} schéma(s) ${toolType} découvert(s) et vectorisé(s)`,'ok');
     }else{
       btn.innerHTML='❌ Échec';
-      showToast(d.errors?d.errors[0]:'Aucun modèle découvert','err',4000);
+      setAlert('companies-alert',d.errors?d.errors[0]:'Aucun modèle découvert','err');
     }
-  }catch(e){btn.innerHTML='❌ Erreur';showToast('Erreur réseau','err');}
+  }catch(e){btn.innerHTML='❌ Erreur';setAlert('companies-alert','Erreur réseau','err');}
   setTimeout(()=>{btn.innerHTML=orig;btn.disabled=false;},5000);
 }
 
@@ -798,5 +804,5 @@ async function changePassword(){
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') document.querySelectorAll('.modal-overlay.open').forEach(m=>m.classList.remove('open')); });
 document.querySelectorAll('.modal-overlay').forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('open'); }));
 
-loadMemoryStatus();
-initUserScope();
+loadMemoryStatus().catch(e=>console.warn('[Admin] loadMemoryStatus failed:',e));
+initUserScope().catch(e=>console.warn('[Admin] initUserScope failed:',e));
