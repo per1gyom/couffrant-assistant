@@ -146,8 +146,13 @@ async function sendMessage() {
   inputEl.value=''; inputEl.style.height='auto'; inputEl.classList.remove('interim');
   removeAttachment(); stopSpeech();
   _setSendMode('sending');
-  addMessage(text||'[Fichier joint]','user',fileSnapshot);
+  const userMsgRow = addMessage(text||'[Fichier joint]','user',fileSnapshot);
   const loading = addLoading();
+  // UX : faire remonter la question en haut du viewport dès que Raya commence à réfléchir.
+  // Petit delay pour laisser le DOM se stabiliser après addMessage + addLoading.
+  setTimeout(() => {
+    try { userMsgRow.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch(_){}
+  }, 60);
   try {
     const body = { query: text||(fileSnapshot?'Analyse ce fichier.':'') };
     if (fileSnapshot) { body.file_data=fileSnapshot.data; body.file_type=fileSnapshot.type; body.file_name=fileSnapshot.name; }
@@ -161,25 +166,38 @@ async function sendMessage() {
     if (data.answer) {
       if (data.speak_speed) { setSpeakSpeed(data.speak_speed); }
     }
-    const msgRow = addMessage(data.answer,'raya',null,data.aria_memory_id||null);
-    if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'), true);
-    if (data.ask_choice) renderAskChoice(data.ask_choice);
-    if (data.actions && data.actions.length > 0) {
-      // Résultats informatifs (Odoo, contacts, drive, etc.) → dans le chat
-      const infoResults = [];
-      data.actions.forEach(a => {
-        if (a.startsWith('\u2705')) showToast(a.replace('\u2705','').trim(),'ok',3000);
-        else if (a.startsWith('\u274c')) showToast(a.replace('\u274c','').trim(),'err',5000);
-        else if (a.startsWith('\u23f8\ufe0f')) { /* pending — géré par pending_actions */ }
-        else infoResults.push(a);
-      });
-      if (infoResults.length > 0) {
-        addMessage(infoResults.join('\n\n'), 'raya');
+    // Cas d'erreur timeout côté backend : le thread Python continue à s'exécuter
+    // (Python ne peut pas tuer un thread), donc la vraie réponse peut arriver en DB
+    // quelques secondes plus tard. On affiche un message transitoire et on polle
+    // /chat/history pendant 90s pour récupérer la réponse "fantôme".
+    if (data.is_error && data.error_type === 'timeout') {
+      const errorRow = addMessage(data.answer, 'raya');
+      errorRow.classList.add('raya-error-transient');
+      showToast('Raya met plus de temps que prévu, je surveille sa réponse…', 'info', 4000);
+      _pollGhostResponse(text || (fileSnapshot ? 'Analyse ce fichier.' : ''), errorRow);
+    } else if (data.is_error) {
+      addMessage(data.answer, 'raya');
+    } else {
+      const msgRow = addMessage(data.answer,'raya',null,data.aria_memory_id||null);
+      if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'), true);
+      if (data.ask_choice) renderAskChoice(data.ask_choice);
+      if (data.actions && data.actions.length > 0) {
+        // Résultats informatifs (Odoo, contacts, drive, etc.) → dans le chat
+        const infoResults = [];
+        data.actions.forEach(a => {
+          if (a.startsWith('\u2705')) showToast(a.replace('\u2705','').trim(),'ok',3000);
+          else if (a.startsWith('\u274c')) showToast(a.replace('\u274c','').trim(),'err',5000);
+          else if (a.startsWith('\u23f8\ufe0f')) { /* pending — géré par pending_actions */ }
+          else infoResults.push(a);
+        });
+        if (infoResults.length > 0) {
+          addMessage(infoResults.join('\n\n'), 'raya');
+        }
       }
+      if (data.pending_actions && data.pending_actions.length>0) {
+        data.pending_actions.forEach(a => { if (typeof appendPendingActionToChat==='function') appendPendingActionToChat(a); });
+      } else { const zone=document.getElementById('pending-actions-zone'); if(zone) zone.remove(); }
     }
-    if (data.pending_actions && data.pending_actions.length>0) {
-      data.pending_actions.forEach(a => { if (typeof appendPendingActionToChat==='function') appendPendingActionToChat(a); });
-    } else { const zone=document.getElementById('pending-actions-zone'); if(zone) zone.remove(); }
   } catch(e) {
     loading.remove();
     if (e.name === 'AbortError') {
@@ -193,6 +211,42 @@ async function sendMessage() {
   _isSending = false;
   _abortController = null;
   _setSendMode('ready');
+}
+
+// Polling fantôme : quand /raya a renvoyé un timeout mais que le thread Python
+// a continué à s'exécuter en arrière-plan. On vérifie /chat/history pendant 90s
+// pour récupérer la vraie réponse si elle finit par arriver.
+async function _pollGhostResponse(userText, errorRow) {
+  const maxAttempts = 30; // 30 × 3s = 90s
+  const userTextNorm = (userText || '').trim().slice(0, 200);
+  const startTs = Date.now() - 15000; // tolérance 15s avant l'envoi
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    try {
+      const r = await fetch('/chat/history?limit=3');
+      if (!r.ok) continue;
+      const data = await r.json();
+      const history = Array.isArray(data) ? data : [];
+      const match = history.find(item => {
+        if (!item.user || !item.raya) return false;
+        const itemUser = (item.user || '').trim().slice(0, 200);
+        let itemTs = 0;
+        try { itemTs = new Date(parseServerTimestamp(item.created_at || item.ts)).getTime(); } catch(_){}
+        return itemUser === userTextNorm && itemTs >= startTs;
+      });
+      if (match) {
+        // La réponse fantôme est arrivée — on remplace le message d'erreur.
+        if (errorRow && errorRow.parentNode) errorRow.remove();
+        const msgRow = addMessage(match.raya, 'raya', null, match.id, match.created_at || match.ts);
+        if (match.actions && match.actions.length > 0) {
+          match.actions.forEach(a => { if (typeof appendPendingActionToChat === 'function') appendPendingActionToChat(a); });
+        }
+        showToast('Réponse récupérée ✨', 'ok', 3000);
+        return true;
+      }
+    } catch(_) {}
+  }
+  return false;
 }
 
 function quickAsk(text) { inputEl.value=text; sendMessage(); }

@@ -1,6 +1,19 @@
 // Raya Chat — Messages (addMessage, addLoading, bug report, ask_choice, pending actions)
 // Chargé en 2ème dans raya_chat.html — dépend de chat-core.js
 
+// --- HELPERS ---
+// Les timestamps venant de Postgres/Railway sont en UTC mais parfois sans indicateur
+// de timezone (ex: "2026-04-17 13:22:03"). On force l'interprétation UTC pour éviter
+// un décalage de 2h affiché en local (bug "13:22 au lieu de 15:22").
+function parseServerTimestamp(ts) {
+  if (!ts) return new Date();
+  let s = String(ts).trim();
+  if (!/[+-]\d{2}:?\d{2}$|Z$/.test(s)) {
+    s = s.replace(' ', 'T') + 'Z';
+  }
+  return new Date(s);
+}
+
 // --- MESSAGES ---
 function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null) {
   const welcome = messagesEl.querySelector('.welcome');
@@ -8,8 +21,12 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
   const row = document.createElement('div'); row.className = 'message-row ' + type;
 
   // TIMESTAMP-2 : horodatage au-dessus des bulles
-  const dateObj = timestamp ? new Date(timestamp) : new Date();
-  const timeStr = dateObj.toLocaleString('fr-FR', {weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit'});
+  const dateObj = timestamp ? parseServerTimestamp(timestamp) : new Date();
+  const timeStr = dateObj.toLocaleString('fr-FR', {
+    weekday:'short', day:'2-digit', month:'short',
+    hour:'2-digit', minute:'2-digit',
+    timeZone: 'Europe/Paris'
+  });
   const lastTimeEl = messagesEl.querySelector('.msg-time:last-of-type');
   if (!lastTimeEl || lastTimeEl.textContent !== timeStr) {
     const timeEl = document.createElement('div');
@@ -113,7 +130,33 @@ function addLoading() {
   const row = document.createElement('div'); row.className = 'message-row raya';
   const avatar = document.createElement('div'); avatar.className = 'avatar raya-avatar'; avatar.textContent = '✦';
   const bubble = document.createElement('div'); bubble.className = 'bubble loading-bubble';
-  bubble.innerHTML = '<div class="dot-anim"></div><div class="dot-anim"></div><div class="dot-anim"></div>';
+
+  const thinking = document.createElement('div'); thinking.className = 'raya-thinking';
+  const sigil = document.createElement('span'); sigil.className = 'raya-thinking-sigil'; sigil.textContent = '✦';
+  const textEl = document.createElement('span'); textEl.className = 'raya-thinking-text';
+  const messages = [
+    'Raya réfléchit…',
+    'Analyse du contexte…',
+    'Consultation de tes outils…',
+    'Recherche dans tes données…',
+    'Croisement des sources…',
+    'Préparation de la réponse…',
+  ];
+  textEl.textContent = messages[0];
+  thinking.appendChild(sigil); thinking.appendChild(textEl);
+  bubble.appendChild(thinking);
+
+  // Rotation des messages toutes les 2.8s avec fondu
+  let idx = 0;
+  const interval = setInterval(() => {
+    idx = (idx + 1) % messages.length;
+    textEl.style.opacity = '0';
+    setTimeout(() => { textEl.textContent = messages[idx]; textEl.style.opacity = '1'; }, 250);
+  }, 2800);
+  // On stocke l'interval sur le row et on override remove() pour le nettoyer
+  const origRemove = row.remove.bind(row);
+  row.remove = () => { clearInterval(interval); origRemove(); };
+
   row.appendChild(avatar); row.appendChild(bubble); messagesEl.appendChild(row); scrollToBottom(); return row;
 }
 
@@ -385,6 +428,7 @@ function appendPendingActionToChat(action) {
   row.appendChild(card);
   // Insérer après le message Raya qui a généré l'action (via conversation_id = aria_memory_id).
   // S'il y a déjà d'autres cartes liées au même échange, on se place après la dernière.
+  // Fallback pour actions legacy sans conversation_id : dernier message Raya visible.
   const convId = action.conversation_id;
   let inserted = false;
   if (convId && messagesEl) {
@@ -394,6 +438,15 @@ function appendPendingActionToChat(action) {
     const lastAnchor = siblings[siblings.length - 1];
     if (lastAnchor) {
       lastAnchor.insertAdjacentElement('afterend', row);
+      inserted = true;
+    }
+  }
+  if (!inserted && messagesEl) {
+    // Smart fallback : chercher le dernier message Raya du DOM
+    const rayaRows = messagesEl.querySelectorAll('.message-row.raya');
+    const lastRaya = rayaRows[rayaRows.length - 1];
+    if (lastRaya) {
+      lastRaya.insertAdjacentElement('afterend', row);
       inserted = true;
     }
   }

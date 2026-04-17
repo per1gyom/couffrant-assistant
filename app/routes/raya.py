@@ -143,18 +143,23 @@ def raya_endpoint(
             "actions": [], "pending_actions": [],
             "aria_memory_id": None, "model_tier": "smart",
             "ask_choice": None,
+            "is_error": True, "error_type": "rate_limit",
         }
     import concurrent.futures
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(_raya_core, request, payload, username, tenant_id)
-            return future.result(timeout=30)
+            # Timeout 90s : Opus 4.7 avec max_tokens=8192 + synthèse auto (2e appel LLM)
+            # peut légitimement prendre 45-75s sur requête complexe. 30s créait des bugs
+            # fantômes (thread non tuable en Python) où la réponse arrivait après coup.
+            return future.result(timeout=90)
     except concurrent.futures.TimeoutError:
         return {
             "answer": "\u26a0\ufe0f Raya est momentan\u00e9ment surcharg\u00e9e. R\u00e9essaie dans quelques secondes.",
             "actions": [], "pending_actions": [],
             "aria_memory_id": None, "model_tier": "smart",
             "ask_choice": None,
+            "is_error": True, "error_type": "timeout",
         }
     except Exception:
         tb = traceback.format_exc()
@@ -164,6 +169,7 @@ def raya_endpoint(
             "actions": [], "pending_actions": [],
             "aria_memory_id": None, "model_tier": "smart",
             "ask_choice": None,
+            "is_error": True, "error_type": "internal",
         }
 
 
