@@ -15,6 +15,7 @@
 - Repo GitHub : `per1gyom/couffrant-assistant` branche `main`
 - URL prod : `https://app.raya-ia.fr`
 - Cache-bust JS/CSS : **v=26** (admin-panel.js) / **v=61** (chat)
+- **⚠️ PANELS SÉPARÉS** : `/admin/panel` → super admin only / `/tenant/panel` → tenant admin only
 - **⚠️ ARCHITECTURE ADMIN** : Routes dans le **package** `app/routes/admin/`
 - **⚠️ JAMAIS** supprimer `async function init()` dans `chat-main.js`
 - **⚠️ TOUJOURS** bumper `v=` lors d'une modif JS/CSS
@@ -157,32 +158,47 @@ app/
 ├── memory_synthesis.py           # synthesize_session — soft-delete
 ├── synthesis_engine.py           # rebuild_hot_summary — invalide cache
 ├── rag.py                        # RAG — retrieve_context
-└── templates/admin_panel.html    # onglet Utilisation
+└── templates/admin_panel.html    # super admin — onglet Utilisation
+└── templates/tenant_panel.html   # tenant admin — Ma société + Profil uniquement
 ```
 
 ---
 
 ## AUDITS PLANIFIÉS — DANS L'ORDRE
 
-1. **Performance** ← EN COURS
-2. **Sécurité** — cloisonnement tenants, routes admin, isolation données
+1. **Performance** ✅ FAIT (17/04)
+2. **Sécurité** ✅ FAIT (17/04) — voir détails ci-dessous
 3. **Système d'actions** — pending_actions, queue, confirmations, robustesse
 4. **Scheduler/jobs** — ce qui tourne vraiment, ce qui est mort, robustesse
 5. **Frontend** — chat-main.js, flux UI, code mort, gestion erreurs
 
 ---
 
+## AUDIT SÉCURITÉ — RÉSULTATS (17/04/2026)
+
+### Corrigé
+| # | Faille | Fix |
+|---|--------|-----|
+| 1 | Routes connexions dupliquées 2× dans tenant_admin.py | Doublon supprimé |
+| 2 | Aucune vérification tenant sur connection_id | `assert_connection_tenant()` ajouté partout |
+| 3 | `_build_tenants_overview()` accessible sans auth | Décorateur route supprimé |
+| 4 | Tenant admin pouvait injecter credentials | Forcé `credentials={}` |
+| 5 | `/admin/panel` accessible aux tenant admins | Verrouillé `require_admin`, redirect vers `/tenant/panel` |
+| 6 | Fonctions masquées côté JS pour tenant admin | **Panels séparés** : `admin_panel.html` (super admin) / `tenant_panel.html` (tenant admin) |
+| 7 | 646 lignes dead code (admin.py + admin_endpoints.py) | Supprimées |
+
+### Vérifié OK (pas d'intervention)
+- Isolation données : toutes les requêtes filtrent par username/tenant_id ✅
+- RAG : scoped par username + tenant_id ✅
+- Pending actions : vérifie username + tenant_id ✅
+- `list_users()` : derrière `require_admin` only ✅
+- `/profile` : propres données uniquement ✅
+
+---
+
 ### Priorité haute (avant commercialisation)
 - [ ] Google OAuth → passer en mode "Externe" + vérification Google
-- [ ] Audit sécurité routes — cloisonnement tenants (voir ci-dessous)
-- [ ] `archived` column dans aria_memory (migration DB pour soft-delete)
 - [ ] Reconnexion Gmail requise (scopes contacts + calendar + drive ajoutés)
-
-### Sécurité — audit à faire
-- [ ] `list_users()` non filtré par tenant pour tenant_admin
-- [ ] `/admin/panel` accessible sans garde
-- [ ] Routes `/admin/*` — vérifier require_admin/require_tenant_admin partout
-- [ ] Isolation des données entre tenants (aria_rules, aria_memory, mail_memory)
 
 ### Panel admin
 - [ ] Création tenant : étape "Outils" pour définir les connexions souhaitées
