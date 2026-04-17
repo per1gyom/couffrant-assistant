@@ -232,8 +232,15 @@ def expire_old_pending(hours: int = 24) -> int:
         c.execute(
             "UPDATE pending_actions SET status = 'expired' WHERE status = 'pending' AND expires_at < NOW()"
         )
-        n = c.rowcount
+        n_expired = c.rowcount
+        # Nettoyer aussi les actions bloquées en "executing" ou "confirmed" depuis +1h
+        c.execute("""
+            UPDATE pending_actions SET status = 'failed', error_message = 'Timeout — action bloquée'
+            WHERE status IN ('executing', 'confirmed')
+              AND confirmed_at < NOW() - INTERVAL '1 hour'
+        """)
+        n_stuck = c.rowcount
         conn.commit()
-        return n
+        return n_expired + n_stuck
     finally:
         if conn: conn.close()

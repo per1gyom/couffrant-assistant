@@ -100,15 +100,17 @@ def _handle_drive_actions(response, token, drive_write, username, tenant_id, con
             parent_id = match.group(1).strip()
             folder_name = match.group(2).strip()
             if direct_ok:
-                # Action directe autorisée
                 try:
-                    _, drive_id, _ = _find_sharepoint_site_and_drive(token)
-                    r = create_folder(token, parent_id, folder_name, drive_id)
-                    if r.get("status") == "ok":
+                    drive = _get_drive(username)
+                    if not drive:
+                        confirmed.append("❌ Aucun drive connecté.")
+                        continue
+                    result = drive.create_folder(parent_id, folder_name)
+                    if result.get("ok"):
                         confirmed.append(f"\u2705 Dossier '{folder_name}' cree")
                         log_activity(username, "drive_create", folder_name[:200], parent_id[:100], tenant_id=tenant_id)
                     else:
-                        confirmed.append(f"\u274c {r.get('message')}")
+                        confirmed.append(f"\u274c {result.get('message', 'Erreur création dossier')}")
                 except Exception as e:
                     confirmed.append(f"\u274c {str(e)[:80]}")
             else:

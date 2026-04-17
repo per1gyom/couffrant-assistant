@@ -15,6 +15,8 @@ def _handle_confirmations(response, username, tenant_id, outlook_token, tools):
         if not action:
             confirmed.append(f"\u274c Action #{action_id} introuvable, deja traitee ou expiree.")
             continue
+        action["username"] = username
+        action["tenant_id"] = tenant_id
         result = _execute_confirmed_action(action, outlook_token, tools)
         label = action.get("label") or f"#{action_id}"
         if result.get("ok"):

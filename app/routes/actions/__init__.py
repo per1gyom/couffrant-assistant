@@ -20,9 +20,8 @@ _ASK_CHOICE_PREFIX = "__CHOICE__:"
 def _get_user_email(username: str) -> str:
     """
     Retourne l'email Microsoft (Outlook) de l'utilisateur.
-    Priorité : connexion V2 tenant_connections → Graph /me → users.email.
+    Source : connexion V2 tenant_connections uniquement.
     """
-    # 1. Connexion V2 tenant_connections
     try:
         from app.connection_token_manager import get_connection_email
         email = get_connection_email(username, "microsoft")
@@ -30,27 +29,14 @@ def _get_user_email(username: str) -> str:
             return email
     except Exception:
         pass
-    # 2. Graph /me en direct (auto-update users.email)
+    # Fallback : email dans la table users (si pas raya-ia.fr)
     try:
-        from app.token_manager import get_valid_microsoft_token
-        from app.graph_client import graph_get
-        token = get_valid_microsoft_token(username)
-        if token:
-            me = graph_get(token, "/me", params={"$select": "mail,userPrincipalName"})
-            email = me.get("mail") or me.get("userPrincipalName") or ""
-            if email and '@' in email:
-                try:
-                    from app.database import get_pg_conn
-                    conn = get_pg_conn(); c = conn.cursor()
-                    c.execute(
-                        "UPDATE users SET email = %s WHERE username = %s "
-                        "AND (email IS NULL OR email ILIKE '%raya-ia.fr%')",
-                        (email, username)
-                    )
-                    conn.commit(); conn.close()
-                except Exception:
-                    pass
-                return email
+        from app.database import get_pg_conn
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("SELECT email FROM users WHERE username=%s", (username,))
+        row = c.fetchone(); conn.close()
+        if row and row[0] and '@' in row[0] and 'raya-ia.fr' not in row[0]:
+            return row[0]
     except Exception:
         pass
     return ""
@@ -76,18 +62,19 @@ def execute_actions(
 
     confirmed += _handle_confirmations(raya_response, username, tenant_id, outlook_token, tools)
 
-    if outlook_token:
-        confirmed += _handle_mail_actions(
-            raya_response, outlook_token, mail_can_delete,
-            mails_from_db, live_mails, username, tenant_id, conversation_id,
-            from_email=from_email
-        )
-        confirmed += _handle_drive_actions(
-            raya_response, outlook_token, drive_write, username, tenant_id, conversation_id
-        )
-        confirmed += _handle_teams_actions(
-            raya_response, outlook_token, username, tenant_id, conversation_id
-        )
+    # Actions mail/drive/teams — toujours exécutées, même sans token Microsoft
+    # (les connecteurs unifiés gèrent Gmail, Google Drive, etc. indépendamment)
+    confirmed += _handle_mail_actions(
+        raya_response, outlook_token, mail_can_delete,
+        mails_from_db, live_mails, username, tenant_id, conversation_id,
+        from_email=from_email
+    )
+    confirmed += _handle_drive_actions(
+        raya_response, outlook_token, drive_write, username, tenant_id, conversation_id
+    )
+    confirmed += _handle_teams_actions(
+        raya_response, outlook_token, username, tenant_id, conversation_id
+    )
 
     if MEMORY_OK:
         confirmed += _handle_memory_actions(raya_response, username, synth_threshold, tenant_id)

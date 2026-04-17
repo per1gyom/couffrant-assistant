@@ -240,25 +240,19 @@ def raya_draft_action(
                 "body":     payload["body"],
             }, outlook_token)
         elif action_type == "SEND_GMAIL":
-            # Brouillon Gmail via API
+            # Brouillon Gmail via connecteur unifié
             try:
-                import base64
-                from email.mime.multipart import MIMEMultipart
-                from email.mime.text import MIMEText
-                from app.connectors.gmail_connector import get_gmail_service
-                service = get_gmail_service(username)
-                if not service:
+                from app.mailbox_manager import get_connector_for_mailbox
+                connector = get_connector_for_mailbox(username, "gmail")
+                if not connector:
                     return {"ok": False, "message": "Gmail non connecté"}
-                body_html = payload["body"].replace('\n', '<br>\n')
-                msg = MIMEMultipart("alternative")
-                msg["To"] = payload["to_email"]
-                msg["Subject"] = payload["subject"]
-                if payload.get("from_email"):
-                    msg["From"] = payload["from_email"]
-                msg.attach(MIMEText(body_html, "html", "utf-8"))
-                raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-                service.users().drafts().create(userId="me", body={"message": {"raw": raw}}).execute()
-                r = {"status": "ok"}
+                result = connector.create_draft(
+                    to=payload["to_email"],
+                    subject=payload["subject"],
+                    body=payload["body"],
+                    from_email=payload.get("from_email", ""),
+                )
+                r = {"status": "ok"} if result.get("ok") else {"status": "error", "message": result.get("message", "")}
             except Exception as e:
                 return {"ok": False, "message": f"Erreur brouillon Gmail : {str(e)[:150]}"}
         elif action_type == "REPLY":
@@ -289,7 +283,7 @@ async def raya_confirm_action(
     """Confirme et execute une action en attente — avec payload_override optionnel."""
     username  = user["username"]
     tenant_id = user["tenant_id"]
-    from app.pending_actions import confirm_action, mark_executed, mark_failed
+    from app.pending_actions import confirm_action, mark_executing, mark_executed, mark_failed
     from app.routes.actions.confirmations import _execute_confirmed_action
 
     # Lire le payload_override s'il est fourni
@@ -304,6 +298,10 @@ async def raya_confirm_action(
     if not action:
         return {"ok": False, "message": "Action introuvable, deja traitee ou expiree."}
 
+    # Injecter username/tenant_id dans l'action pour _execute_confirmed_action
+    action["username"] = username
+    action["tenant_id"] = tenant_id
+
     # Mémoriser le corps ORIGINAL avant modification (pour apprentissage)
     original_payload = dict(action.get("payload", {}))
 
@@ -313,6 +311,7 @@ async def raya_confirm_action(
 
     outlook_token = _get_ms_token(username)
     tools = load_user_tools(username)
+    mark_executing(action_id)
     result = _execute_confirmed_action(action, outlook_token, tools)
 
     if result.get("ok"):
