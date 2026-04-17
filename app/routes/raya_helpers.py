@@ -32,6 +32,37 @@ _SHARED_POOL=concurrent.futures.ThreadPoolExecutor(max_workers=6)
 logger=get_logger("raya.core")
 
 
+def _strip_action_tags(text: str) -> str:
+    """Retire les tags [ACTION:...] en gérant les crochets imbriqués (domaines Odoo, JSON)."""
+    result = []
+    i = 0
+    n = len(text)
+    while i < n:
+        # Détecter le début d'un tag ACTION (avec ou sans backtick)
+        rest = text[i:]
+        if rest.startswith('[ACTION:') or rest.startswith('`[ACTION:'):
+            skip_bt = 1 if text[i] == '`' else 0
+            j = i + skip_bt
+            depth = 0
+            while j < n:
+                if text[j] == '[':
+                    depth += 1
+                elif text[j] == ']':
+                    depth -= 1
+                    if depth == 0:
+                        j += 1
+                        break
+                j += 1
+            # Skip backtick fermant
+            if j < n and text[j] == '`':
+                j += 1
+            i = j
+        else:
+            result.append(text[i])
+            i += 1
+    return ''.join(result)
+
+
 class RayaQuery(BaseModel):
     query: str
     file_data: Optional[str] = None
@@ -123,7 +154,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
                   purpose="raya_main_conversation")
 
     # Nettoyage : retire toutes les balises techniques de la réponse affichée
-    clean_response = re.sub(r'`?\[ACTION:[^\]]*\]`?', '', raya_response)
+    clean_response = _strip_action_tags(raya_response)
     speak_speed = None
     speed_match = re.search(r'\[SPEAK_SPEED:([\d.]+)\]', clean_response)
     if speed_match:
