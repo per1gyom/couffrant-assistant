@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 18/04/2026 — refonte intelligence + auto-découverte outils**
+**Dernière mise à jour : 18/04/2026 — refonte intelligence, auto-découverte, graphe de relations, Opus 4.7**
 
 ---
 
@@ -14,7 +14,7 @@
 - Desktop Commander local : `/Users/per1guillaume/couffrant-assistant`
 - Repo GitHub : `per1gyom/couffrant-assistant` branche `main`
 - URL prod : `https://app.raya-ia.fr`
-- Cache-bust JS/CSS : **v=26** (admin-panel.js) / **v=61** (chat)
+- Cache-bust JS/CSS : **v=28** (admin-panel.js) / **v=63** (chat)
 - **⚠️ PANELS SÉPARÉS** : `/admin/panel` → super admin only / `/tenant/panel` → tenant admin only
 - **⚠️ ARCHITECTURE ADMIN** : Routes dans le **package** `app/routes/admin/`
 - **⚠️ JAMAIS** supprimer `async function init()` dans `chat-main.js`

@@ -4,32 +4,48 @@
 
 ---
 
-## Session 18/04/2026 — Intelligence + Auto-découverte (~10 commits)
+## Session 18/04/2026 — Refonte intelligence + Graphe de relations (~20 commits)
 
 ### Refonte intelligence Raya
 - Identité : "Tu es Claude, modèle d'Anthropic" → intelligence native libérée
-- Prompt restructuré : contexte d'abord (utilisateur, données), règles à la fin
-- GUARDRAILS 370 lignes → 30 lignes (sécurité uniquement, zéro formatage verbeux)
+- Prompt restructuré : contexte d'abord (utilisateur, données), règles CORE_RULES à la fin (30 lignes)
 - Historique 6 → 30 échanges, max_tokens 2048 → 8192
 - Routeur assoupli, quota Opus 20 → 50/jour, rate limiter 60 → 120/h
-- Anti-bluff : "Ne promets jamais ce que tu ne peux pas faire"
+- Anti-bluff + anti-censure : "GÉNÈRE les tags ACTION, ne décris pas ce que tu vas faire — fais-le"
+- Upgrade Claude Opus 4.6 → **4.7** (meilleur suivi instructions, auto-vérification)
 
-### Actions Odoo
-- **Nouveau** : ODOO_SEARCH, ODOO_MODELS, ODOO_CREATE, ODOO_UPDATE, ODOO_NOTE
+### Actions Odoo (complètes)
+- ODOO_SEARCH, ODOO_MODELS, ODOO_CREATE, ODOO_UPDATE, ODOO_NOTE
 - Parseur `_extract_action_tags` — gère les crochets imbriqués (JSON Odoo)
 - `_safe_parse_domain` — parse robuste des domaines Odoo
 - Retry automatique sur KeyError (champs inconnus → fallback `name`)
 
-### Auto-découverte outils
+### Auto-découverte outils (couche 2 — vectorisation)
 - `tool_schemas` table DB avec embeddings vectoriels HNSW
-- `discover_odoo()` — explore modèles business, vectorise descriptions + champs + relations
+- `discover_odoo()` — explore 21 modèles business, vectorise descriptions + champs + relations
 - `retrieve_tool_knowledge()` — RAG injecte les schémas pertinents dans le prompt
-- Routes admin : POST /admin/discover/{tenant_id}/odoo
+- Bouton 🔍 Découvrir dans le panel admin sur chaque connexion Odoo
+
+### Graphe de relations (couche 3 — cross-source)
+- `entity_links` table DB — relie contacts ↔ factures ↔ mails ↔ fichiers ↔ Teams
+- `entity_graph.py` : link_entity, get_entity_context, populate_from_odoo, populate_from_mail_memory
+- Lookup graphe injecté dans le prompt quand un contact est mentionné
+- Peuplement automatique lors du bouton Découvrir Odoo
+
+### Synthèse auto (2ème appel LLM)
+- Quand des résultats informatifs remontent (📊📋📇🗂️🔍❌), un 2ème appel LLM est lancé
+- Raya voit ses propres résultats et fait la synthèse (tableaux, totaux, analyse)
+- Les données brutes sont masquées quand la synthèse réussit
+- aria_memory mis à jour avec la synthèse
 
 ### UX
-- Bouton stop (annuler prompt en cours) + verrouillage double envoi
-- Résultats Odoo/Drive/Contacts affichés dans le chat (plus en toasts perdus)
-- Nettoyage tags ACTION avec crochets imbriqués (`_strip_action_tags`)
+- Bouton stop (annuler prompt en cours) + verrouillage double envoi (AbortController)
+- Résultats informatifs affichés dans le chat (plus en toasts perdus)
+- `_strip_action_tags` — parseur avec profondeur de crochets
+- Fix panel admin : syntaxe JS askDeleteUser, try/catch loadMemoryStatus, showToast→setAlert
+
+### Route admin DEV ONLY
+- `/admin/reset-history/{username}` — archive l'historique (DEV ONLY, à supprimer en prod)
 
 ### Audits #3 #4 #5
 - Actions : username injecté dans confirm, gate outlook_token supprimé
