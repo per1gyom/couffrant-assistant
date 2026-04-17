@@ -4,6 +4,27 @@
 
 ---
 
+## Session 18/04/2026 — 5 Audits complétés (~4 commits)
+
+### Audit #3 — Système d'actions
+- **CRITIQUE** : `username` manquant dans `_execute_confirmed_action` via REST endpoint → SEND_MAIL unifié cassé. Injecté dans les deux chemins (REST + inline).
+- Gate `if outlook_token:` supprimé → utilisateurs Gmail-only peuvent maintenant envoyer des mails
+- `CREATEFOLDER` appelait des fonctions inexistantes (`_find_sharepoint_site_and_drive`) → remplacé par DriveConnector unifié
+- Draft Gmail → connecteur V2 (remplace legacy `gmail_connector`)
+- `_get_user_email` → legacy `token_manager` supprimé, V2 uniquement
+- `mark_executing` appelé avant exécution (tracking état)
+- Nettoyage automatique des actions bloquées en "executing" depuis +1h
+
+### Audit #4 — Scheduler/jobs
+- Architecture propre, aucun problème critique
+- `_job_enabled` dupliquée dans `scheduler.py` → supprimée (utilisée uniquement dans `scheduler_jobs.py`)
+- Imports morts (`IntervalTrigger`, `CronTrigger`, `os`) supprimés de `scheduler.py`
+
+### Audit #5 — Frontend
+- XSS mineur dans `showToast` (`innerHTML` → `textContent`)
+- Structure JS propre, tous les `fetch` en `try/catch`, DOMPurify sur les réponses Raya
+- Code mort identifié (`checkTokenStatus`, `renderPendingActions`) — conservé pour compat
+
 ## Session 17/04/2026 — Audit & Sécurité (~5 commits)
 
 ### Nettoyage post-Sonnet
