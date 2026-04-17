@@ -185,13 +185,33 @@ retrieve_tool_knowledge(query, tenant_id)
 Principe : Raya ne doit PAS attendre qu'on l'interroge. Elle analyse en continu
 et alerte quand c'est pertinent. Elle croise TOUTES ses sources à chaque événement.
 
-Cas cible : mail de SARL DES MOINES → croise Odoo (facture 81k€) + Teams (échanges)
-+ Drive (devis) → alerte Guillaume + prévient Arlène automatiquement.
+**Niveau 1 — Proactivité événementielle (prochaine étape)**
+Architecture : ÉVÉNEMENT → GRAPHE DE RELATIONS → RÈGLES UTILISATEUR → ACTION
+- Graphe d'entités en PostgreSQL (table entity_links) — relie contacts, factures,
+  mails, fichiers, échanges Teams entre eux par entité (nom, email, société)
+- Se met à jour en continu via webhooks + polls sur CHAQUE outil connecté
+  (Odoo, Gmail, Outlook, Teams, Drive, calendrier, tout futur outil)
+- Quand un événement arrive → lookup graphe → contexte complet en 2ms
+- Évaluation des règles utilisateur → action automatique si pertinent
+- Canaux d'alerte : chat, WhatsApp, app mobile (push), mail proactif
 
-Architecture : ÉVÉNEMENT → ENRICHISSEMENT CROSS-SOURCE (RAG) → ÉVALUATION (règles) → ACTION
+**Niveau 2 — Supervision contextuelle (moyen terme)**
+- Raya voit ce que l'utilisateur fait dans ses outils connectés
+  (quel mail il lit, quel dossier il ouvre, quel contact il consulte)
+- Anticipe et enrichit : "Tu lis le mail de X — note : facture impayée 81k€"
+- Nécessite des webhooks plus fins (lecture mail, navigation Drive)
 
-Canaux d'alerte : chat, WhatsApp, app mobile (push), mail proactif.
+**Niveau 3 — Copilote poste de travail (vision long terme)**
+- Agent local (extension navigateur ou app desktop)
+- Raya voit l'écran, comprend le contexte de travail
+- "Mode travail" activable par l'utilisateur
+- Analyse les actions, détecte les patterns, conseille en temps réel
+  ("La dernière fois tu as oublié la remise sur ce type de devis")
+- Apprentissage progressif des workflows de l'utilisateur
+- Toujours avec validation — suggestions, pas d'actions autonomes non approuvées
+
 Règles utilisateur : "si facture impayée > 10k€ + mail paiement → préviens Arlène"
+→ stockées dans aria_rules, évaluées à chaque événement
 
 NOTE DEV : /admin/reset-history est DEV ONLY — en production, mémoire préservée.
 
