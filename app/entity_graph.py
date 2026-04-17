@@ -170,12 +170,22 @@ def get_entity_context_text(entity_key: str, tenant_id: str) -> str:
 
 def populate_from_odoo(tenant_id: str) -> dict:
     """
-    Peuple le graphe depuis Odoo : contacts ↔ factures, devis, projets,
-    + équipe (res.users = collaborateurs internes).
+    Peuple le graphe depuis Odoo : contacts ↔ factures, devis, leads, projets,
+    tâches, planning, tickets SAV, paiements + équipe (res.users = collaborateurs
+    internes).
     Appelé après discover_odoo ou périodiquement.
+
+    Chaque bloc est dans un try/except indépendant : si un module Odoo n'est
+    pas installé (ex: helpdesk, planning) ou qu'un appel échoue, les autres
+    blocs continuent. L'erreur est consignée dans stats["errors"].
     """
     from app.connectors.odoo_connector import odoo_call
-    stats = {"contacts": 0, "invoices": 0, "orders": 0, "team_members": 0, "errors": []}
+    stats = {
+        "contacts": 0, "invoices": 0, "orders": 0, "team_members": 0,
+        "leads": 0, "projects": 0, "tasks": 0,
+        "planning_slots": 0, "tickets": 0, "payments": 0,
+        "errors": [],
+    }
 
     # 0. Équipe interne (res.users) — les collaborateurs qui apparaissent dans
     # les plannings d'intervention et sont assignés aux événements (user_id).
@@ -272,8 +282,244 @@ def populate_from_odoo(tenant_id: str) -> dict:
     except Exception as e:
         stats["errors"].append(f"devis: {str(e)[:100]}")
 
-    logger.info("[Graph] Odoo → graphe : %d équipiers, %d contacts, %d factures, %d devis, %d erreurs",
-                stats["team_members"], stats["contacts"], stats["invoices"], stats["orders"], len(stats["errors"]))
+    # 4. CRM Leads (crm.lead) → pipeline commercial, liés au contact partner_id
+    try:
+        leads = odoo_call(
+            model="crm.lead", method="search_read",
+            kwargs={"domain": [["active", "=", True]],
+                    "fields": ["name", "partner_id", "stage_id",
+                               "expected_revenue", "probability", "user_id"],
+                    "limit": 300}
+        )
+        for lead in (leads or []):
+            partner = lead.get("partner_id")
+            # Les leads peuvent exister sans partner_id (prospect pas encore converti).
+            # Dans ce cas, on les lie à un contact "lead-<id>" synthétique pour ne
+            # pas les perdre, mais idéalement v2 créera un entity_type="lead".
+            if partner and isinstance(partner, list):
+                partner_name = partner[1] if len(partner) > 1 else ""
+                key = normalize_key(partner_name)
+            else:
+                partner_name = lead.get("name", "") or f"Lead #{lead['id']}"
+                key = normalize_key(partner_name)
+            if not key:
+                continue
+            stage = lead.get("stage_id")
+            stage_name = stage[1] if isinstance(stage, list) and len(stage) > 1 else ""
+            revenue = lead.get("expected_revenue") or 0
+            proba = lead.get("probability") or 0
+            label = f"{lead.get('name','')} — {stage_name or '?'} — {revenue:.0f}€ ({proba:.0f}%)"
+            link_entity(tenant_id, "contact", key, partner_name,
+                       "lead", str(lead["id"]), "odoo", label,
+                       {"stage": stage_name, "revenue": revenue,
+                        "probability": proba, "user_id": lead.get("user_id")})
+            stats["leads"] += 1
+    except Exception as e:
+        stats["errors"].append(f"leads: {str(e)[:100]}")
+
+    # 5. Projets (project.project) → chantiers, liés au contact partner_id
+    try:
+        projects = odoo_call(
+            model="project.project", method="search_read",
+            kwargs={"domain": [["active", "=", True]],
+                    "fields": ["name", "partner_id", "stage_id", "user_id",
+                               "date_start", "date"],
+                    "limit": 300}
+        )
+        for proj in (projects or []):
+            partner = proj.get("partner_id")
+            if not partner or not isinstance(partner, list):
+                continue
+            partner_name = partner[1] if len(partner) > 1 else ""
+            key = normalize_key(partner_name)
+            if not key:
+                continue
+            stage = proj.get("stage_id")
+            stage_name = stage[1] if isinstance(stage, list) and len(stage) > 1 else ""
+            date_range = ""
+            if proj.get("date_start") or proj.get("date"):
+                date_range = f" ({proj.get('date_start','?')} → {proj.get('date','?')})"
+            label = f"{proj.get('name','')} — {stage_name or 'en cours'}{date_range}"
+            link_entity(tenant_id, "contact", key, partner_name,
+                       "project", str(proj["id"]), "odoo", label,
+                       {"stage": stage_name, "user_id": proj.get("user_id"),
+                        "date_start": str(proj.get("date_start") or ""),
+                        "date_end": str(proj.get("date") or "")})
+            stats["projects"] += 1
+    except Exception as e:
+        stats["errors"].append(f"projets: {str(e)[:100]}")
+
+    # 6. Tâches (project.task) → liées au contact partner_id si présent,
+    # sinon liées à l'équipier assigné (team_member). Permet à Raya de répondre
+    # à "Qui bosse sur quoi ?" et "Où en est la tâche X pour le client Y ?"
+    try:
+        tasks = odoo_call(
+            model="project.task", method="search_read",
+            kwargs={"domain": [["active", "=", True]],
+                    "fields": ["name", "partner_id", "project_id", "stage_id",
+                               "user_ids", "date_deadline"],
+                    "limit": 500}
+        )
+        for task in (tasks or []):
+            partner = task.get("partner_id")
+            linked = False
+            # Lien principal : contact via partner_id
+            if partner and isinstance(partner, list):
+                partner_name = partner[1] if len(partner) > 1 else ""
+                key = normalize_key(partner_name)
+                if key:
+                    stage = task.get("stage_id")
+                    stage_name = stage[1] if isinstance(stage, list) and len(stage) > 1 else ""
+                    project = task.get("project_id")
+                    project_name = project[1] if isinstance(project, list) and len(project) > 1 else ""
+                    deadline = task.get("date_deadline") or ""
+                    label = f"{task.get('name','')} [{project_name}] — {stage_name}"
+                    if deadline:
+                        label += f" (échéance {deadline})"
+                    link_entity(tenant_id, "contact", key, partner_name,
+                               "task", str(task["id"]), "odoo", label,
+                               {"project": project_name, "stage": stage_name,
+                                "deadline": str(deadline),
+                                "user_ids": task.get("user_ids")})
+                    stats["tasks"] += 1
+                    linked = True
+            # Lien secondaire : équipiers assignés (team_member). Non-exclusif
+            # si la tâche a un partner_id : la tâche apparaît dans les 2 vues.
+            user_ids = task.get("user_ids") or []
+            if isinstance(user_ids, list) and not linked:
+                # Sans partner_id mais avec équipier assigné : on lie à l'équipier
+                # pour que "que fait Benoît cette semaine ?" remonte ces tâches.
+                # Note : user_ids sont des IDs bruts ici, on ne résout pas (ce
+                # serait lourd dans populate_from_odoo — c'est odoo_actions qui
+                # le fait côté requête live via odoo_enrich).
+                for uid in user_ids:
+                    if not isinstance(uid, int):
+                        continue
+                    stage = task.get("stage_id")
+                    stage_name = stage[1] if isinstance(stage, list) and len(stage) > 1 else ""
+                    project = task.get("project_id")
+                    project_name = project[1] if isinstance(project, list) and len(project) > 1 else ""
+                    label = f"{task.get('name','')} [{project_name}] — {stage_name}"
+                    # Clé synthétique basée sur user_id — l'équipier sera résolu
+                    # par ailleurs via team_roster_block.
+                    link_entity(tenant_id, "team_member", f"user-{uid}",
+                               f"User #{uid}",
+                               "task", str(task["id"]), "odoo", label,
+                               {"project": project_name, "stage": stage_name,
+                                "user_id": uid})
+                stats["tasks"] += 1
+    except Exception as e:
+        stats["errors"].append(f"tâches: {str(e)[:100]}")
+
+    # 7. Planning slots (planning.slot) → ventilations ressources × dates.
+    # Module optionnel d'Odoo (Enterprise). Si non installé, l'appel échoue
+    # proprement et on continue.
+    try:
+        slots = odoo_call(
+            model="planning.slot", method="search_read",
+            kwargs={"domain": [],  # tous (le module filtre déjà par défaut les actifs)
+                    "fields": ["name", "start_datetime", "end_datetime",
+                               "resource_id", "role_id", "project_id"],
+                    "limit": 300}
+        )
+        for slot in (slots or []):
+            resource = slot.get("resource_id")
+            if not resource or not isinstance(resource, list):
+                continue
+            resource_name = resource[1] if len(resource) > 1 else ""
+            key = normalize_key(resource_name)
+            if not key:
+                continue
+            role = slot.get("role_id")
+            role_name = role[1] if isinstance(role, list) and len(role) > 1 else ""
+            project = slot.get("project_id")
+            project_name = project[1] if isinstance(project, list) and len(project) > 1 else ""
+            start = slot.get("start_datetime") or ""
+            end = slot.get("end_datetime") or ""
+            label = f"{role_name or 'créneau'} {start} → {end}"
+            if project_name:
+                label += f" [{project_name}]"
+            link_entity(tenant_id, "team_member", key, resource_name,
+                       "planning_slot", str(slot["id"]), "odoo", label,
+                       {"role": role_name, "project": project_name,
+                        "start": str(start), "end": str(end)})
+            stats["planning_slots"] += 1
+    except Exception as e:
+        stats["errors"].append(f"planning: {str(e)[:100]}")
+
+    # 8. Tickets SAV (helpdesk.ticket) → module Helpdesk d'Odoo, optionnel.
+    try:
+        tickets = odoo_call(
+            model="helpdesk.ticket", method="search_read",
+            kwargs={"domain": [["active", "=", True]],
+                    "fields": ["name", "partner_id", "stage_id", "priority",
+                               "user_id", "create_date"],
+                    "limit": 300}
+        )
+        for tk in (tickets or []):
+            partner = tk.get("partner_id")
+            if not partner or not isinstance(partner, list):
+                continue
+            partner_name = partner[1] if len(partner) > 1 else ""
+            key = normalize_key(partner_name)
+            if not key:
+                continue
+            stage = tk.get("stage_id")
+            stage_name = stage[1] if isinstance(stage, list) and len(stage) > 1 else ""
+            prio = tk.get("priority") or "0"
+            prio_label = {"0": "normale", "1": "basse", "2": "haute",
+                          "3": "urgente"}.get(str(prio), prio)
+            label = f"{tk.get('name','')} — {stage_name} (prio {prio_label})"
+            link_entity(tenant_id, "contact", key, partner_name,
+                       "ticket", str(tk["id"]), "odoo", label,
+                       {"stage": stage_name, "priority": prio_label,
+                        "user_id": tk.get("user_id"),
+                        "created": str(tk.get("create_date") or "")})
+            stats["tickets"] += 1
+    except Exception as e:
+        stats["errors"].append(f"tickets: {str(e)[:100]}")
+
+    # 9. Paiements (account.payment) → encaissements historiques, liés au contact.
+    # Complète le bloc factures : permet de voir la chronologie des règlements.
+    try:
+        payments = odoo_call(
+            model="account.payment", method="search_read",
+            kwargs={"domain": [["state", "!=", "cancel"]],
+                    "fields": ["name", "partner_id", "amount", "state",
+                               "date", "payment_type"],
+                    "limit": 500}
+        )
+        for pay in (payments or []):
+            partner = pay.get("partner_id")
+            if not partner or not isinstance(partner, list):
+                continue
+            partner_name = partner[1] if len(partner) > 1 else ""
+            key = normalize_key(partner_name)
+            if not key:
+                continue
+            state_label = {"draft": "brouillon", "posted": "comptabilisé",
+                          "reconciled": "rapproché",
+                          "sent": "envoyé"}.get(pay.get("state", ""), pay.get("state", ""))
+            ptype_label = {"inbound": "reçu", "outbound": "émis"}.get(
+                pay.get("payment_type", ""), pay.get("payment_type", ""))
+            date_str = str(pay.get("date") or "")
+            label = f"{pay.get('name','')} — {pay.get('amount',0):.0f}€ {ptype_label} {state_label} {date_str}"
+            link_entity(tenant_id, "contact", key, partner_name,
+                       "payment", str(pay["id"]), "odoo", label,
+                       {"amount": pay.get("amount"),
+                        "state": pay.get("state"),
+                        "payment_type": pay.get("payment_type"),
+                        "date": date_str})
+            stats["payments"] += 1
+    except Exception as e:
+        stats["errors"].append(f"paiements: {str(e)[:100]}")
+
+    logger.info(
+        "[Graph] Odoo → graphe : %d équipiers, %d contacts, %d factures, %d devis, "
+        "%d leads, %d projets, %d tâches, %d planning, %d tickets, %d paiements, %d erreurs",
+        stats["team_members"], stats["contacts"], stats["invoices"], stats["orders"],
+        stats["leads"], stats["projects"], stats["tasks"], stats["planning_slots"],
+        stats["tickets"], stats["payments"], len(stats["errors"]))
     return stats
 
 

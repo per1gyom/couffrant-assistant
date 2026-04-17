@@ -268,6 +268,9 @@ async function discoverTool(tenantId,toolType,btn){
       const statLabels = {
         team_members: 'équipier(s)', contacts: 'contact(s)',
         invoices: 'facture(s)', orders: 'devis',
+        leads: 'lead(s)', projects: 'projet(s)', tasks: 'tâche(s)',
+        planning_slots: 'créneau(x) planning', tickets: 'ticket(s) SAV',
+        payments: 'paiement(s)',
         folders: 'dossier(s)', files: 'fichier(s)',
         events: 'événement(s)', matched: 'match(s) graphe',
       };
