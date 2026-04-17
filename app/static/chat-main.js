@@ -286,16 +286,24 @@ async function sendMessage() {
   }, 10000);
   messagesEl.addEventListener('raya-message-rendered', _onRendered, { once: true });
   // Nettoyage du spacer : une fois la réponse affichée, le spacer n'a plus
-  // d'utilité. Le laisser créerait un espace vide invisible en bas du chat
-  // (visible si l'user scrolle via Cmd+Flèche-bas). On le retire après un
-  // petit délai pour laisser le temps aux animations (anchor, streaming) de
-  // se stabiliser avant le cleanup.
+  // d'utilité. Suppression en DOUCEUR via transition CSS (max-height +
+  // opacity) pour éviter le 'tout redescend' perçu par Guillaume quand
+  // on retirait le spacer brutalement (500+ px disparaissent d'un coup).
   setTimeout(() => {
     try {
       const s = document.getElementById('raya-scroll-spacer');
-      if (s) s.remove();
+      if (!s) return;
+      // Mesurer la hauteur actuelle pour animer proprement
+      s.style.maxHeight = s.offsetHeight + 'px';
+      s.style.overflow = 'hidden';
+      s.style.transition = 'max-height 0.5s ease-out, opacity 0.4s ease-out';
+      requestAnimationFrame(() => {
+        s.style.maxHeight = '0';
+        s.style.opacity = '0';
+      });
+      setTimeout(() => { try { s.remove(); } catch(_) {} }, 550);
     } catch(_) {}
-  }, 600);
+  }, 800);
 }
 
 // Polling fantôme : quand /raya a renvoyé un timeout mais que le thread Python
