@@ -156,16 +156,28 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
     // Si timestamp fourni → message d'historique, affichage direct.
     // Si markdown complexe (tableau, liste, heading, code) → fade-in plutôt que
     // typing pour éviter de voir les caractères bruts ('|', '**', '###') défiler.
+    // Dans tous les cas, on émet 'raya-message-rendered' une fois le rendu
+    // complet, pour que chat-main.js sache quand réactiver le bouton envoi.
+    const finalizeAndNotify = () => {
+      finalize();
+      try {
+        if (type === 'raya') {
+          messagesEl.dispatchEvent(new CustomEvent('raya-message-rendered', {
+            detail: { isHistory: !!timestamp }
+          }));
+        }
+      } catch(_) {}
+    };
     if (timestamp) {
-      finalize();
+      finalizeAndNotify();
     } else if (hasComplexMarkdown(text)) {
-      finalize();
+      finalizeAndNotify();
       // Fade-in doux de la bulle complète pour remplacer l'effet typing
       content.style.opacity = '0';
       content.style.transition = 'opacity 0.5s ease-out';
       requestAnimationFrame(() => { content.style.opacity = '1'; });
     } else {
-      streamRenderToContent(content, text, finalize);
+      streamRenderToContent(content, text, finalizeAndNotify);
     }
   } else {
     content.style.whiteSpace = 'pre-wrap'; content.textContent = text;

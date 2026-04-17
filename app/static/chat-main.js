@@ -107,15 +107,30 @@ const _STOP_ICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" 
 
 function _setSendMode(mode) {
   if (mode === 'sending') {
+    // Pendant que Raya réfléchit : bouton devient "Stop" rouge (cliquable pour
+    // annuler), MAIS l'input reste actif pour permettre à l'user de préparer
+    // sa prochaine question pendant la réflexion (demande Guillaume 17/04).
     sendBtn.innerHTML = _STOP_ICON;
     sendBtn.classList.add('stop-mode');
+    sendBtn.classList.remove('waiting');
     sendBtn.onclick = cancelMessage;
     sendBtn.disabled = false;
-    inputEl.disabled = true;
-    inputEl.placeholder = 'Raya réfléchit…';
-  } else {
+    inputEl.disabled = false;
+    inputEl.placeholder = 'Prépare ta prochaine question (envoi dispo dès que Raya a fini)…';
+  } else if (mode === 'streaming') {
+    // Réponse Raya en cours d'affichage (streaming ou fade-in) :
+    // bouton envoi visible mais GRISÉ pour empêcher l'envoi tant que
+    // la réponse n'est pas 100% affichée → évite les collisions.
     sendBtn.innerHTML = _SEND_ICON;
     sendBtn.classList.remove('stop-mode');
+    sendBtn.classList.add('waiting');
+    sendBtn.onclick = sendMessage;
+    sendBtn.disabled = true;
+    inputEl.disabled = false;
+    inputEl.placeholder = 'Raya finit sa réponse…';
+  } else {
+    sendBtn.innerHTML = _SEND_ICON;
+    sendBtn.classList.remove('stop-mode', 'waiting');
     sendBtn.onclick = sendMessage;
     sendBtn.disabled = false;
     inputEl.disabled = false;
@@ -253,7 +268,23 @@ async function sendMessage() {
   }
   _isSending = false;
   _abortController = null;
-  _setSendMode('ready');
+  // Au lieu de passer directement à 'ready', on passe en 'streaming' :
+  // bouton envoi grisé le temps que la réponse finisse de s'afficher.
+  // L'event 'raya-message-rendered' est émis par addMessage(raya) quand
+  // le rendu est complet → on attend +500ms de sécurité puis on libère.
+  _setSendMode('streaming');
+  const _onRendered = () => {
+    clearTimeout(_fallbackTimer);
+    messagesEl.removeEventListener('raya-message-rendered', _onRendered);
+    setTimeout(() => { if (!_isSending) _setSendMode('ready'); }, 500);
+  };
+  // Sécurité : si pour une raison X l'event n'arrive pas en 10s, on libère
+  // quand même le bouton pour ne pas bloquer l'utilisateur.
+  const _fallbackTimer = setTimeout(() => {
+    messagesEl.removeEventListener('raya-message-rendered', _onRendered);
+    if (!_isSending) _setSendMode('ready');
+  }, 10000);
+  messagesEl.addEventListener('raya-message-rendered', _onRendered, { once: true });
   // Nettoyage du spacer : une fois la réponse affichée, le spacer n'a plus
   // d'utilité. Le laisser créerait un espace vide invisible en bas du chat
   // (visible si l'user scrolle via Cmd+Flèche-bas). On le retire après un

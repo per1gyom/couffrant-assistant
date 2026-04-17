@@ -111,7 +111,7 @@ function onMessagesScroll() {
 
 // --- INPUT ---
 function autoResize(el) { el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,160)+'px'; el.scrollTop=el.scrollHeight; }
-function handleKey(e) { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); if (!_isSending) sendMessage(); } }
+function handleKey(e) { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); if (!_isSending && !sendBtn.disabled) sendMessage(); } }
 
 function cleanText(t) {
   return t.replace(/#{1,6}\s+/g,'').replace(/\*\*(.*?)\*\*/g,'$1').replace(/\*(.*?)\*/g,'$1')
