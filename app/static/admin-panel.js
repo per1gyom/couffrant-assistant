@@ -213,7 +213,7 @@ async function loadConnections(tenantId,idx){
           <span style="font-size:16px">${icon}</span>
           <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px;cursor:pointer;border-bottom:1px dashed var(--text3)" onclick="renameConn(${c.id},'${tenantId}',${idx},'${c.label.replace(/'/g,"\\'")}')" title="Cliquer pour renommer">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span> ${statusBadge}</div>
           ${oauthBtn}
-          ${['odoo'].includes(c.tool_type)?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px" onclick="discoverTool('${tenantId}','${c.tool_type}',this)">🔍 Découvrir</button>`:''}
+          ${['odoo','microsoft','gmail'].includes(c.tool_type)?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px" onclick="discoverTool('${tenantId}','${c.tool_type}',this)">🔍 Découvrir</button>`:''}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
           <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
         </div>
@@ -238,19 +238,34 @@ async function createConnection(tenantId,idx){
 
 async function discoverTool(tenantId,toolType,btn){
   const orig=btn.innerHTML;
-  btn.disabled=true;btn.innerHTML='⏳ Exploration…';
+  btn.disabled=true;
+  // Pour Odoo → une seule découverte. Pour Microsoft/Gmail → enchaîner drive + calendar + contacts.
+  const batteries = (toolType === 'odoo') ? ['odoo'] : ['drive','calendar','contacts'];
+  const totals = {discovered:0, matched:0, errors:[]};
   try{
-    const r=await fetch(`/admin/discover/${tenantId}/${toolType}`);
-    const d=await r.json();
-    if(d.discovered>0){
-      btn.innerHTML=`✅ ${d.discovered} modèle(s)`;
-      setAlert('companies-alert',`${d.discovered} schéma(s) ${toolType} découvert(s) et vectorisé(s)`,'ok');
-    }else{
-      btn.innerHTML='❌ Échec';
-      setAlert('companies-alert',d.errors?d.errors[0]:'Aucun modèle découvert','err');
+    for (const batt of batteries) {
+      btn.innerHTML = `⏳ ${batt}…`;
+      const r = await fetch(`/admin/discover/${tenantId}/${batt}`);
+      const d = await r.json();
+      totals.discovered += (d.discovered || 0);
+      if (d.graph && d.graph.matched) totals.matched += d.graph.matched;
+      if (d.errors && d.errors.length) totals.errors.push(...d.errors.slice(0, 3));
     }
-  }catch(e){btn.innerHTML='❌ Erreur';setAlert('companies-alert','Erreur réseau','err');}
-  setTimeout(()=>{btn.innerHTML=orig;btn.disabled=false;},5000);
+    if(totals.discovered > 0){
+      btn.innerHTML = `✅ ${totals.discovered} élément(s)`;
+      const extra = totals.matched > 0 ? ` + ${totals.matched} match(s) graphe` : '';
+      setAlert('companies-alert',
+        `${totals.discovered} schéma(s) ${toolType} découvert(s)${extra}`, 'ok');
+    } else {
+      btn.innerHTML = '❌ Rien trouvé';
+      setAlert('companies-alert',
+        totals.errors[0] || `Aucun élément découvert pour ${toolType}`, 'err');
+    }
+  }catch(e){
+    btn.innerHTML='❌ Erreur';
+    setAlert('companies-alert','Erreur réseau : '+e.message, 'err');
+  }
+  setTimeout(()=>{btn.innerHTML=orig;btn.disabled=false;}, 6000);
 }
 
 async function deleteConn(connId,tenantId,idx){

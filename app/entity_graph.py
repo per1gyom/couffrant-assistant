@@ -293,3 +293,172 @@ def populate_from_mail_memory(tenant_id: str) -> int:
     logger.info("[Graph] Mails → graphe : %d liens", count)
     return count
 
+
+
+# ─── PEUPLEMENT : DRIVE → GRAPHE ────────────────────────────────
+
+def populate_from_drive(tenant_id: str, username: str) -> dict:
+    """
+    Lie les fichiers/dossiers Drive aux entités déjà connues dans le graphe
+    (contacts, sociétés). Heuristique : nom de dossier = nom d'entité.
+
+    Ex : dossier 'SARL DES MOINES' → lié à l'entité contact 'sarl-des-moines'.
+    """
+    from app.drive_manager import get_user_drives
+    stats = {"folders": 0, "files": 0, "matched": 0, "errors": []}
+
+    # 1. Récupérer les entités connues du tenant (pour matcher avec les noms de dossier)
+    known_entities = {}
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT DISTINCT entity_key, entity_name FROM entity_links
+            WHERE tenant_id = %s AND entity_name IS NOT NULL
+        """, (tenant_id,))
+        for key, name in c.fetchall():
+            if name:
+                known_entities[normalize_key(name)] = (key, name)
+    except Exception as e:
+        stats["errors"].append(f"load entities: {str(e)[:100]}")
+    finally:
+        if conn: conn.close()
+
+    drives = get_user_drives(username)
+    if not drives:
+        stats["errors"].append(f"aucun drive connecté pour {username}")
+        return stats
+
+    for drv in drives:
+        try:
+            root = drv.list("") or []
+            for item in root:
+                if item.item_type != "folder":
+                    continue
+                stats["folders"] += 1
+                key_norm = normalize_key(item.name)
+                # Match direct sur nom d'entité connue
+                matched_key = None
+                for ek, (entity_key, entity_name) in known_entities.items():
+                    if key_norm == ek or key_norm in ek or ek in key_norm:
+                        matched_key = (entity_key, entity_name)
+                        break
+                if matched_key:
+                    entity_key, entity_name = matched_key
+                    link_entity(
+                        tenant_id=tenant_id, entity_type="contact",
+                        entity_key=entity_key, entity_name=entity_name,
+                        resource_type="folder", resource_id=item.id,
+                        resource_source=drv.provider,
+                        resource_label=f"Dossier {item.name}",
+                        resource_data={"url": item.url, "path": item.path},
+                    )
+                    stats["matched"] += 1
+        except Exception as e:
+            stats["errors"].append(f"{drv.provider}: {str(e)[:100]}")
+
+    logger.info("[Graph] Drive → graphe : %d dossiers, %d matchs, %d erreurs",
+                stats["folders"], stats["matched"], len(stats["errors"]))
+    return stats
+
+
+# ─── PEUPLEMENT : CALENDRIER → GRAPHE ───────────────────────────
+
+def populate_from_calendar(tenant_id: str, username: str) -> dict:
+    """
+    Lie les événements calendrier aux entités (participants).
+    Chaque participant (email) devient une clé d'entité, et l'événement y est rattaché.
+    """
+    from app.mailbox_manager import load_agenda_all
+    stats = {"events": 0, "links": 0, "errors": []}
+
+    try:
+        events = load_agenda_all(username, days=30) or []
+    except Exception as e:
+        return {"events": 0, "links": 0, "errors": [f"load_agenda_all: {str(e)[:200]}"]}
+
+    for ev in events[:100]:
+        try:
+            stats["events"] += 1
+            subject = ev.get("subject") or ev.get("summary") or "(sans sujet)"
+            ev_id = str(ev.get("id", ""))
+            if not ev_id:
+                continue
+            source = ev.get("source", "calendar")
+            start = ev.get("start") or ev.get("start_time") or ""
+            attendees = ev.get("attendees") or []
+
+            for a in attendees:
+                email = a.get("email") if isinstance(a, dict) else str(a)
+                if not email or "@" not in email:
+                    continue
+                name = ""
+                if isinstance(a, dict):
+                    name = a.get("name") or a.get("emailAddress", {}).get("name", "") or email
+                link_entity(
+                    tenant_id=tenant_id, entity_type="contact",
+                    entity_key=email, entity_name=name or email,
+                    resource_type="calendar_event", resource_id=ev_id,
+                    resource_source=source,
+                    resource_label=f"{subject} — {start}",
+                    resource_data={"start": start, "subject": subject},
+                )
+                stats["links"] += 1
+        except Exception as e:
+            stats["errors"].append(f"event: {str(e)[:80]}")
+
+    logger.info("[Graph] Calendar → graphe : %d événements, %d liens",
+                stats["events"], stats["links"])
+    return stats
+
+
+# ─── PEUPLEMENT : CONTACTS FRÉQUENTS → GRAPHE ───────────────────
+
+def populate_from_contacts(tenant_id: str, username: str) -> dict:
+    """
+    Crée/renforce des entités dans le graphe à partir des contacts fréquents
+    (agrégation mail_memory). Ajoute une ressource 'contact_profile' par contact
+    avec compteur d'échanges, permettant à Raya de distinguer un contact ponctuel
+    d'un interlocuteur régulier.
+    """
+    stats = {"contacts": 0, "errors": []}
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT from_email, MAX(from_name) AS name,
+                   COUNT(*) AS mail_count, MAX(received_at) AS last_seen
+            FROM mail_memory
+            WHERE username = %s
+              AND from_email IS NOT NULL AND from_email != ''
+            GROUP BY from_email
+            HAVING COUNT(*) >= 2
+            ORDER BY MAX(received_at) DESC
+            LIMIT 200
+        """, (username,))
+        rows = c.fetchall()
+    except Exception as e:
+        return {"contacts": 0, "errors": [f"query mail_memory: {str(e)[:200]}"]}
+    finally:
+        if conn: conn.close()
+
+    for from_email, name, mail_count, last_seen in rows:
+        try:
+            display = name or from_email
+            link_entity(
+                tenant_id=tenant_id, entity_type="contact",
+                entity_key=from_email, entity_name=display,
+                resource_type="contact_profile", resource_id=from_email,
+                resource_source="mail_memory",
+                resource_label=f"{display} — {mail_count} échanges",
+                resource_data={"email": from_email, "mail_count": mail_count,
+                               "last_seen": str(last_seen) if last_seen else ""},
+            )
+            stats["contacts"] += 1
+        except Exception as e:
+            stats["errors"].append(f"{from_email}: {str(e)[:80]}")
+
+    logger.info("[Graph] Contacts → graphe : %d contacts", stats["contacts"])
+    return stats

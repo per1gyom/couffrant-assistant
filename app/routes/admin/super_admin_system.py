@@ -193,17 +193,51 @@ def admin_discover_tool(
     _: dict = Depends(require_admin),
 ):
     """Lance l'auto-découverte d'un outil pour un tenant."""
+    # Résoudre le user primaire du tenant (nécessaire pour drive/calendar/contacts
+    # qui sont user-level, pas tenant-level).
+    def _primary_username(tid: str) -> str:
+        from app.database import get_pg_conn
+        conn = None
+        try:
+            conn = get_pg_conn()
+            c = conn.cursor()
+            c.execute("""
+                SELECT username FROM user_tenant_access
+                WHERE tenant_id = %s AND role IN ('owner', 'admin')
+                ORDER BY (role = 'owner') DESC, username ASC LIMIT 1
+            """, (tid,))
+            row = c.fetchone()
+            return row[0] if row else ""
+        finally:
+            if conn: conn.close()
+
     if tool_type == "odoo":
         from app.tool_discovery import discover_odoo
         result = discover_odoo(tenant_id)
-        # Peupler le graphe de relations aussi
         try:
             from app.entity_graph import populate_from_odoo
-            graph_stats = populate_from_odoo(tenant_id)
-            result["graph"] = graph_stats
+            result["graph"] = populate_from_odoo(tenant_id)
         except Exception as e:
             result["graph_error"] = str(e)[:200]
         return {"status": "ok" if result["discovered"] > 0 else "error", **result}
+
+    if tool_type in ("drive", "calendar", "contacts"):
+        username = _primary_username(tenant_id)
+        if not username:
+            return {"status": "error", "message": f"Aucun user owner/admin trouvé pour {tenant_id}"}
+        from app.tool_discovery import discover_drive, discover_calendar, discover_contacts
+        from app.entity_graph import populate_from_drive, populate_from_calendar, populate_from_contacts
+        discover_fn = {"drive": discover_drive, "calendar": discover_calendar,
+                        "contacts": discover_contacts}[tool_type]
+        populate_fn = {"drive": populate_from_drive, "calendar": populate_from_calendar,
+                        "contacts": populate_from_contacts}[tool_type]
+        result = discover_fn(tenant_id, username)
+        try:
+            result["graph"] = populate_fn(tenant_id, username)
+        except Exception as e:
+            result["graph_error"] = str(e)[:200]
+        return {"status": "ok" if result.get("discovered", 0) > 0 else "error", **result}
+
     return {"status": "error", "message": f"Type '{tool_type}' non supporté pour la découverte."}
 
 

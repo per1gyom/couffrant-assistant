@@ -152,6 +152,232 @@ def discover_odoo(tenant_id: str, connection_id: int = None) -> dict:
     return {"discovered": discovered, "errors": errors}
 
 
+# ─── DRIVE : DÉCOUVERTE DES DOSSIERS ET FICHIERS RÉCENTS ────────
+
+def discover_drive(tenant_id: str, username: str, connection_id: int = None) -> dict:
+    """
+    Explore les drives connectés d'un user (SharePoint + Google Drive) et vectorise :
+      - les dossiers de niveau 1-2 (structure de l'arborescence)
+      - les 30 fichiers les plus récents (pour que Raya les retrouve par contexte)
+
+    Retourne {"discovered": N, "folders": F, "files": X, "errors": [...]}.
+    """
+    from app.drive_manager import get_user_drives
+
+    discovered = 0
+    folders_count = 0
+    files_count = 0
+    errors = []
+
+    drives = get_user_drives(username)
+    if not drives:
+        return {"discovered": 0, "folders": 0, "files": 0,
+                "errors": [f"Aucun drive connecté pour {username}"]}
+
+    for drv in drives:
+        provider = drv.provider
+        drive_label = drv.label
+        try:
+            # 1. Lister la racine → dossiers de niveau 1
+            root_items = drv.list("") or []
+            folders_lvl1 = [it for it in root_items if it.item_type == "folder"]
+
+            for folder in folders_lvl1[:30]:
+                description = (
+                    f"Dossier '{folder.name}' dans {drive_label} ({provider}). "
+                    f"Accessible via l'action SEARCHDRIVE. "
+                    f"URL directe : {folder.url or 'n/a'}."
+                )
+                try:
+                    vec = embed(description)
+                    _upsert_schema(
+                        tenant_id=tenant_id,
+                        connection_id=connection_id,
+                        tool_type="drive",
+                        schema_type="folder",
+                        entity_key=f"{provider}:folder:{folder.id}",
+                        display_name=folder.name,
+                        description=description,
+                        fields_json={"path": folder.path, "url": folder.url,
+                                     "modified": folder.modified, "provider": provider},
+                        relationships_json=[],
+                        embedding=vec,
+                    )
+                    discovered += 1
+                    folders_count += 1
+                except Exception as e:
+                    errors.append(f"folder {folder.name}: {str(e)[:80]}")
+
+            # 2. Fichiers récents via search(""): utilise l'ordre modifié DESC
+            recent_files = drv.search("", max_results=30) or []
+            recent_files = [it for it in recent_files if it.item_type == "file"][:30]
+
+            for f in recent_files:
+                description = (
+                    f"Fichier '{f.name}' dans {drive_label} ({provider}), "
+                    f"modifié le {f.modified or 'n/a'}. "
+                    f"Accessible via SEARCHDRIVE ou par URL directe."
+                )
+                try:
+                    vec = embed(description)
+                    _upsert_schema(
+                        tenant_id=tenant_id,
+                        connection_id=connection_id,
+                        tool_type="drive",
+                        schema_type="recent_file",
+                        entity_key=f"{provider}:file:{f.id}",
+                        display_name=f.name,
+                        description=description,
+                        fields_json={"path": f.path, "url": f.url,
+                                     "modified": f.modified, "size": f.size,
+                                     "provider": provider},
+                        relationships_json=[],
+                        embedding=vec,
+                    )
+                    discovered += 1
+                    files_count += 1
+                except Exception as e:
+                    errors.append(f"file {f.name}: {str(e)[:80]}")
+
+            logger.info("[Discovery] Drive %s (%s) → %d dossiers, %d fichiers indexés",
+                        drive_label, provider, folders_count, files_count)
+
+        except Exception as e:
+            errors.append(f"{provider}: {str(e)[:200]}")
+            logger.warning("[Discovery] Erreur drive %s : %s", provider, e)
+
+    logger.info("[Discovery] Drive terminé : %d éléments (%d dossiers + %d fichiers), %d erreurs",
+                discovered, folders_count, files_count, len(errors))
+    return {"discovered": discovered, "folders": folders_count,
+            "files": files_count, "errors": errors}
+
+
+# ─── CALENDRIER : DÉCOUVERTE DES ÉVÉNEMENTS ET RÉCURRENTS ───────
+
+def discover_calendar(tenant_id: str, username: str, connection_id: int = None) -> dict:
+    """
+    Indexe les événements des 30 prochains jours (tous calendriers confondus : MS + Google).
+    Pour chaque événement : sujet, date, participants, lieu, récurrence.
+    Utile pour que Raya sache 'tu as RDV avec X lundi' sans lire l'agenda complet à chaque requête.
+    """
+    from app.mailbox_manager import load_agenda_all
+
+    discovered = 0
+    errors = []
+    try:
+        events = load_agenda_all(username, days=30) or []
+    except Exception as e:
+        return {"discovered": 0, "errors": [f"load_agenda_all échoué : {str(e)[:200]}"]}
+
+    for ev in events[:80]:  # cap raisonnable
+        try:
+            subject = ev.get("subject") or ev.get("summary") or "(sans sujet)"
+            start = ev.get("start") or ev.get("start_time") or ""
+            end = ev.get("end") or ev.get("end_time") or ""
+            location = ev.get("location") or ""
+            attendees = ev.get("attendees") or []
+            # Normaliser les participants (peut être liste d'emails ou liste de dicts)
+            attendee_emails = []
+            for a in attendees:
+                if isinstance(a, dict):
+                    email = a.get("email") or a.get("emailAddress", {}).get("address", "")
+                else:
+                    email = str(a)
+                if email:
+                    attendee_emails.append(email)
+
+            description = (
+                f"Événement '{subject}' prévu le {start}"
+                + (f" à {location}" if location else "")
+                + (f", avec {', '.join(attendee_emails[:5])}" if attendee_emails else "")
+                + f". Source : {ev.get('source', 'calendar')}."
+            )
+            vec = embed(description)
+            _upsert_schema(
+                tenant_id=tenant_id,
+                connection_id=connection_id,
+                tool_type="calendar",
+                schema_type="event",
+                entity_key=f"event:{ev.get('id', subject)[:100]}",
+                display_name=subject,
+                description=description,
+                fields_json={"start": start, "end": end, "location": location,
+                             "attendees": attendee_emails, "source": ev.get("source", "")},
+                relationships_json=[{"type": "attendee", "target": em} for em in attendee_emails],
+                embedding=vec,
+            )
+            discovered += 1
+        except Exception as e:
+            errors.append(f"event: {str(e)[:80]}")
+
+    logger.info("[Discovery] Calendar terminé : %d événements indexés, %d erreurs", discovered, len(errors))
+    return {"discovered": discovered, "errors": errors}
+
+
+# ─── CONTACTS : DÉCOUVERTE PAR FRÉQUENCE D'ÉCHANGE ──────────────
+
+def discover_contacts(tenant_id: str, username: str, connection_id: int = None) -> dict:
+    """
+    Indexe les contacts fréquents depuis mail_memory (proxy "qui contacte qui").
+    Pour chaque contact : nombre d'échanges, dernier contact, premier sujet récent.
+    Permet à Raya de prioriser les contacts récurrents dans ses réponses.
+    """
+    discovered = 0
+    errors = []
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT from_email, MAX(from_name) AS name,
+                   COUNT(*) AS mail_count, MAX(received_at) AS last_seen,
+                   (array_agg(subject ORDER BY received_at DESC))[1] AS last_subject
+            FROM mail_memory
+            WHERE username = %s
+              AND from_email IS NOT NULL AND from_email != ''
+            GROUP BY from_email
+            HAVING COUNT(*) >= 2
+            ORDER BY MAX(received_at) DESC
+            LIMIT 100
+        """, (username,))
+        rows = c.fetchall()
+    except Exception as e:
+        return {"discovered": 0, "errors": [f"mail_memory query échouée : {str(e)[:200]}"]}
+    finally:
+        if conn: conn.close()
+
+    for from_email, name, mail_count, last_seen, last_subject in rows:
+        try:
+            display = name or from_email
+            description = (
+                f"Contact fréquent : {display} ({from_email}). "
+                f"{mail_count} échanges, dernier le {last_seen}. "
+                f"Dernier sujet : « {(last_subject or '')[:120]} »."
+            )
+            vec = embed(description)
+            _upsert_schema(
+                tenant_id=tenant_id,
+                connection_id=connection_id,
+                tool_type="contacts",
+                schema_type="contact",
+                entity_key=f"contact:{from_email.lower()}",
+                display_name=display,
+                description=description,
+                fields_json={"email": from_email, "name": name,
+                             "mail_count": mail_count,
+                             "last_seen": str(last_seen) if last_seen else "",
+                             "last_subject": last_subject or ""},
+                relationships_json=[],
+                embedding=vec,
+            )
+            discovered += 1
+        except Exception as e:
+            errors.append(f"contact {from_email}: {str(e)[:80]}")
+
+    logger.info("[Discovery] Contacts terminé : %d contacts indexés, %d erreurs", discovered, len(errors))
+    return {"discovered": discovered, "errors": errors}
+
+
 def _upsert_schema(tenant_id, connection_id, tool_type, schema_type,
                    entity_key, display_name, description, fields_json,
                    relationships_json, embedding):

@@ -14,7 +14,7 @@
 - Desktop Commander local : `/Users/per1guillaume/couffrant-assistant`
 - Repo GitHub : `per1gyom/couffrant-assistant` branche `main`
 - URL prod : `https://app.raya-ia.fr`
-- Cache-bust JS/CSS : **v=28** (admin-panel.js) / **v=65** (chat)
+- Cache-bust JS/CSS : **v=29** (admin-panel.js) / **v=65** (chat)
 - **⚠️ PANELS SÉPARÉS** : `/admin/panel` → super admin only / `/tenant/panel` → tenant admin only
 - **⚠️ ARCHITECTURE ADMIN** : Routes dans le **package** `app/routes/admin/`
 - **⚠️ JAMAIS** supprimer `async function init()` dans `chat-main.js`
@@ -176,8 +176,9 @@ retrieve_tool_knowledge(query, tenant_id)
 
 ### Roadmap connaissance vectorisée
 - [x] Schémas Odoo (auto-découverte)
-- [ ] Index documents Drive (résumés des fichiers)
-- [ ] Graphe de contacts (qui contacte qui, fréquence, sujets)
+- [x] Dossiers + fichiers récents Drive (SharePoint + Google Drive)
+- [x] Événements calendrier (Microsoft + Google) + participants
+- [x] Contacts fréquents (depuis mail_memory, ≥2 échanges)
 - [ ] Vocabulaire métier (termes extraits des conversations)
 - [ ] Blueprints connecteurs (templates réutilisables Odoo, Salesforce...)
 
