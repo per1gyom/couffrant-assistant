@@ -150,11 +150,16 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     )
     raya_response = result["text"]
     model_name    = result["model"]
+    # Log de la réponse brute pour debug
+    logger.info("[Raya] Réponse brute pour %s (tier=%s, model=%s): %s",
+                username, model_tier, model_name, raya_response[:500])
     # Log des tags ACTION détectés pour debug
     import re as _re
     _tags = _re.findall(r'\[ACTION:([A-Z_]+)', raya_response)
     if _tags:
         logger.info("[Raya] Tags détectés dans la réponse pour %s: %s", username, _tags)
+    else:
+        logger.warning("[Raya] AUCUN tag ACTION détecté pour %s", username)
     log_llm_usage(result, username=username, tenant_id=tenant_id,
                   purpose="raya_main_conversation")
 

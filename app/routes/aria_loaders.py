@@ -47,6 +47,8 @@ def load_db_context(username: str) -> dict:
         columns = [desc[0] for desc in c.description]
         history = [dict(zip(columns, row)) for row in c.fetchall()]
         history.reverse()
+        from app.logging_config import get_logger as _gl
+        _gl("raya.loaders").info("[Loaders] Historique pour %s: %d échanges non-archivés", username, len(history))
 
         c.execute("SELECT COUNT(*) FROM aria_memory WHERE username = %s", (username,))
         conv_count = c.fetchone()[0]
