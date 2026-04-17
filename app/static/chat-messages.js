@@ -241,11 +241,10 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
         // mais dont le contenu ressemble à du Mermaid. Rattrape les cas où Raya
         // tape ``` sans le tag de langue.
         tagMermaidCodeBlocks(content);
-        // Rendu Mermaid : scanne les blocs ```mermaid et les transforme en SVG.
-        // Fait APRÈS le setAttribute des liens pour que, si le bloc Mermaid est
-        // remplacé, ça ne casse pas. Async mais on n'attend pas (fire-and-forget)
-        // pour ne pas bloquer le reste du finalize().
-        renderMermaidBlocks(content);
+        // NOTE : renderMermaidBlocks est appelé en FIN de fonction, APRÈS tous
+        // les innerHTML = innerHTML.replace ci-dessous. Sinon, le rendu async
+        // de Mermaid insère son SVG dans un <pre> qui aura été détaché du DOM
+        // par les réécritures innerHTML → SVG invisible, échec silencieux.
         content.querySelectorAll('a').forEach(a => {
           const href = a.getAttribute('href') || '';
           if (href.includes('/download/') || href.match(/\.(pdf|xlsx|xls|csv|png|jpg|jpeg)(\?|$)/i)) {
@@ -273,6 +272,12 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
           memDiv.appendChild(detailDiv);
           bubble.appendChild(memDiv);
         }
+        // Rendu Mermaid : scanne les blocs ```mermaid et les transforme en SVG.
+        // Appelé EN TOUT DERNIER — après les innerHTML = innerHTML.replace
+        // ci-dessus. Async mais on n'attend pas (fire-and-forget). Le scan
+        // querySelectorAll se fait sur le DOM final, donc les <pre> trouvés
+        // sont garantis connectés et le replaceChild aboutira.
+        renderMermaidBlocks(content);
       } catch(e) {
         console.error('[Raya] Erreur rendu markdown:', e, 'marked:', typeof marked);
         content.style.whiteSpace = 'pre-wrap';
