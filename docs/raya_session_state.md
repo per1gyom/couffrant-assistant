@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 17/04/2026 — fin de session**
+**Dernière mise à jour : 17/04/2026 — session soir, audit sécurité + panels séparés**
 
 ---
 

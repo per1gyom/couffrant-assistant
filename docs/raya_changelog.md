@@ -4,6 +4,76 @@
 
 ---
 
+## Session 17/04/2026 — Audit & Sécurité (~5 commits)
+
+### Nettoyage post-Sonnet
+- 11 scripts de patch non exécutés supprimés (tous obsolètes après refactoring)
+- 3 modifications utiles récupérées : prompt TRANSCRIPTION VOCALE + CORRECTIONS VIA CARTE, learned flag
+- `google_contacts.py` orphelin supprimé (gmail_connector2.py fait le travail)
+
+### Audit sécurité
+- `assert_connection_tenant()` — vérifie qu'une connexion appartient au tenant avant toute opération
+- Routes connexions dupliquées 2× dans `tenant_admin.py` → nettoyées
+- `_build_tenants_overview()` exposée sans auth → décorateur route supprimé
+- Injection credentials par tenant admin → bloquée (forcé `credentials={}`)
+- 646 lignes dead code supprimées (`admin.py` + `admin_endpoints.py`)
+
+### Panels séparés (sécurité)
+- `/admin/panel` → `require_admin` uniquement (super admin)
+- `/tenant/panel` → nouveau template `tenant_panel.html` (tenant admin)
+- Tenant admin : 2 onglets seulement (Ma société + Mon profil), zéro accès aux fonctions super admin
+- Menu chat (⋮) : routing automatique selon scope
+
+## Session 16-17/04/2026 — Architecture unifiée (~40 commits)
+
+### Raccourcis éditables v2
+- Table `user_shortcuts`, API CRUD, modale titre+prompt+couleur, stockage DB
+
+### Sujets intégrés sidebar
+- Remplacement du drawer noir par section `<details>` dans la sidebar
+
+### Palette couleurs
+- Bleu Roi Saturé #0057b8, fond pastel #f5f9ff
+
+### Système mail complet
+- Signature email avec logo, auto-injection dans `_build_email_html`
+- Action SEND_MAIL implémentée de bout en bout
+- Cartes de confirmation dans le flux chat (persistées en DB)
+- Carte mail éditable (De dropdown, À input, Corps textarea)
+- Bouton 📁 Brouillon (Outlook Drafts + Gmail Drafts)
+- Apprentissage depuis corrections (`learn_from_correction`)
+
+### Architecture connecteurs unifiés
+- `MailboxConnector` : Microsoft + Gmail, interface commune
+- `DriveConnector` : SharePoint + Google Drive
+- `MessagingConnector` : Teams (+ futur Slack/WhatsApp)
+- `mailbox_manager.py`, `drive_manager.py`, `messaging_manager.py`
+- Tags Raya unifiés : `SEND_MAIL:boite|to|sujet|corps`, `SEARCHDRIVE:drive|query`
+- Calendriers unifiés : Microsoft + Google Calendar, 7j, create/update/delete
+
+### Tokens — source unique
+- `tenant_connections` = seule source de vérité
+- Migration auto au démarrage (`token_migration.py`)
+- `oauth_tokens` / `gmail_tokens` dépréciées (tables conservées, zéro écriture)
+- Fallbacks legacy supprimés de `mailbox_manager.py`
+
+### Audit cœur Raya (10 fixes)
+- MAILBOX_BLOCK dynamique (plus hardcodé Guillaume)
+- embed(query) ×1 au lieu de ×4, 5 index DB, pool 2→15
+- Cache build_blocks 2-5min, FORMAT_BLOCK module-level
+- Soft-delete synthèse, confiance adaptative, dédup RAG robuste
+
+### Panel admin
+- Onglet Utilisation (tokens Claude par tenant/user)
+- Résumé connexions dans entête tenant
+- Display name, modal Paramètres, suppression compte
+
+### Divers
+- Bandeau token expiré + bouton reconnecter
+- Google contacts via People API (dans GmailConnector2)
+- Scope Gmail étendu (mail.google.com + contacts + calendar + drive)
+- OAuth admin pour connexions V2
+
 ## Session 16/04/2026 suite — 17h00 (Opus + Guillaume)
 
 ### Signature email — système complet ✅

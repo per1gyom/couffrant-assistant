@@ -136,12 +136,13 @@
 ```
 12 avril      Phase 5 complète + Phase 7 à 80%
 14-15 avril   Audit + SAV + RGPD + Refactoring complet + Multi-tenant + Suspension
-16 avril      Charlotte en test — Panel admin multi-rôle — Sécurité OAuth + re-auth
-Mi-avril      Sprint 1 — Rapport à la demande + workflow intelligence
-Fin avril     Sprint 2-3 — Multi-mailbox Gmail + monitoring + WhatsApp bidirectionnel
+16 avril      Architecture connecteurs unifiés + Système mail complet + Audit cœur
+17 avril      Audit sécurité + Panels séparés (super admin / tenant admin)
+Mi-avril      Sprint restant — Audits actions/scheduler/frontend
+Fin avril     Sprint 2-3 — monitoring + WhatsApp bidirectionnel
 Mi-mai        Phase 7 complète (Jarvis opérationnel)
 Fin mai       Phase 8 complète (intelligence avancée)
-Juin          Onboarding Charlotte + connecteurs sociaux + premiers clients beta
+Juin          Onboarding premiers clients + connecteurs sociaux
 Juillet-Août  Commercialisation (supervision, API, MCP, clients payants)
 ```
 
