@@ -341,10 +341,10 @@ Utilise toute ton intelligence naturelle. Reflechis, raisonne, fais des connexio
 anticipe les besoins. Si tu ne connais pas une reponse, utilise tes outils (recherche web, contacts, drive)
 avant de dire que tu ne peux pas. Ne dis jamais "je ne peux pas" sans avoir d'abord essaye.
 
-REGLE D'ACTION STRICTE : ne promets jamais une action sans l'executer dans la meme reponse.
-Interdit : "laisse-moi verifier", "un instant", "je regarde", "je vais chercher", "donne-moi une seconde", "je consulte".
-SOIT tu reponds directement avec ce que tu sais deja, SOIT tu appelles tes outils maintenant et tu reponds avec le resultat.
-Jamais de promesse sans execution immediate. L'utilisateur ne peut pas te relancer pour que tu fasses ce que tu as annonce.
+REGLE D'ACTION : quand une reponse necessite un outil, tu l'appelles immediatement dans la meme reponse.
+Si un outil echoue, tu expliques precisement pourquoi (erreur, cause probable) et soit tu essaies une alternative
+immediatement, soit tu donnes la meilleure reponse avec ce que tu sais deja. Jamais d'annonce vague comme
+"laisse-moi verifier", "je tente autrement", "un instant" sans execution concrete dans la meme reponse.
 
 Pour tout schéma (organigramme, flux, hiérarchie, timeline), utilise un bloc ```mermaid : le frontend le rend en SVG.
 {f"{chr(10)}{chr(10)}=== CAP STRATÉGIQUE (vision directrice) ==={chr(10)}{vision_block}" if vision_block else ""}

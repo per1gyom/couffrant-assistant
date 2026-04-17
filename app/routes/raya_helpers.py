@@ -243,14 +243,36 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         logger.info("[Raya] Synthèse auto : %d résultats informatifs pour %s", len(info_results), username)
         try:
             synth_data = "\n\n".join(info_results)
+            # Détecter si les résultats contiennent au moins une erreur (❌).
+            # Dans ce cas on donne au LLM des instructions plus riches pour
+            # qu'il ne se contente pas d'un laconique "la requête a planté"
+            # mais propose une alternative actionnable dans la même réponse.
+            has_errors = any(a.startswith('❌') or '❌' in a[:5] for a in info_results)
+            if has_errors:
+                synth_instruction = (
+                    f"Voici les données récupérées (certaines requêtes ont échoué) :\n\n{synth_data}\n\n"
+                    f"Réponds à {username} en :\n"
+                    f"1. Exploitant TOUTES les données valides que tu viens de recevoir\n"
+                    f"2. Pour chaque erreur : explique précisément la cause probable "
+                    f"(modèle Odoo inexistant, champ invalide, permissions, etc.) "
+                    f"et propose UNE alternative concrète que TU VIENS DE TESTER "
+                    f"ou que tu peux tester maintenant — pas 'je tente autrement' "
+                    f"sans action. Si aucune alternative technique n'est possible, "
+                    f"dis-le clairement et donne la meilleure réponse avec ce que "
+                    f"tu sais déjà.\n"
+                    f"3. Garde un ton direct et utile, jamais évasif."
+                )
+            else:
+                synth_instruction = (
+                    f"Voici les données que tu as obtenues :\n\n{synth_data}\n\n"
+                    f"Fais maintenant la synthèse demandée à {username}. "
+                    f"Sois précis, concis et actionnable."
+                )
             synth_result = llm_complete(
                 messages=[
                     {"role": "user", "content": payload.query or ""},
                     {"role": "assistant", "content": clean_response},
-                    {"role": "user", "content": (
-                        f"Voici les données que tu as obtenues :\n\n{synth_data}\n\n"
-                        f"Fais maintenant la synthèse demandée. Sois précis et concis."
-                    )},
+                    {"role": "user", "content": synth_instruction},
                 ],
                 model_tier=model_tier, max_tokens=4096, system=system,
             )
