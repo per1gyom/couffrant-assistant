@@ -7,6 +7,43 @@ import json
 from app.activity_log import log_activity
 
 
+def _extract_action_tags(text, action_type):
+    """Extrait les tags ACTION avec gestion des crochets imbriqués (domaines Odoo JSON)."""
+    prefix = f'[ACTION:{action_type}:'
+    results = []
+    i = 0
+    while i < len(text):
+        idx = text.find(prefix, i)
+        if idx == -1:
+            break
+        depth = 0
+        j = idx
+        while j < len(text):
+            if text[j] == '[':
+                depth += 1
+            elif text[j] == ']':
+                depth -= 1
+                if depth == 0:
+                    content = text[idx + len(prefix):j]
+                    results.append(content)
+                    j += 1
+                    break
+            j += 1
+        i = j if j > idx else idx + 1
+    return results
+
+
+def _safe_parse_domain(domain_str):
+    """Parse un domaine Odoo de manière robuste (simple quotes, vide, malformé)."""
+    if not domain_str or domain_str.strip() in ('', '[]'):
+        return []
+    cleaned = domain_str.strip().replace("'", '"')
+    try:
+        return json.loads(cleaned)
+    except (json.JSONDecodeError, ValueError):
+        return []
+
+
 def _handle_odoo_actions(response, username, tenant_id, tools):
     confirmed = []
     if not tools.get("odoo_enabled"):
@@ -15,16 +52,15 @@ def _handle_odoo_actions(response, username, tenant_id, tools):
     odoo_access = tools.get("odoo_access", "read_only")
 
     # ODOO_SEARCH : [ACTION:ODOO_SEARCH:model|fields|domain_json]
-    for match in re.finditer(r'\[ACTION:ODOO_SEARCH:([^\|]+)\|([^\|]+)\|(.+?)\]', response, re.DOTALL):
-        model = match.group(1).strip()
-        fields_str = match.group(2).strip()
-        domain_str = match.group(3).strip()
+    for content in _extract_action_tags(response, "ODOO_SEARCH"):
+        parts = content.split('|', 2)
+        model = parts[0].strip()
+        fields_str = parts[1].strip() if len(parts) > 1 else "name"
+        domain_str = parts[2].strip() if len(parts) > 2 else "[]"
         try:
             from app.connectors.odoo_connector import odoo_call
             fields = [f.strip() for f in fields_str.split(',')]
-            # Nettoyer le domaine JSON
-            domain_str = domain_str.replace("'", '"')
-            domain = json.loads(domain_str) if domain_str and domain_str != '[]' else []
+            domain = _safe_parse_domain(domain_str)
             results = odoo_call(
                 model=model, method="search_read",
                 kwargs={"domain": domain, "fields": fields, "limit": 50}
@@ -60,9 +96,10 @@ def _handle_odoo_actions(response, username, tenant_id, tools):
 
     # ODOO_CREATE : [ACTION:ODOO_CREATE:model|values_json]
     if odoo_access == "full":
-        for match in re.finditer(r'\[ACTION:ODOO_CREATE:([^\|]+)\|(.+?)\]', response, re.DOTALL):
-            model = match.group(1).strip()
-            values_str = match.group(2).strip().replace("'", '"')
+        for content in _extract_action_tags(response, "ODOO_CREATE"):
+            parts = content.split('|', 1)
+            model = parts[0].strip()
+            values_str = parts[1].strip().replace("'", '"') if len(parts) > 1 else "{}"
             try:
                 from app.connectors.odoo_connector import odoo_call
                 values = json.loads(values_str)
@@ -73,10 +110,16 @@ def _handle_odoo_actions(response, username, tenant_id, tools):
                 confirmed.append(f"❌ Odoo création : {str(e)[:150]}")
 
         # ODOO_UPDATE : [ACTION:ODOO_UPDATE:model|id|values_json]
-        for match in re.finditer(r'\[ACTION:ODOO_UPDATE:([^\|]+)\|(\d+)\|(.+?)\]', response, re.DOTALL):
-            model = match.group(1).strip()
-            record_id = int(match.group(2))
-            values_str = match.group(3).strip().replace("'", '"')
+        for content in _extract_action_tags(response, "ODOO_UPDATE"):
+            parts = content.split('|', 2)
+            if len(parts) < 3:
+                continue
+            model = parts[0].strip()
+            try:
+                record_id = int(parts[1].strip())
+            except ValueError:
+                continue
+            values_str = parts[2].strip().replace("'", '"')
             try:
                 from app.connectors.odoo_connector import odoo_call
                 values = json.loads(values_str)
