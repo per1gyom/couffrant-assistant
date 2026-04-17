@@ -17,6 +17,9 @@ masquées du RAG mais visibles dans le panel admin.
 Migration auto : colonne last_reinforced_at si absente.
 """
 from app.database import get_pg_conn
+from app.logging_config import get_logger
+
+logger = get_logger("raya.scheduler")
 
 
 def _ensure_column():
@@ -92,3 +95,15 @@ def run(dry_run: bool = False) -> dict:
     except Exception as e:
         print(f"[Scheduler] confidence_decay erreur : {e}")
         return {"degraded": 0, "below_threshold": 0, "error": str(e)}
+
+
+def _job_confidence_decay():
+    """Wrapper APScheduler — hebdo (lundi 02h00). Applique la décroissance de confiance."""
+    try:
+        result = run(dry_run=False)
+        logger.info(
+            "[Scheduler] confidence_decay : %d règles dégradées, %d sous seuil RAG (0.30)",
+            result.get("degraded", 0), result.get("below_threshold", 0)
+        )
+    except Exception as e:
+        logger.error("[Scheduler] confidence_decay erreur : %s", e)
