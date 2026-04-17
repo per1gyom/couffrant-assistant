@@ -737,3 +737,156 @@ dirigeants de PME).
 Ce n'est PAS une limitation de l'API Odoo. Toute l'info est accessible
 via XML-RPC / `search_read`. C'est juste qu'on n'a pas encore écrit le
 code côté Raya pour aller la chercher. Chantier de dev normal.
+
+
+---
+
+## 🐛 CHANTIER MAJEUR — AUTO-DEBUG WORKFLOW (critique pour early adopters + commercialisation)
+
+**Contexte (17/04/2026, ~minuit)** : Guillaume a déjà 2-3 early adopters
+identifiés qui paieraient un prix modique dans quelques semaines pour
+tester. Il a fait remarquer avec justesse que **sans automatisation du
+traitement des bugs, chaque client = heures de support pour lui** → ça
+ne scale pas, et ça devient un blocage opérationnel dès le 3e client.
+
+**État actuel** (déjà en place) :
+- Bouton 🐛 dans chaque bulle Raya, `openBugReportDialog` dans `chat-messages.js`
+- 2 types : "bug" (description optionnelle) et "amélioration" (description
+  obligatoire)
+- Route `POST /raya/bug-report` dans `app/bug_reports.py`
+- Table `bug_reports` avec `report_type`, `description`, `user_input`,
+  `raya_response` (+contexte des derniers échanges), `device_info`,
+  `aria_memory_id`, `status` ('nouveau'/'en_cours'/'resolu'/'rejete')
+- Consultation manuelle uniquement (pas d'UI admin dédiée, pas de notif)
+
+**Vision cible** : quand un bug est signalé → analyse auto par Claude qui
+lit le code → diagnostic + proposition de fix → Guillaume valide dans un
+dashboard → fix appliqué via PR GitHub automatique. Guillaume ne code
+plus les bugs, il **valide des fixes pré-diagnostiqués**.
+
+### Plan en 5 étapes progressives
+
+**Étape 1 — Alerting instantané + dashboard admin (~2h)**
+
+Dès qu'un bug est signalé :
+- Notification Teams/email à Guillaume (via le même canal que les
+  webhooks existants)
+- Nouvelle page admin `/admin/bugs` ou onglet dans le panel existant :
+  liste des rapports avec filtre par statut, recherche, tri par date
+- Vue détail par rapport : description, user_input, raya_response,
+  contexte, device_info, aria_memory_id clickable vers la conversation
+- Actions manuelles : changer le statut, ajouter commentaire interne
+
+**Impact** : Guillaume voit en temps réel ce qui remonte. Plus de
+rapports oubliés en DB. Fondation nécessaire pour les étapes suivantes.
+
+**Étape 2 — Analyse automatique LLM du rapport (~4h)**
+
+Job async déclenché au signalement (ou sur bouton "Analyser" dans le
+dashboard admin) :
+
+1. Assembler le contexte complet :
+   - Le rapport (tous les champs)
+   - Les derniers commits git (ex: 20 derniers, via `git log`)
+   - La conversation complète correspondant à `aria_memory_id`
+   - Éventuellement les logs Railway de la fenêtre temporelle du bug
+
+2. Envoyer à Claude Opus 4.7 via `llm_complete(model_tier="deep")` avec
+   un prompt ingénieur expert du projet :
+   ```
+   Tu es l'ingénieur responsable de Raya. Un utilisateur a signalé
+   le bug suivant. Analyse-le avec rigueur :
+   1. Reproduis mentalement le bug
+   2. Identifie la cause probable (fichiers, fonctions concernés)
+   3. Évalue la criticité (UI mineur / fonctionnel / critique)
+   4. Propose UN OU DEUX fixes avec diffs précis
+   5. Liste les tests de non-régression à vérifier
+   Rappel : tu as accès au code via les outils grep/read.
+   ```
+
+3. Claude utilise `view`, `grep`, `search_code` pour explorer le repo
+   et produit un diagnostic structuré (JSON)
+
+4. Le diagnostic est stocké dans une nouvelle colonne `auto_diagnosis`
+   de `bug_reports` avec timestamp
+
+**Impact** : chaque rapport arrive dans le dashboard déjà pré-diagnostiqué.
+Guillaume n'a plus qu'à lire le diagnostic et valider ou modifier la
+proposition. Gain de temps massif.
+
+**Étape 3 — Proposition de fix + diff + application manuelle (~4h)**
+
+Dashboard admin enrichi avec, pour chaque bug diagnostiqué :
+- Diagnostic de Claude formaté (cause / criticité / fichiers)
+- Diff proposé (affichage à la GitHub avec +/- colorés)
+- Tests suggérés à vérifier
+- Boutons :
+  * **✅ Appliquer le fix** → exécute le diff localement (sur poste
+    Guillaume via un webhook ou un déclenchement manuel côté terminal)
+  * **✏️ Modifier** → ouvre le diff en éditeur pour ajuster
+  * **🔁 Re-diagnostiquer** → relance l'analyse avec feedback
+  * **❌ Rejeter** → marque comme "rejeté" avec raison
+
+**Mode de travail** : Guillaume lit, ajuste si besoin, clique Appliquer.
+Le workflow reste git-friendly (création branche auto, commit, push),
+mais pour un humain qui valide, pas un robot qui déploie direct.
+
+**Impact** : passage de "Guillaume code le fix" à "Guillaume valide le
+fix pré-écrit". Temps divisé par 5-10 pour les bugs courants (UI, typos,
+erreurs de logique simple).
+
+**Étape 4 — Auto-déploiement conditionnel (~3h)**
+
+Pour les bugs dont le diagnostic est classé par Claude comme "trivial"
+(UI, typo, ajustement de couleur, label) ET dont le diff modifie moins
+de 10 lignes ET dans des fichiers de frontend uniquement :
+- Option "**🚀 Appliquer + déployer sans validation manuelle**"
+- Création branche `autofix/bug-{id}`
+- Application du diff
+- Commit + push + merge PR automatique
+- Railway redéploie
+- Guillaume reçoit une notif "bug #42 corrigé et déployé en 3 min"
+
+Pour tout fix de criticité supérieure (backend, routes, DB, prompts
+système) → garde le workflow validation manuelle étape 3.
+
+**Impact** : les petits bugs UI se corrigent pendant que Guillaume dort.
+Au matin, plusieurs fixes déjà en prod. Pour 3-5 early adopters, ça fait
+la différence entre "projet geek" et "produit professionnel".
+
+**Étape 5 — Détection proactive sans attendre le signalement (~5h)**
+
+Au-delà des rapports explicites utilisateur, détection auto des bugs via
+surveillance :
+- **Analyse quotidienne des logs Railway** (niveau ERROR/WARNING
+  récurrents) → création auto de rapport interne type "log_anomaly"
+- **Analyse des conversations Raya** (recherche de patterns "je ne peux
+  pas", "laisse-moi vérifier", erreurs d'outil) → rapport type
+  "user_friction"
+- **Monitoring des métriques** : taux de pouce rouge, temps de réponse,
+  taux de fallback mermaid, etc. → alerting si seuil dépassé
+
+Ces rapports internes passent par le même pipeline étapes 2-4.
+
+**Impact** : Raya détecte ses propres faiblesses avant que les utilisateurs
+ne les signalent. Self-healing partiel. Argument marketing puissant.
+
+### Recommandation de priorisation
+
+À positionner **après Odoo étape 1 (résolution noms) mais AVANT
+l'arrivée des early adopters**. Ordre suggéré :
+
+1. **Cette semaine** : Odoo étape 1 (2h) — règle problème planning immédiat
+2. **Week-end** : Odoo étapes 2-3 (7h) — pilotage CRM + vue 360
+3. **Semaine suivante** : **Auto-debug étapes 1-2** (6h) — fondation
+   critique avant early adopters
+4. **Semaine d'après** : Auto-debug étape 3 (4h) — workflow de validation
+5. **Après premier early adopter** : étapes 4-5 selon retours terrain
+
+### Note stratégique
+
+L'auto-debug EST un argument commercial. Quand tu pitches à un dirigeant
+PME, tu peux dire : **"Je reçois les bugs, Claude les analyse, je valide
+les fixes, c'est en prod en 10 minutes, sans qu'un dev ne touche une
+ligne"**. Ça positionne Raya comme un produit *vraiment* IA-natif, pas
+juste un wrapper de ChatGPT. Gros différenciateur vs concurrents.
