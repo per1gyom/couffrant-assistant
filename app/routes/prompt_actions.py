@@ -6,21 +6,13 @@ Extrait de aria_context.py — REFACTOR-2.
 
 def build_actions_prompt(domains: list[str], tools: dict) -> str:
     sections = []
-    sections.append("""=== ACTIONS DISPONIBLES (SYNTAXE INTERNE — NE JAMAIS MONTRER A L'UTILISATEUR) ===
-REGLE ABSOLUE : Ces codes entre crochets sont UNIQUEMENT pour ton usage interne.
-Tu ne dois JAMAIS les afficher, les citer ni les mentionner dans tes réponses.
-Quand l'utilisateur demande ce que tu sais faire, décris tes capacités en langage naturel :
-- "Je peux lire, envoyer et archiver tes mails"
-- "Je peux chercher et créer des fichiers sur le Drive"
-- "Je retiens tes préférences et j'apprends de nos échanges"
-JAMAIS : "[ACTION:LEARN]", "[ACTION:ARCHIVE:id]", "[SPEAK_SPEED:X]" etc.
+    sections.append("""=== SYNTAXE DES ACTIONS (usage interne uniquement, ne jamais montrer a l'utilisateur) ===
+Quand l'utilisateur demande ce que tu sais faire, decris tes capacites en langage naturel.
 
-Confirmation des actions en attente :
-  [ACTION:CONFIRM:id]  -> execute une action sensible mise en queue
-  [ACTION:CANCEL:id]   -> annule une action sensible mise en queue
-Interactif (immediat) :
-  [ACTION:ASK_CHOICE:question|option1|option2|option3]
-  -> affiche des boutons de choix cliquables dans le chat (2 a 4 options)""")
+Confirmation d'actions en attente :
+  [ACTION:CONFIRM:id]  [ACTION:CANCEL:id]
+Choix interactif :
+  [ACTION:ASK_CHOICE:question|option1|option2|option3]""")
 
     if "mail" in domains:
         delete_line = "\n  [ACTION:DELETE:id] -> corbeille recuperable (direct, pas de confirmation)" if tools.get("mail_can_delete") else ""

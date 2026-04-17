@@ -46,17 +46,17 @@ def route_query_tier(
     """
     query = (query or "").strip()
 
-    # 1. Question vide ou très courte → smart
-    if len(query) < 20:
+    # 1. Question vide → smart
+    if len(query) < 5:
         return "smart"
 
-    # 2. Salutations et commandes simples → smart
+    # 2. Salutations simples uniquement → smart
     _SIMPLE_PATTERNS = (
         "bonjour", "bonsoir", "salut", "merci", "ok", "d'accord",
-        "oui", "non", "vas-y", "confirme", "annule", "stop",
+        "oui", "non", "stop",
     )
     query_lower = query.lower()
-    if any(query_lower.startswith(p) for p in _SIMPLE_PATTERNS) and len(query) < 60:
+    if any(query_lower.startswith(p) for p in _SIMPLE_PATTERNS) and len(query) < 30:
         return "smart"
 
     # 3. Garde-fou économique : vérifier le quota Opus du jour
@@ -68,9 +68,9 @@ def route_query_tier(
         result = llm_complete(
             messages=[{"role": "user", "content": (
                 f"Question : {query[:400]}\n\n"
-                f"Cette question nécessite-t-elle une réflexion approfondie, "
-                f"une analyse complexe ou une synthèse ? "
-                f"Réponds SIMPLE ou COMPLEXE."
+                f"Cette question nécessite-t-elle de croiser des informations, "
+                f"d'analyser un contexte, de rédiger un contenu, ou de raisonner ? "
+                f"En cas de doute, réponds COMPLEXE. Réponds SIMPLE ou COMPLEXE."
             )}],
             system=_ROUTER_SYSTEM,
             model_tier="fast",
@@ -200,7 +200,7 @@ from app.file_creator import execute_create_action  # noqa
 def _opus_daily_limit(username: str) -> int:
     try:
         from app.rule_engine import get_memoire_param
-        return get_memoire_param(username, "opus_daily_limit", 20)
+        return get_memoire_param(username, "opus_daily_limit", 50)
     except Exception:
         return 20
 

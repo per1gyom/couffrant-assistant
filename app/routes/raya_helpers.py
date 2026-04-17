@@ -114,7 +114,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
 
     result = llm_complete(
         messages=messages, model_tier=model_tier,
-        max_tokens=2048, system=system,
+        max_tokens=8192, system=system,
         web_search=web_enabled,
     )
     raya_response = result["text"]
