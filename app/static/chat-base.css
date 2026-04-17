@@ -101,6 +101,21 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   0%, 100% { transform: scale(1) rotate(0deg); opacity: 0.55; }
   50%      { transform: scale(1.25) rotate(180deg); opacity: 1; }
 }
+
+/* Effet curseur typewriter pendant le streaming progressif (v=69) */
+.raya-streaming::after {
+  content: '▋';
+  display: inline-block;
+  margin-left: 2px;
+  color: var(--accent);
+  font-weight: 400;
+  animation: raya-caret 0.9s ease-in-out infinite;
+}
+@keyframes raya-caret {
+  0%, 45% { opacity: 1; }
+  50%, 95% { opacity: 0.2; }
+  100% { opacity: 1; }
+}
 .welcome { text-align: center; padding: 60px 20px; color: var(--text-muted); }
 .welcome-icon { font-size: 36px; margin-bottom: 16px; opacity: 0.6; }
 .welcome h2 { font-size: 22px; font-weight: 700; color: var(--text); margin-bottom: 8px; letter-spacing: -0.03em; }

@@ -28,6 +28,37 @@ function appendToChat(row) {
   }
 }
 
+// Affichage progressif type ChatGPT : le texte brut se déroule mot-par-mot
+// puis est remplacé par le rendu markdown final (liens, bold, listes…).
+// Désactivable via window.RAYA_FAKE_STREAMING = false.
+// La vitesse s'adapte à la longueur : 0,8s min, 3s max.
+function streamRenderToContent(content, rawText, finalizeFn) {
+  if (window.RAYA_FAKE_STREAMING === false || !rawText) {
+    finalizeFn();
+    return;
+  }
+  const text = String(rawText);
+  // Tokenisation par mots (en préservant espaces et retours ligne)
+  const chunks = text.match(/(\S+)|(\s+)/g) || [text];
+  const totalMs = Math.max(800, Math.min(3000, text.length * 6));
+  const tickMs = Math.max(8, Math.floor(totalMs / Math.max(1, chunks.length)));
+  content.style.whiteSpace = 'pre-wrap';
+  content.classList.add('raya-streaming');
+  content.textContent = '';
+  let idx = 0;
+  const interval = setInterval(() => {
+    if (idx >= chunks.length) {
+      clearInterval(interval);
+      content.style.whiteSpace = '';
+      content.classList.remove('raya-streaming');
+      finalizeFn();
+      return;
+    }
+    content.textContent += chunks[idx];
+    idx++;
+  }, tickMs);
+}
+
 // --- MESSAGES ---
 function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null) {
   const welcome = messagesEl.querySelector('.welcome');
@@ -62,48 +93,55 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
   }
   const content = document.createElement('div');
   if (type === 'raya') {
-    try {
-      const rawHtml = marked.parse(text || '', { breaks: true, gfm: true });
-      const cleanHtml = DOMPurify.sanitize(rawHtml, {
-        ADD_ATTR: ['target', 'rel'],
-        ADD_TAGS: ['img'],
-        ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
-      });
-      content.innerHTML = cleanHtml;
-      content.classList.add('markdown-content');
-      content.querySelectorAll('a').forEach(a => { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer'); });
-      content.querySelectorAll('a').forEach(a => {
-        const href = a.getAttribute('href') || '';
-        if (href.includes('/download/') || href.match(/\.(pdf|xlsx|xls|csv|png|jpg|jpeg)(\?|$)/i)) {
-          a.addEventListener('click', (e) => { e.preventDefault(); window.open(href, '_blank'); });
+    // Le rendu markdown + tout le post-processing (liens, memoryNotes, etc.)
+    // sont encapsulés dans finalize() pour être appliqués soit directement
+    // soit à la fin de l'animation de streaming progressif.
+    const finalize = () => {
+      try {
+        const rawHtml = marked.parse(text || '', { breaks: true, gfm: true });
+        const cleanHtml = DOMPurify.sanitize(rawHtml, {
+          ADD_ATTR: ['target', 'rel'],
+          ADD_TAGS: ['img'],
+          ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|data):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i,
+        });
+        content.innerHTML = cleanHtml;
+        content.classList.add('markdown-content');
+        content.querySelectorAll('a').forEach(a => { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer'); });
+        content.querySelectorAll('a').forEach(a => {
+          const href = a.getAttribute('href') || '';
+          if (href.includes('/download/') || href.match(/\.(pdf|xlsx|xls|csv|png|jpg|jpeg)(\?|$)/i)) {
+            a.addEventListener('click', (e) => { e.preventDefault(); window.open(href, '_blank'); });
+          }
+        });
+        // FIX-LEARN-UI: nettoyer les notifications mémoire brutes du contenu affiché
+        const memoryNotes = [];
+        content.innerHTML = content.innerHTML.replace(
+          /<p>(?:🧠|⚠️\s*Conflit)[^<]*<\/p>/gi,
+          (match) => { if (match.includes('🧠')) memoryNotes.push(match.replace(/<\/?p>/g, '').trim()); return ''; }
+        );
+        content.innerHTML = content.innerHTML.replace(
+          /(?:🧠|⚠️\s*Conflit de regle)[^\n<]*/gi,
+          (match) => { if (match.includes('🧠')) memoryNotes.push(match.trim()); return ''; }
+        );
+        if (memoryNotes.length > 0) {
+          const memDiv = document.createElement('div');
+          memDiv.style.cssText = 'margin-top:6px;padding:4px 10px;background:rgba(34,197,94,0.1);border-radius:6px;font-size:12px;color:#16a34a;cursor:pointer;display:inline-block;';
+          memDiv.innerHTML = `✅ ${memoryNotes.length} ${memoryNotes.length > 1 ? 'règles mises' : 'règle mise'} à jour`;
+          const detailDiv = document.createElement('div');
+          detailDiv.style.cssText = 'display:none;margin-top:4px;font-size:11px;color:#666;';
+          detailDiv.innerHTML = memoryNotes.map(n => n.replace(/🧠\s*Memorise\s*[+~]\s*/i, '').replace(/🧠\s*/g, '')).join('<br>');
+          memDiv.onclick = () => { detailDiv.style.display = detailDiv.style.display === 'none' ? 'block' : 'none'; };
+          memDiv.appendChild(detailDiv);
+          bubble.appendChild(memDiv);
         }
-      });
-      // FIX-LEARN-UI: nettoyer les notifications mémoire brutes du contenu affiché
-      const memoryNotes = [];
-      content.innerHTML = content.innerHTML.replace(
-        /<p>(?:🧠|⚠️\s*Conflit)[^<]*<\/p>/gi,
-        (match) => { if (match.includes('🧠')) memoryNotes.push(match.replace(/<\/?p>/g, '').trim()); return ''; }
-      );
-      content.innerHTML = content.innerHTML.replace(
-        /(?:🧠|⚠️\s*Conflit de regle)[^\n<]*/gi,
-        (match) => { if (match.includes('🧠')) memoryNotes.push(match.trim()); return ''; }
-      );
-      if (memoryNotes.length > 0) {
-        const memDiv = document.createElement('div');
-        memDiv.style.cssText = 'margin-top:6px;padding:4px 10px;background:rgba(34,197,94,0.1);border-radius:6px;font-size:12px;color:#16a34a;cursor:pointer;display:inline-block;';
-        memDiv.innerHTML = `✅ ${memoryNotes.length} ${memoryNotes.length > 1 ? 'règles mises' : 'règle mise'} à jour`;
-        const detailDiv = document.createElement('div');
-        detailDiv.style.cssText = 'display:none;margin-top:4px;font-size:11px;color:#666;';
-        detailDiv.innerHTML = memoryNotes.map(n => n.replace(/🧠\s*Memorise\s*[+~]\s*/i, '').replace(/🧠\s*/g, '')).join('<br>');
-        memDiv.onclick = () => { detailDiv.style.display = detailDiv.style.display === 'none' ? 'block' : 'none'; };
-        memDiv.appendChild(detailDiv);
-        bubble.appendChild(memDiv);
+      } catch(e) {
+        console.error('[Raya] Erreur rendu markdown:', e, 'marked:', typeof marked);
+        content.style.whiteSpace = 'pre-wrap';
+        content.textContent = text;
       }
-    } catch(e) {
-      console.error('[Raya] Erreur rendu markdown:', e, 'marked:', typeof marked);
-      content.style.whiteSpace = 'pre-wrap';
-      content.textContent = text;
-    }
+    };
+    // Streaming progressif du texte brut puis switch vers rendu markdown
+    streamRenderToContent(content, text, finalize);
   } else {
     content.style.whiteSpace = 'pre-wrap'; content.textContent = text;
   }
