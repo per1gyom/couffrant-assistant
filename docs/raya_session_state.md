@@ -202,13 +202,18 @@ Architecture : ÉVÉNEMENT → GRAPHE DE RELATIONS → RÈGLES UTILISATEUR → A
 - Nécessite des webhooks plus fins (lecture mail, navigation Drive)
 
 **Niveau 3 — Copilote poste de travail (vision long terme)**
-- Agent local (extension navigateur ou app desktop)
+- Agent local (extension navigateur ou app desktop native — OBLIGATOIRE pour perf)
 - Raya voit l'écran, comprend le contexte de travail
 - "Mode travail" activable par l'utilisateur
-- Analyse les actions, détecte les patterns, conseille en temps réel
-  ("La dernière fois tu as oublié la remise sur ce type de devis")
-- Apprentissage progressif des workflows de l'utilisateur
-- Toujours avec validation — suggestions, pas d'actions autonomes non approuvées
+- NE SE CONTENTE PAS d'observer : PROPOSE DE FAIRE
+  ("Tu commences un devis → je te le rédige, tu vérifies et on valide")
+  ("Ce formulaire → je pré-remplis les champs, tu corriges si besoin")
+- Apprentissage progressif : détecte les patterns de travail, propose des optimisations
+  ("La dernière fois cette étape t'a pris 20 min, je peux la faire en 30 secondes")
+- Toujours avec validation — suggestions + pré-actions, jamais d'autonomie non approuvée
+- Vision "Jarvis" : assistant omniscient, proactif, qui agit
+- PISTE PARTENARIAT : contacter Anthropic quand le produit est stable + clients payants
+  → solution verticale PME sur API Claude = cas d'usage que Anthropic recherche
 
 Règles utilisateur : "si facture impayée > 10k€ + mail paiement → préviens Arlène"
 → stockées dans aria_rules, évaluées à chaque événement
