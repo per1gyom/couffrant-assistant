@@ -52,7 +52,11 @@ def _handle_odoo_actions(response, username, tenant_id, tools):
     odoo_access = tools.get("odoo_access", "read_only")
 
     # ODOO_SEARCH : [ACTION:ODOO_SEARCH:model|fields|domain_json]
-    for content in _extract_action_tags(response, "ODOO_SEARCH"):
+    odoo_searches = _extract_action_tags(response, "ODOO_SEARCH")
+    if odoo_searches:
+        from app.logging_config import get_logger as _gl
+        _gl("raya.odoo").info("[Odoo] %d ODOO_SEARCH tag(s) trouvé(s)", len(odoo_searches))
+    for content in odoo_searches:
         parts = content.split('|', 2)
         model = parts[0].strip()
         fields_str = parts[1].strip() if len(parts) > 1 else "name"

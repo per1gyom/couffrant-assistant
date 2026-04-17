@@ -150,6 +150,11 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     )
     raya_response = result["text"]
     model_name    = result["model"]
+    # Log des tags ACTION détectés pour debug
+    import re as _re
+    _tags = _re.findall(r'\[ACTION:([A-Z_]+)', raya_response)
+    if _tags:
+        logger.info("[Raya] Tags détectés dans la réponse pour %s: %s", username, _tags)
     log_llm_usage(result, username=username, tenant_id=tenant_id,
                   purpose="raya_main_conversation")
 
@@ -187,13 +192,19 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         outlook_token=outlook_token, mails_from_db=db_ctx["mails_from_db"],
         live_mails=live_mails, tools=tools, conversation_id=aria_memory_id,
     )
+    if actions_raw:
+        logger.info("[Raya] %d action(s) retournées pour %s : %s",
+                     len(actions_raw), username,
+                     [a[:80] for a in actions_raw])
 
-    # 7b. SYNTHÈSE AUTO — si des résultats informatifs ont été générés,
+    # 7b. SYNTHÈSE AUTO — si des résultats informatifs ou erreurs ont été générés,
     # on fait un 2ème appel LLM pour que Raya fasse la synthèse.
-    # Sans ça, Raya dit "je lance les requêtes" mais ne voit jamais les résultats.
-    _INFO_MARKERS = ('📊', '📋', '📇', '🗂️', '🔍', '⚠️ Certains champs')
-    info_results = [a for a in actions_raw if any(a.startswith(m) for m in _INFO_MARKERS)]
+    _INFO_MARKERS = ('📊', '📋', '📇', '🗂️', '🔍', '⚠️', '❌ Odoo')
+    info_results = [a for a in actions_raw
+                    if any(a.startswith(m) for m in _INFO_MARKERS)
+                    or '📊' in a or '📋' in a or '📇' in a]
     if info_results:
+        logger.info("[Raya] Synthèse auto : %d résultats informatifs pour %s", len(info_results), username)
         try:
             synth_data = "\n\n".join(info_results)
             synth_result = llm_complete(
