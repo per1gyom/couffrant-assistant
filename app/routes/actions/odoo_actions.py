@@ -61,10 +61,21 @@ def _handle_odoo_actions(response, username, tenant_id, tools):
             from app.connectors.odoo_connector import odoo_call
             fields = [f.strip() for f in fields_str.split(',')]
             domain = _safe_parse_domain(domain_str)
-            results = odoo_call(
-                model=model, method="search_read",
-                kwargs={"domain": domain, "fields": fields, "limit": 50}
-            )
+            try:
+                results = odoo_call(
+                    model=model, method="search_read",
+                    kwargs={"domain": domain, "fields": fields, "limit": 50}
+                )
+            except Exception as field_err:
+                # Retry avec champs minimaux si KeyError (champ inconnu)
+                if "KeyError" in str(field_err) or "field" in str(field_err).lower():
+                    results = odoo_call(
+                        model=model, method="search_read",
+                        kwargs={"domain": domain, "fields": ["name"], "limit": 50}
+                    )
+                    confirmed.append(f"⚠️ Certains champs demandés n'existent pas sur {model}. Résultats avec champs par défaut :")
+                else:
+                    raise
             if results:
                 # Formater proprement pour le chat
                 lines = []

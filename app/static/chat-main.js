@@ -165,10 +165,17 @@ async function sendMessage() {
     if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'), true);
     if (data.ask_choice) renderAskChoice(data.ask_choice);
     if (data.actions && data.actions.length > 0) {
-      const ok=data.actions.filter(a=>a.startsWith('\u2705')); const err=data.actions.filter(a=>a.startsWith('\u274c')); const pend=data.actions.filter(a=>a.startsWith('\u23f8\ufe0f'));
-      if (ok.length) showToast(ok[0].replace('\u2705','').trim(),'ok',3000);
-      if (err.length) showToast(err[0].replace('\u274c','').trim(),'err',4000);
-      if (pend.length) showToast(`${pend.length} action(s) en attente`,'info',4000);
+      // Résultats informatifs (Odoo, contacts, drive, etc.) → dans le chat
+      const infoResults = [];
+      data.actions.forEach(a => {
+        if (a.startsWith('\u2705')) showToast(a.replace('\u2705','').trim(),'ok',3000);
+        else if (a.startsWith('\u274c')) showToast(a.replace('\u274c','').trim(),'err',5000);
+        else if (a.startsWith('\u23f8\ufe0f')) { /* pending — géré par pending_actions */ }
+        else infoResults.push(a);
+      });
+      if (infoResults.length > 0) {
+        addMessage(infoResults.join('\n\n'), 'raya');
+      }
     }
     if (data.pending_actions && data.pending_actions.length>0) {
       data.pending_actions.forEach(a => { if (typeof appendPendingActionToChat==='function') appendPendingActionToChat(a); });
