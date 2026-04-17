@@ -106,6 +106,39 @@ async function renderMermaidBlocks(container) {
   }
 }
 
+// Pré-traite le texte brut AVANT marked.parse() pour corriger les syntaxes
+// Mermaid mal formées par le LLM. Raya oublie parfois d'utiliser les triple
+// backticks et tape un seul ` + "mermaid" — dans ce cas, marked.js traite
+// ça comme inline code, le bloc n'est pas reconnu, et Mermaid ne peut pas
+// le rendre. On normalise ici pour rattraper les erreurs courantes.
+function normalizeMermaidSyntax(text) {
+  if (!text) return text;
+  let fixed = text;
+  // Cas 1 : "`mermaid" (1 backtick + mermaid) en début de ligne → triple backticks
+  fixed = fixed.replace(/^`mermaid\b/gm, '```mermaid');
+  // Cas 2 : si après le fix on a "```mermaid <contenu sur même ligne>",
+  //   on passe le contenu à la ligne suivante pour que marked le parse proprement
+  fixed = fixed.replace(/^```mermaid[ \t]+(.+)$/gm, '```mermaid\n$1');
+  return fixed;
+}
+
+// Détection heuristique : si un code block est rendu sans class language-*
+// MAIS son contenu commence par un mot-clé Mermaid (flowchart, graph, etc.),
+// on lui ajoute la classe language-mermaid pour que renderMermaidBlocks() le
+// traite comme tel. Rattrape le cas où Raya tape ``` sans tag 'mermaid'.
+function tagMermaidCodeBlocks(container) {
+  if (!container) return;
+  const MERMAID_KEYWORDS = /^(flowchart|graph|sequenceDiagram|mindmap|gantt|classDiagram|stateDiagram|erDiagram|journey|pie|timeline|quadrantChart|gitGraph|requirementDiagram|xychart)\b/i;
+  container.querySelectorAll('pre > code').forEach(codeEl => {
+    if (codeEl.classList.contains('language-mermaid')) return;
+    const hasLangClass = Array.from(codeEl.classList).some(c => c.startsWith('language-'));
+    const src = (codeEl.textContent || '').trim();
+    if (!hasLangClass && MERMAID_KEYWORDS.test(src)) {
+      codeEl.classList.add('language-mermaid');
+    }
+  });
+}
+
 // Détecte si une réponse contient du markdown "complexe" qui rendrait moche
 // en texte brut pendant le streaming (tableaux, listes, headings, code).
 // Pour ces cas, on skip le typing et on applique un fade-in rapide à la place.
@@ -157,7 +190,10 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
     // soit à la fin de l'animation de streaming progressif.
     const finalize = () => {
       try {
-        const rawHtml = marked.parse(text || '', { breaks: true, gfm: true });
+        // Pré-traitement : corriger les syntaxes Mermaid mal formées par Raya
+        // (backticks simples au lieu de triple, etc.) avant de parser le markdown.
+        const preparedText = normalizeMermaidSyntax(text || '');
+        const rawHtml = marked.parse(preparedText, { breaks: true, gfm: true });
         const cleanHtml = DOMPurify.sanitize(rawHtml, {
           ADD_ATTR: ['target', 'rel'],
           ADD_TAGS: ['img'],
@@ -166,6 +202,10 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
         content.innerHTML = cleanHtml;
         content.classList.add('markdown-content');
         content.querySelectorAll('a').forEach(a => { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer'); });
+        // Détection heuristique : tagger les code blocks sans 'mermaid' explicite
+        // mais dont le contenu ressemble à du Mermaid. Rattrape les cas où Raya
+        // tape ``` sans le tag de langue.
+        tagMermaidCodeBlocks(content);
         // Rendu Mermaid : scanne les blocs ```mermaid et les transforme en SVG.
         // Fait APRÈS le setAttribute des liens pour que, si le bloc Mermaid est
         // remplacé, ça ne casse pas. Async mais on n'attend pas (fire-and-forget)
