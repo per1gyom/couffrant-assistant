@@ -140,8 +140,15 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
         content.textContent = text;
       }
     };
-    // Streaming progressif du texte brut puis switch vers rendu markdown
-    streamRenderToContent(content, text, finalize);
+    // Streaming progressif UNIQUEMENT pour les nouveaux messages (pas d'historique).
+    // Si un timestamp est fourni, c'est un message restauré depuis /chat/history au
+    // rechargement de la page — on l'affiche directement sans animation, sinon tous
+    // les anciens messages se retapent ligne par ligne au chargement = chaos visuel.
+    if (timestamp) {
+      finalize();
+    } else {
+      streamRenderToContent(content, text, finalize);
+    }
   } else {
     content.style.whiteSpace = 'pre-wrap'; content.textContent = text;
   }
