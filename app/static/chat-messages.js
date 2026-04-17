@@ -76,8 +76,15 @@ if (typeof mermaid !== 'undefined') {
 
 // Scanne le contenu rendu pour détecter les blocs <code class="language-mermaid">
 // et les remplacer par leur rendu SVG. Appelé après le rendu markdown.
-// Gestion d'erreur : si Mermaid rejette la syntaxe, on laisse le code brut
-// visible avec un petit message, plutôt que de casser toute la bulle.
+//
+// Stratégie de robustesse :
+// 1. Valider la syntaxe via mermaid.parse() AVANT de tenter le render — sinon
+//    Mermaid 11.x rend parfois un SVG d'erreur "bombe" au lieu de throw, qui
+//    casse l'UX. Avec parse() on détecte l'erreur proprement en try/catch.
+// 2. Si parse échoue, fallback silencieux au code brut (petit message discret),
+//    pas de SVG-bombe affiché.
+// 3. Nettoyer les <br/> littéraux dans les labels (courante fourberie de Raya)
+//    avant de passer à Mermaid — il préfère \n ou <br> sans slash.
 async function renderMermaidBlocks(container) {
   if (typeof mermaid === 'undefined' || !container) return;
   const blocks = container.querySelectorAll('code.language-mermaid, pre > code.language-mermaid');
@@ -85,8 +92,26 @@ async function renderMermaidBlocks(container) {
   for (let i = 0; i < blocks.length; i++) {
     const codeEl = blocks[i];
     const pre = codeEl.closest('pre') || codeEl.parentElement;
-    const src = codeEl.textContent || '';
+    let src = codeEl.textContent || '';
+    // Nettoyage préventif : <br/> auto-fermants → <br> (mieux toléré par Mermaid)
+    src = src.replace(/<br\s*\/>/gi, '<br>');
     const id = 'raya-mmd-' + Date.now() + '-' + i;
+    // Valider AVANT de render pour éviter les SVG d'erreur de Mermaid
+    try {
+      if (typeof mermaid.parse === 'function') {
+        await mermaid.parse(src);
+      }
+    } catch(parseErr) {
+      console.warn('[Raya] Mermaid parse failed, fallback raw code:', parseErr?.message || parseErr);
+      if (pre) {
+        const hint = document.createElement('div');
+        hint.style.cssText = 'font-size:11px;color:#999;margin-top:4px;font-style:italic;';
+        hint.textContent = '⚠ Schéma non rendu (syntaxe Mermaid non valide)';
+        pre.parentNode.insertBefore(hint, pre.nextSibling);
+      }
+      continue;
+    }
+    // Parse OK → tenter le render réel
     try {
       const { svg } = await mermaid.render(id, src);
       const wrapper = document.createElement('div');
@@ -95,11 +120,10 @@ async function renderMermaidBlocks(container) {
       if (pre && pre.parentNode) pre.parentNode.replaceChild(wrapper, pre);
     } catch(err) {
       console.warn('[Raya] Mermaid render error:', err);
-      // Fallback : on laisse le code brut + une indication discrète
       if (pre) {
         const hint = document.createElement('div');
         hint.style.cssText = 'font-size:11px;color:#999;margin-top:4px;font-style:italic;';
-        hint.textContent = '⚠ Schéma non rendu (syntaxe Mermaid invalide)';
+        hint.textContent = '⚠ Schéma non rendu (erreur de rendu)';
         pre.parentNode.insertBefore(hint, pre.nextSibling);
       }
     }
@@ -107,17 +131,28 @@ async function renderMermaidBlocks(container) {
 }
 
 // Pré-traite le texte brut AVANT marked.parse() pour corriger les syntaxes
-// Mermaid mal formées par le LLM. Raya oublie parfois d'utiliser les triple
-// backticks et tape un seul ` + "mermaid" — dans ce cas, marked.js traite
-// ça comme inline code, le bloc n'est pas reconnu, et Mermaid ne peut pas
-// le rendre. On normalise ici pour rattraper les erreurs courantes.
+// Mermaid mal formées par le LLM. Raya tape souvent `mermaid (1 backtick)
+// au lieu de ```mermaid (3 backticks) aux deux extrémités du bloc.
+// Sans ce fix, marked.js ne reconnaît pas le bloc comme code, tout part
+// en paragraphe normal, et renderMermaidBlocks() ne trouve rien à rendre.
 function normalizeMermaidSyntax(text) {
   if (!text) return text;
   let fixed = text;
-  // Cas 1 : "`mermaid" (1 backtick + mermaid) en début de ligne → triple backticks
+  // Cas 1 (le plus courant) : bloc complet "`mermaid\n...contenu...\n`"
+  // avec backticks simples aux deux bouts → convertir en triple backticks.
+  // Flag /m pour que ^ et $ matchent début/fin de ligne.
+  // Le [\s\S]*? est non-greedy pour ne pas engloutir d'autres blocs.
+  fixed = fixed.replace(
+    /^`mermaid\b([\s\S]*?)^`[ \t]*$/gm,
+    '```mermaid$1```'
+  );
+  // Cas 2 (fallback) : ouverture "`mermaid" orpheline (pas de fermeture `
+  //   trouvée par le cas 1) → au moins ouvrir un triple backticks.
+  //   Si pas de fermeture du tout, marked gérera comme un bloc non fermé
+  //   mais au moins on essaie.
   fixed = fixed.replace(/^`mermaid\b/gm, '```mermaid');
-  // Cas 2 : si après le fix on a "```mermaid <contenu sur même ligne>",
-  //   on passe le contenu à la ligne suivante pour que marked le parse proprement
+  // Cas 3 : "```mermaid contenu_sur_meme_ligne" → passage à la ligne pour
+  //   que marked parse proprement (sinon "mermaid contenu" devient le lang).
   fixed = fixed.replace(/^```mermaid[ \t]+(.+)$/gm, '```mermaid\n$1');
   return fixed;
 }
