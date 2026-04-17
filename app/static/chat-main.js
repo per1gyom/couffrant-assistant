@@ -175,6 +175,21 @@ async function sendMessage() {
       messagesEl.scrollTo({ top: messagesEl.scrollTop + delta, behavior: 'smooth' });
     } catch(_) {}
   }, 120);
+  // Anchor anti-sursaut : après loading.remove() ou tout ajout de message,
+  // la hauteur du DOM change et la bulle user peut visuellement sauter. On
+  // re-verrouille sa position en mode 'instant' (imperceptible). Défini ici
+  // (hors try) pour être accessible aussi dans le catch en cas d'erreur.
+  const _anchorToQuestion = () => {
+    try {
+      if (!messagesEl || !userMsgRow) return;
+      const rowRect = userMsgRow.getBoundingClientRect();
+      const containerRect = messagesEl.getBoundingClientRect();
+      const delta = rowRect.top - containerRect.top - 12;
+      if (Math.abs(delta) > 2) {
+        messagesEl.scrollTo({ top: messagesEl.scrollTop + delta, behavior: 'instant' });
+      }
+    } catch(_) {}
+  };
   try {
     const body = { query: text||(fileSnapshot?'Analyse ce fichier.':'') };
     if (fileSnapshot) { body.file_data=fileSnapshot.data; body.file_type=fileSnapshot.type; body.file_name=fileSnapshot.name; }
@@ -185,21 +200,6 @@ async function sendMessage() {
       signal: _abortController.signal,
     });
     const data = await response.json(); loading.remove();
-    // Anchor anti-sursaut : après loading.remove() la hauteur du DOM change,
-    // ce qui fait visuellement remonter/disparaître la bulle user. On re-verrouille
-    // la position de userMsgRow en mode 'instant' (pas smooth) pour que ce soit
-    // imperceptible. Appelé aussi après addMessage plus bas.
-    const _anchorToQuestion = () => {
-      try {
-        if (!messagesEl || !userMsgRow) return;
-        const rowRect = userMsgRow.getBoundingClientRect();
-        const containerRect = messagesEl.getBoundingClientRect();
-        const delta = rowRect.top - containerRect.top - 12;
-        if (Math.abs(delta) > 2) {
-          messagesEl.scrollTo({ top: messagesEl.scrollTop + delta, behavior: 'instant' });
-        }
-      } catch(_) {}
-    };
     _anchorToQuestion();
     if (data.answer) {
       if (data.speak_speed) { setSpeakSpeed(data.speak_speed); }
@@ -233,6 +233,7 @@ async function sendMessage() {
         });
         if (infoResults.length > 0) {
           addMessage(infoResults.join('\n\n'), 'raya');
+          requestAnimationFrame(_anchorToQuestion);
         }
       }
       if (data.pending_actions && data.pending_actions.length>0) {
@@ -248,10 +249,22 @@ async function sendMessage() {
       addMessage('Erreur de connexion \u00e0 Raya. Réessayez.','raya');
       showToast('Erreur de connexion','err');
     }
+    requestAnimationFrame(_anchorToQuestion);
   }
   _isSending = false;
   _abortController = null;
   _setSendMode('ready');
+  // Nettoyage du spacer : une fois la réponse affichée, le spacer n'a plus
+  // d'utilité. Le laisser créerait un espace vide invisible en bas du chat
+  // (visible si l'user scrolle via Cmd+Flèche-bas). On le retire après un
+  // petit délai pour laisser le temps aux animations (anchor, streaming) de
+  // se stabiliser avant le cleanup.
+  setTimeout(() => {
+    try {
+      const s = document.getElementById('raya-scroll-spacer');
+      if (s) s.remove();
+    } catch(_) {}
+  }, 600);
 }
 
 // Polling fantôme : quand /raya a renvoyé un timeout mais que le thread Python

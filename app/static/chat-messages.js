@@ -240,7 +240,10 @@ function addLoading() {
   const origRemove = row.remove.bind(row);
   row.remove = () => { clearInterval(interval); origRemove(); };
 
-  row.appendChild(avatar); row.appendChild(bubble); appendToChat(row); scrollToBottom(); return row;
+  row.appendChild(avatar); row.appendChild(bubble); appendToChat(row);
+  // Ne pas scroller en bas si un spacer est présent (mode ChatGPT : question en haut).
+  if (!document.getElementById('raya-scroll-spacer')) scrollToBottom();
+  return row;
 }
 
 // --- BUG REPORT (P1-4) ---
@@ -325,7 +328,8 @@ function renderAskChoice(choiceData) {
     btn.onclick = () => { zone.querySelectorAll('button').forEach(b => b.disabled = true); zone.style.opacity = '0.5'; inputEl.value = opt; sendMessage(); };
     zone.appendChild(btn);
   });
-  appendToChat(zone); scrollToBottom();
+  appendToChat(zone);
+  if (!document.getElementById('raya-scroll-spacer')) scrollToBottom();
 }
 
 // --- ACTIONS EN ATTENTE (inline dans le chat) ---
@@ -534,7 +538,7 @@ function appendPendingActionToChat(action) {
     }
   }
   if (!inserted) appendToChat(row);
-  scrollToBottom();
+  if (!document.getElementById('raya-scroll-spacer')) scrollToBottom();
 }
 
 function _markActionInChat(actionId, status, message) {

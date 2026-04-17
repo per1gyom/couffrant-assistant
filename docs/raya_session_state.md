@@ -14,7 +14,7 @@
 - Desktop Commander local : `/Users/per1guillaume/couffrant-assistant`
 - Repo GitHub : `per1gyom/couffrant-assistant` branche `main`
 - URL prod : `https://app.raya-ia.fr`
-- Cache-bust JS/CSS : **v=29** (admin-panel.js) / **v=71** (chat)
+- Cache-bust JS/CSS : **v=29** (admin-panel.js) / **v=72** (chat)
 - **⚠️ PANELS SÉPARÉS** : `/admin/panel` → super admin only / `/tenant/panel` → tenant admin only
 - **⚠️ ARCHITECTURE ADMIN** : Routes dans le **package** `app/routes/admin/`
 - **⚠️ JAMAIS** supprimer `async function init()` dans `chat-main.js`
@@ -417,3 +417,34 @@ Lis docs/raya_session_state.md sur per1gyom/couffrant-assistant main.
 Lis aussi docs/raya_changelog.md, docs/raya_test_protocol.md et
 docs/raya_capabilities_matrix.md si pertinent pour la session.
 ```
+
+
+## 🗺️ ROADMAP UX CHAT (décidée 17/04/2026 après audit)
+
+### Priorité haute — à traiter ce soir ou demain
+- **Taper pendant que Raya réfléchit** : débloquer l'input pour permettre
+  de préparer la question suivante. MAIS le bouton ENVOI reste grisé
+  tant que la réponse précédente n'est pas complètement affichée (fin
+  du streaming + tampon 500 ms de sécurité). Évite les collisions.
+
+### Priorité moyenne — plus tard
+- **Historique visible + accessible à Raya** : au-delà des 20 échanges
+  chargés par défaut, permettre à l'utilisateur de remonter plus loin
+  (bouton "Charger plus" ou infinite scroll). Mais pas seulement visuel :
+  les messages rechargés doivent aussi être injectés dans le contexte
+  Raya, pour qu'elle puisse s'en souvenir quand l'utilisateur fait
+  référence à un échange ancien. Mécanisme à concevoir (injection dans
+  conv_context à la prochaine requête, ou bouton "rappeler à Raya
+  cette conversation").
+
+### Priorité basse — à réactiver un jour
+- **Surveillance intelligente des connexions** (Gmail, Outlook, Odoo).
+  Actuellement le polling `checkTokenStatus` est désactivé car trop
+  de faux positifs (bandeau "déconnecté" affiché alors que les outils
+  marchent). À réactiver avec un algo fiable : 3 échecs d'API consécutifs
+  avant d'afficher l'alerte, pas juste un 401 transitoire. Critères
+  précis à définir quand on y arrivera.
+
+### Abandonné (impact négligeable)
+- `_shownActionIds` jamais vidé : quelques Ko de mémoire navigateur
+  par session longue, sans impact perceptible. Ne pas toucher.
