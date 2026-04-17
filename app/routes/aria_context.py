@@ -256,6 +256,14 @@ def build_system_prompt(
     )
     if matched_name:
         contact_card = get_contact_card(matched_name, tenant_id=tenant_id)
+        # Enrichir avec le graphe de relations cross-source
+        try:
+            from app.entity_graph import get_entity_context_text
+            graph_ctx = get_entity_context_text(matched_name, tenant_id)
+            if graph_ctx:
+                contact_card = (contact_card + "\n\n" + graph_ctx) if contact_card else graph_ctx
+        except Exception:
+            pass
 
     style_examples = get_style_examples(
         context=query[:100] if any(w in query_lower for w in ["repond", "redige", "ecris", "mail"]) else "",

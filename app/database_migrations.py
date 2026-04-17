@@ -256,4 +256,23 @@ MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_tool_schemas_embedding ON tool_schemas USING hnsw (embedding vector_cosine_ops)",
     "CREATE INDEX IF NOT EXISTS idx_tool_schemas_tenant ON tool_schemas (tenant_id, tool_type)",
+    # -- GRAPHE DE RELATIONS : liens cross-source entre entités --
+    """CREATE TABLE IF NOT EXISTS entity_links (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_key TEXT NOT NULL,
+        entity_name TEXT,
+        resource_type TEXT NOT NULL,
+        resource_id TEXT,
+        resource_source TEXT NOT NULL,
+        resource_label TEXT,
+        resource_data JSONB DEFAULT '{}',
+        linked_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (tenant_id, entity_key, resource_source, resource_type, resource_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_entity_links_lookup ON entity_links (tenant_id, entity_key)",
+    "CREATE INDEX IF NOT EXISTS idx_entity_links_resource ON entity_links (tenant_id, resource_source, resource_id)",
+    "CREATE INDEX IF NOT EXISTS idx_entity_links_type ON entity_links (tenant_id, entity_type)",
 ]

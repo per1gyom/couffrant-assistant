@@ -218,6 +218,14 @@ Architecture : ÉVÉNEMENT → GRAPHE DE RELATIONS → RÈGLES UTILISATEUR → A
 Règles utilisateur : "si facture impayée > 10k€ + mail paiement → préviens Arlène"
 → stockées dans aria_rules, évaluées à chaque événement
 
+### Audits périodiques (PROCESS CONTINU)
+À chaque session de développement majeure, faire un audit vision d'ensemble :
+- Le projet va-t-il dans la direction du but final (copilote proactif) ?
+- A-t-on oublié des améliorations possibles ?
+- Les choix techniques sont-ils toujours les bons ?
+- Les 4 couches (temps réel, vectorisation, graphe, proactivité) progressent-elles ?
+Fréquence recommandée : tous les 5-10 sessions ou avant chaque milestone majeur.
+
 NOTE DEV : /admin/reset-history est DEV ONLY — en production, mémoire préservée.
 
 ---

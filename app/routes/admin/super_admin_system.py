@@ -196,6 +196,13 @@ def admin_discover_tool(
     if tool_type == "odoo":
         from app.tool_discovery import discover_odoo
         result = discover_odoo(tenant_id)
+        # Peupler le graphe de relations aussi
+        try:
+            from app.entity_graph import populate_from_odoo
+            graph_stats = populate_from_odoo(tenant_id)
+            result["graph"] = graph_stats
+        except Exception as e:
+            result["graph_error"] = str(e)[:200]
         return {"status": "ok" if result["discovered"] > 0 else "error", **result}
     return {"status": "error", "message": f"Type '{tool_type}' non supporté pour la découverte."}
 
