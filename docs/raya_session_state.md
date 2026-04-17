@@ -1072,3 +1072,130 @@ intercaler entre les autres chantiers, pas en bloc monolithique.
    peu de monde le fait bien. Argument marketing en plus.
 4. **Auto-debug déployé AVANT sécurité Phase 1** pour qu'il puisse
    aider à corriger les findings rapidement.
+
+
+---
+
+## 🐛 BUGS CRITIQUES À TRAITER EN PRIORITÉ (18/04/2026, ~3h)
+
+Deux bugs importants identifiés par Guillaume lors des tests post-étape 2
+Odoo. **Priorité haute** — ces bugs dégradent la confiance dans Raya et
+doivent être corrigés avant les early adopters.
+
+### 🔴 Bug 1 — Raya perd le contexte de sa question précédente
+
+**Symptôme observé** :
+1. Raya dit : *"Le reste n'est pas encore affiché — la liste est tronquée
+   à 100. Tu veux que je récupère la suite ?"*
+2. Guillaume répond : *"oui"*
+3. Raya répond : *"Je n'ai pas de demande de synthèse en cours — le
+   contexte de cette session commence par un 'oui' sans question préalable
+   visible de ma part."*
+
+Elle ne voit pas sa propre question précédente. Grave.
+
+**Hypothèses investigées** :
+
+1. **Filtre `archived = false` dans aria_loaders.py ligne 44** : l'historique
+   envoyé au LLM exclut les échanges archivés. Investigation : les
+   archivages ne sont que manuels via `/admin/users/archive-history`,
+   donc ce n'est pas ça pour un chat actif.
+
+2. **LIMIT 30 trop faible** : peu probable à moins de 30+ échanges
+   consécutifs.
+
+3. **HYPOTHÈSE LA PLUS PROBABLE : `clean_response` vidé par les regex**
+   de nettoyage dans `raya_helpers.py` lignes 162-178. Si la réponse de
+   Raya contient principalement des fragments Odoo au format `[...,...]`,
+   le regex `re.sub(r'\|?\["[^"]*"(?:,"[^"]*")*\](?:\|?\d*\]?)?', '', ...)`
+   peut trop nettoyer. Si `clean_response` devient vide ou quasi-vide,
+   elle est quand même sauvegardée en DB mais n'apporte aucun contexte
+   au LLM ensuite.
+
+4. **Autre hypothèse** : INSERT échoue silencieusement (try/finally sans
+   logger d'erreur dans le try), mais peu probable.
+
+**Plan de diagnostic** :
+- Ajouter un log "aria_memory saved id=X len(input)=Y len(response)=Z"
+  après chaque INSERT dans raya_helpers.py
+- Requête DB directe pour voir ce qui est stocké pour le message
+  "Tu veux que je récupère la suite ?" : est-ce que `aria_response`
+  est vide ou complet ?
+- Tester les regex de nettoyage sur des exemples types avec fragments
+  Odoo pour voir si ça laisse du texte
+
+**Plan de fix (une fois cause confirmée)** :
+- Si regex : les adoucir pour ne jamais vider entièrement une réponse
+- Si INSERT échoué : ajouter catch + log
+- Dans tous les cas : garantie que si `clean_response` devient vide,
+  on sauvegarde `raya_response` original (version pré-nettoyage)
+  comme fallback pour préserver le contexte
+
+**Effort estimé** : 1-2h (diagnostic + fix).
+
+### 🟡 Bug 2 — Raya annonce une action mais ne l'affiche pas
+
+**Symptôme observé** :
+Guillaume : *"Combien de project.project existent dans Odoo, actifs ou non ?"*
+Raya : *"La requête a planté sur le modèle project.project — il n'est
+probablement pas installé ou accessible dans ton Odoo. Je tente une
+autre approche pour lister les modèles disponibles et voir ce qui
+correspond à des projets/chantiers."*
+
+Puis **rien ne s'affiche**. Pas de liste de modèles, pas d'erreur,
+juste cette promesse d'action qui flotte.
+
+**Hypothèses** :
+
+1. **Raya a généré un ACTION tag ODOO_SEARCH ou ODOO_MODELS** qui
+   s'exécute côté backend mais dont le résultat n'est pas réinjecté
+   dans la réponse affichée. Regarder le flow dans
+   `app/routes/actions/odoo_actions.py::_handle_odoo_actions` : les
+   résultats vont dans `confirmed = []` mais est-ce que `confirmed`
+   est bien concaténé à la réponse finale ?
+
+2. **Effet de la règle anti-promesse ajoutée cette nuit** (commit c364d6b) :
+   la règle interdit "laisse-moi vérifier" / "je tente" sans exécuter.
+   Mais Raya dit *"je tente une autre approche"* et APPELLE probablement
+   un outil. Si l'outil plante (modèle non trouvé → exception dans
+   `odoo_call`), le `except Exception as e: confirmed.append(f"❌ Odoo :
+   {str(e)[:150]}")` devrait remonter l'erreur. Est-ce que ça fonctionne ?
+
+3. **Streaming cassé** : si la réponse est générée pendant le streaming
+   et que l'action s'exécute après le streaming, le résultat n'est peut-
+   être pas affiché dans la même bulle. Regarder si le flow "réponse
+   initiale → action → réponse enrichie avec action" est cassé.
+
+**Plan de diagnostic** :
+- Logs Railway pendant un test reproducteur : chercher les lignes
+  `[Odoo] X ODOO_SEARCH tag(s) trouvé(s)` et voir si elles apparaissent
+- Inspecter le champ `aria_response` en DB pour voir ce qui a été
+  réellement stocké (avec ou sans le résultat de l'action)
+- Vérifier que `confirmed` est bien joint à `response` et pas perdu
+
+**Plan de fix (après diagnostic)** :
+- Si bug de concaténation : corriger dans `_handle_odoo_actions` ou
+  dans la fonction qui appelle
+- Si l'action n'est jamais appelée (hallucination pure du LLM) :
+  renforcer la règle anti-promesse pour interdire aussi
+  "je tente une autre approche", "je vais essayer autrement"
+- Si streaming : s'assurer que les actions s'exécutent AVANT le
+  streaming et que leur résultat est dans la réponse streamée
+
+**Effort estimé** : 2-3h (diagnostic plus compliqué car asynchrone).
+
+### Priorisation
+
+Bug 1 > Bug 2. Le Bug 1 casse le fonctionnement conversationnel de base,
+le Bug 2 est gênant mais plus occasionnel. À traiter **avant les early
+adopters**, sinon ils verront ces deux bugs et perdront confiance dès
+la première session.
+
+Position suggérée dans la séquence :
+- Bug 1 en priorité dès demain matin (avant le reste de l'étape 3 Odoo)
+- Bug 2 juste après le Bug 1
+
+Les deux bugs feraient d'excellents candidats pour tester l'**auto-debug**
+quand il sera en place : rapport utilisateur → diagnostic Claude → fix
+proposé → validation → déploiement. Mais là on les traite à la main car
+auto-debug n'est pas encore construit.
