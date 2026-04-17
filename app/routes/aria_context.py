@@ -201,6 +201,14 @@ def build_system_prompt(
         aria_insights = get_aria_insights(limit=8, username=username, tenant_id=tenant_id)
         conv_context  = ""
 
+    # Auto-découverte : connaissance vectorisée des outils connectés
+    tool_knowledge = ""
+    try:
+        from app.tool_discovery import retrieve_tool_knowledge
+        tool_knowledge = retrieve_tool_knowledge(query, tenant_id, limit=5)
+    except Exception:
+        pass
+
     if conv_context and db_ctx.get("history"):
         # Dédupliquer : retirer les blocs RAG dont le texte correspond déjà
         # à une conversation récente (comparaison sur l'input complet normalisé).
@@ -294,7 +302,7 @@ avant de dire que tu ne peux pas. Ne dis jamais "je ne peux pas" sans avoir d'ab
 
 {f"=== {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"Premiere conversation avec {display_name}. Observe et memorise."}{ton_block}{maturity_block}{patterns_block}{narrative_block}
 
-{f"=== TA MEMOIRE ==={chr(10)}{aria_rules}" if aria_rules else ""}{f"{chr(10)}{chr(10)}=== TES OBSERVATIONS ==={chr(10)}{aria_insights}" if aria_insights else ""}{theme_context_block}{conv_context_block}
+{f"=== TA MEMOIRE ==={chr(10)}{aria_rules}" if aria_rules else ""}{f"{chr(10)}{chr(10)}=== TES OBSERVATIONS ==={chr(10)}{aria_insights}" if aria_insights else ""}{f"{chr(10)}{chr(10)}=== CONNAISSANCE DES OUTILS CONNECTES ==={chr(10)}{tool_knowledge}" if tool_knowledge else ""}{theme_context_block}{conv_context_block}
 
 {f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}{f"{chr(10)}{chr(10)}=== STYLE REDACTIONNEL ==={chr(10)}{style_examples}" if style_examples else ""}
 

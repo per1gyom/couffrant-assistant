@@ -237,4 +237,23 @@ MIGRATIONS = [
     # -- SOFT-DELETE synthèse : colonne archived sur aria_memory --
     "ALTER TABLE aria_memory ADD COLUMN IF NOT EXISTS archived BOOLEAN DEFAULT false",
     "CREATE INDEX IF NOT EXISTS idx_aria_memory_archived ON aria_memory (username, archived) WHERE archived = false",
+    # -- AUTO-DÉCOUVERTE : connaissance vectorisée des outils connectés --
+    """CREATE TABLE IF NOT EXISTS tool_schemas (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        connection_id INTEGER,
+        tool_type TEXT NOT NULL,
+        schema_type TEXT NOT NULL DEFAULT 'model',
+        entity_key TEXT NOT NULL,
+        display_name TEXT,
+        description TEXT NOT NULL,
+        fields_json JSONB DEFAULT '{}',
+        relationships_json JSONB DEFAULT '[]',
+        embedding vector(1536),
+        discovered_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (tenant_id, tool_type, entity_key)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_tool_schemas_embedding ON tool_schemas USING hnsw (embedding vector_cosine_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_tool_schemas_tenant ON tool_schemas (tenant_id, tool_type)",
 ]

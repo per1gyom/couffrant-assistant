@@ -183,3 +183,31 @@ def admin_diag(request: Request, _: dict = Depends(require_admin)):
     return result
 
 
+# ─── AUTO-DÉCOUVERTE OUTILS ───
+
+@router.post("/admin/discover/{tenant_id}/{tool_type}")
+def admin_discover_tool(
+    request: Request,
+    tenant_id: str,
+    tool_type: str,
+    _: dict = Depends(require_admin),
+):
+    """Lance l'auto-découverte d'un outil pour un tenant."""
+    if tool_type == "odoo":
+        from app.tool_discovery import discover_odoo
+        result = discover_odoo(tenant_id)
+        return {"status": "ok" if result["discovered"] > 0 else "error", **result}
+    return {"status": "error", "message": f"Type '{tool_type}' non supporté pour la découverte."}
+
+
+@router.get("/admin/discovery-status/{tenant_id}")
+def admin_discovery_status(
+    request: Request,
+    tenant_id: str,
+    _: dict = Depends(require_admin),
+):
+    """État de l'auto-découverte pour un tenant."""
+    from app.tool_discovery import get_discovery_status
+    return get_discovery_status(tenant_id)
+
+
