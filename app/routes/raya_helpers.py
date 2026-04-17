@@ -188,6 +188,44 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         live_mails=live_mails, tools=tools, conversation_id=aria_memory_id,
     )
 
+    # 7b. SYNTHÈSE AUTO — si des résultats informatifs ont été générés,
+    # on fait un 2ème appel LLM pour que Raya fasse la synthèse.
+    # Sans ça, Raya dit "je lance les requêtes" mais ne voit jamais les résultats.
+    _INFO_MARKERS = ('📊', '📋', '📇', '🗂️', '🔍', '⚠️ Certains champs')
+    info_results = [a for a in actions_raw if any(a.startswith(m) for m in _INFO_MARKERS)]
+    if info_results:
+        try:
+            synth_data = "\n\n".join(info_results)
+            synth_result = llm_complete(
+                messages=[
+                    {"role": "user", "content": payload.query or ""},
+                    {"role": "assistant", "content": clean_response},
+                    {"role": "user", "content": (
+                        f"Voici les données que tu as obtenues :\n\n{synth_data}\n\n"
+                        f"Fais maintenant la synthèse demandée. Sois précis et concis."
+                    )},
+                ],
+                model_tier=model_tier, max_tokens=4096, system=system,
+            )
+            synthesis = synth_result["text"]
+            log_llm_usage(synth_result, username=username, tenant_id=tenant_id,
+                          purpose="raya_synthesis_followup")
+            # Remplacer la réponse par la synthèse (plus pertinente)
+            clean_response = _strip_action_tags(synthesis)
+            clean_response = re.sub(r'\n{3,}', '\n\n', clean_response).strip()
+            # Mettre à jour aria_memory avec la synthèse
+            if aria_memory_id:
+                try:
+                    conn2 = get_pg_conn()
+                    c2 = conn2.cursor()
+                    c2.execute("UPDATE aria_memory SET aria_response = %s WHERE id = %s",
+                               (clean_response, aria_memory_id))
+                    conn2.commit(); conn2.close()
+                except Exception:
+                    pass
+        except Exception as e:
+            logger.warning("[Raya] Synthèse follow-up échouée: %s", e)
+
     # 8. Extraction ASK_CHOICE du flux confirmed
     ask_choice = None
     actions_confirmed = []
