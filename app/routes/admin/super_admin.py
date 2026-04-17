@@ -109,7 +109,6 @@ def update_sharepoint_config(
 
 # ─── SOCIÉTÉS ───
 
-@router.get("/admin/tenants-overview")
 def _build_tenants_overview(tenant_filter=None):
     """Construit l'overview. tenant_filter=None → tous, sinon filtre un tenant."""
     conn = None
@@ -270,18 +269,23 @@ def admin_create_connection(request: Request, tenant_id: str, payload: dict = Bo
 
 @router.put("/admin/connections/{tenant_id}/{connection_id}")
 def admin_update_connection(request: Request, tenant_id: str, connection_id: int, payload: dict = Body(...), _: dict = Depends(require_admin)):
-    from app.connections import update_connection
+    from app.connections import assert_connection_tenant, update_connection
+    if not assert_connection_tenant(connection_id, tenant_id):
+        raise HTTPException(status_code=404, detail="Connexion introuvable pour ce tenant.")
     return update_connection(connection_id, **payload)
 
 @router.delete("/admin/connections/{tenant_id}/{connection_id}")
 def admin_delete_connection(request: Request, tenant_id: str, connection_id: int, _: dict = Depends(require_admin)):
-    from app.connections import delete_connection
+    from app.connections import assert_connection_tenant, delete_connection
+    if not assert_connection_tenant(connection_id, tenant_id):
+        raise HTTPException(status_code=404, detail="Connexion introuvable pour ce tenant.")
     return delete_connection(connection_id)
 
 @router.post("/admin/connections/{connection_id}/assign")
-def admin_assign_connection(request: Request, connection_id: int, payload: dict = Body(...), _: dict = Depends(require_admin)):
+def admin_assign_connection(request: Request, connection_id: int, payload: dict = Body(...), admin: dict = Depends(require_admin)):
     from app.connections import assign_connection
-    return assign_connection(connection_id, payload.get("username", ""), payload.get("access_level", "read_only"), payload.get("enabled", True))
+    target = payload.get("username", "")
+    return assign_connection(connection_id, target, payload.get("access_level", "read_only"), payload.get("enabled", True))
 
 @router.delete("/admin/connections/{connection_id}/assign/{username}")
 def admin_unassign_connection(request: Request, connection_id: int, username: str, _: dict = Depends(require_admin)):
@@ -354,8 +358,6 @@ async def admin_auth(request: Request):
             next_url=next_url,
         )
     )
-    with open("app/templates/admin_panel.html", "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
 
 
 # ─── SUSPENSION ───

@@ -163,6 +163,21 @@ def unassign_connection(connection_id: int, username: str) -> dict:
         if conn: conn.close()
 
 
+def assert_connection_tenant(connection_id: int, tenant_id: str) -> bool:
+    """Vérifie qu'une connexion appartient au tenant. Retourne True si OK."""
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("SELECT tenant_id FROM tenant_connections WHERE id = %s", (connection_id,))
+        row = c.fetchone()
+        return bool(row and row[0] == tenant_id)
+    except Exception:
+        return False
+    finally:
+        if conn: conn.close()
+
+
 def get_user_connections(username: str, tenant_id: str = None) -> list:
     """Retourne toutes les connexions accessibles à un user."""
     conn = None
