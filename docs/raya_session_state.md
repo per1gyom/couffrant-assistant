@@ -14,7 +14,7 @@
 - Desktop Commander local : `/Users/per1guillaume/couffrant-assistant`
 - Repo GitHub : `per1gyom/couffrant-assistant` branche `main`
 - URL prod : `https://app.raya-ia.fr`
-- Cache-bust JS/CSS : **v=29** (admin-panel.js) / **v=65** (chat)
+- Cache-bust JS/CSS : **v=29** (admin-panel.js) / **v=66** (chat)
 - **⚠️ PANELS SÉPARÉS** : `/admin/panel` → super admin only / `/tenant/panel` → tenant admin only
 - **⚠️ ARCHITECTURE ADMIN** : Routes dans le **package** `app/routes/admin/`
 - **⚠️ JAMAIS** supprimer `async function init()` dans `chat-main.js`
@@ -47,24 +47,33 @@ LLM-agnostic, tools-agnostic, channel-agnostic, provider-agnostic.
 
 ## 🏢 CONTEXTE MÉTIER — COUFFRANT SOLAR
 
-### OpenFire ≠ Odoo (mais Odoo en backend)
-**OpenFire = CRM** utilisé par Guillaume et son équipe (devis, factures, planning
-d'intervention). OpenFire est construit SUR la plateforme Odoo → le backend
-technique est accessible via l'API Odoo standard (xmlrpc / JSON-RPC).
+### OpenFire = Odoo (même logiciel, un seul accès)
+**OpenFire et Odoo sont le même logiciel.** OpenFire est le nom commercial /
+habillage du déploiement Odoo de Couffrant Solar. Un seul accès, une seule
+base, un seul back-office. Tout s'y fait au même endroit : CRM, devis,
+factures, planning d'intervention, suivi client, stock.
 
-**Vocabulaire à mapper** quand Guillaume parle :
-- "OpenFire" / "planning chantier" / "intervention" → `calendar.event` + `planning.slot` dans Odoo
-- "devis OpenFire" → `sale.order` dans Odoo
-- "facture OpenFire" → `account.move` dans Odoo
-- "client OpenFire" → `res.partner` dans Odoo
+L'API accessible par Raya est l'**API Odoo standard** (xmlrpc / JSON-RPC).
 
-### Ressources planning (users Odoo = équipe Couffrant Solar)
+**Vocabulaire à mapper** quand Guillaume ou son équipe parle :
+- "OpenFire" / "Odoo" → **même chose**
+- "planning chantier" / "planning d'intervention" → `planning.slot` + `calendar.event`
+- "devis" → `sale.order`
+- "facture" → `account.move`
+- "client" → `res.partner`
+- "collaborateur" / "équipe" → `res.users` (7 personnes, voir ci-dessous)
+
+### Équipe Couffrant Solar (7 ressources — source `res.users` Odoo)
 Arlène, Aurélien Le Maistre, Benoît, Guillaume Perrin, Jérôme Couffrant,
-Pierre Couffrant, Sabrina. Chaque événement calendrier a un `user_id` qui
+Pierre Couffrant, Sabrina. Chaque événement de planning a un `user_id` qui
 pointe vers une de ces personnes, et peut avoir des `partner_ids` (clients).
 
-**Règle de ventilation** : quand l'utilisateur demande un planning, Raya doit
-toujours ventiler par **ressource × jour**, pas juste par événement.
+Pour TOUTE question sur l'équipe, la composition, qui fait quoi : Raya
+doit interroger `res.users` via ODOO_SEARCH, jamais se baser sur des
+synthèses conversationnelles (risque d'oubli/hallucination).
+
+**Règle de ventilation** : quand l'utilisateur demande un planning, Raya
+doit toujours ventiler par **ressource × jour**, pas juste par événement.
 
 ### Code couleur planning (module Odoo "Planning d'intervention")
 - Vert = DIVERS / maintenance / réunion
@@ -72,12 +81,12 @@ toujours ventiler par **ressource × jour**, pas juste par événement.
 - Jaune = chantiers couverture
 - Bleu = visites PV (première visite, supervision)
 
-### Logiciels techniques utilisés par Guillaume (hors Raya)
+### Logiciels techniques utilisés par Guillaume (hors Raya, non connectés)
 - **Vesta.co** : simulation photovoltaïque (dimensionnement)
 - **Archelios / Archelios Calc** : simulation et calculs PV
-Ces outils ne sont pas encore connectés à Raya. Intérêt futur : lire les
-rapports PDF pour extraire automatiquement puissance, production estimée,
-nombre de panneaux, onduleur → pousser dans Odoo sans ressaisie manuelle.
+Intérêt futur : lire les rapports PDF pour extraire automatiquement
+puissance, production estimée, nombre de panneaux, onduleur → pousser
+dans Odoo sans ressaisie manuelle.
 
 ---
 

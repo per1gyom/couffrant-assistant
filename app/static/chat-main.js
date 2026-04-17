@@ -149,10 +149,16 @@ async function sendMessage() {
   const userMsgRow = addMessage(text||'[Fichier joint]','user',fileSnapshot);
   const loading = addLoading();
   // UX : faire remonter la question en haut du viewport dès que Raya commence à réfléchir.
-  // Petit delay pour laisser le DOM se stabiliser après addMessage + addLoading.
+  // addMessage + addLoading appellent chacun scrollToBottom → on doit prendre la main APRÈS
+  // eux avec un délai plus long (150ms) et scroller directement le container messages.
+  // scrollIntoView était concurrencé par scrollToBottom et ne prenait pas effet.
   setTimeout(() => {
-    try { userMsgRow.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch(_){}
-  }, 60);
+    try {
+      if (!messagesEl || !userMsgRow) return;
+      const targetTop = userMsgRow.offsetTop - messagesEl.offsetTop - 8;
+      messagesEl.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+    } catch(_) {}
+  }, 150);
   try {
     const body = { query: text||(fileSnapshot?'Analyse ce fichier.':'') };
     if (fileSnapshot) { body.file_data=fileSnapshot.data; body.file_type=fileSnapshot.type; body.file_name=fileSnapshot.name; }

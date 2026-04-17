@@ -170,11 +170,35 @@ def get_entity_context_text(entity_key: str, tenant_id: str) -> str:
 
 def populate_from_odoo(tenant_id: str) -> dict:
     """
-    Peuple le graphe depuis Odoo : contacts ↔ factures, devis, projets.
+    Peuple le graphe depuis Odoo : contacts ↔ factures, devis, projets,
+    + équipe (res.users = collaborateurs internes).
     Appelé après discover_odoo ou périodiquement.
     """
     from app.connectors.odoo_connector import odoo_call
-    stats = {"contacts": 0, "invoices": 0, "orders": 0, "errors": []}
+    stats = {"contacts": 0, "invoices": 0, "orders": 0, "team_members": 0, "errors": []}
+
+    # 0. Équipe interne (res.users) — les collaborateurs qui apparaissent dans
+    # les plannings d'intervention et sont assignés aux événements (user_id).
+    # Sans ça, Raya hallucine la composition de l'équipe depuis l'historique chat.
+    try:
+        users = odoo_call(
+            model="res.users", method="search_read",
+            kwargs={"domain": [["active", "=", True], ["share", "=", False]],
+                    "fields": ["name", "login", "email", "partner_id"],
+                    "limit": 50}
+        )
+        for u in (users or []):
+            key = normalize_key(u.get("login") or u.get("email") or u.get("name", ""))
+            if not key or len(key) < 3:
+                continue
+            link_entity(tenant_id, "team_member", key, u.get("name", ""),
+                       "team_member", str(u["id"]), "odoo",
+                       f"{u.get('name','')} — {u.get('email') or u.get('login','')}",
+                       {"login": u.get("login"), "email": u.get("email"),
+                        "partner_id": u.get("partner_id")})
+            stats["team_members"] += 1
+    except Exception as e:
+        stats["errors"].append(f"res.users: {str(e)[:100]}")
 
     # 1. Contacts (res.partner) — l'entité de base
     try:
@@ -248,8 +272,8 @@ def populate_from_odoo(tenant_id: str) -> dict:
     except Exception as e:
         stats["errors"].append(f"devis: {str(e)[:100]}")
 
-    logger.info("[Graph] Odoo → graphe : %d contacts, %d factures, %d devis, %d erreurs",
-                stats["contacts"], stats["invoices"], stats["orders"], len(stats["errors"]))
+    logger.info("[Graph] Odoo → graphe : %d équipiers, %d contacts, %d factures, %d devis, %d erreurs",
+                stats["team_members"], stats["contacts"], stats["invoices"], stats["orders"], len(stats["errors"]))
     return stats
 
 
