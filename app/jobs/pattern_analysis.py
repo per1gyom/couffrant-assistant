@@ -11,7 +11,7 @@ logger = get_logger("raya.scheduler")
 
 
 def _job_pattern_analysis():
-    """Détecte les patterns comportementaux — dimanche 04h00."""
+    """Détecte les patterns comportementaux — quotidien 04h00."""
     try:
         from app.database import get_pg_conn
         from app.maturity import compute_maturity_score

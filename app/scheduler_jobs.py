@@ -98,11 +98,16 @@ def _register_jobs(scheduler: BackgroundScheduler):
     if _job_enabled("SCHEDULER_PATTERNS_ENABLED"):
         try:
             from app.jobs.pattern_analysis import _job_pattern_analysis
+            # Quotidien à 04h00 (passage d'hebdo → quotidien le 17/04/2026).
+            # Bénéfice : Raya apprend ses patterns comportementaux en 24h au
+            # lieu de 7 jours. Coût : ~$5/mois supplémentaires (Opus).
+            # La fenêtre analysée reste à 30 jours (nécessaire pour capter
+            # les cycles hebdo et mensuels dans mail_memory et activity_log).
             scheduler.add_job(func=_job_pattern_analysis,
-                              trigger=CronTrigger(day_of_week="sun", hour=4, minute=0),
+                              trigger=CronTrigger(hour=4, minute=0),
                               id="pattern_analysis", name="Détection de patterns comportementaux",
                               replace_existing=True)
-            logger.info("[Scheduler] Job enregistré : pattern_analysis (dimanche 04h00)")
+            logger.info("[Scheduler] Job enregistré : pattern_analysis (quotidien 04h00)")
         except Exception as e:
             logger.error(f"[Scheduler] Import échoué pour pattern_analysis: {e}")
     else:
