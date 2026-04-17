@@ -59,27 +59,39 @@ function streamRenderToContent(content, rawText, finalizeFn) {
   }, tickMs);
 }
 
+// Détecte si une réponse contient du markdown "complexe" qui rendrait moche
+// en texte brut pendant le streaming (tableaux, listes, headings, code).
+// Pour ces cas, on skip le typing et on applique un fade-in rapide à la place.
+function hasComplexMarkdown(text) {
+  if (!text) return false;
+  if (text.includes('|')) return true;               // tableau
+  if (/^#{1,4}\s/m.test(text)) return true;          // heading
+  if (/^\s*[-*]\s/m.test(text)) return true;         // liste à puces
+  if (/^\s*\d+\.\s/m.test(text)) return true;        // liste numérotée
+  if (text.includes('```')) return true;             // code block
+  return false;
+}
+
 // --- MESSAGES ---
 function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null) {
   const welcome = messagesEl.querySelector('.welcome');
   if (welcome) welcome.remove();
   const row = document.createElement('div'); row.className = 'message-row ' + type;
 
-  // TIMESTAMP-2 : horodatage au-dessus des bulles
+  // TIMESTAMP-2 : horodatage au-dessus des bulles, aligné à droite pour user,
+  // à gauche pour raya (pour distinguer visuellement sans même lire le contenu).
+  // On supprime l'ancien mécanisme de déduplication qui partageait un timestamp
+  // entre plusieurs messages — chaque bulle a désormais le sien.
   const dateObj = timestamp ? parseServerTimestamp(timestamp) : new Date();
   const timeStr = dateObj.toLocaleString('fr-FR', {
     weekday:'short', day:'2-digit', month:'short',
     hour:'2-digit', minute:'2-digit',
     timeZone: 'Europe/Paris'
   });
-  const lastTimeEl = messagesEl.querySelector('.msg-time:last-of-type');
-  if (!lastTimeEl || lastTimeEl.textContent !== timeStr) {
-    const timeEl = document.createElement('div');
-    timeEl.className = 'msg-time';
-    timeEl.style.cssText = 'font-size:11px;color:#999;text-align:center;width:100%;margin:8px 0 2px;';
-    timeEl.textContent = timeStr;
-    appendToChat(timeEl);
-  }
+  const timeEl = document.createElement('div');
+  timeEl.className = 'msg-time msg-time-' + type;
+  timeEl.textContent = timeStr;
+  appendToChat(timeEl);
 
   const avatar = document.createElement('div'); avatar.className = 'avatar ' + type + '-avatar';
   avatar.textContent = type === 'raya' ? '✦' : (currentUser ? currentUser[0].toUpperCase() : 'G');
@@ -140,12 +152,18 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
         content.textContent = text;
       }
     };
-    // Streaming progressif UNIQUEMENT pour les nouveaux messages (pas d'historique).
-    // Si un timestamp est fourni, c'est un message restauré depuis /chat/history au
-    // rechargement de la page — on l'affiche directement sans animation, sinon tous
-    // les anciens messages se retapent ligne par ligne au chargement = chaos visuel.
+    // Streaming progressif UNIQUEMENT pour les nouveaux messages en texte simple.
+    // Si timestamp fourni → message d'historique, affichage direct.
+    // Si markdown complexe (tableau, liste, heading, code) → fade-in plutôt que
+    // typing pour éviter de voir les caractères bruts ('|', '**', '###') défiler.
     if (timestamp) {
       finalize();
+    } else if (hasComplexMarkdown(text)) {
+      finalize();
+      // Fade-in doux de la bulle complète pour remplacer l'effet typing
+      content.style.opacity = '0';
+      content.style.transition = 'opacity 0.5s ease-out';
+      requestAnimationFrame(() => { content.style.opacity = '1'; });
     } else {
       streamRenderToContent(content, text, finalize);
     }
@@ -181,7 +199,13 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
     bubble.appendChild(actions);
   }
   row.appendChild(avatar); row.appendChild(bubble); appendToChat(row);
-  if (messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 200) scrollToBottom();
+  // scrollToBottom conditionnel : utile pour les messages du bas du chat,
+  // mais DÉSACTIVÉ quand un spacer est présent (l'user a la question en haut
+  // via le mécanisme ChatGPT-like, on ne doit PAS scroller vers le bas).
+  const hasSpacer = document.getElementById('raya-scroll-spacer');
+  if (!hasSpacer && messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 200) {
+    scrollToBottom();
+  }
   return row;
 }
 

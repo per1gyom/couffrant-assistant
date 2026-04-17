@@ -102,6 +102,18 @@ html, body { height: 100%; background: var(--bg); color: var(--text); font-famil
   50%      { transform: scale(1.25) rotate(180deg); opacity: 1; }
 }
 
+/* Timestamps par message, alignés selon le type (v=71) */
+.msg-time {
+  font-size: 11px;
+  color: #999;
+  width: 100%;
+  margin: 10px 0 2px;
+  padding: 0 48px;  /* aligne visuellement avec le bord intérieur des bulles */
+  box-sizing: border-box;
+}
+.msg-time-user { text-align: right; }
+.msg-time-raya { text-align: left; }
+
 /* Effet curseur typewriter pendant le streaming progressif (v=69) */
 .raya-streaming::after {
   content: '▋';
