@@ -7,6 +7,34 @@ import json
 from app.activity_log import log_activity
 
 
+def _format_field_value(v) -> str:
+    """
+    Formate la valeur d'un champ Odoo pour affichage lisible au LLM.
+
+    Cas gérés :
+    - None/False/'' → "" (sera filtré avant par le check `if v`)
+    - many2one Odoo [id, "Nom"] → "Nom"
+    - many2many enrichi [{"id": X, "name": "Y"}, ...] → "Y1, Y2, Y3"
+    - many2many brut [14, 13, 15] → "[14, 13, 15]" (fallback, pas de résolution)
+    - int/float/str → str(v)
+    - dict → json court (rare)
+    """
+    # many2one au format Odoo [id, "Nom"] — 2 éléments, int + str
+    if isinstance(v, list) and len(v) == 2 and isinstance(v[0], int) and isinstance(v[1], str):
+        return v[1]
+    # Liste enrichie par odoo_enrich : [{"id": X, "name": "Y"}, ...]
+    if isinstance(v, list) and v and all(isinstance(x, dict) and "name" in x for x in v):
+        names = [x.get("name") or f"#{x.get('id','?')}" for x in v]
+        return ", ".join(names)
+    # Liste d'IDs bruts non résolus
+    if isinstance(v, list) and v and all(isinstance(x, int) for x in v):
+        return ", ".join(f"#{i}" for i in v)
+    # Dict simple (rare)
+    if isinstance(v, dict):
+        return json.dumps(v, ensure_ascii=False)[:100]
+    return str(v)
+
+
 def _extract_action_tags(text, action_type):
     """Extrait les tags ACTION avec gestion des crochets imbriqués (domaines Odoo JSON)."""
     prefix = f'[ACTION:{action_type}:'
@@ -80,11 +108,26 @@ def _handle_odoo_actions(response, username, tenant_id, tools):
                     confirmed.append(f"⚠️ Certains champs demandés n'existent pas sur {model}. Résultats avec champs par défaut :")
                 else:
                     raise
+            # ENRICHISSEMENT : résoudre les IDs en noms (user_ids, partner_ids,
+            # attendee_ids, etc.) pour que Raya voit "Aurélien, Benoît" au lieu
+            # de "[14, 13]". Fait en best-effort : si l'enrichissement échoue
+            # (modèle inconnu, appel Odoo qui foire), on continue avec les
+            # résultats bruts — pas de régression.
+            try:
+                from app.connectors.odoo_enrich import enrich_records
+                results = enrich_records(model, results)
+            except Exception as enrich_err:
+                from app.logging_config import get_logger as _gl
+                _gl("raya.odoo").warning(
+                    "[Odoo] Enrichissement échoué pour %s: %s",
+                    model, str(enrich_err)[:150]
+                )
             if results:
-                # Formater proprement pour le chat
+                # Formater proprement pour le chat, avec résolution des IDs
+                # en noms via _format_field_value.
                 lines = []
                 for r in results[:30]:
-                    parts = [f"{k}: {v}" for k, v in r.items() if k != 'id' and v]
+                    parts = [f"{k}: {_format_field_value(v)}" for k, v in r.items() if k != 'id' and v]
                     lines.append(f"  #{r.get('id','')} — {' | '.join(parts[:5])}")
                 confirmed.append(f"📊 Odoo {model} ({len(results)} résultat{'s' if len(results)>1 else ''}) :\n" + "\n".join(lines))
             else:
