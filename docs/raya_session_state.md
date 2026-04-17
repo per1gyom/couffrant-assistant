@@ -314,10 +314,29 @@ app/
 
 ---
 
+## 🔮 Évolutions optionnelles (nice-to-have, non bloquantes)
+
+### UX chat
+- **Loader contextuel** : détecter les mots-clés du prompt utilisateur pour afficher
+  un texte italique adapté pendant la réflexion (ex: "Interrogation Odoo…" si la
+  question parle de devis, "Lecture de tes mails…" si elle parle de mails,
+  "Croisement de tes sources…" pour les synthèses cross-source).
+  Code à modifier : `addLoading()` dans `chat-messages.js`. Ajouter un paramètre
+  `queryHints` passé depuis `sendMessage()` après analyse simple du texte.
+
+### Tests automatisés
+- Protocole de tests via Claude in Chrome → voir `docs/raya_test_protocol.md`.
+  Permet à Claude de piloter le navigateur et d'exécuter des batteries de tests
+  (CHAT-BASELINE, CARTES-MAIL, GRAPHE, ODOO-ACTIONS, UX-SCROLL) pour détecter
+  les régressions après chaque déploiement. Validation humaine pour actions sensibles.
+
+---
+
 ## REPRISE
 
 ```
 Bonjour Claude. Projet Raya, Guillaume Perrin (Couffrant Solar).
 Tutoiement, français, Terminal, concis.
 Lis docs/raya_session_state.md sur per1gyom/couffrant-assistant main.
+Lis aussi docs/raya_changelog.md et docs/raya_test_protocol.md si pertinent.
 ```
