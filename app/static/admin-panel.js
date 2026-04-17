@@ -242,6 +242,10 @@ async function discoverTool(tenantId,toolType,btn){
   // Pour Odoo → une seule découverte. Pour Microsoft/Gmail → enchaîner drive + calendar + contacts.
   const batteries = (toolType === 'odoo') ? ['odoo'] : ['drive','calendar','contacts'];
   const totals = {discovered:0, matched:0, errors:[]};
+  // Accumulateur pour les stats détaillées (entités réellement ingérées dans
+  // entity_links, cf. populate_from_odoo/drive/calendar/contacts) — séparé
+  // du simple "discovered" qui n'est que le nombre de modèles/schémas détectés.
+  const graphStats = {};
   try{
     for (const batt of batteries) {
       btn.innerHTML = `⏳ ${batt}…`;
@@ -250,12 +254,31 @@ async function discoverTool(tenantId,toolType,btn){
       totals.discovered += (d.discovered || 0);
       if (d.graph && d.graph.matched) totals.matched += d.graph.matched;
       if (d.errors && d.errors.length) totals.errors.push(...d.errors.slice(0, 3));
+      // Cumuler les stats d'ingestion (team_members, contacts, invoices,
+      // orders, folders, files, events, etc. selon le type de connecteur)
+      if (d.graph && typeof d.graph === 'object') {
+        Object.entries(d.graph).forEach(([k, v]) => {
+          if (typeof v === 'number') graphStats[k] = (graphStats[k] || 0) + v;
+        });
+      }
     }
     if(totals.discovered > 0){
-      btn.innerHTML = `✅ ${totals.discovered} élément(s)`;
-      const extra = totals.matched > 0 ? ` + ${totals.matched} match(s) graphe` : '';
-      setAlert('companies-alert',
-        `${totals.discovered} schéma(s) ${toolType} découvert(s)${extra}`, 'ok');
+      btn.innerHTML = `✅ ${totals.discovered} schéma(s)`;
+      // Construire le détail lisible : "7 équipiers · 342 contacts · 156 factures · 42 devis"
+      const statLabels = {
+        team_members: 'équipier(s)', contacts: 'contact(s)',
+        invoices: 'facture(s)', orders: 'devis',
+        folders: 'dossier(s)', files: 'fichier(s)',
+        events: 'événement(s)', matched: 'match(s) graphe',
+      };
+      const details = Object.entries(graphStats)
+        .filter(([k, v]) => v > 0 && statLabels[k])
+        .map(([k, v]) => `${v} ${statLabels[k]}`)
+        .join(' · ');
+      const message = details
+        ? `${toolType} : ${totals.discovered} schéma(s) · ${details}`
+        : `${totals.discovered} schéma(s) ${toolType} découvert(s)`;
+      setAlert('companies-alert', message, 'ok');
     } else {
       btn.innerHTML = '❌ Rien trouvé';
       setAlert('companies-alert',
