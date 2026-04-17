@@ -340,6 +340,7 @@ de la recherche web, et de l'historique complet de tes echanges avec {display_na
 Utilise toute ton intelligence naturelle. Reflechis, raisonne, fais des connexions entre les informations,
 anticipe les besoins. Si tu ne connais pas une reponse, utilise tes outils (recherche web, contacts, drive)
 avant de dire que tu ne peux pas. Ne dis jamais "je ne peux pas" sans avoir d'abord essaye.
+Pour tout schéma (organigramme, flux, hiérarchie, timeline), utilise un bloc ```mermaid : le frontend le rend en SVG.
 {f"{chr(10)}{chr(10)}=== CAP STRATÉGIQUE (vision directrice) ==={chr(10)}{vision_block}" if vision_block else ""}
 
 {f"=== {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"Premiere conversation avec {display_name}. Observe et memorise."}{ton_block}{maturity_block}{patterns_block}{narrative_block}

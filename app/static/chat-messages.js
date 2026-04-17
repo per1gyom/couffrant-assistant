@@ -59,6 +59,53 @@ function streamRenderToContent(content, rawText, finalizeFn) {
   }, tickMs);
 }
 
+// Initialisation Mermaid : une seule fois au chargement du module.
+// Mermaid est chargé via CDN dans raya_chat.html. On le configure sobrement
+// pour que Raya puisse générer des schémas (organigrammes, flux, hiérarchies)
+// avec le langage Mermaid et les voir rendus en SVG directement dans le chat.
+if (typeof mermaid !== 'undefined') {
+  try {
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: 'default',
+      securityLevel: 'loose',
+      fontFamily: 'Inter, sans-serif',
+    });
+  } catch(e) { console.warn('[Raya] Mermaid init failed:', e); }
+}
+
+// Scanne le contenu rendu pour détecter les blocs <code class="language-mermaid">
+// et les remplacer par leur rendu SVG. Appelé après le rendu markdown.
+// Gestion d'erreur : si Mermaid rejette la syntaxe, on laisse le code brut
+// visible avec un petit message, plutôt que de casser toute la bulle.
+async function renderMermaidBlocks(container) {
+  if (typeof mermaid === 'undefined' || !container) return;
+  const blocks = container.querySelectorAll('code.language-mermaid, pre > code.language-mermaid');
+  if (blocks.length === 0) return;
+  for (let i = 0; i < blocks.length; i++) {
+    const codeEl = blocks[i];
+    const pre = codeEl.closest('pre') || codeEl.parentElement;
+    const src = codeEl.textContent || '';
+    const id = 'raya-mmd-' + Date.now() + '-' + i;
+    try {
+      const { svg } = await mermaid.render(id, src);
+      const wrapper = document.createElement('div');
+      wrapper.className = 'mermaid-wrapper';
+      wrapper.innerHTML = svg;
+      if (pre && pre.parentNode) pre.parentNode.replaceChild(wrapper, pre);
+    } catch(err) {
+      console.warn('[Raya] Mermaid render error:', err);
+      // Fallback : on laisse le code brut + une indication discrète
+      if (pre) {
+        const hint = document.createElement('div');
+        hint.style.cssText = 'font-size:11px;color:#999;margin-top:4px;font-style:italic;';
+        hint.textContent = '⚠ Schéma non rendu (syntaxe Mermaid invalide)';
+        pre.parentNode.insertBefore(hint, pre.nextSibling);
+      }
+    }
+  }
+}
+
 // Détecte si une réponse contient du markdown "complexe" qui rendrait moche
 // en texte brut pendant le streaming (tableaux, listes, headings, code).
 // Pour ces cas, on skip le typing et on applique un fade-in rapide à la place.
@@ -119,6 +166,11 @@ function addMessage(text, type, fileInfo=null, ariaMemoryId=null, timestamp=null
         content.innerHTML = cleanHtml;
         content.classList.add('markdown-content');
         content.querySelectorAll('a').forEach(a => { a.setAttribute('target', '_blank'); a.setAttribute('rel', 'noopener noreferrer'); });
+        // Rendu Mermaid : scanne les blocs ```mermaid et les transforme en SVG.
+        // Fait APRÈS le setAttribute des liens pour que, si le bloc Mermaid est
+        // remplacé, ça ne casse pas. Async mais on n'attend pas (fire-and-forget)
+        // pour ne pas bloquer le reste du finalize().
+        renderMermaidBlocks(content);
         content.querySelectorAll('a').forEach(a => {
           const href = a.getAttribute('href') || '';
           if (href.includes('/download/') || href.match(/\.(pdf|xlsx|xls|csv|png|jpg|jpeg)(\?|$)/i)) {

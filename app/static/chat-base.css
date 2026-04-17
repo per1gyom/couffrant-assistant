@@ -267,4 +267,24 @@ textarea#input.interim { color: var(--text-muted); font-style: italic; }
 #sendBtn.waiting { background: #cbd5e1; border-color: #cbd5e1; cursor: not-allowed; opacity: 0.7; }
 #sendBtn.waiting:hover { background: #cbd5e1; }
 #sendBtn.waiting svg { opacity: 0.6; }
+
+/* Schémas Mermaid rendus dans les bulles Raya (v=75).
+   Wrapper qui remplace les blocs ```mermaid par leur SVG :
+   - centré dans la bulle avec marges aérées
+   - scroll horizontal si le schéma dépasse (mobile / schémas larges)
+   - fond transparent pour se fondre dans la bulle */
+.mermaid-wrapper {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin: 12px 0;
+  padding: 8px;
+  max-width: 100%;
+  overflow-x: auto;
+  background: transparent;
+}
+.mermaid-wrapper svg {
+  max-width: 100%;
+  height: auto;
+}
 #input:disabled { opacity: 0.5; cursor: not-allowed; }
