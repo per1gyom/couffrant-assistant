@@ -229,6 +229,8 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
             # Remplacer la réponse par la synthèse (plus pertinente)
             clean_response = _strip_action_tags(synthesis)
             clean_response = re.sub(r'\n{3,}', '\n\n', clean_response).strip()
+            # Retirer les résultats informatifs de actions_raw — la synthèse les a intégrés
+            actions_raw = [a for a in actions_raw if a not in info_results]
             # Mettre à jour aria_memory avec la synthèse
             if aria_memory_id:
                 try:
