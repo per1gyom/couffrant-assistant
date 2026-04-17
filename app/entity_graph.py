@@ -490,13 +490,17 @@ def populate_from_contacts(tenant_id: str, username: str) -> dict:
 
 # ─── LECTURE : BLOC ÉQUIPE POUR INJECTION DANS LE PROMPT ────────
 
-def build_team_block(tenant_id: str) -> str:
+def build_team_roster_block(tenant_id: str) -> str:
     """
-    Retourne un bloc texte listant l'équipe (team_member) du tenant
+    Retourne un bloc texte listant le ROSTER d'équipe (team_member) du tenant
     pour injection dans le prompt système de Raya.
     Source : entity_links peuplée par populate_from_odoo depuis res.users.
     Format court : 1 ligne par personne, prénom + email.
     Retourne une chaîne vide si aucun team_member en base.
+
+    ⚠ Nom explicite 'roster' pour éviter conflit avec
+    app.routes.prompt_blocks_extra.build_team_block() qui gère lui les
+    événements d'activité de l'équipe (sujet différent).
     """
     conn = None
     try:

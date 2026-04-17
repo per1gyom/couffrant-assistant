@@ -213,10 +213,12 @@ def build_system_prompt(
     # Équipe interne (team_member dans entity_links, source Odoo res.users).
     # Source de vérité injectée systématiquement — évite que Raya hallucine
     # la composition de l'équipe depuis l'historique conversationnel.
-    team_block = ""
+    # ⚠ Variable distincte de 'team_block' (qui vient de prompt_blocks_extra
+    # et gère lui les événements d'activité de l'équipe — sujet différent).
+    team_roster_block = ""
     try:
-        from app.entity_graph import build_team_block
-        team_block = build_team_block(tenant_id)
+        from app.entity_graph import build_team_roster_block
+        team_roster_block = build_team_roster_block(tenant_id)
     except Exception:
         pass
 
@@ -321,7 +323,7 @@ avant de dire que tu ne peux pas. Ne dis jamais "je ne peux pas" sans avoir d'ab
 
 {f"=== {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"Premiere conversation avec {display_name}. Observe et memorise."}{ton_block}{maturity_block}{patterns_block}{narrative_block}
 
-{f"=== TA MEMOIRE ==={chr(10)}{aria_rules}" if aria_rules else ""}{f"{chr(10)}{chr(10)}=== TES OBSERVATIONS ==={chr(10)}{aria_insights}" if aria_insights else ""}{f"{chr(10)}{chr(10)}=== CONNAISSANCE DES OUTILS CONNECTES ==={chr(10)}{tool_knowledge}" if tool_knowledge else ""}{f"{chr(10)}{chr(10)}=== {team_block}" if team_block else ""}{theme_context_block}{conv_context_block}
+{f"=== TA MEMOIRE ==={chr(10)}{aria_rules}" if aria_rules else ""}{f"{chr(10)}{chr(10)}=== TES OBSERVATIONS ==={chr(10)}{aria_insights}" if aria_insights else ""}{f"{chr(10)}{chr(10)}=== CONNAISSANCE DES OUTILS CONNECTES ==={chr(10)}{tool_knowledge}" if tool_knowledge else ""}{f"{chr(10)}{chr(10)}=== {team_roster_block}" if team_roster_block else ""}{theme_context_block}{conv_context_block}
 
 {f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}{f"{chr(10)}{chr(10)}=== STYLE REDACTIONNEL ==={chr(10)}{style_examples}" if style_examples else ""}
 
