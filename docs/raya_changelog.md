@@ -4,6 +4,59 @@
 
 ---
 
+## Session 17/04/2026 soir (22h-23h) — Mermaid : schémas graphiques SVG
+
+**Objectif** : remplacer l'art ASCII illisible par de vrais schémas
+rendus graphiquement (organigrammes, flux, hiérarchies, timelines).
+
+**Approche validée avec Guillaume** : minimaliste côté prompt (~20 tokens),
+robuste côté frontend. Pas de template imposé — l'utilisateur personnalise
+par feedback et Raya apprend via `aria_rules`.
+
+**4 commits successifs de mise en place puis debug** :
+
+- `5b17771` — Ajout Mermaid.js 11.4.0 via CDN + init + `renderMermaidBlocks`
+  + règle minimaliste dans `aria_context.py` + CSS `.mermaid-wrapper`
+- `3a3bfd1` — Ajout `normalizeMermaidSyntax` (backticks simples → triple)
+  + `tagMermaidCodeBlocks` (détection heuristique des code blocks sans tag)
+- `67b5841` — Enrichissement `normalizeMermaidSyntax` pour gérer le cas
+  où Raya ferme avec un `` ` `` simple + ajout `mermaid.parse()` avant
+  `mermaid.render()` pour valider la syntaxe et éviter les SVG-bombes
+  que Mermaid 11.x affiche au lieu de thrower
+- `256bd49` — **Fix du vrai bug** : race condition DOM. `renderMermaidBlocks`
+  était appelé en async fire-and-forget AVANT les `innerHTML = innerHTML.replace`
+  qui réécrivaient le DOM. Le `<pre>` référencé devenait orphelin →
+  `replaceChild` échouait silencieusement → rendu Mermaid fonctionnait
+  mais écrivait dans le vide. Déplacement de l'appel à la FIN de `finalize()`.
+
+**Cache-bust** : v=74 → v=78 (4 bumps successifs).
+
+**Leçon** : Guillaume a insisté pour que je diagnostique via le texte
+brut de la DB plutôt que de patcher à l'aveugle. Sans sa directive,
+j'aurais continué à ajouter des regex au lieu de regarder l'ordre
+d'exécution. Bon réflexe à retenir : quand « tout marche mais rien ne
+s'affiche », scruter l'ordre d'exécution DOM avant de supposer un
+problème de parsing.
+
+**Résultat** : 3 schémas successifs de test (organigramme patrimonial,
+version avec couleurs pastel sur demande) rendus correctement au
+rechargement de page.
+
+### Nouveau chantier identifié (🟡 priorité moyenne, après capabilities)
+
+**Analyse complète des outils visuels/interactifs à intégrer.**
+
+Mermaid a ouvert un nouveau registre pour Raya (visuel, pas seulement
+textuel). Question ouverte : quels autres outils pourraient être ajoutés ?
+Pistes : Chart.js/Plotly (graphiques de données), KaTeX (formules
+financières), Excalidraw (croquis whiteboard), Leaflet/Mapbox (cartes
+chantiers), timelines interactifs, tableaux triables/filtrables, code
+sandbox, widgets formulaires.
+
+Détails dans `raya_session_state.md` section « NOUVEAU CHANTIER À OUVRIR ».
+
+---
+
 ## Session 17/04/2026 soir — Chat solide + Auto-découverte élargie + Architecture capabilities
 
 ### Fixes chat (solidification)

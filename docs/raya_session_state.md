@@ -543,3 +543,100 @@ vision sans passer par une rédaction manuelle.
 la solution parfaite pour déployer. On met en place une v1 qui marche,
 on observe, on améliore. Chaque trimestre environ, on fait un point
 sur les couches mémoire et on remonte d'un cran.
+
+
+---
+
+## 🎨 MERMAID — SCHÉMAS GRAPHIQUES (opérationnel, v=78)
+
+Raya peut maintenant générer des schémas graphiques rendus en SVG dans
+le chat : organigrammes, flux, hiérarchies, timelines, etc. Mise en
+place le 17/04/2026 après 4 commits successifs de debug.
+
+**Architecture** :
+- Mermaid.js 11.4.0 chargé via CDN dans `raya_chat.html` (~200 KB, cache)
+- Initialisation dans `chat-messages.js` (theme default, fontFamily Inter)
+- `normalizeMermaidSyntax(text)` : pré-traite le markdown brut pour
+  corriger les patterns mal formés par le LLM (backticks simples au
+  lieu de triple, aux deux extrémités)
+- `tagMermaidCodeBlocks(container)` : détection heuristique des code
+  blocks sans tag `mermaid` mais dont le contenu ressemble à du Mermaid
+- `renderMermaidBlocks(container)` : appelé en TOUT DERNIER dans
+  `finalize()` pour éviter la race condition avec les `innerHTML.replace`
+  qui réécrivent le DOM plus haut. Utilise `mermaid.parse()` AVANT
+  `mermaid.render()` pour valider la syntaxe (Mermaid 11.x ne throw pas
+  sur erreur, il retourne un SVG-bombe qu'il faut éviter d'afficher).
+- CSS `.mermaid-wrapper` : centré, padding, scroll horizontal mobile
+
+**Règle dans le prompt système** (minimaliste, ~20 tokens) :
+> Pour tout schéma (organigramme, flux, hiérarchie, timeline), utilise
+> un bloc ```mermaid : le frontend le rend en SVG.
+
+**Personnalisation émergente** : si le rendu ne plaît pas, l'utilisateur
+demande une correction (couleurs, orientation, style), Raya enregistre
+une règle dans `aria_rules`, et l'applique aux schémas suivants. Pas de
+template imposé dans le code — chaque Raya développe son style par
+l'usage.
+
+---
+
+## 🔍 NOUVEAU CHANTIER À OUVRIR — ANALYSE DES OUTILS VISUELS/INTERACTIFS
+
+**Contexte** : Mermaid a été un ajout simple mais puissant. Il a ouvert
+un nouveau registre de réponses pour Raya (visuel, pas seulement
+textuel). **Question ouverte** : quels autres outils visuels ou
+interactifs devrait-on intégrer dans le stack pour donner à Raya
+encore plus de moyens d'expression ?
+
+**Candidats à étudier** (liste non exhaustive) :
+
+1. **Chart.js / Plotly** — graphiques de données (barres, lignes, camemberts,
+   scatter). Cas d'usage : évolution CA Couffrant Solar, répartition
+   marges par type de chantier, comparaison devis, âge de la balance
+   clients. Raya génère un bloc ```chart avec données JSON, le frontend
+   rend le graphique.
+
+2. **KaTeX / MathJax** — formules mathématiques. Cas d'usage : calculs
+   financiers complexes (marge brute, DSCR, TRI projet PV, ACC), modèles
+   de rentabilité. Raya écrit du LaTeX, le frontend rend les équations.
+
+3. **Excalidraw** — dessins à main levée, whiteboard style. Cas d'usage :
+   croquis rapides d'implantation chantier, schémas décisionnels
+   informels, brainstormings. Plus esthétique/organique que Mermaid
+   mais plus lourd à intégrer.
+
+4. **Leaflet / Mapbox** — cartes interactives. Cas d'usage : visualiser
+   emplacements chantiers, répartition géographique clients, trajets
+   optimisés pour visites commerciales. Forte valeur pour une PME
+   territoriale.
+
+5. **Timeline/Gantt interactifs** — au-delà du Gantt basique de Mermaid.
+   Cas d'usage : planning chantiers avec drag & drop, vue agenda équipe,
+   projection de jalons business (commercialisation SAS Logiciel).
+
+6. **Tableaux interactifs** (sort, filter, edit) — au-delà du markdown
+   basique. Cas d'usage : liste des factures en attente triable, balance
+   clients filtrable par âge, comparatif multi-devis.
+
+7. **Code execution sandbox** (Python/JS léger) — pour que Raya puisse
+   lancer du code simple en live pour démonstrations ou calculs
+   complexes. Cas d'usage : simulations What-if sur trésorerie, calcul
+   de scénarios fiscaux.
+
+8. **Widgets de formulaires** — pour que Raya puisse demander plusieurs
+   informations structurées en une seule bulle (au lieu du texte libre).
+   Cas d'usage : création rapide de devis, saisie structurée de contacts.
+
+**Méthode suggérée** :
+- Prendre 1 heure pour lister exhaustivement les cas d'usage que Raya
+  rencontrerait chez Guillaume ET chez de futurs clients de la SAS
+  Logiciel
+- Croiser avec la liste de libraries ci-dessus + d'autres qu'on découvrira
+- Prioriser selon : **valeur apportée × fréquence d'usage × coût d'intégration**
+- Intégrer au même rythme que Mermaid : règle minimaliste dans le prompt
+  + frontend robuste + apprentissage par feedback
+
+**Priorité** : 🟡 moyenne. À traiter après le chantier capabilities
+(étape A-F) qui reste plus urgent pour la structuration. Mais avant la
+commercialisation SAS Logiciel — les clients futurs auront des domaines
+métier variés qui bénéficieraient fortement de ces outils visuels.
