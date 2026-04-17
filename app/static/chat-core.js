@@ -84,7 +84,10 @@ function showToast(msg, type='ok', duration=3000) {
   const toast = document.createElement('div');
   toast.className = 'toast ' + type;
   const icons = { ok: '✓', err: '✕', info: 'ℹ' };
-  toast.innerHTML = `<span>${icons[type]||'ℹ'}</span> <span>${msg}</span>`;
+  toast.innerHTML = `<span>${icons[type]||'ℹ'}</span> `;
+  const msgSpan = document.createElement('span');
+  msgSpan.textContent = msg;
+  toast.appendChild(msgSpan);
   container.appendChild(toast);
   setTimeout(() => { toast.style.animation = 'toastOut 0.3s ease forwards'; setTimeout(() => toast.remove(), 300); }, duration);
 }

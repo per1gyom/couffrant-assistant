@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 17/04/2026 — session soir, audit sécurité + panels séparés**
+**Dernière mise à jour : 18/04/2026 — 5 audits complétés, zéro dette technique critique**
 
 ---
 
@@ -167,10 +167,10 @@ app/
 ## AUDITS PLANIFIÉS — DANS L'ORDRE
 
 1. **Performance** ✅ FAIT (17/04)
-2. **Sécurité** ✅ FAIT (17/04) — voir détails ci-dessous
-3. **Système d'actions** — pending_actions, queue, confirmations, robustesse
-4. **Scheduler/jobs** — ce qui tourne vraiment, ce qui est mort, robustesse
-5. **Frontend** — chat-main.js, flux UI, code mort, gestion erreurs
+2. **Sécurité** ✅ FAIT (17/04)
+3. **Système d'actions** ✅ FAIT (18/04) — username confirm, gate token supprimé, CREATEFOLDER V2, cleanup stuck
+4. **Scheduler/jobs** ✅ FAIT (18/04) — architecture propre, _job_enabled dédupliqué
+5. **Frontend** ✅ FAIT (18/04) — XSS toast fixé, code mort nettoyé
 
 ---
 

@@ -20,19 +20,11 @@ Variables d'environnement :
   SCHEDULER_ANOMALY_ENABLED=true       → active anomaly_detection (8-ANOMALIES) — défaut: false
   SCHEDULER_OBSERVER_ENABLED=true      → active external_observer (8-OBSERVE) — défaut: false
 """
-import os
 from app.logging_config import get_logger
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.interval import IntervalTrigger
-from apscheduler.triggers.cron import CronTrigger
 
 logger = get_logger("raya.scheduler")
 _scheduler: BackgroundScheduler | None = None
-
-
-def _job_enabled(env_var: str, default: bool = True) -> bool:
-    val = os.getenv(env_var, "true" if default else "false").lower()
-    return val not in ("false", "0", "no", "off")
 
 
 def get_scheduler() -> BackgroundScheduler:
