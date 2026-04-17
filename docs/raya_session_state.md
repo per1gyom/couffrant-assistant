@@ -1,6 +1,6 @@
 # Raya — État de session vivant
 
-**Dernière mise à jour : 18/04/2026 — 5 audits complétés, zéro dette technique critique**
+**Dernière mise à jour : 18/04/2026 — refonte intelligence + auto-découverte outils**
 
 ---
 
@@ -124,6 +124,61 @@ get_user_XXXX(username) → liste connecteurs actifs
 | 5 | Messagerie unifiée Teams → MessagingConnector |
 | 6 | Legacy tokens nettoyés |
 | 7 | Webhooks + polling branchés sur V2 |
+
+---
+
+## REFONTE INTELLIGENCE (18/04/2026) ✅
+
+### Prompt restructuré
+- Identité : "Tu es Claude, modèle d'Anthropic" → intelligence native libérée
+- Ordre : CONTEXTE d'abord (qui est l'utilisateur, ses données) → RÈGLES à la fin
+- GUARDRAILS condensés : 370 lignes → 30 lignes (sécurité uniquement)
+- Moins de hardcode, plus d'intelligence naturelle
+
+### Paramètres
+- Historique : 6 → **30 échanges** (continuité conversation)
+- max_tokens : 2048 → **8192** (réponses complètes)
+- Routeur : seuils assouplis, quota Opus 20 → **50/jour**
+- Rate limiter : 60 → **120 requêtes/heure**
+
+### Anti-bluff
+- CORE_RULES : "Ne promets jamais de faire quelque chose si tu n'as pas la syntaxe d'action"
+
+---
+
+## AUTO-DÉCOUVERTE DES OUTILS (18/04/2026) ✅
+
+### Principe
+Les outils connectés ne sont plus décrits par des listes hardcodées.
+Raya explore l'outil, vectorise sa structure, et retrouve la connaissance
+pertinente via RAG à chaque conversation.
+
+### Architecture
+```
+tool_schemas (table DB + embeddings vectoriels)
+  → tenant_id, tool_type, entity_key, description, fields_json, embedding
+  → Index HNSW pour recherche par similarité
+
+discover_odoo(tenant_id)
+  → Explore les modèles business Odoo (contacts, devis, factures, projets...)
+  → Pour chaque modèle : champs, relations, description naturelle
+  → Vectorise et stocke dans tool_schemas
+
+retrieve_tool_knowledge(query, tenant_id)
+  → Appelé automatiquement dans build_system_prompt
+  → Retourne les schémas pertinents pour la question de l'utilisateur
+```
+
+### Routes admin
+- `POST /admin/discover/{tenant_id}/odoo` → lance la découverte
+- `GET /admin/discovery-status/{tenant_id}` → état de la découverte
+
+### Roadmap connaissance vectorisée
+- [x] Schémas Odoo (auto-découverte)
+- [ ] Index documents Drive (résumés des fichiers)
+- [ ] Graphe de contacts (qui contacte qui, fréquence, sujets)
+- [ ] Vocabulaire métier (termes extraits des conversations)
+- [ ] Blueprints connecteurs (templates réutilisables)
 
 ---
 

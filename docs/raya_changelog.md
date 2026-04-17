@@ -4,26 +4,37 @@
 
 ---
 
-## Session 18/04/2026 — 5 Audits complétés (~4 commits)
+## Session 18/04/2026 — Intelligence + Auto-découverte (~10 commits)
 
-### Audit #3 — Système d'actions
-- **CRITIQUE** : `username` manquant dans `_execute_confirmed_action` via REST endpoint → SEND_MAIL unifié cassé. Injecté dans les deux chemins (REST + inline).
-- Gate `if outlook_token:` supprimé → utilisateurs Gmail-only peuvent maintenant envoyer des mails
-- `CREATEFOLDER` appelait des fonctions inexistantes (`_find_sharepoint_site_and_drive`) → remplacé par DriveConnector unifié
-- Draft Gmail → connecteur V2 (remplace legacy `gmail_connector`)
-- `_get_user_email` → legacy `token_manager` supprimé, V2 uniquement
-- `mark_executing` appelé avant exécution (tracking état)
-- Nettoyage automatique des actions bloquées en "executing" depuis +1h
+### Refonte intelligence Raya
+- Identité : "Tu es Claude, modèle d'Anthropic" → intelligence native libérée
+- Prompt restructuré : contexte d'abord (utilisateur, données), règles à la fin
+- GUARDRAILS 370 lignes → 30 lignes (sécurité uniquement, zéro formatage verbeux)
+- Historique 6 → 30 échanges, max_tokens 2048 → 8192
+- Routeur assoupli, quota Opus 20 → 50/jour, rate limiter 60 → 120/h
+- Anti-bluff : "Ne promets jamais ce que tu ne peux pas faire"
 
-### Audit #4 — Scheduler/jobs
-- Architecture propre, aucun problème critique
-- `_job_enabled` dupliquée dans `scheduler.py` → supprimée (utilisée uniquement dans `scheduler_jobs.py`)
-- Imports morts (`IntervalTrigger`, `CronTrigger`, `os`) supprimés de `scheduler.py`
+### Actions Odoo
+- **Nouveau** : ODOO_SEARCH, ODOO_MODELS, ODOO_CREATE, ODOO_UPDATE, ODOO_NOTE
+- Parseur `_extract_action_tags` — gère les crochets imbriqués (JSON Odoo)
+- `_safe_parse_domain` — parse robuste des domaines Odoo
+- Retry automatique sur KeyError (champs inconnus → fallback `name`)
 
-### Audit #5 — Frontend
-- XSS mineur dans `showToast` (`innerHTML` → `textContent`)
-- Structure JS propre, tous les `fetch` en `try/catch`, DOMPurify sur les réponses Raya
-- Code mort identifié (`checkTokenStatus`, `renderPendingActions`) — conservé pour compat
+### Auto-découverte outils
+- `tool_schemas` table DB avec embeddings vectoriels HNSW
+- `discover_odoo()` — explore modèles business, vectorise descriptions + champs + relations
+- `retrieve_tool_knowledge()` — RAG injecte les schémas pertinents dans le prompt
+- Routes admin : POST /admin/discover/{tenant_id}/odoo
+
+### UX
+- Bouton stop (annuler prompt en cours) + verrouillage double envoi
+- Résultats Odoo/Drive/Contacts affichés dans le chat (plus en toasts perdus)
+- Nettoyage tags ACTION avec crochets imbriqués (`_strip_action_tags`)
+
+### Audits #3 #4 #5
+- Actions : username injecté dans confirm, gate outlook_token supprimé
+- Scheduler : _job_enabled dédupliqué, imports morts
+- Frontend : XSS toast (textContent)
 
 ## Session 17/04/2026 — Audit & Sécurité (~5 commits)
 
