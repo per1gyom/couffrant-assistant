@@ -8,7 +8,7 @@ import threading
 _lock = threading.Lock()
 _requests: dict[str, list[float]] = {}
 
-RATE_LIMIT_PER_HOUR = 60
+RATE_LIMIT_PER_HOUR = 120
 
 
 def check_rate_limit(username: str) -> bool:

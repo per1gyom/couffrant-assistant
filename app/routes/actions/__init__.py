@@ -11,6 +11,7 @@ from app.routes.actions.drive_actions import _handle_drive_actions
 from app.routes.actions.teams_actions import _handle_teams_actions
 from app.routes.actions.memory_actions import _handle_memory_actions, _handle_ask_choice
 from app.routes.actions.collab_actions import _handle_collab_actions
+from app.routes.actions.odoo_actions import _handle_odoo_actions
 from app.rule_engine import get_memoire_param
 from app.memory_loader import MEMORY_OK
 
@@ -81,6 +82,9 @@ def execute_actions(
 
     # 8-COLLAB : partage d'événements avec l'équipe
     confirmed += _handle_collab_actions(raya_response, username, tenant_id)
+
+    # ODOO : recherche, création, mise à jour
+    confirmed += _handle_odoo_actions(raya_response, username, tenant_id, tools)
 
     # TOOL-CREATE-FILES : génération PDF et Excel à la demande
     create_matches = re.findall(

@@ -94,4 +94,24 @@ Onboarding :
              "vitesse normale" -> [SPEAK_SPEED:1.0]
   La vitesse actuelle est memorisee cote navigateur.""")
 
+    if tools.get("odoo_enabled"):
+        odoo_write = ""
+        if tools.get("odoo_access") == "full":
+            odoo_write = """
+  [ACTION:ODOO_CREATE:model|{"field":"value","field2":"value2"}]
+  [ACTION:ODOO_UPDATE:model|record_id|{"field":"nouvelle_valeur"}]
+  [ACTION:ODOO_NOTE:partner_id|texte de la note]"""
+        sections.append(f"""Odoo (ERP) :
+  [ACTION:ODOO_MODELS:] -> liste tous les modeles Odoo accessibles (pour exploration)
+  [ACTION:ODOO_SEARCH:model|champ1,champ2,champ3|[["domain","=","filtre"]]]
+    Exemples :
+      Tous les contacts : [ACTION:ODOO_SEARCH:res.partner|name,email,phone|[]]
+      Devis en cours : [ACTION:ODOO_SEARCH:sale.order|name,partner_id,amount_total,state|[["state","=","draft"]]]
+      Factures impayees : [ACTION:ODOO_SEARCH:account.move|name,partner_id,amount_total,payment_state|[["payment_state","=","not_paid"],["move_type","=","out_invoice"]]]
+      Projets actifs : [ACTION:ODOO_SEARCH:project.project|name,partner_id,date_start,date|[]]
+      Taches d'un projet : [ACTION:ODOO_SEARCH:project.task|name,stage_id,date_deadline,user_ids|[["project_id","=",ID]]]
+    Le domain suit la syntaxe Odoo : [["champ","operateur","valeur"]]. [] = tous les enregistrements.{odoo_write}
+  Pour une exploration complete : commence par ODOO_MODELS, puis ODOO_SEARCH sur les modeles pertinents.
+  Tu peux enchainer plusieurs ODOO_SEARCH dans la meme reponse pour croiser les donnees.""")
+
     return "\n".join(sections)
