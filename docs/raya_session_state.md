@@ -640,3 +640,100 @@ encore plus de moyens d'expression ?
 (étape A-F) qui reste plus urgent pour la structuration. Mais avant la
 commercialisation SAS Logiciel — les clients futurs auront des domaines
 métier variés qui bénéficieraient fortement de ces outils visuels.
+
+
+---
+
+## 🎯 CHANTIER MAJEUR — ENRICHISSEMENT VISION ODOO (prioritaire)
+
+**Contexte (17/04/2026 soir)** : après le fix UI qui a révélé les vrais
+chiffres de découverte (498 contacts, 233 factures, 310 devis, 9
+équipiers ingérés dans entity_links), il reste un problème important
+identifié lors d'un test : Raya affiche des IDs non résolus dans les
+plannings (ex: "14 → probablement Aurélien Le Maistre"). Elle devine
+au lieu de savoir.
+
+Cause technique : les champs **many2many** d'Odoo (comme `partner_ids`
+sur `calendar.event`) retournent juste des IDs numériques, pas les
+noms. L'outil Odoo actuel ne fait pas la résolution automatique vers
+`res.partner.name` / `res.users.name`. Raya doit deviner via sa mémoire
+d'entity_links, ce qui est fragile.
+
+Par ailleurs, `populate_from_odoo` ne couvre aujourd'hui que 4 modèles
+(res.users, res.partner, account.move, sale.order). Tout le CRM, les
+projets, le planning, le SAV, les achats, les RH dorment dans Odoo
+sans remonter dans Raya.
+
+### Plan en 3 étapes (à jouer dans l'ordre)
+
+**Étape 1 — Résolution automatique des IDs en noms (~2h, priorité haute)**
+
+Enrichir le connecteur Odoo (`app/connectors/odoo_connector.py` ou
+l'outil utilisé par Raya) pour que lors d'un `search_read` sur
+`calendar.event`, `planning.slot`, `project.task`, etc. :
+- Les champs `partner_ids`, `user_ids`, `attendee_ids`, `responsible_id`
+  soient **automatiquement résolus** en appel secondaire vers `res.partner`
+  et `res.users`
+- Retourner un format enrichi : `[{"id": 14, "name": "Aurélien Le Maistre"}]`
+  au lieu de `[14]`
+- Prévoir un cache 60s pour éviter les appels répétés sur les mêmes IDs
+
+**Impact** : Raya reçoit directement les noms. Plus jamais de "probablement
+X". Gain immédiat énorme sur tous les retours de planning, événements,
+tâches.
+
+**Étape 2 — Élargir `populate_from_odoo` au CRM + projets + planning (~3h)**
+
+Ajouter à `app/entity_graph.py::populate_from_odoo` les modèles :
+- **`crm.lead` + `crm.stage`** → pipeline commercial, stades de
+  qualification, leads stagnants
+- **`project.project` + `project.task`** → stades d'avancement par chantier,
+  tâches ouvertes par équipier
+- **`planning.slot`** (si module activé) → ventilations ressources × dates
+- **`helpdesk.ticket`** (si module activé) → tickets SAV
+- **`account.payment`** → encaissements, permet de distinguer factures
+  impayées vs payées
+- **`sale.order.line`** → détail des lignes de devis (produits, marges)
+
+Ces entités se lient au contact parent via `partner_id`, donc elles
+enrichissent la vue 360° d'un client sans nouveau schéma de graphe.
+
+**Impact** : Raya peut répondre à "Où en est le dossier Dupont ?",
+"Quels leads ont stagné depuis 2 semaines ?", "Qui bosse sur quoi cette
+semaine ?", "Quels clients me doivent du cash ?", etc.
+
+**Étape 3 — Vue "360° client" agrégée (~4h, valeur commerciale haute)**
+
+Créer une fonction `get_client_360(partner_id)` qui agrège en une seule
+vue pour un client donné :
+- Infos contact + historique relation
+- Tous ses devis (+ stades)
+- Toutes ses factures (+ paiements/retards)
+- Tous ses projets/chantiers (+ avancement)
+- Tous ses tickets SAV
+- Tous ses échanges mail (via mail_memory)
+- Balance globale (ce qu'il nous doit, ce qu'on lui doit)
+
+Exposée comme outil Raya. Raya l'appelle quand l'user demande une vue
+client complète. Sortie : dashboard textuel ou Mermaid cohérent en une
+seule bulle.
+
+**Impact** : "Fais-moi le point complet sur AZEM" retourne TOUT ce qu'on
+sait sur ce client, en une réponse. Chantier "marketing du produit"
+(cas d'usage flagship pour la commercialisation SAS Logiciel aux
+dirigeants de PME).
+
+### Recommandation
+
+- **Étape 1** à faire en priorité — elle règle un problème UX immédiat
+  (IDs dans les plannings) avec un petit coût
+- **Étape 2** quand Guillaume a 3h — ça change la nature de ce que Raya
+  peut faire (pilotage CRM + projets)
+- **Étape 3** plus tard, en gardant en tête que c'est du "vitrine"
+  pour la commercialisation
+
+### Note technique
+
+Ce n'est PAS une limitation de l'API Odoo. Toute l'info est accessible
+via XML-RPC / `search_read`. C'est juste qu'on n'a pas encore écrit le
+code côté Raya pour aller la chercher. Chantier de dev normal.
