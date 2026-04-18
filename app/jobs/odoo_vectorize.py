@@ -103,7 +103,7 @@ def _store_semantic_content(
 
 # ─── VECTORISATION PAR MODÈLE ODOO ────────────────────────────
 
-def vectorize_partners(tenant_id: str = DEFAULT_TENANT, limit: int = 1000) -> dict:
+def vectorize_partners(tenant_id: str = DEFAULT_TENANT, limit: int = 5000) -> dict:
     """Vectorise res.partner : nom + commentaire + adresse comme texte
     sémantique. Crée les nœuds Person/Company dans le graphe.
     Arête contact_of créée entre enfant et parent_id.
@@ -182,7 +182,7 @@ def vectorize_partners(tenant_id: str = DEFAULT_TENANT, limit: int = 1000) -> di
         if is_co: text_bits.append("(entreprise)")
         text = " — ".join([b for b in text_bits if b and str(b).strip()])
 
-        if len(text) >= 10:
+        if text.strip():
             texts_to_embed.append(text[:2000])
             entries_to_embed.append({
                 "source_record_id": str(pid), "text": text,
@@ -210,7 +210,7 @@ def vectorize_partners(tenant_id: str = DEFAULT_TENANT, limit: int = 1000) -> di
     return stats
 
 
-def vectorize_sale_orders(tenant_id: str = DEFAULT_TENANT, limit: int = 500) -> dict:
+def vectorize_sale_orders(tenant_id: str = DEFAULT_TENANT, limit: int = 2000) -> dict:
     """Vectorise sale.order : note + lignes de produits. Crée les nœuds Deal
     et les arêtes partner_of (deal → partner) + has_line (deal → product).
     Permet de retrouver 'devis avec onduleur SE100K' même si le nom du
@@ -330,7 +330,7 @@ def vectorize_sale_orders(tenant_id: str = DEFAULT_TENANT, limit: int = 500) -> 
         text_bits.append(f"(état : {state})")
         text = " — ".join([b for b in text_bits if b and str(b).strip()])
 
-        if len(text) >= 10:
+        if text.strip():
             texts_to_embed.append(text[:4000])
             entries_to_embed.append({
                 "source_record_id": str(oid), "text": text,
@@ -359,7 +359,7 @@ def vectorize_sale_orders(tenant_id: str = DEFAULT_TENANT, limit: int = 500) -> 
     return stats
 
 
-def vectorize_leads(tenant_id: str = DEFAULT_TENANT, limit: int = 300) -> dict:
+def vectorize_leads(tenant_id: str = DEFAULT_TENANT, limit: int = 1000) -> dict:
     """Vectorise crm.lead : nom + description. Crée les nœuds Lead et arête
     partner_of vers le contact associé."""
     from app.connectors.odoo_connector import odoo_call
@@ -423,7 +423,7 @@ def vectorize_leads(tenant_id: str = DEFAULT_TENANT, limit: int = 300) -> dict:
         if stage_name: text_bits.append(f"(stade : {stage_name})")
         text = " ".join([b for b in text_bits if b and str(b).strip()])
 
-        if len(text) >= 10:
+        if text.strip():
             texts.append(text[:3000])
             entries.append({"source_record_id": str(lid), "text": text,
                             "write_date": lead.get("write_date"),
@@ -448,7 +448,7 @@ def vectorize_leads(tenant_id: str = DEFAULT_TENANT, limit: int = 300) -> dict:
     return stats
 
 
-def vectorize_events(tenant_id: str = DEFAULT_TENANT, limit: int = 300) -> dict:
+def vectorize_events(tenant_id: str = DEFAULT_TENANT, limit: int = 1000) -> dict:
     """Vectorise calendar.event : nom + description (commentaires RDV).
     Crée nœuds Event et arêtes scheduled_for vers les partners/attendees.
 
@@ -523,7 +523,7 @@ def vectorize_events(tenant_id: str = DEFAULT_TENANT, limit: int = 300) -> dict:
                 text_bits.append(desc_clean[:2000])
         text = " — ".join([b for b in text_bits if b and str(b).strip()])
 
-        if len(text) >= 10:
+        if text.strip():
             texts.append(text[:3000])
             entries.append({
                 "source_record_id": str(eid), "text": text,
