@@ -596,3 +596,236 @@ Tu valides cette cartographie complète ?
   le devis, qui l'a modifié, qui le suit"* ?
 - Les **7 cas spéciaux** (3.4) sont-ils tous pertinents ?
 - Quelque chose manque ou doit être déplacé ?
+
+---
+
+## ⚙️ Section 4 — Stratégie d'introspection technique
+
+Cette section décrit **COMMENT** on construit le scanner, au niveau code.
+Objectif : un moteur générique piloté par configuration, pas du code en dur
+modèle par modèle.
+
+### 4.1 — Architecture en 3 couches
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  COUCHE 1 : Orchestrateur central                       │
+│  - Lit le manifest (config JSON en DB)                  │
+│  - Planifie les runs (init / delta / rebuild)           │
+│  - Gère checkpointing et reprise                        │
+└─────────────────────────────────────────────────────────┘
+               ↓
+┌─────────────────────────────────────────────────────────┐
+│  COUCHE 2 : Adaptateur Odoo                             │
+│  - Fetch paginé par modèle (batch 100 records)          │
+│  - Résolution relations (many2one, one2many, m2m)       │
+│  - Fetch transversal (mail.message, tracking, attach)   │
+└─────────────────────────────────────────────────────────┘
+               ↓
+┌─────────────────────────────────────────────────────────┐
+│  COUCHE 3 : Processeur de record                        │
+│  - Construit le texte composite à vectoriser            │
+│  - Appelle OpenAI embedding (batch 100 textes)          │
+│  - Écrit en DB (nodes + edges + semantic_content)       │
+└─────────────────────────────────────────────────────────┘
+```
+
+Chaque couche est **indépendante** et **réutilisable** pour d'autres sources
+(Drive, Teams) en changeant juste la Couche 2.
+
+### 4.2 — Le manifest (config JSON stockée en DB)
+
+Pour chaque modèle actif, un objet JSON définit ce qu'on en fait.
+Table `connector_schemas` :
+```json
+{
+  "model": "sale.order",
+  "enabled": true,
+  "priority": 1,
+  "vectorize_fields": ["name", "client_order_ref", "note", "partner_id.name"],
+  "graph_edges": [
+    {"field": "partner_id", "type": "BELONGS_TO_CLIENT"},
+    {"field": "user_id", "type": "ASSIGNED_TO"},
+    {"field": "order_line", "type": "HAS_LINE", "one2many": true},
+    {"field": "sale_order_template_id", "type": "BASED_ON"}
+  ],
+  "metadata_fields": ["amount_total", "state", "date_order"],
+  "handle_mail_thread": true,
+  "handle_attachments": true,
+  "handle_trackings": true
+}
+```
+Le manifest est généré automatiquement à partir de l'inventaire (Section 4.3)
+puis éditable via panel admin.
+
+### 4.3 — Génération auto du manifest initial
+
+Règle de classification par type de champ Odoo :
+
+| Type Odoo | Classification par défaut |
+|---|---|
+| `char`, `text`, `html` | → `vectorize_fields` (si label sémantique) |
+| `many2one` | → `graph_edges` (arête sortante) |
+| `one2many`, `many2many` | → `graph_edges` (arêtes multiples) |
+| `selection`, `boolean` | → `metadata_fields` |
+| `integer`, `float`, `monetary` | → `metadata_fields` |
+| `date`, `datetime` | → `metadata_fields` |
+| `binary` | → `handle_attachments` si `name`/`mimetype` |
+| `reference` | → `graph_edges` polymorphique |
+
+Filtres automatiques pour éviter le bruit :
+- Champs `create_uid`, `write_uid`, `create_date`, `write_date` → traitement
+  transversal, pas dans metadata
+- Champs `*_tag_ids`, `activity_*`, `message_*_id` → ignorer (gérés par
+  transversaux)
+- Champs techniques (`_uid`, `__last_update`, `access_token`) → ignorer
+
+
+### 4.4 — Pipeline de vectorisation par modèle
+
+Pour chaque modèle activé, une boucle unique :
+
+```
+pour chaque batch de 100 records :
+    1. Fetch Odoo : tous les champs déclarés dans le manifest
+    2. Fetch transversal : mail.message + mail.tracking.value + ir.attachment
+    3. Pour chaque record :
+       a. Construire texte_composite (concat des vectorize_fields)
+       b. Construire les arêtes depuis graph_edges
+    4. Appel OpenAI embedding (1 call pour les 100 textes)
+    5. INSERT ON CONFLICT en DB :
+       - semantic_graph_nodes (1 nœud par record)
+       - semantic_graph_edges (N arêtes par record)
+       - odoo_semantic_content (1 chunk par record)
+    6. Checkpoint : sauver last_processed_id en DB
+    7. Rate limit : pause 200ms entre batches
+```
+
+**Texte composite** : assemblage structuré des champs pour donner du contexte
+à l'embedding. Exemple pour `sale.order` :
+```
+Devis S01545 de [AZEM Société].
+Référence client : PROJ-2026-017.
+Note : "Attente retour ENEDIS pour augmentation puissance".
+Commercial : Arlène Desnoues.
+Modèle source : PV Résidentiel 9kWc Toiture.
+Lignes : 2x SE100k Manager, 1x Module DMEGC 450 HBT, 1x MOE1.
+```
+
+L'embedding de ce texte est **beaucoup plus précis** qu'un simple embedding
+du `name` seul.
+
+### 4.5 — Traitement transversal (mail.thread)
+
+Pour chaque record d'un modèle avec `handle_mail_thread: true` :
+
+**a) Fetch des messages**
+```python
+messages = odoo_call("mail.message", "search_read",
+    domain=[("model", "=", model), ("res_id", "=", record_id)],
+    fields=["id", "body", "author_id", "date", "attachment_ids"])
+```
+Pour chaque message :
+- Nettoyer le HTML → texte brut
+- Vectoriser (nœud `message` + chunk sémantique)
+- Créer arêtes `(message) -[:AUTHORED_BY]-> (partner)` et
+  `(message) -[:ABOUT]-> (record)`
+
+**b) Fetch des trackings**
+```python
+trackings = odoo_call("mail.tracking.value", "search_read",
+    domain=[("mail_message_id", "in", message_ids)],
+    fields=["field_desc", "old_value_char", "new_value_char", ...])
+```
+Pour chaque tracking : stocker en metadata sur le nœud message (pas
+d'embedding, c'est de la donnée structurée).
+
+**c) Fetch des followers**
+Arêtes `(record) -[:FOLLOWED_BY]-> (partner)`.
+
+### 4.6 — Extraction de contenu des pièces jointes (ir.attachment)
+
+Pour chaque attachment lié au record :
+
+| Mimetype | Extraction |
+|---|---|
+| `application/pdf` | `pdfplumber` → texte + tables |
+| `application/vnd.openxmlformats-officedocument.wordprocessingml.document` | `python-docx` → paragraphes |
+| `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` | `openpyxl` → cellules |
+| `text/plain`, `text/csv` | lecture directe |
+| `image/*` | OCR Tesseract (optionnel, désactivable) |
+| autres | skip avec warning en log |
+
+**Chunking** : si texte extrait > 8000 caractères, découpe en chunks de 2000
+chars avec overlap de 200, chaque chunk vectorisé indépendamment avec le
+même `attachment_id` source.
+
+**Arête** : `(chunk) -[:EXTRACTED_FROM]-> (attachment) -[:ATTACHED_TO]-> (record)`
+
+### 4.7 — Checkpointing et reprise après interruption
+
+Table `scanner_runs` (nouvelle) :
+```
+run_id          : UUID
+source          : 'odoo' | 'drive' | 'teams' | ...
+run_type        : 'init' | 'delta' | 'rebuild' | 'audit'
+status          : 'pending' | 'running' | 'paused' | 'ok' | 'error'
+started_at      : timestamp
+finished_at     : timestamp nullable
+params          : JSON (filtres, modèles sélectionnés)
+progress        : JSON {model: {last_id, done, total}}
+error           : text nullable
+```
+
+**Reprise** : si un run est marqué `paused` ou `error`, le prochain démarrage
+reprend à `last_id + 1` pour chaque modèle, sans re-traiter ce qui est fait.
+
+**Garantie d'idempotence** : tous les INSERT utilisent `ON CONFLICT (source,
+source_id) DO UPDATE` → re-traiter 10 fois le même record = 1 seul nœud,
+mis à jour.
+
+### 4.8 — Concurrence et limites
+
+**Limites à respecter** :
+- **Odoo XML-RPC** : pas de limite technique mais chaque appel = ~200-500ms,
+  donc fetch sériel par défaut
+- **OpenAI embeddings** : 3000 requêtes/min et 1M tokens/min (plan Tier 1)
+- **PostgreSQL** : pas de limite à ces volumes
+
+**Stratégie** :
+- 1 seul worker thread en mode normal (évite surcharge Odoo prod)
+- Batch OpenAI de 100 textes par appel (réduit le nombre de calls)
+- Rate limiting : max 10 calls OpenAI/sec
+- Pour un full rebuild gros volume (133k articles) : option multi-worker à 4
+  threads max, lancé manuellement via panel admin avec warning de durée
+
+**Temps estimé pour un full rebuild complet** :
+- P1 + P2 + P3 = ~200k records dont ~50k vectorisés
+- 50k records / 100 par batch / 10 req/sec OpenAI = ~50 minutes d'embeddings
+- + ~30 minutes de fetch Odoo en parallèle
+- **Total : ~1h15 pour un full rebuild complet** (fait rarement)
+
+### 4.9 — Observabilité (dashboard admin)
+
+Le panel admin doit afficher en temps réel :
+- **Runs actifs** : nom, type, progression, estimation restante
+- **Dernier run réussi par source** : horodatage, volume, durée
+- **Intégrité par modèle** : compte Odoo vs compte Raya, alerte si écart >1%
+- **Queue de webhooks** : records en attente d'être vectorisés après push Odoo
+- **Erreurs récentes** : derniers échecs avec contexte pour debug
+
+Tous ces indicateurs sont stockés en DB et exposés via endpoints `/admin/scanner/*`.
+
+---
+
+**→ Fin de la Section 4. Validation demandée.**
+
+Tu valides cette stratégie technique ?
+- L'architecture en **3 couches** (orchestrateur / adaptateur / processeur) ?
+- Le **manifest JSON** comme configuration centrale (modifiable par toi) ?
+- Le **pipeline en 7 étapes** par batch ?
+- Le **traitement transversal** (messages, trackings, attachments) ?
+- Les **estimations de durée** (~1h15 pour full rebuild) ?
+
+Si oui, je lance la Section 5 (phasage de développement concret + Section 6
+questions ouvertes). Sinon dis-moi ce qui coince.
