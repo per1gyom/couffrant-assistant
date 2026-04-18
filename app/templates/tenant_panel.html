@@ -159,17 +159,16 @@ async function loadPermissions(){
     const isAllLocked = locked > 0 && locked >= data.length / 2;
     // Stocker dans la variable globale pour que toggleReadOnly l utilise
     _lastPermissionsState = { isLocked: isAllLocked, total: data.length };
+    // RECREATION DU BOUTON via outerHTML : remplacer le noeud DOM entier
+    // force le navigateur a repainter. Modifier juste les styles d un noeud
+    // existant apres un prompt() bloquant provoque un bug de non-repaint.
+    // C est la meme technique que cote super admin (recree via innerHTML).
     const toggleBtn = document.getElementById('toggle-read-only-btn');
-    if(isAllLocked){
-      toggleBtn.innerHTML = '🔒 Lecture seule';
-      toggleBtn.style.setProperty('background', '#7f1d1d', 'important');
-      toggleBtn.style.setProperty('border-color', '#dc2626', 'important');
-      toggleBtn.style.setProperty('color', '#fca5a5', 'important');
-    } else {
-      toggleBtn.innerHTML = '🔓 Lecture écriture';
-      toggleBtn.style.setProperty('background', 'transparent', 'important');
-      toggleBtn.style.setProperty('border-color', 'var(--border)', 'important');
-      toggleBtn.style.setProperty('color', 'var(--text2)', 'important');
+    if(toggleBtn){
+      const btnHtml = isAllLocked
+        ? '<button class="btn" id="toggle-read-only-btn" onclick="toggleReadOnly()" style="background:#7f1d1d;border:1px solid #dc2626;color:#fca5a5;padding:6px 14px;border-radius:6px;cursor:pointer;font-weight:600">🔒 Lecture seule</button>'
+        : '<button class="btn" id="toggle-read-only-btn" onclick="toggleReadOnly()" style="background:transparent;border:1px solid var(--border);color:var(--text2);padding:6px 14px;border-radius:6px;cursor:pointer;font-weight:600">🔓 Lecture écriture</button>';
+      toggleBtn.outerHTML = btnHtml;
     }
     // Construction du tableau
     const LEVEL_LABELS = {'read':'Lecture','read_write':'Lect+Écrit','read_write_delete':'Tout'};
