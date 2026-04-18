@@ -331,9 +331,9 @@ async function showIntegrity(btn){
     // Construction de la modale
     const backdrop = document.createElement('div');
     backdrop.id = 'integrity-backdrop';
-    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9998;display:flex;align-items:center;justify-content:center';
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9998;display:flex;align-items:center;justify-content:center';
     const modal = document.createElement('div');
-    modal.style.cssText = 'background:var(--bg1);border:1px solid var(--border);border-radius:12px;padding:16px 20px 20px;width:95vw;max-width:1100px;height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.5)';
+    modal.style.cssText = 'background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:16px 20px 20px;width:95vw;max-width:1100px;height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.8)';
     modal.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-shrink:0">
         <div>
@@ -456,9 +456,9 @@ async function generateManifests(btn){
     const fullText = summary + '\n\n=== JSON COMPLET ===\n' + JSON.stringify(d, null, 2);
     const backdrop = document.createElement('div');
     backdrop.id = 'manifests-backdrop';
-    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9998;display:flex;align-items:center;justify-content:center';
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9998;display:flex;align-items:center;justify-content:center';
     const modal = document.createElement('div');
-    modal.style.cssText = 'background:var(--bg1);border:1px solid var(--border);border-radius:12px;padding:16px 20px 20px;width:90vw;max-width:1000px;height:85vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.5)';
+    modal.style.cssText = 'background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:16px 20px 20px;width:90vw;max-width:1000px;height:85vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.8)';
     const escapeHtml = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
     modal.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-shrink:0">
@@ -542,9 +542,9 @@ async function introspectOdoo(btn){
         const fullText = `${summary}\n\n\n=== JSON COMPLET (pour partager a Claude) ===\n${JSON.stringify({stats, by_category: byCat, top_30_models: topModels}, null, 2)}`;
         const backdrop = document.createElement('div');
         backdrop.id = 'introspect-backdrop';
-        backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9998;display:flex;align-items:center;justify-content:center';
+        backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9998;display:flex;align-items:center;justify-content:center';
         const modal = document.createElement('div');
-        modal.style.cssText = 'background:var(--bg1);border:1px solid var(--border);border-radius:12px;padding:16px 20px 20px;width:90vw;max-width:1000px;height:85vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.5)';
+        modal.style.cssText = 'background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:16px 20px 20px;width:90vw;max-width:1000px;height:85vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.8)';
         const escapeHtml = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
         modal.innerHTML = `
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-shrink:0">
