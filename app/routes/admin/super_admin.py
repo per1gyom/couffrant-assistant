@@ -476,3 +476,89 @@ from app.routes.admin.super_admin_users import router as _su
 router.include_router(_su)
 from app.routes.admin.super_admin_system import router as _ss
 router.include_router(_ss)
+
+
+# ─── PERMISSIONS GLOBALES (Super admin) ───
+# Plan : docs/raya_permissions_plan.md etape 5
+
+@router.get("/admin/permissions/overview")
+def admin_permissions_overview(request: Request, _: dict = Depends(require_admin)):
+    """Vue d ensemble des permissions : toutes les connexions de tous les tenants.
+
+    Format : [
+      {"tenant_id": "couffrant", "connection_id": 1, "tool_type": "odoo",
+       "super_admin_level": "read_write", "tenant_admin_level": "read"}
+    ]
+    """
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT tenant_id, id, tool_type, name, status,
+                       super_admin_permission_level,
+                       tenant_admin_permission_level
+                FROM tenant_connections
+                ORDER BY tenant_id, tool_type, id
+            """)
+            rows = cur.fetchall()
+            return [{
+                "tenant_id": r[0],
+                "connection_id": r[1],
+                "tool_type": r[2],
+                "name": r[3] or r[2],
+                "status": r[4],
+                "super_admin_level": r[5] or "read",
+                "tenant_admin_level": r[6] or "read",
+            } for r in rows]
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
+@router.post("/admin/permissions/update-cap")
+async def admin_update_cap(request: Request, _: dict = Depends(require_admin)):
+    """Met a jour le plafond super_admin d une connexion (super admin only).
+
+    Body JSON : {"connection_id": 1, "new_level": "read_write"}
+
+    Le nouveau plafond est applique. Si le tenant_admin_permission_level
+    actuel depasse, il est automatiquement cappe au nouveau plafond.
+    """
+    try:
+        body = await request.json()
+        connection_id = int(body.get("connection_id"))
+        new_level = body.get("new_level")
+        if new_level not in ("read", "read_write", "read_write_delete"):
+            return {"status": "error", "message": "Niveau invalide"}
+        # Recupere le tenant_id de la connexion pour l appel
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT tenant_id FROM tenant_connections WHERE id=%s", (connection_id,))
+            row = cur.fetchone()
+            if not row:
+                return {"status": "error", "message": "Connexion introuvable"}
+            tenant_id = row[0]
+        from app.permissions import update_permission
+        ok, msg = update_permission(
+            tenant_id=tenant_id,
+            connection_id=connection_id,
+            new_level=new_level,
+            actor_role="super_admin",
+        )
+        if not ok:
+            return {"status": "error", "message": msg}
+        return {"status": "ok", "connection_id": connection_id, "new_level": new_level}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
+@router.post("/admin/permissions/toggle-read-only-global")
+def admin_toggle_read_only_global(request: Request, _: dict = Depends(require_admin)):
+    """Bouton global 'Tout en lecture seule' : bascule TOUTES les connexions
+    de TOUS les tenants en 'read' (ou restaure).
+    """
+    try:
+        from app.permissions import toggle_all_read_only
+        result = toggle_all_read_only(tenant_id=None, actor_role="super_admin")
+        return {"status": "ok", **result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}

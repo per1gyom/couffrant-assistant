@@ -151,6 +151,7 @@
     <button class="btn btn-ghost" onclick="loadCompanies()">&#8635; Actualiser</button>
     <button class="btn btn-primary" id="btn-create-tenant" style="display:none" onclick="openModal('create-tenant')">+ Créer une société</button>
     <button class="btn btn-primary" id="btn-create-user-companies" style="display:none" onclick="openModal('create-user')">+ Créer un utilisateur</button>
+    <button class="btn" id="btn-toggle-lock-global" onclick="toggleReadOnlyGlobal()" style="background:#f59e0b;color:white;padding:6px 12px;border:none;border-radius:6px;cursor:pointer;font-weight:600" title="Bascule TOUTES les connexions de TOUS les tenants en lecture seule. Re-cliquer restaure les permissions precedentes.">🔒 Tout en lecture (GLOBAL)</button>
     <input type="text" id="companies-search" placeholder="🔍 Rechercher société ou utilisateur…" oninput="filterCompanies()" style="flex:1;min-width:200px;max-width:400px;padding:6px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:8px;color:var(--text1);font-size:12px;font-family:var(--mono)">
     <span id="companies-count" style="font-family:var(--mono);font-size:12px;color:var(--text3)"></span>
   </div>
@@ -367,7 +368,7 @@
   </div>
 </div>
 
-<script src="/static/admin-panel.js?v=40"></script>
+<script src="/static/admin-panel.js?v=41"></script>
 <script>
 // display_name patch v25
 (function(){

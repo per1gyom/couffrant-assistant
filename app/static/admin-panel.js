@@ -296,6 +296,40 @@ function escapeHtml(str){
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// ─── Permissions globales (super admin) — Etape 5 du plan permissions ───
+async function toggleReadOnlyGlobal(){
+  if(!confirm('⚠️ Bascule TOUTES les connexions de TOUS les tenants en lecture seule.\n\nRe-cliquer restaurera leurs permissions precedentes.\n\nConfirmer ?')) return;
+  const btn = document.getElementById('btn-toggle-lock-global');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ En cours...';
+  try{
+    const r = await fetch('/admin/permissions/toggle-read-only-global', {method:'POST'});
+    const d = await r.json();
+    if(d.status === 'ok'){
+      const msg = d.action === 'locked'
+        ? `🔒 ${d.affected} connexion(s) basculee(s) en lecture seule`
+        : `🔓 ${d.affected} connexion(s) restauree(s) a leurs permissions precedentes`;
+      setAlert('companies-alert', msg, 'ok');
+      if(d.action === 'locked'){
+        btn.style.background = '#10b981';
+        btn.innerHTML = '🔓 Restaurer (GLOBAL)';
+      } else {
+        btn.style.background = '#f59e0b';
+        btn.innerHTML = '🔒 Tout en lecture (GLOBAL)';
+      }
+    } else {
+      setAlert('companies-alert', '❌ '+(d.message||'Erreur'), 'err');
+      btn.innerHTML = orig;
+    }
+  }catch(e){
+    setAlert('companies-alert', '❌ '+e.message, 'err');
+    btn.innerHTML = orig;
+  }finally{
+    btn.disabled = false;
+  }
+}
+
 async function showIntegrity(btn){
   // Scanner Universel Phase 8 : dashboard d integrite visuel
   // Affiche une modale avec un tableau du % de vectorisation par modele
