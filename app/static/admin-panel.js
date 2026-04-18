@@ -218,6 +218,7 @@ async function loadConnections(tenantId,idx){
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#0ea5e9" onclick="introspectOdoo(this)" title="Inventaire complet : liste tous les modèles Odoo et leurs champs">🔍 Inventaire</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#f59e0b" onclick="generateManifests(this)" title="Scanner Universel Phase 2 : génère les manifests de vectorisation pour les 31 modèles P1+P2">📋 Manifests</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#dc2626" onclick="scanP1(this)" title="Scanner Universel Phase 3 : lance la vectorisation complète des 16 modèles P1 (purge + rebuild)">🚀 Scanner P1</button>`:''}
+          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#10b981" onclick="showIntegrity(this)" title="Scanner Universel Phase 8 : tableau de l'état d'intégrité de la vectorisation par modèle">📊 Intégrité</button>`:''}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
           <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
         </div>
@@ -293,6 +294,92 @@ async function acknowledgeAlert(alertId){
 function escapeHtml(str){
   if(!str) return '';
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function showIntegrity(btn){
+  // Scanner Universel Phase 8 : dashboard d integrite visuel
+  // Affiche une modale avec un tableau du % de vectorisation par modele
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Chargement...';
+  try{
+    const r = await fetch('/admin/scanner/integrity');
+    const d = await r.json();
+    if(d.status !== 'ok') throw new Error(d.message || 'Erreur inconnue');
+    const ov = d.overall;
+    // Couleur de la barre de progression globale
+    const overallPct = ov.overall_integrity_pct || 0;
+    const overallColor = overallPct >= 90 ? '#10b981' : overallPct >= 50 ? '#f59e0b' : '#dc2626';
+    // Icones severity
+    const sevIcon = s => s === 'ok' ? '✅' : s === 'warning' ? '⚠️' : s === 'critical' ? '🔴' : '⚪';
+    const sevColor = s => s === 'ok' ? '#10b981' : s === 'warning' ? '#f59e0b' : s === 'critical' ? '#dc2626' : '#6b7280';
+    // Formattage des chiffres
+    const fmt = n => (n === null || n === undefined) ? '-' : n.toLocaleString('fr-FR');
+    const fmtPct = p => (p === null || p === undefined) ? '-' : p.toFixed(1) + '%';
+    const fmtDate = s => !s ? '<span style="color:var(--text3)">Jamais</span>' : new Date(s).toLocaleString('fr-FR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    // Construction du tableau
+    const rows = d.models.map(m => `
+      <tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px 10px;font-weight:600">${sevIcon(m.severity)} ${m.model_name}</td>
+        <td style="padding:8px 10px;text-align:center"><span style="background:${m.priority===1?'#7c3aed':'#0ea5e9'};color:white;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700">P${m.priority}</span></td>
+        <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmt(m.records_count_odoo)}</td>
+        <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmt(m.records_count_raya)}</td>
+        <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmt(m.chunks_in_db)}</td>
+        <td style="padding:8px 10px;text-align:right;font-weight:700;color:${sevColor(m.severity)};font-variant-numeric:tabular-nums">${fmtPct(m.integrity_pct)}</td>
+        <td style="padding:8px 10px;text-align:right;font-size:11px;color:var(--text2)">${fmtDate(m.last_scanned_at)}</td>
+      </tr>`).join('');
+    // Construction de la modale
+    const backdrop = document.createElement('div');
+    backdrop.id = 'integrity-backdrop';
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9998;display:flex;align-items:center;justify-content:center';
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:var(--bg1);border:1px solid var(--border);border-radius:12px;padding:16px 20px 20px;width:95vw;max-width:1100px;height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.5)';
+    modal.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-shrink:0">
+        <div>
+          <h3 style="margin:0 0 4px 0">📊 Intégrité de la vectorisation</h3>
+          <div style="font-size:12px;color:var(--text3)">Tenant : <code>${d.tenant_id}</code> · Source : <code>${d.source}</code></div>
+        </div>
+        <button class="btn" id="integrity-close-btn" style="background:#ef4444;color:white;padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:700">✕ Fermer</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px;flex-shrink:0">
+        <div style="background:var(--bg2);border:1px solid var(--border);padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Modèles</div><div style="font-size:20px;font-weight:700">${ov.models_total}</div></div>
+        <div style="background:var(--bg2);border:1px solid #10b981;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">✅ OK ≥90%</div><div style="font-size:20px;font-weight:700;color:#10b981">${ov.models_ok}</div></div>
+        <div style="background:var(--bg2);border:1px solid #f59e0b;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">⚠️ Warning</div><div style="font-size:20px;font-weight:700;color:#f59e0b">${ov.models_warning}</div></div>
+        <div style="background:var(--bg2);border:1px solid #dc2626;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">🔴 Critique</div><div style="font-size:20px;font-weight:700;color:#dc2626">${ov.models_critical}</div></div>
+        <div style="background:var(--bg2);border:1px solid var(--border);padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">⚪ Non scanné</div><div style="font-size:20px;font-weight:700;color:var(--text3)">${ov.models_unknown}</div></div>
+        <div style="background:var(--bg2);border:1px solid ${overallColor};padding:10px;border-radius:8px;grid-column:span 2"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Intégrité globale</div><div style="font-size:20px;font-weight:700;color:${overallColor}">${overallPct.toFixed(1)}%</div><div style="font-size:11px;color:var(--text3)">${ov.total_records_raya.toLocaleString('fr-FR')} / ${ov.total_records_odoo.toLocaleString('fr-FR')} records</div></div>
+      </div>
+      <div style="flex:1;overflow:auto;border:1px solid var(--border);border-radius:8px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead style="background:var(--bg2);position:sticky;top:0;z-index:1">
+            <tr style="border-bottom:2px solid var(--border)">
+              <th style="padding:10px;text-align:left">Modèle</th>
+              <th style="padding:10px">Priorité</th>
+              <th style="padding:10px;text-align:right">Records Odoo</th>
+              <th style="padding:10px;text-align:right">Records Raya</th>
+              <th style="padding:10px;text-align:right">Chunks DB</th>
+              <th style="padding:10px;text-align:right">Intégrité</th>
+              <th style="padding:10px;text-align:right">Dernier scan</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:var(--text3);flex-shrink:0">Chunks DB = nombre réel de chunks vectorisés en base (source de vérité live). Records Raya = comptage du dernier scan complet.</div>`;
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+    const close = () => { backdrop.remove(); document.removeEventListener('keydown', onEsc); };
+    const onEsc = e => { if(e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onEsc);
+    backdrop.addEventListener('click', e => { if(e.target === backdrop) close(); });
+    document.getElementById('integrity-close-btn').onclick = close;
+  }catch(e){
+    setAlert('companies-alert', '❌ Intégrité échouée : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
 }
 
 async function scanP1(btn){

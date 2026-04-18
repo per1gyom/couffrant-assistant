@@ -597,6 +597,119 @@ async def admin_scanner_debug_extract(
                 "trace": traceback.format_exc()[:1500]}
 
 
+@router.get("/admin/scanner/integrity")
+def admin_scanner_integrity(
+    request: Request,
+    tenant_id: str = "couffrant",
+    source: str = "odoo",
+    _: dict = Depends(require_admin),
+):
+    """Dashboard d integrite Phase 8 : retourne pour chaque modele son
+    niveau de vectorisation (Odoo vs Raya).
+
+    Pour chaque modele avec manifest actif :
+    - records_count_odoo : nombre de records cote Odoo (au moment du
+      dernier scan complet)
+    - records_count_raya : nombre de records vectorises cote Raya
+    - integrity_pct : ratio raya/odoo (100% = parfait, <50% = alerte rouge)
+    - chunks_in_db : nombre reel de chunks actuellement en base
+    - nodes_in_db : nombre de noeuds du graphe pour ce modele
+    - severity : 'ok' / 'warning' / 'critical' selon integrity_pct
+    - last_scanned_at : timestamp du dernier scan reussi
+    """
+    try:
+        from app.database import get_pg_conn
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            # 1. Liste des manifests + compteurs des colonnes
+            cur.execute(
+                """SELECT model_name, priority, enabled, records_count_odoo,
+                          records_count_raya, integrity_pct, last_scanned_at
+                   FROM connector_schemas
+                   WHERE tenant_id=%s AND source=%s
+                   ORDER BY priority ASC, records_count_odoo DESC NULLS LAST""",
+                (tenant_id, source),
+            )
+            rows = cur.fetchall()
+
+            # 2. Comptage REEL des chunks + nodes actuellement en DB
+            #    (independant des stats des runs, source de verite live)
+            cur.execute(
+                """SELECT source_model, COUNT(*) AS n
+                   FROM odoo_semantic_content
+                   WHERE tenant_id=%s AND source_model IS NOT NULL
+                     AND deleted_at IS NULL
+                   GROUP BY source_model""",
+                (tenant_id,),
+            )
+            chunks_by_model = {r[0]: r[1] for r in cur.fetchall()}
+
+            cur.execute(
+                """SELECT node_type, COUNT(*) AS n
+                   FROM semantic_graph_nodes
+                   WHERE tenant_id=%s AND source=%s
+                     AND deleted_at IS NULL
+                   GROUP BY node_type""",
+                (tenant_id, source),
+            )
+            # node_type peut etre 'contact', 'devis', etc. — mapping rapide
+            nodes_by_type = {r[0]: r[1] for r in cur.fetchall()}
+
+        # 3. Construction du rapport par modele
+        models = []
+        for r in rows:
+            model_name, priority, enabled, odoo_count = r[0], r[1], r[2], r[3]
+            raya_count, integrity, last_scan = r[4], r[5], r[6]
+            chunks = chunks_by_model.get(model_name, 0)
+            # Severity basee sur integrity_pct
+            if integrity is None or enabled is False:
+                severity = "unknown"
+            elif integrity >= 90:
+                severity = "ok"
+            elif integrity >= 50:
+                severity = "warning"
+            else:
+                severity = "critical"
+            models.append({
+                "model_name": model_name,
+                "priority": priority,
+                "enabled": enabled,
+                "records_count_odoo": odoo_count,
+                "records_count_raya": raya_count,
+                "chunks_in_db": chunks,
+                "integrity_pct": float(integrity) if integrity else None,
+                "severity": severity,
+                "last_scanned_at": last_scan.isoformat() if last_scan else None,
+            })
+
+        # 4. Totaux
+        total_odoo = sum(m["records_count_odoo"] or 0 for m in models)
+        total_raya = sum(m["records_count_raya"] or 0 for m in models)
+        total_chunks = sum(m["chunks_in_db"] for m in models)
+        overall_integrity = round(100 * total_raya / total_odoo, 1) if total_odoo else 0
+        return {
+            "status": "ok",
+            "tenant_id": tenant_id,
+            "source": source,
+            "overall": {
+                "models_total": len(models),
+                "models_ok": sum(1 for m in models if m["severity"] == "ok"),
+                "models_warning": sum(1 for m in models if m["severity"] == "warning"),
+                "models_critical": sum(1 for m in models if m["severity"] == "critical"),
+                "models_unknown": sum(1 for m in models if m["severity"] == "unknown"),
+                "total_records_odoo": total_odoo,
+                "total_records_raya": total_raya,
+                "total_chunks_in_db": total_chunks,
+                "overall_integrity_pct": overall_integrity,
+            },
+            "models": models,
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
 @router.get("/admin/scanner/db-size")
 def admin_scanner_db_size(
     request: Request,
