@@ -5,14 +5,16 @@ import json
 from app.database import get_pg_conn
 
 # Scopes
-SCOPE_ADMIN        = "admin"
+SCOPE_SUPER_ADMIN  = "super_admin"           # NEW : super admin Raya (hardcode via email)
+SCOPE_ADMIN        = "admin"                 # admin Raya (collaborateur)
 SCOPE_TENANT_ADMIN = "tenant_admin"
 SCOPE_CS           = "couffrant_solar"  # legacy
 SCOPE_USER         = "user"
 DEFAULT_TENANT     = "couffrant_solar"
-TENANT_ADMIN_SCOPES = (SCOPE_ADMIN, SCOPE_TENANT_ADMIN)
+SUPER_ADMIN_SCOPES  = (SCOPE_SUPER_ADMIN,)
+TENANT_ADMIN_SCOPES = (SCOPE_SUPER_ADMIN, SCOPE_ADMIN, SCOPE_TENANT_ADMIN)
 USER_SCOPES         = (SCOPE_CS, SCOPE_USER)
-ALL_SCOPES          = (SCOPE_ADMIN, SCOPE_TENANT_ADMIN, SCOPE_CS, SCOPE_USER)
+ALL_SCOPES          = (SCOPE_SUPER_ADMIN, SCOPE_ADMIN, SCOPE_TENANT_ADMIN, SCOPE_CS, SCOPE_USER)
 
 DEFAULT_TOOLS_ADMIN = [
     {"tool": "outlook", "access_level": "full", "config": {"mailboxes": [], "can_delete_mail": True}},

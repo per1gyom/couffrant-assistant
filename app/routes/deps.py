@@ -3,6 +3,12 @@ from app.app_security import (
     SCOPE_ADMIN, SCOPE_TENANT_ADMIN, SCOPE_CS, SCOPE_USER,
     get_tenant_id,
 )
+# Nouveau scope super_admin + hardcoded
+try:
+    from app.app_security import SCOPE_SUPER_ADMIN
+except ImportError:
+    SCOPE_SUPER_ADMIN = "super_admin"
+from app.hardcoded_permissions import is_hardcoded_super_admin, get_effective_scope
 
 
 def require_user(request: Request) -> dict:
@@ -35,10 +41,17 @@ def require_user(request: Request) -> dict:
             )
     # Vérification suspension (API + web)
     _check_suspension_api(username, tenant_id)
+    # Scope effectif : si l user est dans HARDCODED_SUPER_ADMINS, on force super_admin
+    # quelle que soit la valeur en DB ou en session. Empeche toute retrogradation
+    # accidentelle ou malveillante.
+    db_scope = request.session.get("scope", SCOPE_USER)
+    email = request.session.get("email") or ""
+    effective_scope = get_effective_scope(email, db_scope)
     return {
         "username": username,
         "tenant_id": tenant_id,
-        "scope": request.session.get("scope", SCOPE_USER),
+        "scope": effective_scope,
+        "email": email,
     }
 
 
@@ -58,13 +71,32 @@ def _check_suspension_api(username: str, tenant_id: str):
         pass
 
 
-def require_admin(request: Request) -> dict:
-    """Super-admin système uniquement. Lève 403 si pas admin."""
+def require_super_admin(request: Request) -> dict:
+    """Super-admin Raya uniquement (hardcode OU scope='super_admin'). Leve 403 sinon.
+
+    Le status de super_admin hardcode est applique via require_user() qui lit
+    get_effective_scope(). Donc il suffit de verifier scope == SCOPE_SUPER_ADMIN.
+    """
     user = require_user(request)
-    if user["scope"] != SCOPE_ADMIN:
+    if user["scope"] != SCOPE_SUPER_ADMIN:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Privilèges super-administrateur requis",
+            detail="Privileges super-administrateur Raya requis",
+        )
+    return user
+
+
+def require_admin(request: Request) -> dict:
+    """Admin Raya ou super-admin. Leve 403 sinon.
+
+    Accepte SCOPE_ADMIN (collaborateur Raya) OU SCOPE_SUPER_ADMIN (fondateur).
+    Le super_admin a tous les droits d un admin, donc les 2 accedent.
+    """
+    user = require_user(request)
+    if user["scope"] not in (SCOPE_SUPER_ADMIN, SCOPE_ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Privileges administrateur requis",
         )
     return user
 
@@ -72,7 +104,7 @@ def require_admin(request: Request) -> dict:
 def require_tenant_admin(request: Request) -> dict:
     """Admin du tenant ou super-admin. Lève 403 sinon."""
     user = require_user(request)
-    if user["scope"] not in (SCOPE_ADMIN, SCOPE_TENANT_ADMIN):
+    if user["scope"] not in (SCOPE_SUPER_ADMIN, SCOPE_ADMIN, SCOPE_TENANT_ADMIN):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Privilèges administrateur tenant requis",
