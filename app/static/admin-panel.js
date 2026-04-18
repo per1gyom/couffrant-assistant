@@ -215,6 +215,7 @@ async function loadConnections(tenantId,idx){
           ${oauthBtn}
           ${['odoo','microsoft','gmail'].includes(c.tool_type)?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px" onclick="discoverTool('${tenantId}','${c.tool_type}',this)">🔍 Découvrir</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#8b5cf6" onclick="vectorizeOdoo(this)" title="Vectorisation sémantique + graphe typé">🧠 Vectoriser</button>`:''}
+          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#0ea5e9" onclick="introspectOdoo(this)" title="Inventaire complet : liste tous les modèles Odoo et leurs champs">🔍 Inventaire</button>`:''}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
           <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
         </div>
@@ -290,6 +291,63 @@ async function acknowledgeAlert(alertId){
 function escapeHtml(str){
   if(!str) return '';
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function introspectOdoo(btn){
+  // Scanner Universel Odoo (18/04/2026) : lance un inventaire complet via
+  // /admin/odoo/introspect/start (async en background thread) + polling sur
+  // /admin/odoo/introspect/status?run_id=xxx jusqu a completion.
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Demarrage...';
+  try{
+    // Lancer le run
+    const r = await fetch('/admin/odoo/introspect/start', {method:'POST'});
+    const d = await r.json();
+    if(d.status !== 'started' || !d.run_id) throw new Error(d.message || 'Demarrage echoue');
+    const runId = d.run_id;
+    setAlert('companies-alert', `🔍 Inventaire Odoo lancé (run_id: ${runId}). Patience, cela peut prendre 2-5 min...`, 'ok');
+    // Polling toutes les 3 secondes
+    let tries = 0;
+    const maxTries = 200; // 200 * 3s = 10 min max
+    while(tries < maxTries){
+      await new Promise(res => setTimeout(res, 3000));
+      tries++;
+      const sr = await fetch(`/admin/odoo/introspect/status?run_id=${runId}`);
+      const sd = await sr.json();
+      if(sd.status === 'running'){
+        const p = sd.progress || {};
+        btn.innerHTML = `⏳ ${p.step||''} ${p.current||0}/${p.total||0} (${p.pct||0}%)`;
+        continue;
+      }
+      if(sd.status === 'ok' && sd.result){
+        // Affichage du resume
+        const res = sd.result;
+        const stats = res.stats || {};
+        const byCat = res.by_category || {};
+        const topModels = (res.models || []).slice(0, 30);
+        const catLine = Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k}=${v}`).join(', ');
+        const topLines = topModels.map(m => `  ${m.model} (${m.records_count} records, ${m.fields_count||'?'} fields)`).join('\n');
+        const summary = `✅ Inventaire terminé en ${sd.duration_sec}s.\n\nSTATS : ${stats.total_models_filtered} modèles non-vides / ${stats.total_models_discovered} découverts. Total ${stats.total_records_all} records. ${stats.custom_models} modèles custom.\n\nPAR CATEGORIE : ${catLine}\n\nTOP 30 MODELES :\n${topLines}`;
+        // Afficher dans un textarea pour copier
+        const modal = document.createElement('div');
+        modal.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg1);border:1px solid var(--border);border-radius:12px;padding:20px;max-width:90vw;max-height:85vh;overflow:auto;z-index:9999;box-shadow:0 10px 40px rgba(0,0,0,0.5)';
+        modal.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0">🔍 Inventaire Odoo</h3><button class="btn btn-ghost" onclick="this.closest('div[style]').remove()">✕ Fermer</button></div><textarea readonly style="width:80vw;height:60vh;font-family:var(--mono);font-size:11px;padding:10px;background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:8px">${summary}\n\n\n=== JSON COMPLET (pour partager a Claude) ===\n${JSON.stringify({stats, by_category: byCat, top_30_models: topModels}, null, 2)}</textarea><div style="margin-top:8px;font-size:11px;color:var(--text3)">Copie ce JSON et colle-le dans la conversation avec Claude pour continuer le plan Scanner Universel.</div>`;
+        document.body.appendChild(modal);
+        setAlert('companies-alert', `✅ Inventaire OK : ${stats.total_models_filtered} modeles. Resultats dans la fenetre.`, 'ok');
+        return;
+      }
+      if(sd.status === 'error'){
+        throw new Error(sd.error || sd.message || 'Erreur inconnue');
+      }
+    }
+    throw new Error('Timeout 10 min');
+  }catch(e){
+    setAlert('companies-alert', '❌ Inventaire echoue : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
 }
 
 async function vectorizeOdoo(btn){
