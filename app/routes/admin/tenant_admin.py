@@ -320,6 +320,17 @@ async def tenant_update_permission(
     except Exception as e:
         return {"status": "error", "message": str(e)[:300]}
 
+@router.get("/tenant/permissions/lock-status")
+def tenant_lock_status(request: Request, _: dict = Depends(require_tenant_admin)):
+    """Retourne l etat de verrouillage du tenant de l utilisateur connecte."""
+    tenant_id = get_session_tenant_id(request)
+    try:
+        from app.permissions import get_tenant_lock_status
+        return get_tenant_lock_status(tenant_id=tenant_id)
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
 @router.post("/tenant/permissions/toggle-read-only")
 def tenant_toggle_read_only(request: Request, _: dict = Depends(require_tenant_admin)):
     """Bouton 'Tout en lecture seule' : bascule toutes les connexions du tenant

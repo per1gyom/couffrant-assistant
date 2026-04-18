@@ -570,6 +570,85 @@ def admin_toggle_read_only_global(request: Request, _: dict = Depends(require_ad
         return {"status": "error", "message": str(e)[:300]}
 
 
+@router.get("/admin/tenant/{tenant_id}/permissions")
+def admin_tenant_permissions(tenant_id: str, request: Request, _: dict = Depends(require_admin)):
+    """Liste les permissions des connexions d un tenant donne (vue super admin).
+
+    Retourne la meme structure que /tenant/permissions mais pour n importe
+    quel tenant, pas seulement celui en session.
+    """
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, tool_type, label AS name, status,
+                       super_admin_permission_level,
+                       tenant_admin_permission_level,
+                       previous_permission_level
+                FROM tenant_connections
+                WHERE tenant_id = %s
+                ORDER BY tool_type, id
+            """, (tenant_id,))
+            rows = cur.fetchall()
+            return [{
+                "connection_id": r[0],
+                "tool_type": r[1],
+                "name": r[2] or r[1],
+                "status": r[3],
+                "super_admin_level": r[4] or "read",
+                "tenant_admin_level": r[5] or "read",
+                "previous_level": r[6],
+            } for r in rows]
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
+@router.post("/admin/tenant/{tenant_id}/permissions/update")
+async def admin_tenant_permissions_update(tenant_id: str, request: Request, _: dict = Depends(require_admin)):
+    """Met a jour la permission d une connexion d un tenant (vue super admin).
+
+    Body JSON : {"connection_id": 1, "new_level": "read_write", "scope_type": "super_admin"|"tenant_admin"}
+
+    scope_type='super_admin' : modifie le plafond super_admin_permission_level
+    scope_type='tenant_admin' : modifie le niveau applique (cappe au plafond super)
+    """
+    try:
+        body = await request.json()
+        connection_id = int(body.get("connection_id"))
+        new_level = body.get("new_level")
+        scope_type = body.get("scope_type", "super_admin")
+        if new_level not in ("read", "read_write", "read_write_delete"):
+            return {"status": "error", "message": "Niveau invalide"}
+        if scope_type not in ("super_admin", "tenant_admin"):
+            return {"status": "error", "message": "scope_type invalide"}
+        from app.permissions import update_permission
+        ok, msg = update_permission(
+            tenant_id=tenant_id,
+            connection_id=connection_id,
+            new_level=new_level,
+            actor_role=scope_type,
+        )
+        if not ok:
+            return {"status": "error", "message": msg}
+        return {"status": "ok", "connection_id": connection_id, "new_level": new_level, "scope_type": scope_type}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
+@router.get("/admin/tenant/{tenant_id}/lock-status")
+def admin_tenant_lock_status(tenant_id: str, request: Request, _: dict = Depends(require_admin)):
+    """Retourne l etat de verrouillage d un tenant (is_locked true/false).
+
+    Utilise par le frontend pour colorer le bouton 🔒 et afficher le bon
+    message dans le prompt de confirmation.
+    """
+    try:
+        from app.permissions import get_tenant_lock_status
+        return get_tenant_lock_status(tenant_id=tenant_id)
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
 @router.post("/admin/tenant/{tenant_id}/toggle-read-only")
 def admin_toggle_read_only_per_tenant(tenant_id: str, request: Request, _: dict = Depends(require_admin)):
     """Bascule toutes les connexions d UN tenant specifique en 'read' (ou restaure).

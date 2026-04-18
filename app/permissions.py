@@ -366,6 +366,52 @@ def update_permission(
         return (False, str(e)[:200])
 
 
+def get_tenant_lock_status(tenant_id: str = None) -> dict:
+    """Retourne l etat de verrouillage d un tenant (ou global si tenant_id=None).
+
+    Format : {
+        "is_locked": True|False,  # majorite en read avec previous != NULL
+        "total_connections": N,
+        "locked_connections": N,
+        "tenant_id": "..." ou None,
+    }
+    """
+    from app.database import get_pg_conn
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            if tenant_id:
+                cur.execute(
+                    """SELECT COUNT(*),
+                              SUM(CASE WHEN tenant_admin_permission_level='read'
+                                        AND previous_permission_level IS NOT NULL
+                                       THEN 1 ELSE 0 END)
+                       FROM tenant_connections WHERE tenant_id=%s""",
+                    (tenant_id,),
+                )
+            else:
+                cur.execute(
+                    """SELECT COUNT(*),
+                              SUM(CASE WHEN tenant_admin_permission_level='read'
+                                        AND previous_permission_level IS NOT NULL
+                                       THEN 1 ELSE 0 END)
+                       FROM tenant_connections""",
+                )
+            row = cur.fetchone()
+            total = row[0] or 0
+            locked = row[1] or 0
+            is_locked = total > 0 and locked >= total / 2
+            return {
+                "is_locked": bool(is_locked),
+                "total_connections": total,
+                "locked_connections": locked,
+                "tenant_id": tenant_id,
+            }
+    except Exception as e:
+        logger.exception("[Permissions] get_tenant_lock_status : %s", e)
+        return {"is_locked": False, "total_connections": 0, "locked_connections": 0, "error": str(e)[:200]}
+
+
 def toggle_all_read_only(
     tenant_id: Optional[str] = None,
     actor_role: str = "tenant_admin",

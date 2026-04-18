@@ -302,10 +302,19 @@ function escapeHtml(str){
 
 // ─── Permissions par tenant (super admin) — bouton par tenant avec confirmation textuelle ───
 async function toggleReadOnlyForTenant(tenantId, tenantName){
-  const answer = prompt(`⚠️ Basculer TOUTES les connexions de "${tenantName}" en lecture seule ?\n\n(ou restaurer si deja verrouille)\n\nTape "oui" pour confirmer :`);
-  if(!answer || answer.trim().toLowerCase() !== 'oui'){
+  // Lire l etat actuel pour un feedback visuel clair
+  let status;
+  try{
+    status = await (await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/lock-status`)).json();
+  }catch(e){
+    setAlert('companies-alert', '❌ Impossible de lire l etat actuel : '+e.message, 'err');
     return;
   }
+  const isLocked = status.is_locked === true;
+  const stateText = isLocked ? 'VERROUILLE en lecture seule' : 'OUVERT (permissions actives)';
+  const actionText = isLocked ? 'RESTAURER les permissions precedentes' : 'VERROUILLER toutes les connexions en lecture seule';
+  const answer = prompt(`⚠️ Tenant : ${tenantName}\n\nEtat actuel : ${stateText}\nAction : ${actionText}\n\n(${status.total_connections} connexion(s))\n\nTape "oui" pour confirmer :`);
+  if(!answer || answer.trim().toLowerCase() !== 'oui') return;
   try{
     const r = await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/toggle-read-only`, {method:'POST'});
     const d = await r.json();
@@ -314,6 +323,8 @@ async function toggleReadOnlyForTenant(tenantId, tenantName){
         ? `🔒 ${tenantName} : ${d.affected} connexion(s) basculee(s) en lecture seule`
         : `🔓 ${tenantName} : ${d.affected} connexion(s) restauree(s)`;
       setAlert('companies-alert', msg, 'ok');
+      // Recharger la liste pour mettre a jour les couleurs des boutons
+      loadCompanies();
     } else {
       setAlert('companies-alert', '❌ '+(d.message||'Erreur'), 'err');
     }
@@ -888,7 +899,7 @@ async function loadCompanies(){
         <div class="tenant-header" onclick="toggleTenant(${i})">
           <span class="tenant-toggle" id="toggle-${i}">›</span>
           <span class="tenant-name">🏢 ${t.name}${(t.settings||{}).suspended?'<span class="badge badge-yellow" style="margin-left:8px;font-size:10px">⏸️ SUSPENDU</span>':''}${legalForm?' <span style="font-size:11px;color:var(--text3);font-weight:400">'+legalForm+'</span>':''}</span>
-          <div class="tenant-meta"><span>👥 ${t.user_count} collaborateur(s)</span><span>📬 ${fmt(t.total_mails)} mails</span><span>💬 ${fmt(t.total_conv)} conversations</span><span id="conn-summary-${i}" style="display:inline-flex;gap:6px;align-items:center">…</span>${siret?`<span style="color:var(--text3)">SIRET: ${siret}</span>`:''}${isAdminOrSuper()?`<button class="btn" onclick="event.stopPropagation();toggleReadOnlyForTenant('${t.tenant_id}','${(t.name||'').replace(/'/g,'&apos;')}')" style="background:transparent;border:1px solid var(--border);color:var(--text2);padding:2px 8px;font-size:11px;border-radius:6px;cursor:pointer;margin-left:auto" title="Bascule toutes les connexions de ce tenant en lecture seule">🔒 Lecture</button>`:''}</div>
+          <div class="tenant-meta"><span>👥 ${t.user_count} collaborateur(s)</span><span>📬 ${fmt(t.total_mails)} mails</span><span>💬 ${fmt(t.total_conv)} conversations</span><span id="conn-summary-${i}" style="display:inline-flex;gap:6px;align-items:center">…</span>${siret?`<span style="color:var(--text3)">SIRET: ${siret}</span>`:''}${isAdminOrSuper()?`<button class="btn tenant-lock-btn" id="lock-btn-${i}" data-tenant-id="${t.tenant_id}" data-tenant-name="${(t.name||'').replace(/"/g,'&quot;')}" onclick="event.stopPropagation();const btn=this;toggleReadOnlyForTenant(btn.dataset.tenantId,btn.dataset.tenantName)" style="background:transparent;border:1px solid var(--border);color:var(--text2);padding:2px 8px;font-size:11px;border-radius:6px;cursor:pointer;margin-left:auto" title="Bascule toutes les connexions de ce tenant en lecture seule">🔒 Lecture</button>`:''}</div>
         </div>
         <div class="tenant-body" id="body-${i}">
           <table><thead><tr><th>Identifiant</th><th>Email</th><th>Rôle</th><th>MS</th><th>Mails</th><th>Conv.</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
@@ -937,6 +948,11 @@ async function loadCompanies(){
               </div>
               <div id="conn-list-${i}" style="font-family:var(--mono);font-size:11px;color:var(--text3)">Chargement...</div>
             </div>
+            <div style="margin-top:20px">
+              <div class="sp-config-title" style="margin-bottom:10px">🔐 Permissions des connexions (plafond super admin)</div>
+              <div id="perms-list-${i}" style="font-family:var(--mono);font-size:11px;color:var(--text3)">Chargement...</div>
+              <div style="font-size:10px;color:var(--text3);margin-top:6px;font-style:italic">Le plafond super admin definit le maximum que le tenant admin peut appliquer.</div>
+            </div>
           </div>
           ${isSuperAdmin?`<div class="tenant-admin-bar">
             ${(t.settings||{}).suspended?`<button class="btn btn-unlock" style="font-size:11px;padding:5px 12px" onclick="unsuspendTenant('${t.tenant_id}')">▶️ Réactiver</button>`:`<button class="btn btn-ghost" style="font-size:11px;padding:5px 12px;color:var(--yellow)" onclick="suspendTenant('${t.tenant_id}','${t.name.replace(/'/g,"\\'")}')">⏸️ Suspendre</button>`}
@@ -950,6 +966,90 @@ async function loadCompanies(){
   openCards.forEach(i=>toggleTenant(i));
   // Charger les connexions pour chaque tenant
   if(typeof _lastTenants!=='undefined') _lastTenants.forEach((t,i)=>loadConnections(t.tenant_id,i));
+  // Charger l etat de verrouillage (🔒/🔓) de chaque tenant — Fix 2 du plan
+  if(typeof _lastTenants!=='undefined') _lastTenants.forEach((t,i)=>updateLockButtonState(t.tenant_id,i));
+  // Charger les permissions par connexion — Fix 3 du plan
+  if(typeof _lastTenants!=='undefined') _lastTenants.forEach((t,i)=>loadPermissionsForTenant(t.tenant_id,i));
+}
+
+async function updateLockButtonState(tenantId, idx){
+  try{
+    const d = await (await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/lock-status`)).json();
+    const btn = document.getElementById('lock-btn-'+idx);
+    if(!btn) return;
+    if(d.is_locked === true){
+      btn.innerHTML = '🔓 Verrouille';
+      btn.style.background = '#7f1d1d';  // rouge fonce
+      btn.style.borderColor = '#dc2626';
+      btn.style.color = '#fca5a5';
+      btn.title = `Ce tenant a ${d.locked_connections}/${d.total_connections} connexion(s) en lecture seule. Cliquer pour restaurer.`;
+    } else {
+      btn.innerHTML = '🔒 Lecture';
+      btn.style.background = 'transparent';
+      btn.style.borderColor = 'var(--border)';
+      btn.style.color = 'var(--text2)';
+      btn.title = 'Toutes les connexions ont leurs permissions actives. Cliquer pour verrouiller tout en lecture seule.';
+    }
+  }catch(e){ /* silencieux */ }
+}
+
+// ─── Fix 3 : permissions par connexion dans le super admin panel ───
+async function loadPermissionsForTenant(tenantId, idx){
+  const list = document.getElementById('perms-list-'+idx);
+  if(!list) return;
+  try{
+    const data = await (await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/permissions`)).json();
+    if(!Array.isArray(data) || data.length === 0){
+      list.innerHTML = '<div style="color:var(--text3)">Aucune connexion.</div>';
+      return;
+    }
+    const LABELS = {'read':'Lecture','read_write':'Lect+Écrit','read_write_delete':'Tout'};
+    const ICONS = {'odoo':'🗂️','gmail':'📧','outlook':'📧','microsoft':'📧','mailbox':'📧','sharepoint':'📁','drive':'📁','teams':'💬'};
+    let html = '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--border);color:var(--text3)"><th style="text-align:left;padding:4px 6px">Connexion</th><th style="padding:4px 6px">Plafond super admin</th><th style="padding:4px 6px">Niveau applique (tenant)</th></tr></thead><tbody>';
+    for(const c of data){
+      const icon = ICONS[c.tool_type] || '🔧';
+      const levels = ['read','read_write','read_write_delete'];
+      let superRadios = '';
+      for(const lvl of levels){
+        const checked = c.super_admin_level === lvl;
+        superRadios += `<label style="margin-right:6px;cursor:pointer;font-size:10px"><input type="radio" name="sup-${c.connection_id}" value="${lvl}" ${checked?'checked':''} onchange="updatePermissionCap('${tenantId}',${c.connection_id},'${lvl}','super_admin',${idx})"/> ${LABELS[lvl]}</label>`;
+      }
+      const maxRank = levels.indexOf(c.super_admin_level);
+      let tenantRadios = '';
+      for(let i=0;i<levels.length;i++){
+        const lvl = levels[i];
+        const disabled = i > maxRank;
+        const checked = c.tenant_admin_level === lvl;
+        tenantRadios += `<label style="margin-right:6px;opacity:${disabled?'0.3':'1'};cursor:${disabled?'not-allowed':'pointer'};font-size:10px"><input type="radio" name="ten-${c.connection_id}" value="${lvl}" ${checked?'checked':''} ${disabled?'disabled':''} onchange="updatePermissionCap('${tenantId}',${c.connection_id},'${lvl}','tenant_admin',${idx})"/> ${LABELS[lvl]}</label>`;
+      }
+      html += `<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px"><strong>${icon} ${c.name}</strong><br><span style="font-size:9px;color:var(--text3)">${c.tool_type}</span></td><td style="padding:6px">${superRadios}</td><td style="padding:6px">${tenantRadios}</td></tr>`;
+    }
+    html += '</tbody></table>';
+    list.innerHTML = html;
+  }catch(e){
+    list.innerHTML = '<div style="color:var(--red)">Erreur: '+e.message+'</div>';
+  }
+}
+
+async function updatePermissionCap(tenantId, connectionId, newLevel, scopeType, idx){
+  try{
+    const r = await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/permissions/update`, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({connection_id: connectionId, new_level: newLevel, scope_type: scopeType})
+    });
+    const d = await r.json();
+    if(d.status === 'ok'){
+      const lab = scopeType === 'super_admin' ? 'Plafond super admin' : 'Niveau applique';
+      setAlert('companies-alert', `✅ ${lab} : ${newLevel}`, 'ok');
+      loadPermissionsForTenant(tenantId, idx);
+      updateLockButtonState(tenantId, idx);
+    } else {
+      setAlert('companies-alert', '❌ '+(d.message||'Erreur'), 'err');
+    }
+  }catch(e){
+    setAlert('companies-alert', '❌ '+e.message, 'err');
+  }
 }
 function toggleTenant(i){document.getElementById('body-'+i).classList.toggle('open');document.getElementById('toggle-'+i).classList.toggle('open');}
 function filterCompanies(){

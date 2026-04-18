@@ -210,7 +210,18 @@ async function updatePermission(connectionId, newLevel){
 }
 
 async function toggleReadOnly(){
-  const answer = prompt('⚠️ Basculer TOUTES les connexions de ta société en lecture seule ?\n\n(ou restaurer si déjà verrouillé)\n\nTape "oui" pour confirmer :');
+  // Lire l etat actuel pour un feedback visuel clair
+  let status;
+  try{
+    status = await (await fetch('/tenant/permissions/lock-status')).json();
+  }catch(e){
+    setAlert('company-alert', '❌ Impossible de lire l etat actuel : '+e.message, 'err');
+    return;
+  }
+  const isLocked = status.is_locked === true;
+  const stateText = isLocked ? 'VERROUILLÉ en lecture seule' : 'OUVERT (permissions actives)';
+  const actionText = isLocked ? 'RESTAURER les permissions précédentes' : 'VERROUILLER toutes les connexions en lecture seule';
+  const answer = prompt(`⚠️ Permissions de ta société\n\nÉtat actuel : ${stateText}\nAction : ${actionText}\n\n(${status.total_connections} connexion(s))\n\nTape "oui" pour confirmer :`);
   if(!answer || answer.trim().toLowerCase() !== 'oui') return;
   try{
     const r = await fetch('/tenant/permissions/toggle-read-only', {method:'POST'});

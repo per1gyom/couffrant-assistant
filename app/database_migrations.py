@@ -431,7 +431,7 @@ MIGRATIONS = [
     # Plan : docs/raya_permissions_plan.md
     # Hierarchie : super_admin > tenant_admin > user (v2)
     # En v1 : super_admin_permission_level plafonne tenant_admin_permission_level
-    "ALTER TABLE tenant_connections ADD COLUMN IF NOT EXISTS super_admin_permission_level TEXT DEFAULT 'read'",
+    "ALTER TABLE tenant_connections ADD COLUMN IF NOT EXISTS super_admin_permission_level TEXT DEFAULT 'read_write_delete'",
     "ALTER TABLE tenant_connections ADD COLUMN IF NOT EXISTS tenant_admin_permission_level TEXT DEFAULT 'read'",
     "ALTER TABLE tenant_connections ADD COLUMN IF NOT EXISTS previous_permission_level TEXT",
     # Contrainte soft : valeur autorisee
