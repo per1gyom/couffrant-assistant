@@ -36,7 +36,7 @@ DEFAULT_TOOLS_CS = DEFAULT_TOOLS_USER
 
 
 def _tools_for_scope(scope: str) -> list:
-    if scope == SCOPE_ADMIN: return DEFAULT_TOOLS_ADMIN
+    if scope in (SCOPE_SUPER_ADMIN, SCOPE_ADMIN): return DEFAULT_TOOLS_ADMIN
     if scope == SCOPE_TENANT_ADMIN: return DEFAULT_TOOLS_TENANT_ADMIN
     return DEFAULT_TOOLS_USER
 

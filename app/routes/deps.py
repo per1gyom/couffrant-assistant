@@ -123,7 +123,8 @@ def assert_same_tenant(request: Request, target_username: str) -> None:
     Lève HTTPException 403 si violation. Super-admin passe toujours.
     """
     user = require_user(request)
-    if user["scope"] == SCOPE_ADMIN:
+    # Super_admin ET admin Raya passent toujours (cross-tenant autorise)
+    if user["scope"] in (SCOPE_SUPER_ADMIN, SCOPE_ADMIN):
         return
     target_tenant = get_tenant_id(target_username)
     if user["tenant_id"] != target_tenant:

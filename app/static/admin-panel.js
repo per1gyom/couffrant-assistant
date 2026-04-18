@@ -2,6 +2,10 @@
 let allRules=[], allInsights=[];
 let currentEditUser=null, usernameToDelete=null;
 let isSuperAdmin=false, currentUserScope='', currentUserTenantId='';
+// Helper : true si l user est admin Raya OU super_admin (hardcode ou non).
+// Utilise partout a la place de isAdminOrSuper() qui ne reconnait
+// pas les super_admin et les fait basculer sur les endpoints /tenant en 403.
+function isAdminOrSuper(){ return isAdminOrSuper() || currentUserScope==='super_admin'; }
 let _lastTenants=[];
 let currentEditTenantId=null, tenantToDelete=null;
 
@@ -49,7 +53,7 @@ async function loadMemoryStatus(){
     <div class="stat-card"><div class="stat-label">Insights</div><div class="stat-value">${fmt(tot('insights'))}</div></div>`;
   document.getElementById('memory-tbody').innerHTML=data.map(u=>`
     <tr><td><strong class="mono">${u.username}</strong></td><td style="font-size:12px;color:var(--text2)">${u.email||'—'}</td>
-    <td><span class="badge ${u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope||'user'}</span></td>
+    <td><span class="badge ${u.scope==='super_admin'?'badge-blue':u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope||'user'}</span></td>
     <td class="mono">${fmt(u.conv||u.conversations||0)}</td>
     <td><span class="badge badge-green">${fmt(u.rules||0)}</span></td>
     <td class="mono">${fmt(u.insights||0)}</td><td class="mono">${fmt(u.mails||0)}</td></tr>`).join('');
@@ -71,7 +75,7 @@ async function loadUsers(){
     <tr class="${u.account_locked?'row-locked':u.suspended?'row-locked':''}">
       <td><strong class="mono">${u.username}</strong>${u.account_locked?'<span class="badge badge-red" style="margin-left:7px;font-size:9px">🔒 BLOQUÉ</span>':''}${u.suspended?'<span class="badge badge-yellow" style="margin-left:7px;font-size:9px">⏸️ SUSPENDU</span>':''}${u.must_reset_password&&!u.account_locked?'<span class="badge badge-yellow" style="margin-left:7px;font-size:9px">⚠️ Reset MDP</span>':''}</td>
       <td style="font-size:12px;color:var(--text2)">${u.email||'—'}</td>
-      <td><span class="badge ${u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope||'user'}</span></td>
+      <td><span class="badge ${u.scope==='super_admin'?'badge-blue':u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope||'user'}</span></td>
       <td class="mono" style="font-size:11px;color:var(--text2)">${fmtDateShort(u.last_login)}</td>
       <td class="mono" style="font-size:11px;color:var(--text3)">${fmtDate(u.created_at)}</td>
       <td style="display:flex;gap:6px;flex-wrap:wrap">
@@ -80,7 +84,7 @@ async function loadUsers(){
         <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="seedUser('${u.username}')">🌱</button>
         ${u.suspended?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unsuspendUser('${u.username}')">▶️ Réactiver</button>`:`<button class="btn btn-ghost" style="padding:4px 9px;font-size:11px;color:var(--yellow)" onclick="suspendUser('${u.username}')">⏸️</button>`}
         ${u.account_locked?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unlockUser('${u.username}')">🔓 Débloquer</button>`:''}
-        ${u.scope!=='admin'?`<button class="btn btn-danger" style="padding:4px 9px;font-size:11px" onclick="askDeleteUser('${u.username}')">Suppr.</button>`:''}
+        ${u.scope!=='admin'&&u.scope!=='super_admin'?`<button class="btn btn-danger" style="padding:4px 9px;font-size:11px" onclick="askDeleteUser('${u.username}')">Suppr.</button>`:''}
       </td>
     </tr>`).join('');
 }
@@ -97,7 +101,7 @@ function hideTools(){document.getElementById('tools-section').style.display='non
 
 // ─── OUTILS PAR USER (fiche société) ───
 let currentToolsUser=null;
-const toolsApiBase=()=>currentUserScope==='admin'?'/admin':'/tenant';
+const toolsApiBase=()=>isAdminOrSuper()?'/admin':'/tenant';
 
 async function showToolsCompany(username){
   currentToolsUser=username;
@@ -155,7 +159,7 @@ async function addToolToUser(){
 }
 
 // ─── CONNEXIONS V2 ───
-const connApiBase=()=>currentUserScope==='admin'?'/admin':'/tenant';
+const connApiBase=()=>isAdminOrSuper()?'/admin':'/tenant';
 const TOOL_ICONS={'outlook':'📧','gmail':'✉️','drive':'📁','odoo':'🔧','teams':'💬','whatsapp':'📱','microsoft':'🔵','google':'🟢'};
 
 function showAddConnection(tenantId,idx){document.getElementById('conn-add-'+idx).style.display='block';}
@@ -165,7 +169,7 @@ async function loadConnections(tenantId,idx){
   const summaryEl=document.getElementById('conn-summary-'+idx);
   if(!el) return;
   try{
-    const url=currentUserScope==='admin'?`/admin/connections/${tenantId}`:'/tenant/connections';
+    const url=isAdminOrSuper()?`/admin/connections/${tenantId}`:'/tenant/connections';
     const conns=await(await fetch(url)).json();
 
     // ── Résumé dans l'entête de la carte ──
@@ -233,7 +237,7 @@ async function createConnection(tenantId,idx){
   const type=document.getElementById('conn-type-'+idx).value.trim().toLowerCase();
   const label=document.getElementById('conn-label-'+idx).value.trim();
   if(!type||!label){setAlert('companies-alert','Type et nom requis.','err');return;}
-  const url=currentUserScope==='admin'?`/admin/connections/${tenantId}`:'/tenant/connections';
+  const url=isAdminOrSuper()?`/admin/connections/${tenantId}`:'/tenant/connections';
   try{
     const d=await(await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tool_type:type,label})})).json();
     if(d.status==='ok'){document.getElementById('conn-add-'+idx).style.display='none';document.getElementById('conn-type-'+idx).value='';document.getElementById('conn-label-'+idx).value='';loadConnections(tenantId,idx);}
@@ -721,7 +725,7 @@ async function discoverTool(tenantId,toolType,btn){
 
 async function deleteConn(connId,tenantId,idx){
   if(!confirm('Supprimer cette connexion et tous ses accès ?')) return;
-  const url=currentUserScope==='admin'?`/admin/connections/${tenantId}/${connId}`:'/tenant/connections/'+connId;
+  const url=isAdminOrSuper()?`/admin/connections/${tenantId}/${connId}`:'/tenant/connections/'+connId;
   try{await fetch(url,{method:'DELETE'});loadConnections(tenantId,idx);}catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
 }
 
@@ -748,7 +752,7 @@ function toggleAssignPanel(connId,tenantId,idx){
 
 async function assignOneUser(connId,username,tenantId,idx){
   const level=document.getElementById('assign-level-'+connId).value;
-  const url=currentUserScope==='admin'?`/admin/connections/${connId}/assign`:'/tenant/connections/'+connId+'/assign';
+  const url=isAdminOrSuper()?`/admin/connections/${connId}/assign`:'/tenant/connections/'+connId+'/assign';
   try{
     await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,access_level:level})});
     await loadConnections(tenantId,idx);
@@ -760,7 +764,7 @@ async function assignAll(connId,tenantId,idx){
   const tenant=_lastTenants.find(t=>t.tenant_id===tenantId);
   if(!tenant) return;
   const level=document.getElementById('assign-level-'+connId).value;
-  const url=currentUserScope==='admin'?`/admin/connections/${connId}/assign`:'/tenant/connections/'+connId+'/assign';
+  const url=isAdminOrSuper()?`/admin/connections/${connId}/assign`:'/tenant/connections/'+connId+'/assign';
   for(const u of tenant.users){
     try{await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u.username,access_level:level})});}catch(e){}
   }
@@ -772,7 +776,7 @@ async function unassignAll(connId,tenantId,idx){
   const tenant=_lastTenants.find(t=>t.tenant_id===tenantId);
   if(!tenant) return;
   for(const u of tenant.users){
-    const url=currentUserScope==='admin'?`/admin/connections/${connId}/assign/${u.username}`:'/tenant/connections/'+connId+'/assign/'+u.username;
+    const url=isAdminOrSuper()?`/admin/connections/${connId}/assign/${u.username}`:'/tenant/connections/'+connId+'/assign/'+u.username;
     try{await fetch(url,{method:'DELETE'});}catch(e){}
   }
   await loadConnections(tenantId,idx);
@@ -782,7 +786,7 @@ async function unassignAll(connId,tenantId,idx){
 async function renameConn(connId,tenantId,idx,currentLabel){
   const newLabel=prompt('Nouveau nom de la connexion :',currentLabel);
   if(!newLabel||newLabel===currentLabel) return;
-  const url=currentUserScope==='admin'?`/admin/connections/${tenantId}/${connId}`:'/tenant/connections/'+connId;
+  const url=isAdminOrSuper()?`/admin/connections/${tenantId}/${connId}`:'/tenant/connections/'+connId;
   try{
     await fetch(url,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({label:newLabel})});
     loadConnections(tenantId,idx);
@@ -791,7 +795,7 @@ async function renameConn(connId,tenantId,idx,currentLabel){
 
 async function unassignConn(connId,username,tenantId,idx){
   if(!confirm(`Retirer l'accès de ${username} ?`)) return;
-  const url=currentUserScope==='admin'?`/admin/connections/${connId}/assign/${username}`:'/tenant/connections/'+connId+'/assign/'+username;
+  const url=isAdminOrSuper()?`/admin/connections/${connId}/assign/${username}`:'/tenant/connections/'+connId+'/assign/'+username;
   const panelWasOpen=document.getElementById('assign-panel-'+connId)?.style.display==='block';
   try{await fetch(url,{method:'DELETE'});await loadConnections(tenantId,idx);if(panelWasOpen)toggleAssignPanel(connId,tenantId,idx);}catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
 }
@@ -903,7 +907,7 @@ async function loadCompanies(){
           <tbody>${t.users.map(u=>`<tr class="${u.account_locked||u.suspended?'row-locked':''}">
             <td><strong class="mono">${u.username}</strong>${u.account_locked?'<span class="badge badge-red" style="margin-left:6px;font-size:9px">🔒</span>':''}${u.suspended?'<span class="badge badge-yellow" style="margin-left:6px;font-size:9px">⏸️</span>':''}${u.must_reset_password&&!u.account_locked?'<span class="badge badge-yellow" style="margin-left:6px;font-size:9px">⚠️</span>':''}</td>
             <td style="font-size:12px;color:var(--text2)">${u.email||'—'}</td>
-            <td><span class="badge ${u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope}</span></td>
+            <td><span class="badge ${u.scope==='super_admin'?'badge-blue':u.scope==='admin'?'badge-blue':u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope}</span></td>
             <td><span class="badge ${u.ms_connected?'badge-ms-ok':'badge-red'}">${u.ms_connected?'✅ OK':'❌ Non'}</span></td>
             <td class="mono">${fmt(u.mails)}</td><td class="mono">${fmt(u.conv)}</td>
             <td class="mono" style="font-size:11px;color:var(--text2)">${fmtDateShort(u.last_login)}</td>
@@ -911,10 +915,10 @@ async function loadCompanies(){
               <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="showToolsCompany('${u.username}')">🔧</button>
               <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope}','${u.phone||''}')">Modifier</button>
               <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="seedUser('${u.username}')">🌱</button>
-              ${!isSuperAdmin&&u.scope!=='admin'?`<button class="btn ${u.direct_actions_override===true?'btn-accent':u.direct_actions_override===false?'btn-danger':'btn-ghost'}" style="padding:4px 9px;font-size:10px" onclick="cycleUserDirectActions('${u.username}',${u.direct_actions_override===null||u.direct_actions_override===undefined?'null':u.direct_actions_override})" title="Actions directes fichiers">${u.direct_actions_override===true?'📂 ON':u.direct_actions_override===false?'📂 OFF':'📂 ='}</button>`:''}
-              ${u.suspended?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unsuspendUser('${u.username}')">▶️</button>`:`${u.scope!=='admin'?`<button class="btn btn-ghost" style="padding:4px 9px;font-size:11px;color:var(--yellow)" onclick="suspendUser('${u.username}')">⏸️</button>`:''}`}
+              ${!isSuperAdmin&&u.scope!=='admin'&&u.scope!=='super_admin'?`<button class="btn ${u.direct_actions_override===true?'btn-accent':u.direct_actions_override===false?'btn-danger':'btn-ghost'}" style="padding:4px 9px;font-size:10px" onclick="cycleUserDirectActions('${u.username}',${u.direct_actions_override===null||u.direct_actions_override===undefined?'null':u.direct_actions_override})" title="Actions directes fichiers">${u.direct_actions_override===true?'📂 ON':u.direct_actions_override===false?'📂 OFF':'📂 ='}</button>`:''}
+              ${u.suspended?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unsuspendUser('${u.username}')">▶️</button>`:`${u.scope!=='admin'&&u.scope!=='super_admin'?`<button class="btn btn-ghost" style="padding:4px 9px;font-size:11px;color:var(--yellow)" onclick="suspendUser('${u.username}')">⏸️</button>`:''}`}
               ${u.account_locked?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unlockUser('${u.username}')">🔓</button>`:''}
-              ${u.scope!=='admin'?`<button class="btn btn-danger" style="padding:4px 9px;font-size:11px" onclick="askDeleteUser('${u.username}')">Suppr.</button>`:''}
+              ${u.scope!=='admin'&&u.scope!=='super_admin'?`<button class="btn btn-danger" style="padding:4px 9px;font-size:11px" onclick="askDeleteUser('${u.username}')">Suppr.</button>`:''}
             </td></tr>`).join('')}</tbody></table>
           <div class="sp-config-panel">
             <div style="margin-bottom:12px"><button class="btn btn-primary" style="font-size:12px;padding:6px 14px" onclick="openCreateUserForTenant('${t.tenant_id}','${t.name.replace(/'/g,"\\'")}')">➕ Ajouter un collaborateur</button></div>
@@ -1290,7 +1294,7 @@ async function loadProfile(){
 async function initUserScope(){
   try{
     const d=await(await fetch('/profile')).json();
-    currentUserScope=d.scope||'';currentUserTenantId=d.tenant_id||'';isSuperAdmin=(currentUserScope==='admin');
+    currentUserScope=d.scope||'';currentUserTenantId=d.tenant_id||'';isSuperAdmin=(isAdminOrSuper());
     // Mode "Ma société" : ?view=company force la vue tenant_admin même pour le super admin
     const companyView=new URLSearchParams(window.location.search).get('view')==='company';
     if(companyView) isSuperAdmin=false;
