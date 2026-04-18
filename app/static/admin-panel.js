@@ -301,19 +301,29 @@ function escapeHtml(str){
 }
 
 // ─── Permissions par tenant (super admin) — bouton par tenant avec confirmation textuelle ───
+// Cache local de l etat de verrouillage par tenant (cle = tenant_id)
+// Mis a jour par updateLockButtonState() a chaque rechargement.
+const _tenantLockState = {};
+
 async function toggleReadOnlyForTenant(tenantId, tenantName){
-  // Lire l etat actuel pour un feedback visuel clair
-  let status;
-  try{
-    status = await (await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/lock-status`)).json();
-  }catch(e){
-    setAlert('companies-alert', '❌ Impossible de lire l etat actuel : '+e.message, 'err');
-    return;
+  // Utilise le cache local (meme source que le bouton visuel) plutot qu un
+  // nouveau fetch qui pourrait donner un resultat different.
+  let cached = _tenantLockState[tenantId];
+  if(!cached){
+    // Fallback : si pas en cache, on demande au backend une fois
+    try{
+      cached = await (await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/lock-status`)).json();
+      _tenantLockState[tenantId] = cached;
+    }catch(e){
+      setAlert('companies-alert', '❌ Impossible de lire l etat actuel : '+e.message, 'err');
+      return;
+    }
   }
-  const isLocked = status.is_locked === true;
+  const isLocked = cached.is_locked === true;
+  const total = cached.total_connections || 0;
   const stateText = isLocked ? 'VERROUILLE en lecture seule' : 'OUVERT (permissions actives)';
   const actionText = isLocked ? 'RESTAURER les permissions precedentes' : 'VERROUILLER toutes les connexions en lecture seule';
-  const answer = prompt(`⚠️ Tenant : ${tenantName}\n\nEtat actuel : ${stateText}\nAction : ${actionText}\n\n(${status.total_connections} connexion(s))\n\nTape "oui" pour confirmer :`);
+  const answer = prompt(`⚠️ Tenant : ${tenantName}\n\nEtat actuel : ${stateText}\nAction : ${actionText}\n\n(${total} connexion(s))\n\nTape "oui" pour confirmer :`);
   if(!answer || answer.trim().toLowerCase() !== 'oui') return;
   try{
     const r = await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/toggle-read-only`, {method:'POST'});
@@ -323,7 +333,8 @@ async function toggleReadOnlyForTenant(tenantId, tenantName){
         ? `🔒 ${tenantName} : ${d.affected} connexion(s) basculee(s) en lecture seule`
         : `🔓 ${tenantName} : ${d.affected} connexion(s) restauree(s)`;
       setAlert('companies-alert', msg, 'ok');
-      // Recharger la liste pour mettre a jour les couleurs des boutons
+      // Invalider le cache avant rechargement
+      delete _tenantLockState[tenantId];
       loadCompanies();
     } else {
       setAlert('companies-alert', '❌ '+(d.message||'Erreur'), 'err');
@@ -975,6 +986,8 @@ async function loadCompanies(){
 async function updateLockButtonState(tenantId, idx){
   try{
     const d = await (await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/lock-status`)).json();
+    // Mettre a jour le cache local pour toggleReadOnlyForTenant
+    _tenantLockState[tenantId] = d;
     const btn = document.getElementById('lock-btn-'+idx);
     if(!btn) return;
     if(d.is_locked === true){

@@ -142,6 +142,7 @@ function closeModal(id){document.getElementById('modal-'+id).classList.remove('o
 function setAlert(id,msg,type){const el=document.getElementById(id);if(!el)return;el.textContent=msg;el.className='alert alert-'+type;}
 
 // 🔐 Permissions des connexions (Etape 4 du plan permissions)
+let _lastPermissionsState = { isLocked: false, total: 0 };
 async function loadPermissions(){
   try{
     const data = await (await fetch('/tenant/permissions')).json();
@@ -150,11 +151,14 @@ async function loadPermissions(){
     if(!Array.isArray(data) || data.length === 0){
       list.innerHTML = '<div style="color:var(--text3)">Aucune connexion configurée.</div>';
       document.getElementById('toggle-read-only-btn').disabled = true;
+      _lastPermissionsState = { isLocked: false, total: 0 };
       return;
     }
     // Detection etat toggle actuel (si majorite en read avec previous != null)
     const locked = data.filter(c => c.tenant_admin_level === 'read' && c.previous_level).length;
     const isAllLocked = locked > 0 && locked >= data.length / 2;
+    // Stocker dans la variable globale pour que toggleReadOnly l utilise
+    _lastPermissionsState = { isLocked: isAllLocked, total: data.length };
     const toggleBtn = document.getElementById('toggle-read-only-btn');
     if(isAllLocked){
       toggleBtn.innerHTML = '🔒 Lecture seule';
@@ -220,18 +224,17 @@ async function updatePermission(connectionId, newLevel){
 }
 
 async function toggleReadOnly(){
-  // Lire l etat actuel pour un feedback visuel clair
-  let status;
-  try{
-    status = await (await fetch('/tenant/permissions/lock-status')).json();
-  }catch(e){
-    setAlert('company-alert', '❌ Impossible de lire l etat actuel : '+e.message, 'err');
-    return;
+  // Utilise l etat mis a jour en temps reel par loadPermissions (source unique de verite).
+  // Evite toute desynchro avec un endpoint /lock-status separe.
+  if(!_lastPermissionsState || _lastPermissionsState.total === 0){
+    // Fallback : recharger d abord pour avoir les donnees a jour
+    await loadPermissions();
   }
-  const isLocked = status.is_locked === true;
+  const isLocked = _lastPermissionsState.isLocked === true;
+  const total = _lastPermissionsState.total;
   const stateText = isLocked ? 'VERROUILLÉ en lecture seule' : 'OUVERT (permissions actives)';
   const actionText = isLocked ? 'RESTAURER les permissions précédentes' : 'VERROUILLER toutes les connexions en lecture seule';
-  const answer = prompt(`⚠️ Permissions de ta société\n\nÉtat actuel : ${stateText}\nAction : ${actionText}\n\n(${status.total_connections} connexion(s))\n\nTape "oui" pour confirmer :`);
+  const answer = prompt(`⚠️ Permissions de ta société\n\nÉtat actuel : ${stateText}\nAction : ${actionText}\n\n(${total} connexion(s))\n\nTape "oui" pour confirmer :`);
   if(!answer || answer.trim().toLowerCase() !== 'oui') return;
   try{
     const r = await fetch('/tenant/permissions/toggle-read-only', {method:'POST'});
