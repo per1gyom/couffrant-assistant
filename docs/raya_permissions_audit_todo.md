@@ -116,9 +116,12 @@ Tous les commits de la nuit du 18/04 au 19/04 (session marathon) :
 ## Propositions d'amélioration
 
 1. **Remplacer `prompt()` par un vrai modal HTML non-bloquant**
-   - Évite les soucis de repaint
+   - Évite les soucis de repaint (bugs e9d6abb ET 6d390e0)
    - Plus joli visuellement
    - Permet une UX plus riche (icônes, couleurs, etc.)
+   - **PRIORITÉ : HAUTE** — 2 bugs de repaint ont été nécessaires à corriger
+     avec `offsetHeight` + `requestAnimationFrame`, ce qui est un hack.
+     Un vrai modal HTML résout la cause racine.
 
 2. **Fix 4 de la roadmap : unifier UIs tenant_panel et super admin**
    - Actuellement 2 UIs différentes pour le même concept
