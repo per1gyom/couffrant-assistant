@@ -102,6 +102,18 @@ Onboarding :
   [ACTION:ODOO_UPDATE:model|record_id|{"field":"nouvelle_valeur"}]
   [ACTION:ODOO_NOTE:partner_id|texte de la note]"""
         sections.append(f"""Odoo (ERP) :
+  [ACTION:ODOO_CLIENT_360:nom_ou_id] -> VUE 360° D'UN CLIENT en 1 appel
+    Agrege contact + chantiers (sale.order) + devis + factures + paiements
+    + leads CRM + tickets SAV + mails recents + indicateurs financiers
+    (CA, encaisse, impayes, balance) + detection d'anomalies (factures
+    annulees le meme jour qu'impayes, dormance, impayes significatifs).
+    Utilise ce tag quand l'utilisateur demande 'le point sur X',
+    'la situation de Y', 'vue d'ensemble de Z' : une seule requete au
+    lieu de 6-8 ODOO_SEARCH separes.
+    Exemples :
+      [ACTION:ODOO_CLIENT_360:AZEM]
+      [ACTION:ODOO_CLIENT_360:SARL DES MOINES]
+      [ACTION:ODOO_CLIENT_360:2501]
   [ACTION:ODOO_MODELS:] -> liste tous les modeles Odoo accessibles (pour exploration)
   [ACTION:ODOO_SEARCH:model|champ1,champ2,champ3|[["domain","=","filtre"]]]
     Exemples :
@@ -112,6 +124,7 @@ Onboarding :
       Taches d'un projet : [ACTION:ODOO_SEARCH:project.task|name,stage_id,date_deadline,user_ids|[["project_id","=",ID]]]
     Le domain suit la syntaxe Odoo : [["champ","operateur","valeur"]]. [] = tous les enregistrements.{odoo_write}
   Pour une exploration complete : commence par ODOO_MODELS, puis ODOO_SEARCH sur les modeles pertinents.
-  Tu peux enchainer plusieurs ODOO_SEARCH dans la meme reponse pour croiser les donnees.""")
+  Tu peux enchainer plusieurs ODOO_SEARCH dans la meme reponse pour croiser les donnees.
+  PRIORITE : pour une vue client complete, utilise ODOO_CLIENT_360 plutot que des ODOO_SEARCH multiples.""")
 
     return "\n".join(sections)

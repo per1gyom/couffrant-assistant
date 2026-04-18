@@ -15,6 +15,7 @@
 - Repo GitHub : `per1gyom/couffrant-assistant` branche `main`
 - URL prod : `https://app.raya-ia.fr`
 - Cache-bust JS/CSS : **v=31** (admin-panel.js) / **v=79** (chat)
+- Chantier Odoo — Étape 3 (vue 360° client) : **FAIT** — module `app/connectors/odoo_client_360.py`, tag `[ACTION:ODOO_CLIENT_360:nom_ou_id]`, détection d'anomalies intelligente (facture annulée le même jour qu'impayé, impayés significatifs, dormance 180j+)
 - **⚠️ PANELS SÉPARÉS** : `/admin/panel` → super admin only / `/tenant/panel` → tenant admin only
 - **⚠️ ARCHITECTURE ADMIN** : Routes dans le **package** `app/routes/admin/`
 - **⚠️ JAMAIS** supprimer `async function init()` dans `chat-main.js`

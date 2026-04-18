@@ -136,6 +136,27 @@ def _handle_odoo_actions(response, username, tenant_id, tools):
         except Exception as e:
             confirmed.append(f"❌ Odoo : {str(e)[:150]}")
 
+    # ODOO_CLIENT_360 : [ACTION:ODOO_CLIENT_360:nom_ou_id]
+    # Vue 360° agrégée d'un client : contact + chantiers + factures +
+    # paiements + leads + tickets + mails + indicateurs + anomalies.
+    # En 1 tag au lieu de 6-8 ODOO_SEARCH séparés. Voir odoo_client_360.py
+    # pour la liste des données et la détection d'anomalies intelligente.
+    for content in _extract_action_tags(response, "ODOO_CLIENT_360"):
+        key = content.strip()
+        if not key:
+            confirmed.append("❌ CLIENT_360 : clé manquante (attendu : nom ou ID partner)")
+            continue
+        try:
+            from app.connectors.odoo_client_360 import get_client_360, format_client_360
+            data = get_client_360(key, include_mails=True, mail_username=username)
+            formatted = format_client_360(data)
+            confirmed.append(formatted)
+            partner_id = (data.get("partner") or {}).get("id", "?")
+            log_activity(username, "odoo_client_360", str(partner_id),
+                         f"key={key[:50]}", tenant_id=tenant_id)
+        except Exception as e:
+            confirmed.append(f"❌ CLIENT_360 : {str(e)[:200]}")
+
     # ODOO_MODELS : [ACTION:ODOO_MODELS:] — liste les modèles accessibles
     for _ in re.finditer(r'\[ACTION:ODOO_MODELS:\]', response):
         try:
