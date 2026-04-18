@@ -145,7 +145,7 @@ function setAlert(id,msg,type){const el=document.getElementById(id);if(!el)retur
 let _lastPermissionsState = { isLocked: false, total: 0 };
 async function loadPermissions(){
   try{
-    const data = await (await fetch('/tenant/permissions')).json();
+    const data = await (await fetch('/tenant/permissions?_=' + Date.now(), {cache: 'no-store'})).json();
     const list = document.getElementById('permissions-list');
     if(!list) return;
     if(!Array.isArray(data) || data.length === 0){

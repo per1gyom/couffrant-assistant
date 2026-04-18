@@ -311,7 +311,7 @@ async function toggleReadOnlyForTenant(tenantId, tenantName){
   let cached;
   try{
     console.log('[toggleReadOnlyForTenant] Rechargement etat avant toggle...');
-    cached = await (await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/lock-status`)).json();
+    cached = await (await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/lock-status?_=` + Date.now(), {cache: 'no-store'})).json();
     _tenantLockState[tenantId] = cached;
     console.log('[toggleReadOnlyForTenant] Etat lu :', cached);
   }catch(e){
@@ -991,8 +991,7 @@ async function loadCompanies(){
 
 async function updateLockButtonState(tenantId, idx){
   try{
-    const d = await (await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/lock-status`)).json();
-    // Mettre a jour le cache local pour toggleReadOnlyForTenant
+    const d = await (await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/lock-status?_=` + Date.now(), {cache: 'no-store'})).json();
     _tenantLockState[tenantId] = d;
     const btn = document.getElementById('lock-btn-'+idx);
     if(!btn) return;
@@ -1017,7 +1016,7 @@ async function loadPermissionsForTenant(tenantId, idx){
   const list = document.getElementById('perms-list-'+idx);
   if(!list) return;
   try{
-    const data = await (await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/permissions`)).json();
+    const data = await (await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/permissions?_=` + Date.now(), {cache: 'no-store'})).json();
     if(!Array.isArray(data) || data.length === 0){
       list.innerHTML = '<div style="color:var(--text3)">Aucune connexion.</div>';
       return;
