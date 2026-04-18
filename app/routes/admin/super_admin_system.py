@@ -597,10 +597,10 @@ def admin_scanner_debug_embed(
             cur.execute(
                 """INSERT INTO odoo_semantic_content
                    (tenant_id, source_model, source_record_id, content_type,
-                    content_text, embedding, metadata, odoo_write_date, updated_at)
+                    text_content, embedding, metadata, odoo_write_date, updated_at)
                    VALUES (%s, %s, %s, 'record_summary', %s, %s::vector, %s, NOW(), NOW())
                    ON CONFLICT (tenant_id, source_model, source_record_id, content_type)
-                   DO UPDATE SET content_text=EXCLUDED.content_text, updated_at=NOW()
+                   DO UPDATE SET text_content=EXCLUDED.text_content, updated_at=NOW()
                    RETURNING id""",
                 ("couffrant", "debug.test", "999999",
                  "Test chunk diagnostic", vec_str, json.dumps({"test": True})),
