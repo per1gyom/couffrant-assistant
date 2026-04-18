@@ -58,8 +58,35 @@ def _should_ignore_model(model_name: str) -> bool:
 
 
 def _categorize_model(model_name: str) -> str:
-    """Classification en catégorie métier (pour affichage UI)."""
+    """Classification en categorie metier.
+    Enrichi 18/04 apres introspection : reconnait of.* (OpenFire, editeur
+    francais BTP/PV specifique a Guillaume) et affine la categorisation
+    des modules standards Odoo."""
+    # Modules OpenFire (prefixe of.*) - classes selon leur domaine metier
+    if model_name.startswith("of."):
+        if model_name.startswith(("of.product.", "of.image")):
+            return "E_Produits"
+        if model_name.startswith(("of.sale.", "of.invoice.", "of.payment.")):
+            return "C_Ventes"
+        if "of.sale.payment" in model_name or "of.invoice.product.pack" in model_name:
+            return "C_Ventes"
+        if model_name.startswith(("of.planning.", "of.calendar.", "of.survey.",
+                                   "of.tour", "of.sector")):
+            return "G_Planning_Projets"
+        if model_name.startswith(("of.partner.", "of.res.partner.")):
+            return "A_Partenaires"
+        if model_name.startswith(("of.stock.", "of.equipment.", "of.datastore.",
+                                   "of.import.", "of.export.")):
+            return "F_Stock_Production"
+        if model_name.startswith("of.account."):
+            return "D_Comptabilite"
+        return "L_OpenFire"  # modules OF non classes
+
+    # Modeles standards Odoo
     if model_name.startswith("res.partner") or model_name in ("res.users", "res.company"):
+        return "A_Partenaires"
+    # Referentiels geo (res.city, res.city.zip, res.country.*) = adresses partners
+    if model_name.startswith(("res.city", "res.country", "res.region", "res.state")):
         return "A_Partenaires"
     if model_name.startswith("crm."):
         return "B_CRM"
@@ -69,14 +96,20 @@ def _categorize_model(model_name: str) -> str:
         return "D_Comptabilite"
     if model_name.startswith(("product.", "uom.")):
         return "E_Produits"
-    if model_name.startswith(("mrp.", "stock.")):
+    if model_name.startswith(("mrp.", "stock.", "purchase.", "hr.")):
         return "F_Stock_Production"
     if model_name.startswith(("calendar.", "project.")):
         return "G_Planning_Projets"
     if model_name.startswith("mail."):
         return "H_Communication"
+    if model_name.startswith("ir.attachment"):
+        return "I_PiecesJointes"
     if model_name.startswith(("sign.", "approval.")):
         return "J_Signatures"
+    # Modeles techniques / logs / rapports (a priori pas de valeur metier)
+    if model_name.endswith((".log", ".report")) or model_name.startswith(
+        ("utm.", "digest.", "auth_", "bus.", "iap.")):
+        return "M_Technique"
     if model_name.startswith("x_") or "x_" in model_name:
         return "K_Custom"
     return "Z_Autres"

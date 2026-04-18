@@ -325,10 +325,20 @@ async function introspectOdoo(btn){
         const res = sd.result;
         const stats = res.stats || {};
         const byCat = res.by_category || {};
-        const topModels = (res.models || []).slice(0, 30);
+        const allModels = res.models || [];
+        const topModels = allModels.slice(0, 30);
         const catLine = Object.entries(byCat).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k}=${v}`).join(', ');
-        const topLines = topModels.map(m => `  ${m.model} (${m.records_count} records, ${m.fields_count||'?'} fields)`).join('\n');
-        const summary = `✅ Inventaire terminé en ${sd.duration_sec}s.\n\nSTATS : ${stats.total_models_filtered} modèles non-vides / ${stats.total_models_discovered} découverts. Total ${stats.total_records_all} records. ${stats.custom_models} modèles custom.\n\nPAR CATEGORIE : ${catLine}\n\nTOP 30 MODELES :\n${topLines}`;
+        const topLines = topModels.map(m => `  ${m.model} (${m.records_count} records, ${m.fields_count||'?'} fields) [${m.category}]`).join('\n');
+        // Regrouper par categorie : liste tous les modeles avec leur volume
+        const byCatDetails = {};
+        for(const m of allModels){
+          if(!byCatDetails[m.category]) byCatDetails[m.category] = [];
+          byCatDetails[m.category].push(`    ${m.model} (${m.records_count})`);
+        }
+        const catDetailsLines = Object.entries(byCatDetails).sort().map(([cat,lines]) =>
+          `\n[${cat}] ${lines.length} modeles:\n${lines.slice(0,30).join('\n')}${lines.length>30?'\n    ... et '+(lines.length-30)+' de plus':''}`
+        ).join('\n');
+        const summary = `✅ Inventaire terminé en ${sd.duration_sec}s.\n\nSTATS : ${stats.total_models_filtered} modèles non-vides / ${stats.total_models_discovered} découverts. Total ${stats.total_records_all} records. ${stats.custom_models} modèles custom.\n\nPAR CATEGORIE : ${catLine}\n\nTOP 30 MODELES :\n${topLines}\n\n=== DETAIL PAR CATEGORIE ===${catDetailsLines}`;
         // Afficher dans un textarea pour copier
         const modal = document.createElement('div');
         modal.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg1);border:1px solid var(--border);border-radius:12px;padding:20px;max-width:90vw;max-height:85vh;overflow:auto;z-index:9999;box-shadow:0 10px 40px rgba(0,0,0,0.5)';
