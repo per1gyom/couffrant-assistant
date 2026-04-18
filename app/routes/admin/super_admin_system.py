@@ -527,6 +527,46 @@ def admin_inspect_graph(
 
 
 
+@router.post("/admin/odoo/introspect/start")
+def admin_odoo_introspect_start(
+    request: Request,
+    include_empty: bool = False,
+    include_system: bool = False,
+    fetch_fields_for_top: int = 30,
+    _: dict = Depends(require_admin),
+):
+    """Lance une introspection en BACKGROUND. Retourne immediatement un
+    run_id. Utiliser /admin/odoo/introspect/status?run_id=... pour poller."""
+    try:
+        from app.jobs.odoo_introspect import start_introspect_run
+        run_id = start_introspect_run(
+            include_empty=include_empty,
+            include_system=include_system,
+            fetch_fields_for_top=fetch_fields_for_top,
+        )
+        return {"status": "started", "run_id": run_id}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
+@router.get("/admin/odoo/introspect/status")
+def admin_odoo_introspect_status(
+    request: Request,
+    run_id: str,
+    _: dict = Depends(require_admin),
+):
+    """Retourne le status d'un run en cours ou son resultat final."""
+    try:
+        from app.jobs.odoo_introspect import get_run_status
+        status = get_run_status(run_id)
+        if not status:
+            return {"status": "not_found",
+                    "message": f"Run {run_id} inconnu (expire ou jamais lance)"}
+        return status
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
 @router.get("/admin/odoo/introspect")
 def admin_odoo_introspect(
     request: Request,
@@ -535,15 +575,9 @@ def admin_odoo_introspect(
     fetch_fields_for_top: int = 30,
     _: dict = Depends(require_admin),
 ):
-    """Inventaire complet de l'Odoo connecte : tous les modeles accessibles,
-    leurs compteurs de records, leurs champs (pour les top N). Base de
-    travail pour construire le plan de vectorisation universel.
-
-    Parametres :
-    - include_empty : inclure les modeles a 0 record (default False)
-    - include_system : inclure les modeles systeme ir.*/base.*/etc (default False)
-    - fetch_fields_for_top : fetch les champs des N premiers modeles (default 30)
-    """
+    """[OBSOLETE — timeout probable] Version synchrone de l'introspection.
+    Pour ~300 modeles, peut prendre 2-5 min et depasser le timeout HTTP.
+    Preferer /admin/odoo/introspect/start + /admin/odoo/introspect/status."""
     try:
         from app.jobs.odoo_introspect import introspect_odoo
         result = introspect_odoo(
