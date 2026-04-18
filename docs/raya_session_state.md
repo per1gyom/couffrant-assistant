@@ -1100,13 +1100,13 @@ intercaler entre les autres chantiers, pas en bloc monolithique.
 
 ---
 
-## 🐛 BUGS CRITIQUES À TRAITER EN PRIORITÉ (18/04/2026, ~3h)
+## ✅ BUGS CRITIQUES RÉSOLUS LE 18/04/2026 (01h08-01h24)
 
-Deux bugs importants identifiés par Guillaume lors des tests post-étape 2
-Odoo. **Priorité haute** — ces bugs dégradent la confiance dans Raya et
-doivent être corrigés avant les early adopters.
+Les 2 bugs critiques identifiés lors des tests post-étape 2 Odoo ont été
+**diagnostiqués et corrigés dans la nuit du 18/04**. Cette section est
+conservée pour traçabilité mais les bugs ne sont plus à traiter.
 
-### 🔴 Bug 1 — Raya perd le contexte de sa question précédente
+### ✅ Bug 1 — RÉSOLU (commit 5ff31d8)
 
 **Symptôme observé** :
 1. Raya dit : *"Le reste n'est pas encore affiché — la liste est tronquée
@@ -1157,7 +1157,7 @@ Elle ne voit pas sa propre question précédente. Grave.
 
 **Effort estimé** : 1-2h (diagnostic + fix).
 
-### 🟡 Bug 2 — Raya annonce une action mais ne l'affiche pas
+### ✅ Bug 2 — RÉSOLU (commit be440d9)
 
 **Symptôme observé** :
 Guillaume : *"Combien de project.project existent dans Odoo, actifs ou non ?"*
