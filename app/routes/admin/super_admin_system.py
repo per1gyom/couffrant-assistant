@@ -549,6 +549,54 @@ def admin_odoo_introspect_start(
         return {"status": "error", "message": str(e)[:300]}
 
 
+@router.get("/admin/scanner/db-size")
+def admin_scanner_db_size(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Retourne la taille actuelle de la DB PostgreSQL + taille des principales
+    tables du Scanner Universel. Permet de surveiller le remplissage du volume
+    Railway en temps reel pendant un scan."""
+    try:
+        from app.database import get_pg_conn
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            # Taille totale de la DB
+            cur.execute("SELECT pg_database_size(current_database())")
+            total_bytes = cur.fetchone()[0]
+            # Taille par table (relevantes pour le Scanner)
+            cur.execute("""
+                SELECT
+                    tablename,
+                    pg_total_relation_size('public.' || quote_ident(tablename)) AS total_bytes,
+                    pg_relation_size('public.' || quote_ident(tablename)) AS table_bytes,
+                    (SELECT reltuples::bigint FROM pg_class WHERE relname = tablename) AS row_estimate
+                FROM pg_tables
+                WHERE schemaname = 'public'
+                  AND tablename IN ('odoo_semantic_content', 'semantic_graph_nodes',
+                                    'semantic_graph_edges', 'scanner_runs',
+                                    'connector_schemas', 'vectorization_queue',
+                                    'mail_memory', 'conversation_history')
+                ORDER BY total_bytes DESC
+            """)
+            tables = [{
+                "table": r[0],
+                "total_bytes": r[1],
+                "total_mb": round(r[1] / 1024 / 1024, 2),
+                "row_estimate": r[3],
+            } for r in cur.fetchall()]
+        return {
+            "total_db_bytes": total_bytes,
+            "total_db_mb": round(total_bytes / 1024 / 1024, 2),
+            "total_db_gb": round(total_bytes / 1024 / 1024 / 1024, 3),
+            "railway_volume_gb": 5,
+            "usage_pct": round(100 * total_bytes / (5 * 1024**3), 1),
+            "tables": tables,
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
 @router.get("/admin/scanner/debug/embed-test")
 def admin_scanner_debug_embed(
     request: Request,

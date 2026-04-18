@@ -120,13 +120,20 @@ def _get_fields_to_fetch(manifest: dict) -> list:
 def _run_scan_worker(
     run_id: str, tenant_id: str, source: str,
     priority_max: int, purge_first: bool, batch_size: int = 100,
+    record_limits: Optional[dict] = None,
 ):
     """Worker background execute par un thread. Ne retourne rien, ecrit
-    tout dans scanner_runs via orchestrator.update_progress."""
+    tout dans scanner_runs via orchestrator.update_progress.
+
+    record_limits : {model_name: max_records} pour limiter le volume traite.
+    0 = skip complet, None ou absent = illimite.
+    """
     from app.scanner import orchestrator
     from app.scanner import adapter_odoo
     from app.scanner.processor import process_record
     from app.database import get_pg_conn
+
+    record_limits = record_limits or {}
 
     try:
         # 0. Purge initiale si demande (init rebuild)
@@ -161,11 +168,28 @@ def _run_scan_worker(
             fields = _get_fields_to_fetch(manifest)
             checkpoint = orchestrator.get_checkpoint(run_id, model_name) or 0
 
+            # Applique la limite par modele si definie
+            model_limit = record_limits.get(model_name)
+            if model_limit == 0:
+                logger.info("[Runner run=%s] SKIP %s (limite=0)",
+                            run_id, model_name)
+                global_stats["models_processed"] += 1
+                continue
+            if model_limit and model_limit < total_records:
+                logger.info("[Runner run=%s] %s : limite %d/%d records",
+                            run_id, model_name, model_limit, total_records)
+                total_records = model_limit
+
             offset = 0
             records_done_this_model = 0
             records_raya = 0
 
             while True:
+                # Stop si on a atteint la limite du modele
+                if model_limit and records_done_this_model >= model_limit:
+                    logger.info("[Runner run=%s] %s : limite atteinte (%d)",
+                                run_id, model_name, model_limit)
+                    break
                 # Mise a jour progression en debut de batch
                 models_progress[model_name] = {
                     "last_id": checkpoint,
@@ -292,12 +316,30 @@ def _run_scan_worker(
 
 # ─── API publique : lancement et controle des runs ────────────────
 
+# Limites par modele pour eviter de saturer la DB sur les gros volumes.
+# Ajoute 18/04 apres incident de saturation volume Railway (5 Go) sur
+# product.template (133k records = ~800 Mo de vecteurs + index HNSW ~600 Mo).
+# On garde un echantillon representatif, suffisant pour valider les cas
+# Coullet/Glandier, SE100K et les kits. Les 133k articles complets arriveront
+# en Phase 4+ avec volume DB augmente.
+MODEL_RECORD_LIMITS = {
+    "product.template": 5000,     # echantillon : top articles + kits
+    "product.product": 5000,      # meme logique (pas prevu en P1 mais securite)
+    "product.supplierinfo": 10000,  # relations fournisseur
+    "mail.message": 10000,        # historique 10k messages recents
+    "mail.tracking.value": 10000,
+    "res.city": 0,                # referentiel geo = graphe only, skip
+    "res.city.zip": 0,
+}
+
+
 def start_scan_p1(
     tenant_id: str = "couffrant",
     source: str = "odoo",
     priority_max: int = 1,
     purge_first: bool = True,
     run_type: str = "init",
+    record_limits: Optional[dict] = None,
 ) -> str:
     """Lance un scan P1 en background thread.
 
@@ -307,11 +349,17 @@ def start_scan_p1(
         priority_max: 1 pour P1 seul, 2 pour P1+P2
         purge_first: True pour rebuild complet (Q4=A, purge avant)
         run_type: 'init' (premiere fois) / 'rebuild' (re-run ulterieur)
+        record_limits: override optionnel des limites par modele
+            (ex: {"product.template": 1000}). Par defaut MODEL_RECORD_LIMITS.
 
     Retourne le run_id. Le statut est interrogeable via
     orchestrator.get_run_status(run_id).
     """
     from app.scanner import orchestrator
+
+    effective_limits = dict(MODEL_RECORD_LIMITS)
+    if record_limits:
+        effective_limits.update(record_limits)
 
     run_id = orchestrator.create_run(
         tenant_id=tenant_id,
@@ -321,12 +369,14 @@ def start_scan_p1(
             "priority_max": priority_max,
             "purge_first": purge_first,
             "scope": "P1" if priority_max == 1 else f"P1-P{priority_max}",
+            "record_limits": effective_limits,
         },
     )
 
     thread = threading.Thread(
         target=_run_scan_worker,
-        args=(run_id, tenant_id, source, priority_max, purge_first),
+        args=(run_id, tenant_id, source, priority_max, purge_first, 100,
+              effective_limits),
         daemon=True,
         name=f"scanner-{run_id[:8]}",
     )
@@ -334,8 +384,8 @@ def start_scan_p1(
         _ACTIVE_THREADS[run_id] = thread
     thread.start()
 
-    logger.info("[Runner] Scan lance : run_id=%s, priority_max=%d, purge=%s",
-                run_id, priority_max, purge_first)
+    logger.info("[Runner] Scan lance : run_id=%s, priority_max=%d, purge=%s, limits=%s",
+                run_id, priority_max, purge_first, effective_limits)
     return run_id
 
 
