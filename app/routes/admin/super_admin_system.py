@@ -527,6 +527,65 @@ def admin_inspect_graph(
 
 
 
+@router.get("/admin/odoo/introspect")
+def admin_odoo_introspect(
+    request: Request,
+    include_empty: bool = False,
+    include_system: bool = False,
+    fetch_fields_for_top: int = 30,
+    _: dict = Depends(require_admin),
+):
+    """Inventaire complet de l'Odoo connecte : tous les modeles accessibles,
+    leurs compteurs de records, leurs champs (pour les top N). Base de
+    travail pour construire le plan de vectorisation universel.
+
+    Parametres :
+    - include_empty : inclure les modeles a 0 record (default False)
+    - include_system : inclure les modeles systeme ir.*/base.*/etc (default False)
+    - fetch_fields_for_top : fetch les champs des N premiers modeles (default 30)
+    """
+    try:
+        from app.jobs.odoo_introspect import introspect_odoo
+        result = introspect_odoo(
+            include_empty=include_empty,
+            include_system=include_system,
+            fetch_fields_for_top=fetch_fields_for_top,
+        )
+        return result
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
+@router.get("/admin/odoo/fields/{model_name}")
+def admin_odoo_fields(
+    request: Request,
+    model_name: str,
+    _: dict = Depends(require_admin),
+):
+    """Retourne TOUS les champs d'un modele Odoo specifique (sans limite)."""
+    try:
+        from app.connectors.odoo_connector import odoo_call
+        fields = odoo_call(
+            model="ir.model.fields", method="search_read",
+            kwargs={
+                "domain": [["model", "=", model_name]],
+                "fields": ["name", "field_description", "ttype", "relation",
+                           "required", "readonly", "store", "translate",
+                           "help", "related", "compute", "depends"],
+            },
+        )
+        return {
+            "status": "ok",
+            "model": model_name,
+            "fields_count": len(fields or []),
+            "fields": fields,
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
 @router.get("/admin/odoo/test-search")
 def admin_test_semantic_search(
     request: Request,

@@ -328,3 +328,113 @@ valides ou tu corriges ces 2 premières sections ? En particulier :
 - Les **8 principes** sont-ils tous pertinents, ou y en a-t-il que tu veux
   modifier, retirer, ajouter ?
 - Quelque chose te choque, te manque, te paraît trop ambitieux ou pas assez ?
+
+
+---
+
+## 🗺️ Section 3 — Cartographie Odoo exhaustive
+
+Cette section recense **tout ce qui peut vivre dans un Odoo standard** et qui
+doit donc être candidat à l'introspection automatique par le scanner. C'est
+une cartographie de référence pour nous assurer qu'on n'oublie rien. On la
+valide sous-section par sous-section.
+
+### 3.1 — Modèles Odoo classés par catégorie métier
+
+On organise les modèles Odoo en 10 catégories métier. Pour chaque catégorie,
+le scanner doit découvrir automatiquement tous les modèles présents chez
+Guillaume (y compris les modèles custom).
+
+**Catégorie A — Partenaires et contacts (CRM socle)**
+- `res.partner` : contacts, entreprises, prospects, fournisseurs
+- `res.partner.category` : étiquettes clients (type, segment)
+- `res.partner.industry` : secteurs d'activité
+- `res.partner.title` : civilité (M., Mme, Dr.)
+- `res.users` : utilisateurs du système (employés Couffrant)
+- `res.company` : sociétés gérées (si multi-société)
+
+**Catégorie B — CRM / Prospection**
+- `crm.lead` : leads et opportunités
+- `crm.stage` : étapes du pipeline (prospect, RDV, étude, devis, signé, perdu)
+- `crm.team` : équipes commerciales
+- `crm.tag` : tags de qualification
+- `crm.lost.reason` : motifs de perte
+
+**Catégorie C — Ventes / Devis / Commandes**
+- `sale.order` : devis et commandes
+- `sale.order.line` : lignes de devis (chaque article posé)
+- `sale.order.template` : modèles de devis pré-établis (important pour
+  contrôle qualité)
+- `sale.order.template.line` : lignes des modèles
+- `sale.order.option` : options optionnelles d'un modèle
+
+**Catégorie D — Facturation et comptabilité**
+- `account.move` : factures, avoirs, factures fournisseurs
+- `account.move.line` : lignes comptables (écritures)
+- `account.payment` : paiements
+- `account.payment.term` : conditions de règlement
+- `account.tax` : taxes (TVA, etc.)
+- `account.journal` : journaux comptables
+- `account.account` : plan comptable
+
+**Catégorie E — Produits et stock**
+- `product.product` : articles (les 133k de Guillaume)
+- `product.template` : modèles de produits (généralisation de product)
+- `product.category` : catégories de produits
+- `product.pricelist` : listes de prix
+- `product.pricelist.item` : règles de prix spécifiques
+- `product.supplierinfo` : relation produit-fournisseur (prix achat,
+  délais, références fournisseur)
+- `uom.uom` : unités de mesure
+- `product.attribute` : attributs produits (couleur, taille, puissance...)
+
+**Catégorie F — Kits et nomenclatures (MRP)**
+- `mrp.bom` : nomenclatures (structures de kit)
+- `mrp.bom.line` : composants d'une nomenclature
+- `mrp.routing` : gammes de fabrication
+- Nota : c'est ici que se trouvent les **kits Couffrant** (ENT_KIT ...)
+  avec leurs composants (modules + optimiseurs + MOE + protections)
+
+**Catégorie G — Planning et interventions**
+- `calendar.event` : événements calendrier (RDV, chantiers, visites)
+- `calendar.attendee` : participants aux événements
+- `calendar.recurrence` : récurrences
+- `project.task` : tâches projet (si module projet activé)
+- `project.project` : projets
+
+**Catégorie H — Communication (mail)**
+- `mail.message` : messages du fil de discussion (sur tous les records !)
+- `mail.tracking.value` : historique des modifications de chaque record
+- `mail.activity` : activités à faire (rappel, appel, mail)
+- `mail.activity.type` : types d'activités
+- `mail.followers` : abonnés à un record
+- Nota : ces modèles sont **transversaux** — ils s'attachent à TOUS les
+  autres records (partner, order, lead, event, task, etc.)
+
+**Catégorie I — Pièces jointes et documents**
+- `ir.attachment` : pièces jointes (sur tous les records)
+- `documents.document` : documents du module Documents (si installé)
+- Nota : on devra extraire le **contenu** des PDF/Word/Excel attachés
+
+**Catégorie J — Signatures et approbations**
+- `sign.request` : demandes de signature électronique
+- `sign.request.item` : signataires
+- `sign.template` : modèles de documents à signer
+- `approval.request` : demandes d'approbation
+- Nota : extraire aussi le champ `signature` binaire des records signés
+  (devis signés, contrats)
+
+**Catégorie K — Custom et inconnus**
+Tous les modèles qui n'entrent pas dans les 10 catégories ci-dessus. Le
+scanner doit les lister séparément et te proposer de les activer ou non.
+Exemples possibles chez Couffrant :
+- Modules sectoriels PV (si tu as un module photovoltaïque custom)
+- Champs `x_*` ajoutés manuellement
+- Modèles de devis avec options métier
+
+---
+
+**→ Validation Section 3.1**
+
+Tu valides cette classification en 11 catégories (A à K) ? Quelque chose te
+manque, te semble hors-sujet, ou à déplacer ?
