@@ -79,6 +79,30 @@ def _handle_odoo_actions(response, username, tenant_id, tools):
 
     odoo_access = tools.get("odoo_access", "read_only")
 
+    # Helper permissions : appele avant chaque action write/delete.
+    # Retourne True si autorise, False sinon (ajoute un message explicatif
+    # dans confirmed pour que Raya puisse expliquer a l utilisateur).
+    # Plan : docs/raya_permissions_plan.md etape 3.
+    def _check_perm(action_tag: str) -> bool:
+        try:
+            from app.permissions import check_permission
+            allowed, reason = check_permission(
+                tenant_id=tenant_id,
+                username=username,
+                action_tag=action_tag,
+                user_input_excerpt="",
+            )
+            if not allowed:
+                confirmed.append(f"🔒 {action_tag} bloque : {reason}")
+            return allowed
+        except Exception:
+            # En cas d erreur du systeme de permissions, on autorise par
+            # defaut pour ne pas bloquer l usage (le bug sera loggue).
+            import logging
+            logging.getLogger("raya.permissions").exception(
+                "[Permissions] check_perm echec, autorise par securite")
+            return True
+
     # ODOO_SEARCH : [ACTION:ODOO_SEARCH:model|fields|domain_json]
     odoo_searches = _extract_action_tags(response, "ODOO_SEARCH")
     if odoo_searches:
@@ -213,6 +237,8 @@ def _handle_odoo_actions(response, username, tenant_id, tools):
     # ODOO_CREATE : [ACTION:ODOO_CREATE:model|values_json]
     if odoo_access == "full":
         for content in _extract_action_tags(response, "ODOO_CREATE"):
+            if not _check_perm("ODOO_CREATE"):
+                continue
             parts = content.split('|', 1)
             model = parts[0].strip()
             values_str = parts[1].strip().replace("'", '"') if len(parts) > 1 else "{}"
@@ -227,6 +253,8 @@ def _handle_odoo_actions(response, username, tenant_id, tools):
 
         # ODOO_UPDATE : [ACTION:ODOO_UPDATE:model|id|values_json]
         for content in _extract_action_tags(response, "ODOO_UPDATE"):
+            if not _check_perm("ODOO_UPDATE"):
+                continue
             parts = content.split('|', 2)
             if len(parts) < 3:
                 continue
@@ -247,6 +275,8 @@ def _handle_odoo_actions(response, username, tenant_id, tools):
 
         # ODOO_NOTE : [ACTION:ODOO_NOTE:partner_id|texte]
         for match in re.finditer(r'\[ACTION:ODOO_NOTE:(\d+)\|(.+?)\]', response, re.DOTALL):
+            if not _check_perm("ODOO_UPDATE"):  # note = update d un partner
+                continue
             partner_id = int(match.group(1))
             note = match.group(2).strip()
             try:

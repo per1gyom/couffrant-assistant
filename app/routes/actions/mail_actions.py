@@ -32,6 +32,21 @@ def _queue_send_mail(username, tenant_id, mailbox_hint, to_email, subject, body,
     Met en queue un envoi de mail vers le bon connecteur.
     mailbox_hint : email, 'gmail', 'microsoft', '' (auto)
     """
+    # Check permission (Plan : docs/raya_permissions_plan.md etape 3)
+    # SEND_MAIL necessite 'read_write' minimum. Si refuse, on skip avec message.
+    try:
+        from app.permissions import check_permission
+        allowed, reason = check_permission(
+            tenant_id=tenant_id, username=username,
+            action_tag="SEND_MAIL",
+            user_input_excerpt=f"To: {to_email} / Subject: {subject[:100]}",
+        )
+        if not allowed:
+            confirmed.append(f"🔒 Envoi mail bloque : {reason}")
+            return
+    except Exception:
+        pass  # En cas d erreur systeme permissions, on autorise par securite
+
     dedup_key = (to_email.lower(), subject.lower())
     if dedup_key in seen_set:
         return
