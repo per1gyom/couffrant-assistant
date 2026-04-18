@@ -123,7 +123,8 @@ def _build_tenants_overview(tenant_filter=None):
         q_users = """
             SELECT u.username, u.email, u.scope, u.tenant_id, u.last_login, u.created_at,
                    COALESCE(u.account_locked, false), COALESCE(u.must_reset_password, false),
-                   COALESCE(u.suspended, false), u.settings
+                   COALESCE(u.suspended, false), u.settings,
+                   u.display_name, u.phone
             FROM users u {} ORDER BY u.tenant_id, u.created_at
         """
         if tenant_filter:
@@ -146,13 +147,18 @@ def _build_tenants_overview(tenant_filter=None):
 
     users_by_tenant = {}
     for row in users_raw:
-        username, email, scope, tenant_id, last_login, created_at, locked, must_reset, suspended, user_settings = row
+        username, email, scope, tenant_id, last_login, created_at, locked, must_reset, suspended, user_settings, display_name, phone = row
         tid = tenant_id or DEFAULT_TENANT
         da_override = None
         if user_settings and isinstance(user_settings, dict):
             da_override = user_settings.get("direct_actions")
+        # is_hardcoded : indique si le compte est protege par hardcoded_permissions
+        from app.hardcoded_permissions import is_hardcoded_super_admin
         users_by_tenant.setdefault(tid, []).append({
             "username": username, "email": email or "", "scope": scope or "user",
+            "display_name": display_name or "",
+            "phone": phone or "",
+            "is_hardcoded_super_admin": is_hardcoded_super_admin(email or ""),
             "last_login": str(last_login) if last_login else None,
             "created_at": str(created_at) if created_at else None,
             "ms_connected": username in ms_connected,
