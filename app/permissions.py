@@ -456,31 +456,23 @@ def toggle_all_read_only(
             if is_locked:
                 # Mode actuellement locked : on restaure les permissions
                 # precedentes depuis previous_permission_level
-                if actor_role == "super_admin":
-                    cur.execute(
-                        f"""UPDATE tenant_connections
-                            SET tenant_admin_permission_level =
-                                COALESCE(previous_permission_level, 'read'),
-                                super_admin_permission_level =
-                                COALESCE(previous_permission_level, 'read'),
-                                previous_permission_level = NULL,
-                                updated_at = NOW()
-                            {where_tenant}""",
-                        params,
-                    )
-                else:
-                    cur.execute(
-                        f"""UPDATE tenant_connections
-                            SET tenant_admin_permission_level =
-                                COALESCE(previous_permission_level, 'read'),
-                                previous_permission_level = NULL,
-                                updated_at = NOW()
-                            {where_tenant}""",
-                        params,
-                    )
+                # NOTE : on ne touche PAS a super_admin_permission_level
+                # (le plafond ne doit JAMAIS etre ecrase par le toggle,
+                # sinon bug : cycle lock/unlock effondre le plafond a 'read')
+                cur.execute(
+                    f"""UPDATE tenant_connections
+                        SET tenant_admin_permission_level =
+                            COALESCE(previous_permission_level, 'read'),
+                            previous_permission_level = NULL,
+                            updated_at = NOW()
+                        {where_tenant}""",
+                    params,
+                )
                 action = "restored"
             else:
-                # Mode normal : on passe tout en read, on sauvegarde previous
+                # Mode normal : on passe tenant_admin_level en read, on
+                # sauvegarde l ancien dans previous. On ne touche PAS au
+                # plafond super_admin_permission_level.
                 cur.execute(
                     f"""UPDATE tenant_connections
                         SET previous_permission_level =
