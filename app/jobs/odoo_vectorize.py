@@ -37,6 +37,43 @@ logger = logging.getLogger("raya.odoo_vectorize")
 DEFAULT_TENANT = "couffrant_solar"
 
 
+# Mentions legales/boilerplate Odoo qui polluent les embeddings et doivent etre
+# retirees AVANT vectorisation. Identifies via les tests de diagnostic du 18/04 :
+# tous les devis commencaient par la meme mention TVA, ce qui empechait les
+# embeddings denses de differencier les devis entre eux.
+_BOILERPLATE_PATTERNS = [
+    "Le client (voir coordonnées en tête du devis) certifie que les conditions",
+    "Le client (voir coordonnees en tete du devis) certifie que les conditions",
+    "les travaux sont effectués dans des locaux à usage d'habitation",
+    "les travaux sont effectues dans des locaux a usage d habitation",
+]
+
+
+def _strip_boilerplate(text: str) -> str:
+    """Supprime les mentions légales standard répétées sur tous les records
+    (TVA, conditions générales, etc.) qui polluent les embeddings."""
+    if not text:
+        return ""
+    import re
+    # Strip HTML basique (devis contiennent souvent <p>, <em>, <br>, etc.)
+    cleaned = re.sub(r"<[^>]+>", " ", text)
+    cleaned = re.sub(r"&nbsp;", " ", cleaned)
+    cleaned = re.sub(r"&[a-z]+;", " ", cleaned)
+    # Chercher un des patterns boilerplate et couper tout ce qui suit
+    # (la mention TVA Odoo fait ~1000 chars et se termine par une signature client)
+    lower = cleaned.lower()
+    for pattern in _BOILERPLATE_PATTERNS:
+        idx = lower.find(pattern.lower())
+        if idx >= 0:
+            # On garde ce qui est AVANT la mention boilerplate (souvent le titre
+            # ou description propre du devis) et on jette le reste.
+            cleaned = cleaned[:idx].strip()
+            break
+    # Normaliser les espaces
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned
+
+
 def _count_odoo_records(model: str, domain: Optional[list] = None) -> Optional[int]:
     """Retourne le nombre total de records Odoo pour un modele et un domain,
     via search_count (leger, O(1) cote Odoo). Utilise pour detecter proactivement
@@ -69,7 +106,16 @@ def _store_semantic_content(
     odoo_write_date: Optional[str] = None,
 ) -> bool:
     """Insère ou met à jour une entrée dans odoo_semantic_content.
-    Calcule aussi le tsvector français pour recherche sparse.
+
+    Calcule un tsvector COMBINE 'french' + 'simple' pour la recherche sparse :
+    - 'french' : lemmatise + gestion accents, excellent pour les requetes en
+      langage naturel ("devis de couverture", "chantier photovoltaique")
+    - 'simple' : garde les tokens bruts, essentiel pour les noms propres, les
+      references produits (SE100K, DMEGC, SOLAREDGE), les acronymes (AZEM,
+      GPLH, SCI) que 'french' filtre ou deforme
+
+    Resout le bug decouvert dans le test 2 : plainto_tsquery('french','SE100K')
+    retournait 0 resultats alors que 'SE100K' etait present dans les textes.
 
     Retourne True si succès, False sinon."""
     from app.database import get_pg_conn
@@ -93,7 +139,8 @@ def _store_semantic_content(
                text_content, embedding, content_tsv,
                related_partner_id, metadata, odoo_write_date, updated_at)
             VALUES (%s, %s, %s, %s, %s,
-                    %s::vector, to_tsvector('french', %s),
+                    %s::vector,
+                    to_tsvector('french', %s) || to_tsvector('simple', %s),
                     %s, %s::jsonb, %s, NOW())
             ON CONFLICT (tenant_id, source_model, source_record_id, content_type)
             DO UPDATE SET
@@ -106,7 +153,7 @@ def _store_semantic_content(
               updated_at = NOW()
         """, (tenant_id, source_model, str(source_record_id), content_type,
               text_content[:8000],
-              vec_str, text_content[:8000],
+              vec_str, text_content[:8000], text_content[:8000],
               str(related_partner_id) if related_partner_id else None,
               meta_json, odoo_write_date))
         conn.commit()
@@ -139,9 +186,9 @@ def vectorize_partners(tenant_id: str = DEFAULT_TENANT, limit: int = 5000) -> di
             kwargs={
                 "domain": [["active", "=", True]],
                 "fields": ["id", "name", "comment", "email", "phone",
-                           "mobile", "street", "city", "zip", "is_company",
-                           "parent_id", "customer_rank", "supplier_rank",
-                           "write_date"],
+                           "mobile", "street", "street2", "city", "zip",
+                           "is_company", "parent_id", "customer_rank",
+                           "supplier_rank", "write_date"],
                 "limit": limit,
             },
         )
@@ -203,11 +250,48 @@ def vectorize_partners(tenant_id: str = DEFAULT_TENANT, limit: int = 5000) -> di
                     stats["graph_edges"] += 1
                     break
 
-        # Préparer le texte à vectoriser (concaténation sémantique utile)
+        # Préparer le texte à vectoriser — enrichi (Fix C du 18/04/2026)
+        # Inclut TOUS les champs pertinents pour :
+        # 1. Permettre la recherche par tel/email/adresse ("trouve qui a ce numero")
+        # 2. Detecter les doublons (deux fiches avec meme tel/email/adresse)
+        # 3. Remonter le contexte complet lors d'une recherche semantique
         text_bits = [node_label]
-        if p.get("comment"): text_bits.append(p["comment"])
-        if p.get("city"): text_bits.append(f"à {p['city']}")
         if is_co: text_bits.append("(entreprise)")
+        if p.get("comment"): text_bits.append(_strip_boilerplate(p["comment"]))
+
+        # Coordonnees
+        contact_parts = []
+        if p.get("email"): contact_parts.append(f"email {p['email']}")
+        if p.get("phone"): contact_parts.append(f"tel {p['phone']}")
+        if p.get("mobile"): contact_parts.append(f"mobile {p['mobile']}")
+        if contact_parts:
+            text_bits.append(", ".join(contact_parts))
+
+        # Adresse
+        address_parts = []
+        if p.get("street"): address_parts.append(str(p["street"]))
+        if p.get("street2"): address_parts.append(str(p["street2"]))
+        zip_city = []
+        if p.get("zip"): zip_city.append(str(p["zip"]))
+        if p.get("city"): zip_city.append(str(p["city"]))
+        if zip_city: address_parts.append(" ".join(zip_city))
+        if address_parts:
+            text_bits.append("adresse : " + ", ".join(address_parts))
+
+        # Parent (contact d'une entreprise)
+        parent = p.get("parent_id")
+        if parent and isinstance(parent, list) and len(parent) > 1:
+            text_bits.append(f"contact de {parent[1]}")
+
+        # Indicateurs business
+        rank_bits = []
+        if p.get("customer_rank", 0) > 0:
+            rank_bits.append("client")
+        if p.get("supplier_rank", 0) > 0:
+            rank_bits.append("fournisseur")
+        if rank_bits:
+            text_bits.append(" et ".join(rank_bits))
+
         text = " — ".join([b for b in text_bits if b and str(b).strip()])
 
         if text.strip():
@@ -312,35 +396,49 @@ def vectorize_sale_orders(tenant_id: str = DEFAULT_TENANT, limit: int = 2000) ->
                     break
 
 
-        # Récupérer les lignes de commande et créer les arêtes has_line
-        # vers les produits (ET vectoriser les noms de produits pour recherche).
+        # Recuperer les lignes de commande. Fix C du 18/04/2026 :
+        # - On recupere le champ 'name' complet (description riche multi-ligne
+        #   qui contient les references produit type SE100K, DMEGC, etc.)
+        # - On cree une entree VECTORISEE SEPAREE par ligne (content_type='order_line')
+        #   pour que la recherche hybrid trouve "devis avec SE100K" en matchant
+        #   directement le texte de la ligne, pas dilue dans l'agregat devis
+        # - On garde aussi l'agregat global (content_type='order_full') pour la
+        #   vue synthese
         line_ids = o.get("order_line") or []
         lines_text_parts = []
+        line_texts_to_embed = []  # entrees order_line a vectoriser apres
         if line_ids:
             try:
                 lines = odoo_call(
                     model="sale.order.line", method="search_read",
                     kwargs={
                         "domain": [["id", "in", line_ids]],
-                        "fields": ["id", "name", "product_id", "product_uom_qty",
-                                   "price_subtotal"],
+                        "fields": ["id", "name", "product_id",
+                                   "product_uom_qty", "price_subtotal",
+                                   "display_name"],
                     },
                 )
                 for ln in (lines or []):
                     prod = ln.get("product_id")
                     prod_id = prod[0] if isinstance(prod, list) and prod else None
                     prod_name = prod[1] if isinstance(prod, list) and len(prod) > 1 else ""
-                    line_name = ln.get("name", "")
+                    # line_name = description complete (peut contenir plusieurs
+                    # lignes avec les specs techniques, references, garanties)
+                    line_name = _strip_boilerplate(ln.get("name", "") or "")
                     qty = ln.get("product_uom_qty", 0)
                     subtotal = ln.get("price_subtotal", 0)
-                    lines_text_parts.append(
-                        f"{qty} × {prod_name or line_name} ({subtotal:.0f}€)"
-                    )
-                    # Créer un nœud Product si absent
+
+                    # Agregat resume pour le devis global (court)
+                    resume_line = f"{qty} × {prod_name or line_name[:80]} ({subtotal:.0f}€)"
+                    lines_text_parts.append(resume_line)
+
+                    # Creer un noeud Product si absent
                     if prod_id:
                         prod_key = f"odoo-product-{prod_id}"
-                        if add_node(tenant_id, "Product", prod_key, prod_name or line_name,
-                                    {"product_ref": line_name}, source="odoo",
+                        if add_node(tenant_id, "Product", prod_key,
+                                    prod_name or line_name[:100],
+                                    {"product_ref": line_name[:500]},
+                                    source="odoo",
                                     source_record_id=str(prod_id)):
                             stats["product_nodes"] += 1
                         # Arête Deal → Product (has_line)
@@ -352,16 +450,42 @@ def vectorize_sale_orders(tenant_id: str = DEFAULT_TENANT, limit: int = 2000) ->
                             edge_confidence=1.0,
                             edge_source="explicit_source",
                             edge_metadata={"qty": qty, "subtotal": subtotal,
-                                           "line_desc": line_name[:200]},
+                                           "line_desc": line_name[:500]},
                         ):
                             stats["graph_edges"] += 1
+
+                    # Preparer l entree vectorisee de la LIGNE (Fix C)
+                    # Contient : produit + description technique complete +
+                    # contexte devis + contexte client. C'est ce qui permet a
+                    # Raya de retrouver 'SE100K chez AZEM' en une requete.
+                    if line_name or prod_name:
+                        line_full_text = (
+                            f"{prod_name} — {line_name} "
+                            f"(Devis {node_label} pour {partner_name}, {qty} unités, {subtotal:.0f}€)"
+                        ).strip()
+                        line_texts_to_embed.append({
+                            "line_id": ln["id"],
+                            "order_id": oid,
+                            "text": line_full_text,
+                            "related_partner_id": str(partner_id) if partner_id else None,
+                            "metadata": {
+                                "order_name": node_label,
+                                "partner_name": partner_name,
+                                "product_name": prod_name,
+                                "qty": qty,
+                                "subtotal": subtotal,
+                            },
+                        })
             except Exception as e:
                 logger.debug("[Vectorize] Lignes order %s : %s", oid, str(e)[:100])
 
-        # Construire le texte sémantique global du devis
+        # Construire le texte semantique global du devis (vue synthese)
+        # - note nettoyee du boilerplate TVA
+        # - resume des lignes (pour retrouver le devis si on cherche un produit)
         text_bits = [node_label]
         if partner_name: text_bits.append(f"pour {partner_name}")
-        if o.get("note"): text_bits.append(o["note"])
+        note_clean = _strip_boilerplate(o.get("note", "") or "")
+        if note_clean: text_bits.append(note_clean)
         if lines_text_parts:
             text_bits.append("Contenu : " + " ; ".join(lines_text_parts[:20]))
         text_bits.append(f"(état : {state})")
@@ -373,10 +497,11 @@ def vectorize_sale_orders(tenant_id: str = DEFAULT_TENANT, limit: int = 2000) ->
                 "source_record_id": str(oid), "text": text,
                 "write_date": o.get("write_date"),
                 "related_partner_id": str(partner_id) if partner_id else None,
+                "line_entries": line_texts_to_embed,
             })
 
 
-    # Batch embeddings
+    # Batch embeddings de l'agregat devis
     for i in range(0, len(texts_to_embed), 50):
         batch_texts = texts_to_embed[i:i + 50]
         batch_entries = entries_to_embed[i:i + 50]
@@ -390,9 +515,34 @@ def vectorize_sale_orders(tenant_id: str = DEFAULT_TENANT, limit: int = 2000) ->
             ):
                 stats["vectorized"] += 1
 
-    logger.info("[Vectorize] sale.order : %d fetched, %d deals, %d products, %d edges, %d vectorized",
+    # Fix C : batch embeddings des LIGNES individuelles (content_type='order_line')
+    # Potentiellement plusieurs milliers d entrees, on traite par batch de 50
+    all_line_entries = []
+    for entry in entries_to_embed:
+        all_line_entries.extend(entry.get("line_entries", []))
+    stats["lines_total"] = len(all_line_entries)
+
+    for i in range(0, len(all_line_entries), 50):
+        batch = all_line_entries[i:i + 50]
+        batch_texts = [le["text"][:4000] for le in batch]
+        embeddings = embed_batch(batch_texts)
+        for le, emb in zip(batch, embeddings):
+            if _store_semantic_content(
+                tenant_id=tenant_id,
+                source_model="sale.order.line",
+                source_record_id=str(le["line_id"]),
+                content_type="order_line",
+                text_content=le["text"],
+                embedding=emb,
+                related_partner_id=le.get("related_partner_id"),
+                metadata=le.get("metadata"),
+            ):
+                stats["lines_vectorized"] = stats.get("lines_vectorized", 0) + 1
+
+    logger.info("[Vectorize] sale.order : %d fetched, %d deals, %d products, %d edges, %d aggreg, %d lines",
                 stats["fetched"], stats["graph_nodes"], stats["product_nodes"],
-                stats["graph_edges"], stats["vectorized"])
+                stats["graph_edges"], stats["vectorized"],
+                stats.get("lines_vectorized", 0))
     return stats
 
 

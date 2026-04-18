@@ -116,9 +116,13 @@ def _sparse_search(
     try:
         conn = get_pg_conn()
         c = conn.cursor()
+        # Recherche BM25 avec dictionnaire COMBINE 'french' + 'simple' pour capter
+        # a la fois les requetes en langage naturel et les noms propres/acronymes
+        # (SE100K, AZEM, SOLAREDGE, DMEGC, etc.) que 'french' seul filtre.
         filters = ["tenant_id = %s",
-                   "content_tsv @@ plainto_tsquery('french', %s)"]
-        params = [tenant_id, query_text.strip()]
+                   "content_tsv @@ (plainto_tsquery('french', %s) "
+                   "|| plainto_tsquery('simple', %s))"]
+        params = [tenant_id, query_text.strip(), query_text.strip()]
         if source_models:
             filters.append("source_model = ANY(%s)")
             params.append(source_models)
@@ -127,12 +131,14 @@ def _sparse_search(
         c.execute(f"""
             SELECT id, source_model, source_record_id, content_type,
                    text_content, related_partner_id, metadata,
-                   ts_rank_cd(content_tsv, plainto_tsquery('french', %s)) AS rank_score
+                   ts_rank_cd(content_tsv,
+                              plainto_tsquery('french', %s)
+                              || plainto_tsquery('simple', %s)) AS rank_score
             FROM odoo_semantic_content
             WHERE {where}
             ORDER BY rank_score DESC
             LIMIT %s
-        """, [query_text.strip()] + params + [limit])
+        """, [query_text.strip(), query_text.strip()] + params + [limit])
 
         results = []
         for idx, row in enumerate(c.fetchall()):
