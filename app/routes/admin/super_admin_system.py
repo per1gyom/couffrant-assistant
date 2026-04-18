@@ -252,3 +252,57 @@ def admin_discovery_status(
     return get_discovery_status(tenant_id)
 
 
+
+
+
+# ─── VECTORISATION ODOO (Bloc 2 du chantier memoire 4 couches, 18/04/2026) ───
+# Voir docs/raya_memory_architecture.md + app/jobs/odoo_vectorize.py
+
+@router.post("/admin/odoo/vectorize")
+def admin_odoo_vectorize(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Lance la vectorisation complete Odoo pour le tenant de l'admin :
+    partners + sale.order + leads + events.
+
+    Peuple le graphe semantique typé (nœuds Person/Company/Deal/Lead/Event/
+    Product, arêtes contact_of/partner_of/has_line/scheduled_for) ET
+    vectorise le contenu textuel (descriptions, notes, commentaires RDV).
+
+    Execution synchrone : prend 30 secondes a 2 minutes selon le volume
+    de donnees Odoo du tenant. Retourne un dict avec les stats par modele.
+    """
+    try:
+        from app.tenant_manager import get_user_tenants
+        tenants = get_user_tenants(request.session.get("username", ""))
+        tenant_id = tenants[0] if tenants else "couffrant_solar"
+
+        from app.jobs.odoo_vectorize import vectorize_all
+        result = vectorize_all(tenant_id=tenant_id)
+        return {"status": "ok", "result": result}
+    except Exception as e:
+        import traceback
+        return {
+            "status": "error",
+            "message": str(e)[:300],
+            "trace": traceback.format_exc()[:2000],
+        }
+
+
+@router.get("/admin/odoo/graph-stats")
+def admin_odoo_graph_stats(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Retourne les stats du graphe semantique pour le tenant de l'admin.
+    Affiche dans la UI combien de nœuds de chaque type + arêtes par type."""
+    try:
+        from app.tenant_manager import get_user_tenants
+        tenants = get_user_tenants(request.session.get("username", ""))
+        tenant_id = tenants[0] if tenants else "couffrant_solar"
+        from app.semantic_graph import count_graph
+        return {"status": "ok", "tenant_id": tenant_id,
+                "stats": count_graph(tenant_id)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}

@@ -214,6 +214,7 @@ async function loadConnections(tenantId,idx){
           <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px;cursor:pointer;border-bottom:1px dashed var(--text3)" onclick="renameConn(${c.id},'${tenantId}',${idx},'${c.label.replace(/'/g,"\\'")}')" title="Cliquer pour renommer">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span> ${statusBadge}</div>
           ${oauthBtn}
           ${['odoo','microsoft','gmail'].includes(c.tool_type)?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px" onclick="discoverTool('${tenantId}','${c.tool_type}',this)">🔍 Découvrir</button>`:''}
+          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#8b5cf6" onclick="vectorizeOdoo(this)" title="Vectorisation sémantique + graphe typé">🧠 Vectoriser</button>`:''}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
           <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
         </div>
@@ -234,6 +235,38 @@ async function createConnection(tenantId,idx){
     if(d.status==='ok'){document.getElementById('conn-add-'+idx).style.display='none';document.getElementById('conn-type-'+idx).value='';document.getElementById('conn-label-'+idx).value='';loadConnections(tenantId,idx);}
     else setAlert('companies-alert','❌ '+(d.message||'Erreur'),'err');
   }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
+}
+
+async function vectorizeOdoo(btn){
+  // Chantier memoire 4 couches (Bloc 2, 18/04/2026) :
+  // Lance la vectorisation Odoo -> peuple le graphe semantique type (noeuds
+  // Person/Company/Deal/Lead/Event/Product + aretes typees) et la table
+  // odoo_semantic_content (embedding + tsvector FR pour hybrid search).
+  if (!confirm('Vectoriser tout Odoo ? Ça peut prendre 1-2 minutes (partners + devis + leads + events).')) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Vectorisation…';
+  try{
+    const r = await fetch('/admin/odoo/vectorize', {method: 'POST'});
+    const d = await r.json();
+    if (d.status !== 'ok') throw new Error(d.message || 'Erreur inconnue');
+    const res = d.result || {};
+    // Construire le récap lisible
+    const parts = [];
+    if (res.partners) parts.push(`${res.partners.vectorized} contact(s) vectorisé(s), ${res.partners.graph_nodes} nœud(s), ${res.partners.graph_edges} arête(s)`);
+    if (res.sale_orders) parts.push(`${res.sale_orders.vectorized} devis, ${res.sale_orders.product_nodes} produit(s), ${res.sale_orders.graph_edges} arête(s)`);
+    if (res.leads) parts.push(`${res.leads.vectorized} lead(s), ${res.leads.graph_edges} arête(s)`);
+    if (res.events) parts.push(`${res.events.vectorized} événement(s), ${res.events.graph_edges} arête(s)`);
+    const gs = res.graph_stats || {};
+    const types = Object.entries(gs.nodes_by_type || {}).map(([k,v])=>`${k}=${v}`).join(', ');
+    const summary = `✅ Vectorisation OK en ${res.total_duration_sec || '?'}s. ${parts.join(' · ')}. Graphe total : ${gs.nodes_total||0} nœuds (${types}), ${gs.edges_total||0} arêtes.`;
+    setAlert('companies-alert', summary, 'ok');
+  }catch(e){
+    setAlert('companies-alert', '❌ Vectorisation échouée : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
 }
 
 async function discoverTool(tenantId,toolType,btn){
