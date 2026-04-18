@@ -306,40 +306,46 @@ function escapeHtml(str){
 const _tenantLockState = {};
 
 async function toggleReadOnlyForTenant(tenantId, tenantName){
-  // Utilise le cache local (meme source que le bouton visuel) plutot qu un
-  // nouveau fetch qui pourrait donner un resultat different.
-  let cached = _tenantLockState[tenantId];
-  if(!cached){
-    // Fallback : si pas en cache, on demande au backend une fois
-    try{
-      cached = await (await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/lock-status`)).json();
-      _tenantLockState[tenantId] = cached;
-    }catch(e){
-      setAlert('companies-alert', '❌ Impossible de lire l etat actuel : '+e.message, 'err');
-      return;
-    }
+  // Toujours recharger l etat depuis le backend avant le modal, pour ne pas
+  // utiliser un cache obsolete (la DB a pu changer entre temps).
+  let cached;
+  try{
+    console.log('[toggleReadOnlyForTenant] Rechargement etat avant toggle...');
+    cached = await (await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/lock-status`)).json();
+    _tenantLockState[tenantId] = cached;
+    console.log('[toggleReadOnlyForTenant] Etat lu :', cached);
+  }catch(e){
+    setAlert('companies-alert', '❌ Impossible de lire l etat actuel : '+e.message, 'err');
+    return;
   }
   const isLocked = cached.is_locked === true;
   const total = cached.total_connections || 0;
+  if(total === 0){
+    setAlert('companies-alert', '❌ Aucune connexion a modifier pour ce tenant', 'err');
+    return;
+  }
   const stateText = isLocked ? 'VERROUILLE en lecture seule' : 'OUVERT (permissions actives)';
   const actionText = isLocked ? 'RESTAURER les permissions precedentes' : 'VERROUILLER toutes les connexions en lecture seule';
   const answer = prompt(`⚠️ Tenant : ${tenantName}\n\nEtat actuel : ${stateText}\nAction : ${actionText}\n\n(${total} connexion(s))\n\nTape "oui" pour confirmer :`);
   if(!answer || answer.trim().toLowerCase() !== 'oui') return;
   try{
+    console.log('[toggleReadOnlyForTenant] POST /admin/tenant/'+tenantId+'/toggle-read-only...');
     const r = await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/toggle-read-only`, {method:'POST'});
     const d = await r.json();
+    console.log('[toggleReadOnlyForTenant] Reponse backend :', d);
     if(d.status === 'ok'){
       const msg = d.action === 'locked'
         ? `🔒 ${tenantName} : ${d.affected} connexion(s) basculee(s) en lecture seule`
         : `🔓 ${tenantName} : ${d.affected} connexion(s) restauree(s)`;
       setAlert('companies-alert', msg, 'ok');
-      // Invalider le cache avant rechargement
+      // Invalider le cache + recharger toute la liste
       delete _tenantLockState[tenantId];
       loadCompanies();
     } else {
       setAlert('companies-alert', '❌ '+(d.message||'Erreur'), 'err');
     }
   }catch(e){
+    console.error('[toggleReadOnlyForTenant] Erreur :', e);
     setAlert('companies-alert', '❌ '+e.message, 'err');
   }
 }

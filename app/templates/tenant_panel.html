@@ -224,29 +224,38 @@ async function updatePermission(connectionId, newLevel){
 }
 
 async function toggleReadOnly(){
-  // Utilise l etat mis a jour en temps reel par loadPermissions (source unique de verite).
-  // Evite toute desynchro avec un endpoint /lock-status separe.
-  if(!_lastPermissionsState || _lastPermissionsState.total === 0){
-    // Fallback : recharger d abord pour avoir les donnees a jour
-    await loadPermissions();
-  }
+  // Toujours recharger depuis le backend AVANT d afficher le modal, pour
+  // avoir l etat reel (la DB peut avoir change depuis le dernier loadPermissions
+  // via une autre session ou un autre onglet).
+  console.log('[toggleReadOnly] Rechargement etat avant toggle...');
+  await loadPermissions();
   const isLocked = _lastPermissionsState.isLocked === true;
   const total = _lastPermissionsState.total;
+  console.log('[toggleReadOnly] Etat lu :', {isLocked, total});
+  if(total === 0){
+    setAlert('company-alert', '❌ Aucune connexion a modifier', 'err');
+    return;
+  }
   const stateText = isLocked ? 'VERROUILLÉ en lecture seule' : 'OUVERT (permissions actives)';
   const actionText = isLocked ? 'RESTAURER les permissions précédentes' : 'VERROUILLER toutes les connexions en lecture seule';
   const answer = prompt(`⚠️ Permissions de ta société\n\nÉtat actuel : ${stateText}\nAction : ${actionText}\n\n(${total} connexion(s))\n\nTape "oui" pour confirmer :`);
   if(!answer || answer.trim().toLowerCase() !== 'oui') return;
   try{
+    console.log('[toggleReadOnly] POST /tenant/permissions/toggle-read-only...');
     const r = await fetch('/tenant/permissions/toggle-read-only', {method:'POST'});
     const d = await r.json();
+    console.log('[toggleReadOnly] Reponse backend :', d);
     if(d.status === 'ok'){
-      const lab = d.action === 'locked' ? '🔒 Verrouillé en lecture' : '🔓 Permissions restaurées';
+      const lab = d.action === 'locked' ? '🔒 Verrouillé en lecture seule' : '🔓 Permissions restaurées';
       setAlert('company-alert', `${lab} (${d.affected} connexion(s))`, 'ok');
-      loadPermissions();
+      // Recharger pour mettre a jour le bouton, le bandeau et les radios
+      await loadPermissions();
+      console.log('[toggleReadOnly] Apres reload :', _lastPermissionsState);
     } else {
       setAlert('company-alert', '❌ '+(d.message||'Erreur'), 'err');
     }
   }catch(e){
+    console.error('[toggleReadOnly] Erreur :', e);
     setAlert('company-alert', '❌ '+e.message, 'err');
   }
 }
