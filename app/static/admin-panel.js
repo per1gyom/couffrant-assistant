@@ -3,9 +3,9 @@ let allRules=[], allInsights=[];
 let currentEditUser=null, usernameToDelete=null;
 let isSuperAdmin=false, currentUserScope='', currentUserTenantId='';
 // Helper : true si l user est admin Raya OU super_admin (hardcode ou non).
-// Utilise partout a la place de isAdminOrSuper() qui ne reconnait
+// Utilise partout a la place de currentUserScope==='admin' qui ne reconnait
 // pas les super_admin et les fait basculer sur les endpoints /tenant en 403.
-function isAdminOrSuper(){ return isAdminOrSuper() || currentUserScope==='super_admin'; }
+function isAdminOrSuper(){ return currentUserScope==='admin' || currentUserScope==='super_admin'; }
 let _lastTenants=[];
 let currentEditTenantId=null, tenantToDelete=null;
 
