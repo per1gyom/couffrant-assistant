@@ -899,7 +899,7 @@ async function loadCompanies(){
         <div class="tenant-header" onclick="toggleTenant(${i})">
           <span class="tenant-toggle" id="toggle-${i}">›</span>
           <span class="tenant-name">🏢 ${t.name}${(t.settings||{}).suspended?'<span class="badge badge-yellow" style="margin-left:8px;font-size:10px">⏸️ SUSPENDU</span>':''}${legalForm?' <span style="font-size:11px;color:var(--text3);font-weight:400">'+legalForm+'</span>':''}</span>
-          <div class="tenant-meta"><span>👥 ${t.user_count} collaborateur(s)</span><span>📬 ${fmt(t.total_mails)} mails</span><span>💬 ${fmt(t.total_conv)} conversations</span><span id="conn-summary-${i}" style="display:inline-flex;gap:6px;align-items:center">…</span>${siret?`<span style="color:var(--text3)">SIRET: ${siret}</span>`:''}${isAdminOrSuper()?`<button class="btn tenant-lock-btn" id="lock-btn-${i}" data-tenant-id="${t.tenant_id}" data-tenant-name="${(t.name||'').replace(/"/g,'&quot;')}" onclick="event.stopPropagation();const btn=this;toggleReadOnlyForTenant(btn.dataset.tenantId,btn.dataset.tenantName)" style="background:transparent;border:1px solid var(--border);color:var(--text2);padding:2px 8px;font-size:11px;border-radius:6px;cursor:pointer;margin-left:auto" title="Bascule toutes les connexions de ce tenant en lecture seule">🔒 Lecture</button>`:''}</div>
+          <div class="tenant-meta"><span>👥 ${t.user_count} collaborateur(s)</span><span>📬 ${fmt(t.total_mails)} mails</span><span>💬 ${fmt(t.total_conv)} conversations</span><span id="conn-summary-${i}" style="display:inline-flex;gap:6px;align-items:center">…</span>${siret?`<span style="color:var(--text3)">SIRET: ${siret}</span>`:''}${isAdminOrSuper()?`<button class="btn tenant-lock-btn" id="lock-btn-${i}" data-tenant-id="${t.tenant_id}" data-tenant-name="${(t.name||'').replace(/"/g,'&quot;')}" onclick="event.stopPropagation();const btn=this;toggleReadOnlyForTenant(btn.dataset.tenantId,btn.dataset.tenantName)" style="background:transparent;border:1px solid var(--border);color:var(--text2);padding:2px 8px;font-size:11px;border-radius:6px;cursor:pointer;margin-left:auto" title="Chargement de l etat...">🔓 Lecture écriture</button>`:''}</div>
         </div>
         <div class="tenant-body" id="body-${i}">
           <table><thead><tr><th>Identifiant</th><th>Email</th><th>Rôle</th><th>MS</th><th>Mails</th><th>Conv.</th><th>Dernière connexion</th><th>Actions</th></tr></thead>
@@ -978,13 +978,13 @@ async function updateLockButtonState(tenantId, idx){
     const btn = document.getElementById('lock-btn-'+idx);
     if(!btn) return;
     if(d.is_locked === true){
-      btn.innerHTML = '🔓 Verrouille';
+      btn.innerHTML = '🔒 Lecture seule';
       btn.style.background = '#7f1d1d';  // rouge fonce
       btn.style.borderColor = '#dc2626';
       btn.style.color = '#fca5a5';
       btn.title = `Ce tenant a ${d.locked_connections}/${d.total_connections} connexion(s) en lecture seule. Cliquer pour restaurer.`;
     } else {
-      btn.innerHTML = '🔒 Lecture';
+      btn.innerHTML = '🔓 Lecture écriture';
       btn.style.background = 'transparent';
       btn.style.borderColor = 'var(--border)';
       btn.style.color = 'var(--text2)';

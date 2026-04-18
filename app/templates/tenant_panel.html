@@ -45,7 +45,7 @@
         <div style="font-weight:700;font-size:14px">🔐 Permissions des connexions</div>
         <div style="font-size:11px;color:var(--text3)">Contrôle ce que Raya peut faire sur chaque outil. Lecture seule = sécurité maximale.</div>
       </div>
-      <button class="btn" id="toggle-read-only-btn" onclick="toggleReadOnly()" style="background:#f59e0b;color:white;padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:600">🔒 Tout en lecture seule</button>
+      <button class="btn" id="toggle-read-only-btn" onclick="toggleReadOnly()" style="background:transparent;border:1px solid var(--border);color:var(--text2);padding:6px 14px;border-radius:6px;cursor:pointer;font-weight:600">🔓 Lecture écriture</button>
     </div>
     <div id="permissions-list" style="font-family:var(--mono);font-size:12px"><div style="color:var(--text3)">Chargement...</div></div>
   </div>
@@ -157,11 +157,15 @@ async function loadPermissions(){
     const isAllLocked = locked > 0 && locked >= data.length / 2;
     const toggleBtn = document.getElementById('toggle-read-only-btn');
     if(isAllLocked){
-      toggleBtn.innerHTML = '🔓 Rétablir les permissions';
-      toggleBtn.style.background = '#10b981';
+      toggleBtn.innerHTML = '🔒 Lecture seule';
+      toggleBtn.style.background = '#7f1d1d';
+      toggleBtn.style.borderColor = '#dc2626';
+      toggleBtn.style.color = '#fca5a5';
     } else {
-      toggleBtn.innerHTML = '🔒 Tout en lecture seule';
-      toggleBtn.style.background = '#f59e0b';
+      toggleBtn.innerHTML = '🔓 Lecture écriture';
+      toggleBtn.style.background = 'transparent';
+      toggleBtn.style.borderColor = 'var(--border)';
+      toggleBtn.style.color = 'var(--text2)';
     }
     // Construction du tableau
     const LEVEL_LABELS = {'read':'Lecture','read_write':'Lect+Écrit','read_write_delete':'Tout'};
