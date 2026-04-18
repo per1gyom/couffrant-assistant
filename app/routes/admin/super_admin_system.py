@@ -549,6 +549,89 @@ def admin_odoo_introspect_start(
         return {"status": "error", "message": str(e)[:300]}
 
 
+@router.get("/admin/scanner/debug/embed-test")
+def admin_scanner_debug_embed(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Diagnostic Phase 3 : teste embed() + insert chunk + verifie l env.
+    Retourne un rapport detaille pour identifier pourquoi les chunks ne
+    s ecrivent pas (0 chunks malgre N records scannes)."""
+    import os, json, traceback
+    from app.database import get_pg_conn
+    report = {
+        "env_openai_api_key_set": bool(os.getenv("OPENAI_API_KEY")),
+        "env_openai_api_key_len": len(os.getenv("OPENAI_API_KEY") or ""),
+    }
+    # 1. Test import embedding module
+    try:
+        from app.embedding import embed, _get_client
+        report["embedding_module_import"] = "ok"
+        client = _get_client()
+        report["embedding_client_init"] = "ok" if client else "FAIL - client None"
+    except Exception as e:
+        report["embedding_module_import"] = f"ERR: {str(e)[:200]}"
+        return report
+    # 2. Test embed() sur un texte simple
+    try:
+        vec = embed("Test diagnostic scanner P1")
+        if vec is None:
+            report["embed_test_call"] = "FAIL - returned None"
+        else:
+            report["embed_test_call"] = f"ok - {len(vec)} dims, first={vec[0]:.4f}"
+    except Exception as e:
+        report["embed_test_call"] = f"EXCEPTION: {str(e)[:300]}"
+        return report
+    # 3. Test format pgvector
+    try:
+        vec_str = "[" + ",".join(str(x) for x in vec) + "]"
+        report["pgvector_format_len"] = len(vec_str)
+        report["pgvector_format_preview"] = vec_str[:80] + "..."
+    except Exception as e:
+        report["pgvector_format"] = f"ERR: {str(e)[:200]}"
+        return report
+    # 4. Test INSERT dans odoo_semantic_content
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """INSERT INTO odoo_semantic_content
+                   (tenant_id, source_model, source_record_id, content_type,
+                    content_text, embedding, metadata, odoo_write_date, updated_at)
+                   VALUES (%s, %s, %s, 'record_summary', %s, %s::vector, %s, NOW(), NOW())
+                   ON CONFLICT (tenant_id, source_model, source_record_id, content_type)
+                   DO UPDATE SET content_text=EXCLUDED.content_text, updated_at=NOW()
+                   RETURNING id""",
+                ("couffrant", "debug.test", "999999",
+                 "Test chunk diagnostic", vec_str, json.dumps({"test": True})),
+            )
+            row = cur.fetchone()
+            conn.commit()
+            report["insert_test"] = f"ok - chunk_id={row[0] if row else None}"
+            # Cleanup : on supprime ce chunk de test
+            cur.execute(
+                """DELETE FROM odoo_semantic_content
+                   WHERE source_model='debug.test'""")
+            conn.commit()
+            report["cleanup"] = "ok"
+    except Exception as e:
+        report["insert_test"] = f"EXCEPTION: {str(e)[:400]}"
+        report["insert_trace"] = traceback.format_exc()[:800]
+    # 5. Check table structure (dim de la colonne embedding)
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """SELECT atttypmod FROM pg_attribute
+                   WHERE attrelid='odoo_semantic_content'::regclass
+                     AND attname='embedding'""")
+            row = cur.fetchone()
+            report["embedding_column_typmod"] = row[0] if row else "N/A"
+    except Exception as e:
+        report["embedding_column_check"] = f"ERR: {str(e)[:200]}"
+    return report
+
+
 @router.post("/admin/scanner/run/start")
 def admin_scanner_run_start(
     request: Request,
