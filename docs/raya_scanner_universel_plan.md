@@ -1087,3 +1087,56 @@ Si tu veux répondre aux 10 questions en une fois via "mes réponses à Q1 = A,
 Q2 = B, etc." c'est le plus efficace. Tu peux aussi dire "suis tes
 recommandations partout" et j'applique les défauts.
 </content>
+---
+
+## ✅ Section 7 — Arbitrages validés par Guillaume (18/04 ~16h30)
+
+Les 10 questions ouvertes ont été tranchées. Ces choix deviennent des
+engagements du plan et seront implémentés dans la Phase 1.
+
+| Q | Décision | Rationale retenue |
+|---|---|---|
+| Q1 | **A** — `product.template` only + arête `VARIANT_OF` sur `product.product` | Pas de doublons, évolutif si variantes arrivent |
+| Q2 | **A** — Tout `mail.message` vectorisé, y compris logs système auto | Guillaume veut la vision Jarvis totale ; même les logs système peuvent être utiles pour la proactivité et l'automatisation des actions |
+| Q3 | **B** — OCR `of.image` désactivé au démarrage, activable plus tard | Gain de temps initial, activable en un bouton si le besoin se manifeste |
+| Q4 | **A** — Purge complète des tables `odoo_semantic_content` / `semantic_graph_nodes` avant rebuild | Guillaume préfère la propreté, accepte une pause de 30 min de service |
+| Q5 | **A** — `text-embedding-3-small` (1536 dims, ~0.02€/M tokens) | Suffisant pour démarrer ; migration vers `large` possible si qualité insuffisante |
+| Q6 | **A** — Rebuild automatique dès détection d'écart par l'audit | Zéro friction, auto-correction |
+| Q7 | **A** — Soft delete (marquer `deleted_at`, garder le nœud) | Traçabilité complète : Raya peut dire *"ce devis existait mais a été supprimé"* |
+| Q8 | **A** — Multi-tenant strict dès maintenant | Validé commercialement par Guillaume : *« la personnalisation par tenant est ce qui fera la force de Raya et justifiera son prix »* ; chaque tenant aura ses propres outils (pas forcément Odoo) |
+| Q9 | **A puis C** — `pdfplumber` pour démarrer, migration vers Claude Vision si qualité insuffisante sur certains PDFs | Couvre 90% des cas gratuitement, migration ciblée si besoin |
+| Q10 | **A** — Manifest appliqué automatiquement au premier scan, modifiable via panel admin après | Validé par échange : Guillaume reconnaît que la classification auto des champs est mécanique (pas de jugement humain nécessaire), et que quelques euros de vectorisation en trop valent mieux que 1500 cases à cocher |
+
+### Impacts budgétaires finaux de ces choix
+
+- Coût one-shot rebuild initial : **~20-30€** (augmentation de ~10€ vs estimation Section 1 à cause de Q2 "tout vectoriser")
+- Coût mensuel d'entretien via webhooks : **~3-6€/mois**
+- Coût additionnel multi-tenant : négligeable (juste du filtrage SQL)
+- **Total 1er mois : ~25-35€** — dans la fourchette "investissement modeste".
+
+### Engagements techniques pour la Phase 1
+
+Ces arbitrages se traduiront dans le code par :
+1. Schéma `manifest` avec un champ `mail_message_filter: "all"` (et non `"comment_only"`)
+2. Schéma `product.product` réduit au nœud graphe + arête `VARIANT_OF`
+3. Job de purge `admin/scanner/purge-all` exécuté en tout début de rebuild
+4. Soft delete : ajout d'un champ `deleted_at` sur `semantic_graph_nodes` + filtre dans les recherches
+5. Respect strict de `tenant_id` dans tous les INSERT et SELECT
+6. Classe `PDFExtractor` avec méthode `extract()` qui utilise pdfplumber par défaut + point d'extension pour Claude Vision
+7. Ajout de `text-embedding-3-small` dans les env vars (déjà actif)
+8. Pas d'UI de validation manifest avant scan (Phase 2 simplifiée)
+
+---
+
+**→ Le plan Scanner Universel Odoo est COMPLET et VALIDÉ.**
+
+Prochaine étape : **Phase 1 — Fondations** (3h de code estimé), qui
+implémente :
+- Migrations DB (`scanner_runs`, `connector_schemas`, `vectorization_queue`)
+- Module `app/scanner/orchestrator.py`
+- Module `app/scanner/adapter_odoo.py`
+- Module `app/scanner/processor.py`
+- Endpoint `/admin/scanner/health`
+
+Sans ces fondations, rien ne peut tourner. C'est l'étape indispensable
+avant tout le reste.
