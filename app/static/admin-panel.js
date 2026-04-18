@@ -339,11 +339,45 @@ async function introspectOdoo(btn){
           `\n[${cat}] ${lines.length} modeles:\n${lines.slice(0,30).join('\n')}${lines.length>30?'\n    ... et '+(lines.length-30)+' de plus':''}`
         ).join('\n');
         const summary = `✅ Inventaire terminé en ${sd.duration_sec}s.\n\nSTATS : ${stats.total_models_filtered} modèles non-vides / ${stats.total_models_discovered} découverts. Total ${stats.total_records_all} records. ${stats.custom_models} modèles custom.\n\nPAR CATEGORIE : ${catLine}\n\nTOP 30 MODELES :\n${topLines}\n\n=== DETAIL PAR CATEGORIE ===${catDetailsLines}`;
-        // Afficher dans un textarea pour copier
+        // Modale amelioree : bouton fermer visible, bouton copier, scroll, Escape, click externe
+        const fullText = `${summary}\n\n\n=== JSON COMPLET (pour partager a Claude) ===\n${JSON.stringify({stats, by_category: byCat, top_30_models: topModels}, null, 2)}`;
+        const backdrop = document.createElement('div');
+        backdrop.id = 'introspect-backdrop';
+        backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9998;display:flex;align-items:center;justify-content:center';
         const modal = document.createElement('div');
-        modal.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--bg1);border:1px solid var(--border);border-radius:12px;padding:20px;max-width:90vw;max-height:85vh;overflow:auto;z-index:9999;box-shadow:0 10px 40px rgba(0,0,0,0.5)';
-        modal.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0">🔍 Inventaire Odoo</h3><button class="btn btn-ghost" onclick="this.closest('div[style]').remove()">✕ Fermer</button></div><textarea readonly style="width:80vw;height:60vh;font-family:var(--mono);font-size:11px;padding:10px;background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:8px">${summary}\n\n\n=== JSON COMPLET (pour partager a Claude) ===\n${JSON.stringify({stats, by_category: byCat, top_30_models: topModels}, null, 2)}</textarea><div style="margin-top:8px;font-size:11px;color:var(--text3)">Copie ce JSON et colle-le dans la conversation avec Claude pour continuer le plan Scanner Universel.</div>`;
-        document.body.appendChild(modal);
+        modal.style.cssText = 'background:var(--bg1);border:1px solid var(--border);border-radius:12px;padding:16px 20px 20px;width:90vw;max-width:1000px;height:85vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.5)';
+        const escapeHtml = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+        modal.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-shrink:0">
+            <h3 style="margin:0">🔍 Inventaire Odoo</h3>
+            <div style="display:flex;gap:8px">
+              <button class="btn" id="introspect-copy-btn" style="background:#10b981;color:white;padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:600">📋 Tout copier</button>
+              <button class="btn" id="introspect-close-btn" style="background:#ef4444;color:white;padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:700">✕ Fermer</button>
+            </div>
+          </div>
+          <textarea id="introspect-textarea" readonly style="flex:1;width:100%;font-family:var(--mono);font-size:11px;padding:10px;background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:8px;overflow:auto;resize:none">${escapeHtml(fullText)}</textarea>
+          <div style="margin-top:8px;font-size:11px;color:var(--text3);flex-shrink:0">Échap ou clic en dehors pour fermer — le bouton vert copie tout en un clic</div>`;
+        backdrop.appendChild(modal);
+        document.body.appendChild(backdrop);
+        const closeModal = () => { backdrop.remove(); document.removeEventListener('keydown', onEsc); };
+        const onEsc = e => { if(e.key === 'Escape') closeModal(); };
+        document.addEventListener('keydown', onEsc);
+        backdrop.addEventListener('click', e => { if(e.target === backdrop) closeModal(); });
+        document.getElementById('introspect-close-btn').onclick = closeModal;
+        document.getElementById('introspect-copy-btn').onclick = async () => {
+          const b = document.getElementById('introspect-copy-btn');
+          try{
+            await navigator.clipboard.writeText(fullText);
+            b.innerHTML = '✓ Copié !';
+          }catch(err){
+            // Fallback si clipboard API bloquee : select all dans le textarea
+            const ta = document.getElementById('introspect-textarea');
+            ta.focus(); ta.select();
+            document.execCommand('copy');
+            b.innerHTML = '✓ Copié (fallback)';
+          }
+          setTimeout(()=>{ b.innerHTML = '📋 Tout copier'; }, 2000);
+        };
         setAlert('companies-alert', `✅ Inventaire OK : ${stats.total_models_filtered} modeles. Resultats dans la fenetre.`, 'ok');
         return;
       }
