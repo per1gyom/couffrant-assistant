@@ -549,6 +549,63 @@ def admin_odoo_introspect_start(
         return {"status": "error", "message": str(e)[:300]}
 
 
+@router.get("/admin/scanner/health")
+def admin_scanner_health(request: Request, _: dict = Depends(require_admin)):
+    """Verifie l etat du Scanner Universel.
+
+    Retourne :
+    - existence des 3 tables (scanner_runs, connector_schemas, vectorization_queue)
+    - dernier run par source
+    - taille de la queue de vectorisation
+    - nombre de schemas actifs par source
+
+    C est le health check de la Phase 1 du Scanner Universel (voir
+    docs/raya_scanner_universel_plan.md)."""
+    from app.database import get_pg_conn
+    result = {"status": "ok", "tables": {}, "runs": {}, "queue": {}, "schemas": {}}
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            # 1. Verifier existence des 3 tables
+            for table in ["scanner_runs", "connector_schemas", "vectorization_queue"]:
+                cur.execute(
+                    """SELECT COUNT(*) FROM information_schema.tables
+                       WHERE table_name=%s""", (table,))
+                result["tables"][table] = cur.fetchone()[0] > 0
+            # 2. Dernier run par source (tous tenants confondus pour l admin)
+            cur.execute("""SELECT source, run_type, status, started_at,
+                                  finished_at, stats
+                           FROM scanner_runs ORDER BY started_at DESC LIMIT 20""")
+            result["runs"]["recent"] = [{
+                "source": r[0], "run_type": r[1], "status": r[2],
+                "started_at": r[3].isoformat() if r[3] else None,
+                "finished_at": r[4].isoformat() if r[4] else None,
+                "stats": r[5],
+            } for r in cur.fetchall()]
+            # 3. Queue de vectorisation
+            cur.execute("""SELECT
+                             COUNT(*) FILTER (WHERE completed_at IS NULL) pending,
+                             COUNT(*) FILTER (WHERE completed_at IS NOT NULL) done,
+                             COUNT(*) FILTER (WHERE attempts > 0 AND completed_at IS NULL) failed
+                           FROM vectorization_queue""")
+            row = cur.fetchone()
+            result["queue"] = {"pending": row[0], "done": row[1], "failed": row[2]}
+            # 4. Schemas enregistres par source
+            cur.execute("""SELECT source, COUNT(*) FILTER (WHERE enabled) enabled,
+                                  COUNT(*) total FROM connector_schemas
+                           GROUP BY source""")
+            result["schemas"] = {r[0]: {"enabled": r[1], "total": r[2]}
+                                 for r in cur.fetchall()}
+        # 5. Statut global : OK si toutes les tables existent
+        if not all(result["tables"].values()):
+            result["status"] = "missing_tables"
+        return result
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
 @router.get("/admin/odoo/introspect/status")
 def admin_odoo_introspect_status(
     request: Request,

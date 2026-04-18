@@ -357,4 +357,74 @@ MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_alerts_active ON system_alerts (tenant_id, acknowledged, severity)",
     "CREATE INDEX IF NOT EXISTS idx_alerts_component ON system_alerts (tenant_id, component, alert_type)",
+    # -- SCANNER UNIVERSEL PHASE 1 FONDATIONS (v1.0 18/04/2026) --
+    # Voir docs/raya_scanner_universel_plan.md Section 4 & 5 Phase 1.
+    # Table scanner_runs : trace chaque execution du scanner (init, delta,
+    # rebuild, audit) avec checkpointing pour reprise apres interruption.
+    """CREATE TABLE IF NOT EXISTS scanner_runs (
+        id SERIAL PRIMARY KEY,
+        run_id TEXT NOT NULL UNIQUE,
+        tenant_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        run_type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        started_at TIMESTAMP DEFAULT NOW(),
+        finished_at TIMESTAMP,
+        params JSONB DEFAULT '{}',
+        progress JSONB DEFAULT '{}',
+        stats JSONB DEFAULT '{}',
+        error TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_scanner_runs_tenant_status ON scanner_runs (tenant_id, status, started_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_scanner_runs_source ON scanner_runs (tenant_id, source, started_at DESC)",
+    # Table connector_schemas : manifest de vectorisation par modele et par
+    # source. JSON decrit quels champs vectoriser, quelles aretes creer, etc.
+    # Genere automatiquement par introspection, editable via panel admin.
+    """CREATE TABLE IF NOT EXISTS connector_schemas (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        model_name TEXT NOT NULL,
+        priority INT NOT NULL DEFAULT 3,
+        enabled BOOLEAN DEFAULT TRUE,
+        manifest JSONB NOT NULL,
+        last_scanned_at TIMESTAMP,
+        records_count_odoo INT,
+        records_count_raya INT,
+        integrity_pct FLOAT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (tenant_id, source, model_name)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_schemas_enabled ON connector_schemas (tenant_id, source, enabled, priority)",
+    # Table vectorization_queue : queue des records a (re)vectoriser suite aux
+    # webhooks ou au delta incremental. Un worker depile toutes les 5s et
+    # traite un record a la fois avec idempotence (INSERT ON CONFLICT).
+    """CREATE TABLE IF NOT EXISTS vectorization_queue (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        model_name TEXT NOT NULL,
+        record_id INT NOT NULL,
+        action TEXT NOT NULL DEFAULT 'upsert',
+        priority INT DEFAULT 5,
+        attempts INT DEFAULT 0,
+        last_error TEXT,
+        scheduled_at TIMESTAMP DEFAULT NOW(),
+        started_at TIMESTAMP,
+        completed_at TIMESTAMP,
+        source_info JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_queue_pending ON vectorization_queue (tenant_id, completed_at, scheduled_at) WHERE completed_at IS NULL",
+    "CREATE INDEX IF NOT EXISTS idx_queue_record ON vectorization_queue (tenant_id, source, model_name, record_id)",
+    # Soft delete sur semantic_graph_nodes (Q7=A : tracabilite totale).
+    # Quand un record Odoo est supprime, on marque deleted_at mais on garde
+    # le noeud et ses aretes. Les recherches filtrent sur deleted_at IS NULL.
+    "ALTER TABLE semantic_graph_nodes ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
+    "ALTER TABLE semantic_graph_edges ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
+    "ALTER TABLE odoo_semantic_content ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
+    "CREATE INDEX IF NOT EXISTS idx_sg_nodes_active ON semantic_graph_nodes (tenant_id, node_type) WHERE deleted_at IS NULL",
 ]
