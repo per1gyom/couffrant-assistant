@@ -60,9 +60,43 @@ def tenant_update_user(
     admin: dict = Depends(require_tenant_admin),
 ):
     assert_same_tenant(request, target)
-    new_scope = payload.get("scope", "")
-    result = update_user(target, email=payload.get("email"), scope=new_scope)
-    log_admin_action(admin["username"], "update_scope", target, new_scope)
+    # Recuperer l etat actuel du target pour can_modify_user / can_change_scope
+    with get_pg_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT username, email, scope, tenant_id FROM users WHERE username=%s", (target,))
+        row = cur.fetchone()
+    if not row:
+        return {"status": "error", "message": "Utilisateur introuvable."}
+    target_user = {"username": row[0], "email": row[1] or "", "scope": row[2], "tenant_id": row[3]}
+    # Garde-fous : modification du scope interdite si hardcoded / auto-modif / sous-privilege
+    from app.hardcoded_permissions import can_modify_user, can_change_scope, is_hardcoded_super_admin
+    allowed, reason = can_modify_user(admin, target_user)
+    if not allowed:
+        return {"status": "error", "message": reason}
+    # Si changement de scope demande, garde-fou dedie
+    new_scope = payload.get("scope")
+    if new_scope and new_scope != target_user["scope"]:
+        ok_scope, reason_scope = can_change_scope(admin, target_user, new_scope)
+        if not ok_scope:
+            return {"status": "error", "message": reason_scope}
+    else:
+        # Pas de changement de scope demande : on ne le modifie pas meme si present
+        new_scope = None
+    # Garde-fou email : si target est hardcoded super_admin, on ne laisse PAS toucher a l email
+    new_email = payload.get("email")
+    if new_email is not None and is_hardcoded_super_admin(target_user["email"]):
+        if new_email.strip().lower() != target_user["email"].strip().lower():
+            return {"status": "error", "message": "L email d un super-admin protege ne peut etre change via UI."}
+    # display_name et phone : pas de garde-fou specifique, c est cosmetique
+    result = update_user(
+        target,
+        email=new_email,
+        scope=new_scope,
+        display_name=payload.get("display_name"),
+        phone=payload.get("phone"),
+    )
+    log_admin_action(admin["username"], "update_user", target,
+                     f"scope={new_scope or 'unchanged'} display_name={payload.get('display_name') or 'unchanged'}")
     return result
 
 
