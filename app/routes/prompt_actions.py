@@ -102,35 +102,46 @@ Onboarding :
   [ACTION:ODOO_UPDATE:model|record_id|{"field":"nouvelle_valeur"}]
   [ACTION:ODOO_NOTE:partner_id|texte de la note]"""
         sections.append(f"""Odoo (ERP) :
-  [ACTION:ODOO_SEMANTIC:requete en langage naturel] -> RECHERCHE SEMANTIQUE HYBRID
-    Trouve des records Odoo par le SENS de la requete (plus le BM25 pour les
-    termes exacts). Utilise dense+sparse+reranking Cohere+traverse du graphe
-    semantique pour remonter le contexte relationnel de chaque match.
-    C'est LE tag le plus puissant pour les recherches transversales :
+  [ACTION:ODOO_SEMANTIC:requete en langage naturel] -> TON REFLEXE PAR DEFAUT pour TOUTE question impliquant Odoo
+    C'est LE tag a utiliser EN PREMIER pour 90% des questions. Il combine :
+      - Recherche dense (embeddings OpenAI sur nom, description, commentaires, lignes de devis)
+      - Recherche sparse BM25 (termes exacts : noms propres, references produit type SE100K, noms de villes)
+      - Reranking Cohere (precision +3-5 pts)
+      - Traverse du graphe semantique (remonte les clients lies, devis, events, contacts en une seule passe)
+    Retourne un contexte RICHE et exploitable. Le graphe te ramene automatiquement les relations (client d'un devis, contacts d'une entreprise, events lies a un projet).
+
+    UTILISE-LE SYSTEMATIQUEMENT QUAND l'utilisateur mentionne :
+      - Un nom propre de personne (meme si pas certain du lien avec Odoo)
+      - Un nom d'entreprise, de lieu, de chantier
+      - Un produit, materiel ou reference technique (SE100K, Tesla PW3, batterie lithium, etc.)
+      - Un concept metier (photovoltaique, couverture, isolation, etc.)
+      - Un sujet transversal ("clients dormants", "chantiers en retard", "RDV avec commentaires")
+
+    Exemples concrets :
+      [ACTION:ODOO_SEMANTIC:Francine Coullet]
       [ACTION:ODOO_SEMANTIC:devis avec onduleur SolarEdge SE100K]
+      [ACTION:ODOO_SEMANTIC:chantiers AZEM onduleur SE100K]
       [ACTION:ODOO_SEMANTIC:RDV ou on a parle du kit de fixation]
-      [ACTION:ODOO_SEMANTIC:chantiers a Tours en 2025]
+      [ACTION:ODOO_SEMANTIC:clients a Tours]
       [ACTION:ODOO_SEMANTIC:leads interesses par batterie lithium]
-      [ACTION:ODOO_SEMANTIC:clients qui ont eu des problemes de production]
+
     Filtre optionnel sur les modeles via '|' :
-      [ACTION:ODOO_SEMANTIC:onduleur SE100K|sale.order]
-      [ACTION:ODOO_SEMANTIC:probleme toiture|calendar.event,project.task]
-    Utilise-le QUAND :
-      - L'utilisateur parle d'un produit/materiel/technique (retrouve les
-        chantiers, devis, commentaires qui en parlent)
-      - La recherche implique du texte libre (notes, commentaires, descriptions)
-      - Tu veux trouver des patterns transversaux (similarites entre clients,
-        evenements, chantiers)
-      - ODOO_CLIENT_360 ne suffit pas car la question ne porte pas sur UN
-        client precis mais sur un concept/sujet
-  [ACTION:ODOO_CLIENT_360:nom_ou_id] -> VUE 360° D'UN CLIENT en 1 appel
+      [ACTION:ODOO_SEMANTIC:SE100K|sale.order]
+      [ACTION:ODOO_SEMANTIC:probleme toiture|calendar.event,crm.lead]
+
+    NE FAIS PAS d'ODOO_SEARCH classique en premier : ODOO_SEMANTIC est PLUS puissant et
+    remonte le contexte relationnel (devis + clients + events lies), la ou ODOO_SEARCH
+    ne retourne qu'une liste brute sans contexte.
+  [ACTION:ODOO_CLIENT_360:nom_ou_id] -> VUE 360° APPROFONDIE D'UN CLIENT (apres ODOO_SEMANTIC)
+    A UTILISER EN SECONDE PASSE, une fois que ODOO_SEMANTIC a identifie le bon client.
     Agrege contact + chantiers (sale.order) + devis + factures + paiements
     + leads CRM + tickets SAV + mails recents + indicateurs financiers
     (CA, encaisse, impayes, balance) + detection d'anomalies (factures
     annulees le meme jour qu'impayes, dormance, impayes significatifs).
-    Utilise ce tag quand l'utilisateur demande 'le point sur X',
-    'la situation de Y', 'vue d'ensemble de Z' : une seule requete au
-    lieu de 6-8 ODOO_SEARCH separes.
+    Workflow type :
+      1. Utilisateur : "topo sur AZEM"
+      2. Toi : [ACTION:ODOO_SEMANTIC:AZEM]  -> trouve le bon partner + contexte
+      3. Toi (si pertinent) : [ACTION:ODOO_CLIENT_360:AZEM]  -> vue financiere approfondie
     Exemples :
       [ACTION:ODOO_CLIENT_360:AZEM]
       [ACTION:ODOO_CLIENT_360:SARL DES MOINES]
