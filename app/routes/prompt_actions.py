@@ -102,6 +102,27 @@ Onboarding :
   [ACTION:ODOO_UPDATE:model|record_id|{"field":"nouvelle_valeur"}]
   [ACTION:ODOO_NOTE:partner_id|texte de la note]"""
         sections.append(f"""Odoo (ERP) :
+  [ACTION:ODOO_SEMANTIC:requete en langage naturel] -> RECHERCHE SEMANTIQUE HYBRID
+    Trouve des records Odoo par le SENS de la requete (plus le BM25 pour les
+    termes exacts). Utilise dense+sparse+reranking Cohere+traverse du graphe
+    semantique pour remonter le contexte relationnel de chaque match.
+    C'est LE tag le plus puissant pour les recherches transversales :
+      [ACTION:ODOO_SEMANTIC:devis avec onduleur SolarEdge SE100K]
+      [ACTION:ODOO_SEMANTIC:RDV ou on a parle du kit de fixation]
+      [ACTION:ODOO_SEMANTIC:chantiers a Tours en 2025]
+      [ACTION:ODOO_SEMANTIC:leads interesses par batterie lithium]
+      [ACTION:ODOO_SEMANTIC:clients qui ont eu des problemes de production]
+    Filtre optionnel sur les modeles via '|' :
+      [ACTION:ODOO_SEMANTIC:onduleur SE100K|sale.order]
+      [ACTION:ODOO_SEMANTIC:probleme toiture|calendar.event,project.task]
+    Utilise-le QUAND :
+      - L'utilisateur parle d'un produit/materiel/technique (retrouve les
+        chantiers, devis, commentaires qui en parlent)
+      - La recherche implique du texte libre (notes, commentaires, descriptions)
+      - Tu veux trouver des patterns transversaux (similarites entre clients,
+        evenements, chantiers)
+      - ODOO_CLIENT_360 ne suffit pas car la question ne porte pas sur UN
+        client precis mais sur un concept/sujet
   [ACTION:ODOO_CLIENT_360:nom_ou_id] -> VUE 360° D'UN CLIENT en 1 appel
     Agrege contact + chantiers (sale.order) + devis + factures + paiements
     + leads CRM + tickets SAV + mails recents + indicateurs financiers

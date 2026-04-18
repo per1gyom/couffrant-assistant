@@ -157,6 +157,43 @@ def _handle_odoo_actions(response, username, tenant_id, tools):
         except Exception as e:
             confirmed.append(f"❌ CLIENT_360 : {str(e)[:200]}")
 
+    # ODOO_SEMANTIC : [ACTION:ODOO_SEMANTIC:query en langage naturel]
+    # Recherche sémantique hybrid (dense + sparse) + reranking Cohere +
+    # enrichissement par traverse du graphe sémantique typé. Permet à Raya
+    # de retrouver : "devis avec onduleur SE100K", "RDV où on a parlé du
+    # kit de fixation", "chantiers à Tours", "clients dormants", etc.
+    # Voir app/retrieval.py pour le pipeline complet (4 couches mémoire).
+    for content in _extract_action_tags(response, "ODOO_SEMANTIC"):
+        query = content.strip()
+        if not query:
+            confirmed.append("❌ SEMANTIC : requête vide (attendu : question en langage naturel)")
+            continue
+        # Filtre optionnel sur les modèles : "query|model1,model2"
+        source_models = None
+        if '|' in query:
+            q_parts = query.split('|', 1)
+            query = q_parts[0].strip()
+            models_str = q_parts[1].strip()
+            if models_str:
+                source_models = [m.strip() for m in models_str.split(',') if m.strip()]
+        try:
+            from app.retrieval import hybrid_search, format_search_results
+            data = hybrid_search(
+                query=query,
+                tenant_id=tenant_id or "couffrant_solar",
+                source_models=source_models,
+                top_k_final=10,
+                enrich_graph=True,
+                use_rerank=True,
+            )
+            formatted = format_search_results(data, max_items=10)
+            confirmed.append(formatted)
+            log_activity(username, "odoo_semantic_search", "",
+                         f"query={query[:80]}|results={data.get('stats',{}).get('final_count',0)}",
+                         tenant_id=tenant_id)
+        except Exception as e:
+            confirmed.append(f"❌ SEMANTIC : {str(e)[:200]}")
+
     # ODOO_MODELS : [ACTION:ODOO_MODELS:] — liste les modèles accessibles
     for _ in re.finditer(r'\[ACTION:ODOO_MODELS:\]', response):
         try:
