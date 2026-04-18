@@ -237,6 +237,61 @@ async function createConnection(tenantId,idx){
   }catch(e){setAlert('companies-alert','❌ '+e.message,'err');}
 }
 
+async function loadSystemAlerts(){
+  // Chantier memoire 4 couches (Bloc 2.5) : affichage des alertes systeme
+  // actives en haut du panel Societes. Rafraichi automatiquement a chaque
+  // ouverture de l'onglet. Alertes : limites fetch atteintes/approchees,
+  // modules Odoo manquants, OpenAI quota faible, etc.
+  const banner = document.getElementById('system-alerts-banner');
+  if(!banner) return;
+  try{
+    const r = await fetch('/admin/alerts');
+    const d = await r.json();
+    if(d.status !== 'ok' || !d.alerts || d.alerts.length === 0){
+      banner.style.display = 'none';
+      return;
+    }
+    const sevColors = {
+      'critical': {bg:'#fef2f2', border:'#dc2626', txt:'#991b1b', icon:'🔴'},
+      'warning':  {bg:'#fffbeb', border:'#d97706', txt:'#92400e', icon:'🟠'},
+      'info':     {bg:'#eff6ff', border:'#2563eb', txt:'#1e40af', icon:'🔵'},
+    };
+    const items = d.alerts.map(a => {
+      const s = sevColors[a.severity] || sevColors['warning'];
+      const dateStr = a.updated_at ? a.updated_at.slice(0, 16).replace('T', ' ') : '';
+      return `<div style="display:flex;gap:10px;align-items:flex-start;padding:10px 12px;background:${s.bg};border-left:3px solid ${s.border};border-radius:6px;margin-bottom:6px">
+        <span style="font-size:14px">${s.icon}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:11px;color:${s.txt};font-weight:600">${a.component} · ${a.alert_type}</div>
+          <div style="font-size:12px;color:${s.txt};margin-top:2px">${escapeHtml(a.message)}</div>
+          <div style="font-size:10px;color:${s.txt};opacity:0.7;margin-top:4px">${dateStr}</div>
+        </div>
+        <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px;white-space:nowrap" onclick="acknowledgeAlert(${a.id})">✓ Accuser</button>
+      </div>`;
+    }).join('');
+    banner.innerHTML = `<div style="padding:10px 12px;background:var(--bg1);border:1px solid var(--border);border-radius:10px">
+      <div style="font-size:11px;font-weight:600;color:var(--text2);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">⚠️ Alertes système actives (${d.alerts.length})</div>
+      ${items}
+    </div>`;
+    banner.style.display = 'block';
+  }catch(e){
+    console.warn('loadSystemAlerts:', e);
+    banner.style.display = 'none';
+  }
+}
+
+async function acknowledgeAlert(alertId){
+  try{
+    await fetch(`/admin/alerts/${alertId}/acknowledge`, {method:'POST'});
+    await loadSystemAlerts();
+  }catch(e){ setAlert('companies-alert','❌ '+e.message,'err'); }
+}
+
+function escapeHtml(str){
+  if(!str) return '';
+  return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 async function vectorizeOdoo(btn){
   // Chantier memoire 4 couches (Bloc 2, 18/04/2026) :
   // Lance la vectorisation Odoo -> peuple le graphe semantique type (noeuds

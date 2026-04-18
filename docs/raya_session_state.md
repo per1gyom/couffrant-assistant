@@ -16,6 +16,7 @@
 - URL prod : `https://app.raya-ia.fr`
 - Cache-bust JS/CSS : **v=33** (admin-panel.js) / **v=79** (chat)
 - Chantier Odoo — Étape 3 (vue 360° client) : **FAIT** — module `app/connectors/odoo_client_360.py`, tag `[ACTION:ODOO_CLIENT_360:nom_ou_id]`, détection d'anomalies intelligente (facture annulée le même jour qu'impayé, impayés significatifs, dormance 180j+)
+- Chantier mémoire 4 couches (18/04/2026) : Bloc 1 (migrations + semantic_graph) **FAIT** (`2dd6402`), Bloc 2 (vectorisation Odoo) **FAIT** (`3b69833`), Bloc 2.5 (surveillance limites + alertes) **FAIT** (`7e29d4c`), Bloc 3 (webhooks Odoo) **FAIT code** — endpoint `/webhooks/odoo/record-changed` actif, doc config `docs/odoo_webhook_setup.md`. Reste Bloc 4 (hybrid search + rerank + tag ODOO_SEMANTIC).
 
 ## 🧠 RÈGLE ARCHITECTURALE FONDAMENTALE — Mémoire à 4 couches
 
