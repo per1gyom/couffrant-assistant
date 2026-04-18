@@ -346,7 +346,13 @@ async function toggleReadOnlyForTenant(tenantId, tenantName){
       setAlert('companies-alert', msg, 'ok');
       // Invalider le cache + recharger toute la liste
       delete _tenantLockState[tenantId];
+      // BUGFIX : forcer un reflow + 2 animation frames pour que le bouton
+      // se mette a jour visuellement (sinon il faut recliquer pour voir
+      // le changement a cause du prompt() bloquant precedent)
+      await new Promise(r => requestAnimationFrame(r));
       loadCompanies();
+      await new Promise(r => requestAnimationFrame(r));
+      await new Promise(r => requestAnimationFrame(r));
     } else {
       setAlert('companies-alert', '❌ '+(d.message||'Erreur'), 'err');
     }

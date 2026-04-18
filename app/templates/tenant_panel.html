@@ -257,7 +257,18 @@ async function toggleReadOnly(){
       const lab = d.action === 'locked' ? '🔒 Verrouillé en lecture seule' : '🔓 Permissions restaurées';
       setAlert('company-alert', `${lab} (${d.affected} connexion(s))`, 'ok');
       await loadPermissions();
-      console.log('[toggleReadOnly] Apres reload :', _lastPermissionsState);
+      // BUGFIX : forcer un reflow + repaint explicites pour que le bouton
+      // et le bandeau reflètent immédiatement le nouvel état (sinon il
+      // faut recliquer pour voir le changement, car le prompt() precedent
+      // a laisse le navigateur dans un etat ou il ne repeint pas
+      // automatiquement le DOM juste modifie).
+      const list = document.getElementById('permissions-list');
+      if(list) void list.offsetHeight;  // force reflow
+      const btn = document.getElementById('toggle-read-only-btn');
+      if(btn) void btn.offsetHeight;  // force reflow
+      await new Promise(r => requestAnimationFrame(r));
+      await new Promise(r => requestAnimationFrame(r));
+      console.log('[toggleReadOnly] Apres reload + repaint :', _lastPermissionsState);
     } else {
       setAlert('company-alert', '❌ '+(d.message||'Erreur'), 'err');
     }
