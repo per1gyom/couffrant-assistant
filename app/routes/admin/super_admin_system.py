@@ -352,3 +352,237 @@ def admin_alerts_ack(
                 "message": "Acquittee" if ok else "Non trouvee"}
     except Exception as e:
         return {"status": "error", "message": str(e)[:200]}
+
+
+
+# ─── INSPECTION VECTORISATION (Fix D du 18/04/2026) ───
+# Endpoints de diagnostic pour verifier concretement ce qui est dans les
+# tables odoo_semantic_content et semantic_graph. Utile pour valider la
+# vectorisation avant d ameliorer les fixes.
+
+@router.get("/admin/odoo/inspect-semantic")
+def admin_inspect_semantic(
+    request: Request,
+    source_model: Optional[str] = None,
+    search: Optional[str] = None,
+    limit: int = 20,
+    _: dict = Depends(require_admin),
+):
+    """Inspecte le contenu de la table odoo_semantic_content.
+    source_model : filtrer sur un modele (res.partner, sale.order, ...)
+    search : recherche plein texte (tsvector FR) pour voir les matches BM25
+    limit : max 50"""
+    try:
+        from app.tenant_manager import get_user_tenants
+        tenants = get_user_tenants(request.session.get("username", ""))
+        tenant_id = tenants[0] if tenants else "couffrant_solar"
+        limit = min(max(1, limit), 50)
+
+        conn = get_pg_conn()
+        c = conn.cursor()
+
+        # Stats globales par source_model
+        c.execute("""
+            SELECT source_model, content_type, COUNT(*),
+                   COUNT(embedding) as with_embed,
+                   COUNT(content_tsv) as with_tsv,
+                   AVG(LENGTH(text_content))::int as avg_text_len,
+                   MAX(LENGTH(text_content)) as max_text_len
+            FROM odoo_semantic_content
+            WHERE tenant_id = %s
+            GROUP BY source_model, content_type
+            ORDER BY source_model, content_type
+        """, (tenant_id,))
+        stats = [{
+            "source_model": r[0], "content_type": r[1],
+            "total": r[2], "with_embedding": r[3], "with_tsv": r[4],
+            "avg_text_len": r[5], "max_text_len": r[6],
+        } for r in c.fetchall()]
+
+        # Echantillon de lignes
+        filters = ["tenant_id = %s"]
+        params = [tenant_id]
+        if source_model:
+            filters.append("source_model = %s")
+            params.append(source_model)
+        if search and search.strip():
+            filters.append("content_tsv @@ plainto_tsquery('french', %s)")
+            params.append(search.strip())
+        where = " AND ".join(filters)
+
+        order_clause = "updated_at DESC"
+        if search and search.strip():
+            order_clause = ("ts_rank_cd(content_tsv, plainto_tsquery('french', %s)) "
+                            "DESC")
+            params_with_search = params + [search.strip(), limit]
+        else:
+            params_with_search = params + [limit]
+
+        c.execute(f"""
+            SELECT id, source_model, source_record_id, content_type,
+                   text_content, related_partner_id,
+                   LENGTH(text_content) as text_len,
+                   (embedding IS NOT NULL) as has_embedding,
+                   metadata, updated_at
+            FROM odoo_semantic_content
+            WHERE {where}
+            ORDER BY {order_clause}
+            LIMIT %s
+        """, params_with_search)
+
+        samples = [{
+            "id": r[0], "source_model": r[1], "source_record_id": r[2],
+            "content_type": r[3],
+            "text_preview": (r[4] or "")[:300],
+            "text_length": r[6],
+            "related_partner_id": r[5],
+            "has_embedding": r[7],
+            "metadata": r[8] or {},
+            "updated_at": str(r[9]),
+        } for r in c.fetchall()]
+        conn.close()
+
+        return {
+            "status": "ok",
+            "tenant_id": tenant_id,
+            "total_entries": sum(s["total"] for s in stats),
+            "stats_by_model": stats,
+            "samples": samples,
+            "search_filter": search,
+            "source_model_filter": source_model,
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
+
+@router.get("/admin/odoo/inspect-graph")
+def admin_inspect_graph(
+    request: Request,
+    search: Optional[str] = None,
+    node_type: Optional[str] = None,
+    limit: int = 30,
+    _: dict = Depends(require_admin),
+):
+    """Inspecte le graphe semantique. Cherche des noeuds par label (ilike),
+    optionnellement filtre par type, puis traverse depuis chacun pour montrer
+    les aretes sortantes/entrantes.
+
+    Tres utile pour verifier si 'Francine Coullet' est bien dans le graphe
+    et quelles relations elle a.
+    """
+    try:
+        from app.tenant_manager import get_user_tenants
+        from app.semantic_graph import (find_nodes_by_label, get_neighbors,
+                                         count_graph)
+        tenants = get_user_tenants(request.session.get("username", ""))
+        tenant_id = tenants[0] if tenants else "couffrant_solar"
+        limit = min(max(1, limit), 50)
+
+        graph_stats = count_graph(tenant_id)
+
+        if not search or not search.strip():
+            return {"status": "ok", "tenant_id": tenant_id,
+                    "graph_stats": graph_stats,
+                    "note": "Passe ?search=nom pour chercher des noeuds"}
+
+        nodes = find_nodes_by_label(tenant_id, search.strip(),
+                                    node_type=node_type, limit=limit)
+
+        # Pour chaque noeud trouve, on remonte ses voisins directs
+        enriched = []
+        for n in nodes:
+            neighbors = get_neighbors(tenant_id, n["id"], min_confidence=0.3,
+                                       direction="both")
+            # Grouper par type d'arete pour lisibilite
+            by_edge = {}
+            for ng in neighbors:
+                k = f"{ng['edge_type']} ({ng['edge_direction']})"
+                by_edge.setdefault(k, []).append({
+                    "neighbor_label": ng["neighbor_label"],
+                    "neighbor_type": ng["neighbor_type"],
+                    "neighbor_key": ng["neighbor_key"],
+                    "confidence": ng["edge_confidence"],
+                })
+            enriched.append({
+                "id": n["id"], "node_type": n["node_type"],
+                "node_key": n["node_key"], "node_label": n["node_label"],
+                "source_record_id": n["source_record_id"],
+                "neighbors_count": len(neighbors),
+                "edges_by_type": by_edge,
+            })
+        return {
+            "status": "ok", "tenant_id": tenant_id,
+            "graph_stats": graph_stats,
+            "search": search, "node_type_filter": node_type,
+            "matched_count": len(enriched),
+            "matches": enriched,
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
+
+@router.get("/admin/odoo/test-search")
+def admin_test_semantic_search(
+    request: Request,
+    q: str,
+    source_models: Optional[str] = None,
+    limit: int = 10,
+    _: dict = Depends(require_admin),
+):
+    """Teste le pipeline hybrid search complet (dense+sparse+RRF+rerank+graph)
+    tel qu il serait utilise par Raya via le tag ODOO_SEMANTIC.
+    Retourne les resultats bruts avec tous les scores pour diagnostic.
+
+    Exemple : GET /admin/odoo/test-search?q=SE100K+onduleur&source_models=sale.order
+    """
+    try:
+        from app.tenant_manager import get_user_tenants
+        from app.retrieval import hybrid_search
+        tenants = get_user_tenants(request.session.get("username", ""))
+        tenant_id = tenants[0] if tenants else "couffrant_solar"
+
+        models_list = None
+        if source_models:
+            models_list = [m.strip() for m in source_models.split(',') if m.strip()]
+
+        result = hybrid_search(
+            query=q,
+            tenant_id=tenant_id,
+            source_models=models_list,
+            top_k_final=min(limit, 30),
+            enrich_graph=True,
+            use_rerank=True,
+        )
+        # On garde juste les champs lisibles pour le diagnostic
+        compact_results = []
+        for r in result.get("results", []):
+            compact_results.append({
+                "source": f"{r.get('source_model')}#{r.get('source_record_id')}",
+                "content_type": r.get("content_type"),
+                "text_preview": (r.get("text_content") or "")[:250],
+                "dense_rank": r.get("dense_rank"),
+                "sparse_rank": r.get("sparse_rank"),
+                "rrf_score": r.get("rrf_score"),
+                "rerank_score": r.get("rerank_score"),
+                "related_nodes_count": len(r.get("related_nodes") or []),
+                "related_preview": [
+                    f"{n['type']}:{n['label']}"
+                    for n in (r.get("related_nodes") or [])[:5]
+                ],
+            })
+        return {
+            "status": "ok",
+            "query": q, "source_models": models_list,
+            "stats": result.get("stats"),
+            "results": compact_results,
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
