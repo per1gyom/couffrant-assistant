@@ -75,6 +75,24 @@ class _PooledConn:
             except Exception:
                 pass
 
+    # Support du pattern "with get_pg_conn() as conn:" (ajoute 18/04/2026
+    # pour le Scanner Universel qui utilise massivement ce pattern).
+    # __enter__ retourne self pour que "as conn" pointe sur le wrapper.
+    # __exit__ rollback si exception, sinon ne commit pas (au caller de faire
+    # conn.commit() explicite), puis retourne la connexion au pool via close().
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        conn = self.__dict__.get("_conn")
+        if exc_type is not None and conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        self.close()
+        return False  # ne suppress pas l exception
+
 
 def get_pg_conn():
     pool = _get_pool()
