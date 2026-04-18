@@ -332,109 +332,267 @@ valides ou tu corriges ces 2 premières sections ? En particulier :
 
 ---
 
-## 🗺️ Section 3 — Cartographie Odoo exhaustive
-
-Cette section recense **tout ce qui peut vivre dans un Odoo standard** et qui
-doit donc être candidat à l'introspection automatique par le scanner. C'est
-une cartographie de référence pour nous assurer qu'on n'oublie rien. On la
-valide sous-section par sous-section.
-
-### 3.1 — Modèles Odoo classés par catégorie métier
-
-On organise les modèles Odoo en 10 catégories métier. Pour chaque catégorie,
-le scanner doit découvrir automatiquement tous les modèles présents chez
-Guillaume (y compris les modèles custom).
-
-**Catégorie A — Partenaires et contacts (CRM socle)**
-- `res.partner` : contacts, entreprises, prospects, fournisseurs
-- `res.partner.category` : étiquettes clients (type, segment)
-- `res.partner.industry` : secteurs d'activité
-- `res.partner.title` : civilité (M., Mme, Dr.)
-- `res.users` : utilisateurs du système (employés Couffrant)
-- `res.company` : sociétés gérées (si multi-société)
-
-**Catégorie B — CRM / Prospection**
-- `crm.lead` : leads et opportunités
-- `crm.stage` : étapes du pipeline (prospect, RDV, étude, devis, signé, perdu)
-- `crm.team` : équipes commerciales
-- `crm.tag` : tags de qualification
-- `crm.lost.reason` : motifs de perte
-
-**Catégorie C — Ventes / Devis / Commandes**
-- `sale.order` : devis et commandes
-- `sale.order.line` : lignes de devis (chaque article posé)
-- `sale.order.template` : modèles de devis pré-établis (important pour
-  contrôle qualité)
-- `sale.order.template.line` : lignes des modèles
-- `sale.order.option` : options optionnelles d'un modèle
-
-**Catégorie D — Facturation et comptabilité**
-- `account.move` : factures, avoirs, factures fournisseurs
-- `account.move.line` : lignes comptables (écritures)
-- `account.payment` : paiements
-- `account.payment.term` : conditions de règlement
-- `account.tax` : taxes (TVA, etc.)
-- `account.journal` : journaux comptables
-- `account.account` : plan comptable
-
-**Catégorie E — Produits et stock**
-- `product.product` : articles (les 133k de Guillaume)
-- `product.template` : modèles de produits (généralisation de product)
-- `product.category` : catégories de produits
-- `product.pricelist` : listes de prix
-- `product.pricelist.item` : règles de prix spécifiques
-- `product.supplierinfo` : relation produit-fournisseur (prix achat,
-  délais, références fournisseur)
-- `uom.uom` : unités de mesure
-- `product.attribute` : attributs produits (couleur, taille, puissance...)
-
-**Catégorie F — Kits et nomenclatures (MRP)**
-- `mrp.bom` : nomenclatures (structures de kit)
-- `mrp.bom.line` : composants d'une nomenclature
-- `mrp.routing` : gammes de fabrication
-- Nota : c'est ici que se trouvent les **kits Couffrant** (ENT_KIT ...)
-  avec leurs composants (modules + optimiseurs + MOE + protections)
-
-**Catégorie G — Planning et interventions**
-- `calendar.event` : événements calendrier (RDV, chantiers, visites)
-- `calendar.attendee` : participants aux événements
-- `calendar.recurrence` : récurrences
-- `project.task` : tâches projet (si module projet activé)
-- `project.project` : projets
-
-**Catégorie H — Communication (mail)**
-- `mail.message` : messages du fil de discussion (sur tous les records !)
-- `mail.tracking.value` : historique des modifications de chaque record
-- `mail.activity` : activités à faire (rappel, appel, mail)
-- `mail.activity.type` : types d'activités
-- `mail.followers` : abonnés à un record
-- Nota : ces modèles sont **transversaux** — ils s'attachent à TOUS les
-  autres records (partner, order, lead, event, task, etc.)
-
-**Catégorie I — Pièces jointes et documents**
-- `ir.attachment` : pièces jointes (sur tous les records)
-- `documents.document` : documents du module Documents (si installé)
-- Nota : on devra extraire le **contenu** des PDF/Word/Excel attachés
-
-**Catégorie J — Signatures et approbations**
-- `sign.request` : demandes de signature électronique
-- `sign.request.item` : signataires
-- `sign.template` : modèles de documents à signer
-- `approval.request` : demandes d'approbation
-- Nota : extraire aussi le champ `signature` binaire des records signés
-  (devis signés, contrats)
-
-**Catégorie K — Custom et inconnus**
-Tous les modèles qui n'entrent pas dans les 10 catégories ci-dessus. Le
-scanner doit les lister séparément et te proposer de les activer ou non.
-Exemples possibles chez Couffrant :
-- Modules sectoriels PV (si tu as un module photovoltaïque custom)
-- Champs `x_*` ajoutés manuellement
-- Modèles de devis avec options métier
 
 ---
 
-**→ Validation Section 3.1**
+## 🗺️ Section 3 — Cartographie Odoo exhaustive (basée sur l'inventaire réel)
 
-Tu valides cette classification en 11 catégories (A à K) ? Quelque chose te
-manque, te semble hors-sujet, ou à déplacer ?
+**Source** : inventaire live de l'Odoo de Guillaume, 18/04 ~15h30.
+**Chiffres** : 717 modèles découverts, 186 non-vides, 627 015 records totaux.
+**Stack identifié** : Odoo 16 Community + **module OpenFire** (éditeur français
+spécialisé BTP/photovoltaïque, préfixe `of.*`).
+
+### 3.1 — Les 186 modèles classés par priorité de traitement
+
+Règle de tri : combinaison du **volume métier**, de la **densité sémantique**
+des champs, et de la **fréquence d'usage** par Raya.
+
+**Priorité 1 — Vectorisation + graphe (16 modèles)**
+Le cœur métier. Sans ça, Raya est aveugle sur l'essentiel.
+
+| Modèle | Records | Rôle |
+|---|---|---|
+| `res.partner` | 1 226 | Clients, prospects, fournisseurs, contacts |
+| `crm.lead` | 139 | Leads et opportunités commerciales |
+| `sale.order` | 310 | Devis et commandes |
+| `sale.order.line` | 3 743 | Lignes de devis (article, qté, prix, description) |
+| `sale.order.template` | 9 | **Modèles de devis pré-établis** (contrôle qualité) |
+| `sale.order.template.line` | 119 | Lignes des modèles de devis |
+| `calendar.event` | 1 162 | **Interventions + comptes-rendus** |
+| `product.template` | 133 112 | Catalogue articles (nom, description, réf technique) |
+| `of.product.pack.lines` | 5 518 | **Composants des kits Couffrant** (ENT_KIT ...) |
+| `product.pack.line` | 715 | Autre système de packs (à investiguer) |
+| `mail.message` | 29 139 | Commentaires et notes sur tous les records |
+| `mail.tracking.value` | 22 850 | Historique des modifications (qui a changé quoi) |
+| `of.planning.tour` | 5 373 | Tournées terrain des équipes |
+| `of.planning.tour.line` | 2 753 | Étapes des tournées (adresses GPS) |
+| `of.survey.answers` | 5 320 | **Formulaires de relevé chantier remplis** |
+| `of.survey.user_input.line` | 687 | Réponses utilisateurs aux formulaires |
+
+
+**Priorité 2 — Vectorisation + graphe (15 modèles)**
+Support métier important pour la proactivité et le suivi.
+
+| Modèle | Records | Rôle |
+|---|---|---|
+| `account.move` | 408 | Factures clients et fournisseurs |
+| `account.move.line` | 2 450 | Lignes comptables (articles facturés) |
+| `account.payment` | 175 | Paiements reçus et émis |
+| `of.sale.payment.schedule` | 6 203 | **Échéanciers de paiement devis** |
+| `of.account.move.payment.schedule` | 434 | Échéanciers sur factures |
+| `of.invoice.product.pack.lines` | 1 340 | Lignes de kits facturés |
+| `stock.picking` | 206 | Bons de livraison / réception |
+| `of.image` | 1 577 | Photos intervention chantier |
+| `of.custom.document` + `.field` | 59 | Documents custom métier |
+| `of.service.request` + `.stage` + `.type` | 24 | Tickets SAV client |
+| `of.planning.intervention.template` + `.line` | 30 | Modèles d'intervention |
+| `of.planning.intervention.section` | 8 | Sections de compte-rendu |
+| `of.planning.task` | 31 | Tâches planifiées |
+| `hr.employee` | 7 | Salariés Couffrant |
+| `mail.activity` | 107 | Activités à faire (rappels, appels) |
+
+**Priorité 3 — Graphe uniquement (30 modèles)**
+Pas de texte sémantique riche, mais liaisons essentielles pour la navigation.
+
+| Modèle | Records | Rôle |
+|---|---|---|
+| `product.product` | 133 112 | Variantes articles (pointent vers template) |
+| `product.supplierinfo` | 124 607 | Relation produit ↔ fournisseur |
+| `res.city.zip` + `res.city` | 87 762 | Référentiel géo (code postal ↔ ville) |
+| `res.partner.industry/category/title` | 40 | Étiquettes partners |
+| `of.res.partner.phone` | 1 148 | Téléphones multiples des contacts |
+| `crm.stage` + `.tag` + `.lost.reason` + `.team` | 24 | Étapes CRM et étiquettes |
+| `mail.followers` | 12 576 | Qui suit quel record |
+| `calendar.attendee` | 1 792 | Participants aux événements |
+| `of.planning.available.slot` | 4 817 | Créneaux disponibles équipes |
+| `product.category` + `.tag` + `of.product.brand` | 32 | Taxonomie produits |
+| `uom.uom` + `uom.category` | 45 | Unités de mesure |
+| `account.account` + `account.journal` + `account.tax` + ... (~15 modèles) | 2 500 | Plan comptable et paramétrage |
+
+**Ignorés (125 modèles restants)**
+Infrastructure, logs, dashboards, rapports, imports, paiement en ligne, etc.
+Aucune valeur pour Raya.
+- Toutes les catégories `M_Technique` (7 modèles) et `Z_Autres` (31 modèles)
+- Les `account.*` de paramétrage pur (fiscal.position, edi.format, etc.)
+- Les `*.report`, `*.log`, `ks_dashboard_ninja.*`, `base_import.*`
+
+### 3.2 — Champs systématiques transversaux (sur TOUS les records P1 et P2)
+
+Odoo ajoute automatiquement certains champs à tous les modèles hérités de
+`mail.thread`, `mail.activity.mixin`, etc. Ces champs sont **critiques** pour
+la traçabilité et doivent être captés systématiquement.
+
+**Traçabilité (nœuds d'arêtes dans le graphe)**
+- `create_uid` (many2one res.users) → arête `(record) -[:CREATED_BY]-> (user)`
+- `write_uid` (many2one res.users) → arête `(record) -[:LAST_MODIFIED_BY]-> (user)`
+- `create_date` / `write_date` → metadata sur le nœud
+
+**Abonnés (followers) — qui suit le dossier**
+- `message_follower_ids` (one2many mail.followers) → arêtes
+  `(record) -[:FOLLOWED_BY]-> (user)` pour chaque follower
+- Permet à Raya de répondre *"qui est sur ce dossier Coullet ?"*
+
+**Commentaires (mail.message) — le fil de discussion**
+Relation polymorphique via `res_model` + `res_id` (déjà vectorisé en P1).
+Chaque commentaire a :
+- `author_id` (many2one res.partner) → arête `(message) -[:AUTHORED_BY]-> (partner)`
+- `body` (html) → **vectorisé** (c'est le contenu sémantique riche)
+- `date` (datetime) → metadata
+- `attachment_ids` (many2many ir.attachment) → pièces jointes du message
+- `model` + `res_id` → arête `(message) -[:ABOUT]-> (record_parent)`
+
+**Historique de modifications (mail.tracking.value)**
+Pour chaque `mail.message` de type tracking, on capte :
+- `field_desc` (char) → nom du champ modifié (ex: *"Étape"*)
+- `old_value_char/datetime/float` et `new_value_char/datetime/float`
+- Permet à Raya de répondre *"le devis est passé de draft à sent le 18/03 par
+  Guillaume, puis de sent à sale le 20/03 par Arlène"*
+
+**Pièces jointes (ir.attachment)**
+Relation polymorphique via `res_model` + `res_id`. Pour chaque attachment :
+- `name` (char), `mimetype` (char) → metadata
+- `datas` (binary) → **contenu à extraire et vectoriser**
+  - PDF → texte via pdfplumber
+  - DOCX → texte via python-docx
+  - XLSX → texte via openpyxl
+  - Images → OCR via Tesseract (si photos de chantier avec texte)
+- Arête `(attachment) -[:ATTACHED_TO]-> (record_parent)`
+
+**Activités à faire (mail.activity)**
+- `summary` (char) → **vectorisé**
+- `note` (html) → **vectorisé**
+- `activity_type_id` → type (appel, mail, RDV)
+- `user_id` → arête `(activity) -[:ASSIGNED_TO]-> (user)`
+- `date_deadline` → metadata
+
+### 3.3 — Règle universelle pour chaque record traité
+
+**Pour chaque record d'un modèle P1 ou P2, le scanner doit systématiquement :**
+
+1. Créer le **nœud principal** avec label + type
+2. Vectoriser les **champs texte sémantiques** définis pour ce modèle
+3. Créer les **arêtes sortantes** depuis les many2one vers leurs cibles
+4. Traiter les **champs transversaux** :
+   - Arêtes `CREATED_BY`, `LAST_MODIFIED_BY`, `FOLLOWED_BY`
+   - Fetch + vectorisation des `mail.message` liés (avec auteurs)
+   - Fetch + stockage des `mail.tracking.value` (historique)
+   - Fetch + extraction + vectorisation des `ir.attachment` liés
+   - Fetch + vectorisation des `mail.activity` en cours
+
+**C'est ce traitement transversal systématique qui manquait aux Blocs 1-4
+d'hier**. On avait juste le nom et 2-3 champs du record principal, rien du
+fil de discussion ni de l'historique.
+
+### 3.4 — Cas spéciaux Couffrant / OpenFire (sujets métier spécifiques)
+
+Ces cas nécessitent un traitement dédié et ne sont pas couverts par la règle
+universelle de 3.3.
+
+**Cas 1 — Les kits Couffrant (priorité absolue)**
+
+Découverte clé : les kits **ne sont PAS dans `mrp.bom`** comme l'Odoo standard,
+mais dans `of.product.pack.lines` (5 518 records). C'est une table OpenFire.
+
+Structure :
+- `parent_product_id` (many2one `sale.order.line`) → ligne de devis qui contient
+  le kit
+- `product_id` (many2one `product.product`) → composant du kit
+- `quantity` (float) → quantité du composant
+- `price_unit` (float) → prix unitaire
+
+Traitement spécifique :
+- Pour chaque ligne de `of.product.pack.lines`, créer l'arête
+  `(sale_order_line) -[:CONTAINS]-> (product)` avec quantité en metadata
+- Permet à Raya de répondre *"quels kits utilisent le module DMEGC 450 HBT ?"*
+  en traversant `(product) <-[:CONTAINS]- (sale_order_line) -[:BELONGS_TO]->
+  (sale_order) -[:HAS_PRODUCT]-> (kit_product)`
+
+**Cas 2 — Les modèles de devis (contrôle qualité)**
+
+`sale.order.template` (9 modèles) + `sale.order.template.line` (119 lignes)
+
+Objectif : permettre à Raya de comparer un devis réel à son modèle source et
+détecter les écarts. Ex : *"Arlène a oublié le kit maintenance sur ce devis
+par rapport au modèle standard"*.
+
+Traitement :
+- Vectoriser chaque template + ses lignes
+- Pour chaque `sale.order`, détecter le template source (champ
+  `sale_order_template_id` sur `sale.order`)
+- Créer arête `(sale_order) -[:BASED_ON]-> (template)`
+- Raya peut alors faire du diff template ↔ order
+
+**Cas 3 — Tournées GPS et planning terrain**
+
+`of.planning.tour` (5 373) + `.line` (2 753) + `of.planning.available.slot` (4 817)
+
+Contient les tournées avec adresses GPS des interventions. Champs critiques :
+- `of.planning.tour.line.address_city/address_zip` → géoloc
+- `distance_one_way`, `duration_one_way` → km et temps de trajet
+- `endpoint_geometry_data` (text) → données GeoJSON du trajet
+- `employee_id` (many2one) → qui fait la tournée
+
+Traitement :
+- Vectoriser les tournées pour permettre *"quelles tournées près de Guéret
+  cette semaine ?"*
+- Arêtes vers `res.partner` (client visité) et `hr.employee` (technicien)
+
+**Cas 4 — Formulaires de relevé chantier**
+
+`of.survey.*` (ensemble ~22 000 records)
+- `of.survey.survey` → définition du questionnaire (ex : *"Étude préalable PV"*)
+- `of.survey.question` → questions posées
+- `of.survey.user_input` → session de réponse (lié à un lead/intervention)
+- `of.survey.user_input.line` → réponse à une question donnée
+- `of.survey.answers` → réponses texte libre des utilisateurs
+
+Mine d'or pour Raya : les réponses contiennent les caractéristiques techniques
+relevées chez le client (type de toiture, orientation, puissance cible, etc.).
+
+Traitement : vectoriser les `user_input.line` + `answers` avec liaison vers
+le lead ou l'intervention parent.
+
+**Cas 5 — Signatures électroniques YouSign**
+
+`of.yousign.request.template` + `.signatory` (2 + 1 records)
+
+Peu volumineux mais important pour la traçabilité juridique.
+Sur chaque devis signé, capter :
+- Template de signature utilisé
+- Signataires (partner ou email)
+- Date de signature
+
+Pour l'instant volume faible → traitement simple en arêtes, pas de
+vectorisation.
+
+**Cas 6 — Images intervention**
+
+`of.image` (1 577 records) avec champs `image_1024`, `image_1920` (binary) et
+`caption` (text), liés via `intervention_id` (many2one calendar.event).
+
+Traitement :
+- Vectoriser le `caption` (description de la photo)
+- Créer arête `(image) -[:FROM_INTERVENTION]-> (calendar.event)`
+- Option future : OCR sur les images de chantier pour extraire les textes
+  visibles (repères techniques, numéros de série équipements)
+
+**Cas 7 — Documents custom et DMS**
+
+`of.custom.document` (3) + `.field` (56) + `of.dms.virtual_file_report` (7)
+
+Petit volume aujourd'hui mais à surveiller. Ce sont des documents que
+Guillaume peut créer avec des champs personnalisés (ex : fiche technique
+produit, rapport d'intervention custom).
+
+Traitement : vectoriser le contenu + créer arêtes vers les entités liées.
+
+---
+
+**→ Fin de la Section 3. Validation demandée.**
+
+Tu valides cette cartographie complète ?
+- Les **3 niveaux de priorité** (P1/P2/P3) te conviennent ?
+- Les **champs transversaux** (3.2/3.3) capturent bien ta phrase *"qui a fait
+  le devis, qui l'a modifié, qui le suit"* ?
+- Les **7 cas spéciaux** (3.4) sont-ils tous pertinents ?
+- Quelque chose manque ou doit être déplacé ?
