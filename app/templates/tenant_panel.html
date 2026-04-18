@@ -210,7 +210,8 @@ async function updatePermission(connectionId, newLevel){
 }
 
 async function toggleReadOnly(){
-  if(!confirm('Confirmer le basculement des permissions ?')) return;
+  const answer = prompt('⚠️ Basculer TOUTES les connexions de ta société en lecture seule ?\n\n(ou restaurer si déjà verrouillé)\n\nTape "oui" pour confirmer :');
+  if(!answer || answer.trim().toLowerCase() !== 'oui') return;
   try{
     const r = await fetch('/tenant/permissions/toggle-read-only', {method:'POST'});
     const d = await r.json();

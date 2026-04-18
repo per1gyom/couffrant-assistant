@@ -500,7 +500,7 @@ def admin_permissions_overview(request: Request, _: dict = Depends(require_admin
         with get_pg_conn() as conn:
             cur = conn.cursor()
             cur.execute("""
-                SELECT tenant_id, id, tool_type, name, status,
+                SELECT tenant_id, id, tool_type, label AS name, status,
                        super_admin_permission_level,
                        tenant_admin_permission_level
                 FROM tenant_connections
@@ -565,6 +565,21 @@ def admin_toggle_read_only_global(request: Request, _: dict = Depends(require_ad
     try:
         from app.permissions import toggle_all_read_only
         result = toggle_all_read_only(tenant_id=None, actor_role="super_admin")
+        return {"status": "ok", **result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
+@router.post("/admin/tenant/{tenant_id}/toggle-read-only")
+def admin_toggle_read_only_per_tenant(tenant_id: str, request: Request, _: dict = Depends(require_admin)):
+    """Bascule toutes les connexions d UN tenant specifique en 'read' (ou restaure).
+
+    Accessible par super_admin ou admin Raya. Permet un basculement cible
+    sans toucher aux autres tenants.
+    """
+    try:
+        from app.permissions import toggle_all_read_only
+        result = toggle_all_read_only(tenant_id=tenant_id, actor_role="super_admin")
         return {"status": "ok", **result}
     except Exception as e:
         return {"status": "error", "message": str(e)[:300]}

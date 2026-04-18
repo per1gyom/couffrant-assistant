@@ -300,37 +300,25 @@ function escapeHtml(str){
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
-// ─── Permissions globales (super admin) — Etape 5 du plan permissions ───
-async function toggleReadOnlyGlobal(){
-  if(!confirm('⚠️ Bascule TOUTES les connexions de TOUS les tenants en lecture seule.\n\nRe-cliquer restaurera leurs permissions precedentes.\n\nConfirmer ?')) return;
-  const btn = document.getElementById('btn-toggle-lock-global');
-  const orig = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '⏳ En cours...';
+// ─── Permissions par tenant (super admin) — bouton par tenant avec confirmation textuelle ───
+async function toggleReadOnlyForTenant(tenantId, tenantName){
+  const answer = prompt(`⚠️ Basculer TOUTES les connexions de "${tenantName}" en lecture seule ?\n\n(ou restaurer si deja verrouille)\n\nTape "oui" pour confirmer :`);
+  if(!answer || answer.trim().toLowerCase() !== 'oui'){
+    return;
+  }
   try{
-    const r = await fetch('/admin/permissions/toggle-read-only-global', {method:'POST'});
+    const r = await fetch(`/admin/tenant/${encodeURIComponent(tenantId)}/toggle-read-only`, {method:'POST'});
     const d = await r.json();
     if(d.status === 'ok'){
       const msg = d.action === 'locked'
-        ? `🔒 ${d.affected} connexion(s) basculee(s) en lecture seule`
-        : `🔓 ${d.affected} connexion(s) restauree(s) a leurs permissions precedentes`;
+        ? `🔒 ${tenantName} : ${d.affected} connexion(s) basculee(s) en lecture seule`
+        : `🔓 ${tenantName} : ${d.affected} connexion(s) restauree(s)`;
       setAlert('companies-alert', msg, 'ok');
-      if(d.action === 'locked'){
-        btn.style.background = '#10b981';
-        btn.innerHTML = '🔓 Restaurer (GLOBAL)';
-      } else {
-        btn.style.background = '#f59e0b';
-        btn.innerHTML = '🔒 Tout en lecture (GLOBAL)';
-      }
     } else {
       setAlert('companies-alert', '❌ '+(d.message||'Erreur'), 'err');
-      btn.innerHTML = orig;
     }
   }catch(e){
     setAlert('companies-alert', '❌ '+e.message, 'err');
-    btn.innerHTML = orig;
-  }finally{
-    btn.disabled = false;
   }
 }
 
@@ -900,7 +888,7 @@ async function loadCompanies(){
         <div class="tenant-header" onclick="toggleTenant(${i})">
           <span class="tenant-toggle" id="toggle-${i}">›</span>
           <span class="tenant-name">🏢 ${t.name}${(t.settings||{}).suspended?'<span class="badge badge-yellow" style="margin-left:8px;font-size:10px">⏸️ SUSPENDU</span>':''}${legalForm?' <span style="font-size:11px;color:var(--text3);font-weight:400">'+legalForm+'</span>':''}</span>
-          <div class="tenant-meta"><span>👥 ${t.user_count} collaborateur(s)</span><span>📬 ${fmt(t.total_mails)} mails</span><span>💬 ${fmt(t.total_conv)} conversations</span><span id="conn-summary-${i}" style="display:inline-flex;gap:6px;align-items:center">…</span>${siret?`<span style="color:var(--text3)">SIRET: ${siret}</span>`:''}</div>
+          <div class="tenant-meta"><span>👥 ${t.user_count} collaborateur(s)</span><span>📬 ${fmt(t.total_mails)} mails</span><span>💬 ${fmt(t.total_conv)} conversations</span><span id="conn-summary-${i}" style="display:inline-flex;gap:6px;align-items:center">…</span>${siret?`<span style="color:var(--text3)">SIRET: ${siret}</span>`:''}${isAdminOrSuper()?`<button class="btn" onclick="event.stopPropagation();toggleReadOnlyForTenant('${t.tenant_id}','${(t.name||'').replace(/'/g,'&apos;')}')" style="background:transparent;border:1px solid var(--border);color:var(--text2);padding:2px 8px;font-size:11px;border-radius:6px;cursor:pointer;margin-left:auto" title="Bascule toutes les connexions de ce tenant en lecture seule">🔒 Lecture</button>`:''}</div>
         </div>
         <div class="tenant-body" id="body-${i}">
           <table><thead><tr><th>Identifiant</th><th>Email</th><th>Rôle</th><th>MS</th><th>Mails</th><th>Conv.</th><th>Dernière connexion</th><th>Actions</th></tr></thead>

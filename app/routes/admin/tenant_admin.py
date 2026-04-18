@@ -261,7 +261,7 @@ def tenant_get_permissions(request: Request, _: dict = Depends(require_tenant_ad
         with get_pg_conn() as conn:
             cur = conn.cursor()
             cur.execute("""
-                SELECT id, tool_type, name, status,
+                SELECT id, tool_type, label AS name, status,
                        super_admin_permission_level,
                        tenant_admin_permission_level,
                        previous_permission_level
