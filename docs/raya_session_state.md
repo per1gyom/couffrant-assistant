@@ -14,7 +14,7 @@
 - Desktop Commander local : `/Users/per1guillaume/couffrant-assistant`
 - Repo GitHub : `per1gyom/couffrant-assistant` branche `main`
 - URL prod : `https://app.raya-ia.fr`
-- Cache-bust JS/CSS : **v=32** (admin-panel.js) / **v=79** (chat)
+- Cache-bust JS/CSS : **v=33** (admin-panel.js) / **v=79** (chat)
 - Chantier Odoo — Étape 3 (vue 360° client) : **FAIT** — module `app/connectors/odoo_client_360.py`, tag `[ACTION:ODOO_CLIENT_360:nom_ou_id]`, détection d'anomalies intelligente (facture annulée le même jour qu'impayé, impayés significatifs, dormance 180j+)
 
 ## 🧠 RÈGLE ARCHITECTURALE FONDAMENTALE — Mémoire à 4 couches

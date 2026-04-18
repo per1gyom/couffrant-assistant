@@ -336,4 +336,25 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_odoo_sem_tenant_model ON odoo_semantic_content (tenant_id, source_model)",
     "CREATE INDEX IF NOT EXISTS idx_odoo_sem_partner ON odoo_semantic_content (tenant_id, related_partner_id)",
     "CREATE INDEX IF NOT EXISTS idx_odoo_sem_write_date ON odoo_semantic_content (tenant_id, source_model, odoo_write_date)",
+    # -- ALERTES SYSTEME (v1.0 18/04/2026) --
+    # Voir docs/raya_memory_architecture.md. Table generique pour toutes les
+    # alertes systeme remontees a l'admin : limites approchees, erreurs
+    # recurrentes, modules Odoo manquants, quotas API atteints, etc.
+    """CREATE TABLE IF NOT EXISTS system_alerts (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        alert_type TEXT NOT NULL,
+        severity TEXT NOT NULL DEFAULT 'warning',
+        component TEXT NOT NULL,
+        message TEXT NOT NULL,
+        details JSONB DEFAULT '{}',
+        acknowledged BOOLEAN DEFAULT FALSE,
+        acknowledged_by TEXT,
+        acknowledged_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (tenant_id, alert_type, component)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_alerts_active ON system_alerts (tenant_id, acknowledged, severity)",
+    "CREATE INDEX IF NOT EXISTS idx_alerts_component ON system_alerts (tenant_id, component, alert_type)",
 ]

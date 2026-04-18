@@ -24,7 +24,7 @@ function switchTab(name){
   if(name==='rules'){populateUserFilters();loadRules();}
   if(name==='insights'){populateUserFilters();loadInsights();}
   if(name==='usage') loadUsage();
-  if(name==='companies') loadCompanies();
+  if(name==='companies'){ loadCompanies(); loadSystemAlerts(); }
   if(name==='profile') loadProfile();
 }
 
@@ -261,6 +261,8 @@ async function vectorizeOdoo(btn){
     const types = Object.entries(gs.nodes_by_type || {}).map(([k,v])=>`${k}=${v}`).join(', ');
     const summary = `✅ Vectorisation OK en ${res.total_duration_sec || '?'}s. ${parts.join(' · ')}. Graphe total : ${gs.nodes_total||0} nœuds (${types}), ${gs.edges_total||0} arêtes.`;
     setAlert('companies-alert', summary, 'ok');
+    // Recharger les alertes : la vectorisation a pu en declencher (limites atteintes)
+    loadSystemAlerts();
   }catch(e){
     setAlert('companies-alert', '❌ Vectorisation échouée : '+e.message, 'err');
   }finally{
@@ -427,6 +429,59 @@ async function runDiag(btn){
       </div>`).join('')+'</div>';
   }catch(e){el.textContent='❌ Erreur: '+e.message;}
   if(btn){btn.disabled=false;}
+}
+
+// ─ ALERTES SYSTEME (Bloc 2.5, 18/04/2026) ─
+// Affiche un bandeau rouge/orange en haut du panel admin pour toute alerte
+// active (limites fetch approchees, modules Odoo manquants, etc.).
+async function loadSystemAlerts(){
+  try{
+    const r = await fetch('/admin/alerts');
+    const d = await r.json();
+    const box = document.getElementById('system-alerts-banner');
+    if (!box) return;
+    const alerts = (d.alerts || []).filter(a => !a.acknowledged);
+    if (alerts.length === 0){ box.innerHTML = ''; box.style.display = 'none'; return; }
+    const bySev = {critical: [], warning: [], info: []};
+    alerts.forEach(a => (bySev[a.severity] || bySev.warning).push(a));
+    const colors = {
+      critical: {bg:'#7f1d1d', border:'#dc2626', icon:'🚨', label:'CRITIQUE'},
+      warning:  {bg:'#78350f', border:'#f59e0b', icon:'⚠️', label:'ALERTE'},
+      info:     {bg:'#1e3a8a', border:'#3b82f6', icon:'ℹ️', label:'INFO'},
+    };
+    let html = '';
+    ['critical','warning','info'].forEach(sev => {
+      if (!bySev[sev].length) return;
+      const c = colors[sev];
+      bySev[sev].forEach(a => {
+        const detailsBits = [];
+        if (a.details && typeof a.details === 'object'){
+          if (a.details.usage_pct) detailsBits.push(`${a.details.usage_pct}% utilise`);
+          if (a.details.total_in_source) detailsBits.push(`total Odoo: ${a.details.total_in_source}`);
+          if (a.details.fetched) detailsBits.push(`recupere: ${a.details.fetched}`);
+          if (a.details.limit) detailsBits.push(`limite: ${a.details.limit}`);
+        }
+        const detailsStr = detailsBits.length ? ` (${detailsBits.join(' · ')})` : '';
+        html += `<div style="padding:10px 14px;background:${c.bg};border-left:4px solid ${c.border};border-radius:6px;margin-bottom:6px;color:#fff;display:flex;align-items:center;gap:10px;font-size:12px">
+          <span style="font-size:16px">${c.icon}</span>
+          <div style="flex:1">
+            <strong>${c.label}</strong> — <span style="opacity:0.8">${a.component}</span><br>
+            ${a.message}${detailsStr}
+          </div>
+          <button class="btn btn-ghost" style="padding:4px 10px;font-size:11px;background:rgba(255,255,255,0.15);color:#fff;border:1px solid rgba(255,255,255,0.3)" onclick="acknowledgeAlert(${a.id})">✓ Acquitter</button>
+        </div>`;
+      });
+    });
+    box.innerHTML = html;
+    box.style.display = 'block';
+  }catch(e){ /* silencieux : une erreur de chargement d'alertes ne doit pas casser l'UI */ }
+}
+
+async function acknowledgeAlert(alertId){
+  try{
+    await fetch(`/admin/alerts/${alertId}/acknowledge`, {method: 'POST'});
+    await loadSystemAlerts();  // recharger pour refleter l'acquittement
+  }catch(e){}
 }
 
 // ─ SOCIÉTÉS ─

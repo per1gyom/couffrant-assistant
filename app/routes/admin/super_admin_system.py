@@ -28,6 +28,7 @@ Endpoints super_admin — gestion globale (utilisateurs, tenants, outils, mémoi
 """
 import os
 import requests as http_requests
+from typing import Optional
 from fastapi import APIRouter, Request, Body, Depends, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse
 
@@ -306,3 +307,48 @@ def admin_odoo_graph_stats(
                 "stats": count_graph(tenant_id)}
     except Exception as e:
         return {"status": "error", "message": str(e)[:300]}
+
+
+# ─── ALERTES SYSTEME (Bloc 2.5 du chantier memoire, 18/04/2026) ───
+
+@router.get("/admin/alerts")
+def admin_alerts_list(
+    request: Request,
+    include_acknowledged: bool = False,
+    min_severity: Optional[str] = None,
+    _: dict = Depends(require_admin),
+):
+    """Liste les alertes systeme actives pour le tenant de l'admin connecte.
+    min_severity accepte 'info' / 'warning' / 'critical'."""
+    try:
+        from app.tenant_manager import get_user_tenants
+        from app.system_alerts import list_alerts
+        tenants = get_user_tenants(request.session.get("username", ""))
+        tenant_id = tenants[0] if tenants else "couffrant_solar"
+        alerts = list_alerts(
+            tenant_id=tenant_id,
+            include_acknowledged=include_acknowledged,
+            min_severity=min_severity,
+        )
+        return {"status": "ok", "tenant_id": tenant_id,
+                "count": len(alerts), "alerts": alerts}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
+@router.post("/admin/alerts/{alert_id}/acknowledge")
+def admin_alerts_ack(
+    request: Request,
+    alert_id: int,
+    _: dict = Depends(require_admin),
+):
+    """L'admin accuse reception d'une alerte : elle est cachee jusqu'a ce
+    que le probleme se re-declenche ou evolue (updated_at et acknowledged=FALSE)."""
+    try:
+        from app.system_alerts import acknowledge_alert
+        username = request.session.get("username", "admin")
+        ok = acknowledge_alert(alert_id, username)
+        return {"status": "ok" if ok else "error",
+                "message": "Acquittee" if ok else "Non trouvee"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:200]}

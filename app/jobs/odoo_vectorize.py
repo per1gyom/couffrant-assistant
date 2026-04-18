@@ -37,6 +37,24 @@ logger = logging.getLogger("raya.odoo_vectorize")
 DEFAULT_TENANT = "couffrant_solar"
 
 
+def _count_odoo_records(model: str, domain: Optional[list] = None) -> Optional[int]:
+    """Retourne le nombre total de records Odoo pour un modele et un domain,
+    via search_count (leger, O(1) cote Odoo). Utilise pour detecter proactivement
+    les cas ou la limite de fetch est approchee ou depassee.
+
+    Retourne None en cas d'erreur (pas bloquant, la vectorisation continue)."""
+    try:
+        from app.connectors.odoo_connector import odoo_call
+        count = odoo_call(
+            model=model, method="search_count",
+            args=[domain or []],
+        )
+        return int(count) if count is not None else None
+    except Exception as e:
+        logger.debug("[Vectorize] count %s échoué : %s", model, str(e)[:100])
+        return None
+
+
 # ─── STOCKAGE D'UN CONTENU SÉMANTIQUE ─────────────────────────
 
 def _store_semantic_content(
@@ -133,6 +151,16 @@ def vectorize_partners(tenant_id: str = DEFAULT_TENANT, limit: int = 5000) -> di
         return stats
 
     stats["fetched"] = len(partners or [])
+
+    # Surveillance proactive : compte total + check limite
+    total_in_odoo = _count_odoo_records("res.partner", [["active", "=", True]])
+    stats["total_in_source"] = total_in_odoo
+    from app.system_alerts import check_fetch_limit
+    check_fetch_limit(
+        tenant_id=tenant_id, component="vectorize_partners",
+        fetched_count=stats["fetched"], limit_configured=limit,
+        total_in_source=total_in_odoo,
+    )
 
     # 1. Créer les nœuds dans le graphe (pas besoin d'embedding pour ça)
     texts_to_embed = []
@@ -238,6 +266,15 @@ def vectorize_sale_orders(tenant_id: str = DEFAULT_TENANT, limit: int = 2000) ->
         return stats
 
     stats["fetched"] = len(orders or [])
+    # Surveillance limite
+    total_in_odoo = _count_odoo_records("sale.order", [])
+    stats["total_in_source"] = total_in_odoo
+    from app.system_alerts import check_fetch_limit
+    check_fetch_limit(
+        tenant_id=tenant_id, component="vectorize_sale_orders",
+        fetched_count=stats["fetched"], limit_configured=limit,
+        total_in_source=total_in_odoo,
+    )
     texts_to_embed = []
     entries_to_embed = []
 
@@ -386,6 +423,15 @@ def vectorize_leads(tenant_id: str = DEFAULT_TENANT, limit: int = 1000) -> dict:
         return stats
 
     stats["fetched"] = len(leads or [])
+    # Surveillance limite
+    total_in_odoo = _count_odoo_records("crm.lead", [["active", "=", True]])
+    stats["total_in_source"] = total_in_odoo
+    from app.system_alerts import check_fetch_limit
+    check_fetch_limit(
+        tenant_id=tenant_id, component="vectorize_leads",
+        fetched_count=stats["fetched"], limit_configured=limit,
+        total_in_source=total_in_odoo,
+    )
     texts = []
     entries = []
 
@@ -478,6 +524,15 @@ def vectorize_events(tenant_id: str = DEFAULT_TENANT, limit: int = 1000) -> dict
         return stats
 
     stats["fetched"] = len(events or [])
+    # Surveillance limite
+    total_in_odoo = _count_odoo_records("calendar.event", [])
+    stats["total_in_source"] = total_in_odoo
+    from app.system_alerts import check_fetch_limit
+    check_fetch_limit(
+        tenant_id=tenant_id, component="vectorize_events",
+        fetched_count=stats["fetched"], limit_configured=limit,
+        total_in_source=total_in_odoo,
+    )
     texts = []
     entries = []
 
