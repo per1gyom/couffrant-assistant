@@ -549,6 +549,84 @@ def admin_odoo_introspect_start(
         return {"status": "error", "message": str(e)[:300]}
 
 
+@router.post("/admin/scanner/run/start")
+def admin_scanner_run_start(
+    request: Request,
+    tenant_id: str = "couffrant",
+    source: str = "odoo",
+    priority_max: int = 1,
+    purge_first: bool = True,
+    run_type: str = "init",
+    _: dict = Depends(require_admin),
+):
+    """Lance un scan de vectorisation en background thread.
+
+    Phase 3 du Scanner Universel : execute les manifests actifs jusqu a la
+    priorite max demandee. priority_max=1 par defaut pour scanner P1 seul.
+
+    Args de query string :
+    - tenant_id : defaut 'couffrant'
+    - source : defaut 'odoo'
+    - priority_max : 1 (P1) / 2 (P1+P2)
+    - purge_first : true pour rebuild complet avec purge prealable
+    - run_type : 'init' (default) / 'rebuild'
+
+    Retourne {run_id} immediat. Utiliser /admin/scanner/run/status pour poller."""
+    try:
+        from app.scanner.runner import start_scan_p1
+        run_id = start_scan_p1(
+            tenant_id=tenant_id, source=source,
+            priority_max=priority_max, purge_first=purge_first,
+            run_type=run_type,
+        )
+        return {"status": "started", "run_id": run_id,
+                "priority_max": priority_max, "purge_first": purge_first}
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
+@router.get("/admin/scanner/run/status")
+def admin_scanner_run_status(
+    request: Request, run_id: str,
+    _: dict = Depends(require_admin),
+):
+    """Retourne le statut d un run (en cours ou termine) via orchestrator."""
+    try:
+        from app.scanner import orchestrator
+        from app.scanner.runner import is_run_active
+        status = orchestrator.get_run_status(run_id)
+        if not status:
+            return {"status": "not_found",
+                    "message": f"Run {run_id} inconnu"}
+        status["thread_alive"] = is_run_active(run_id)
+        return status
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
+@router.post("/admin/scanner/purge")
+def admin_scanner_purge(
+    request: Request,
+    tenant_id: str = "couffrant",
+    source: str = "odoo",
+    confirm: str = "",
+    _: dict = Depends(require_admin),
+):
+    """DANGER : supprime toutes les donnees vectorisees + graphe pour un
+    tenant+source. Necessite confirm='yes' pour eviter les erreurs."""
+    if confirm != "yes":
+        return {"status": "blocked",
+                "message": "Operation destructrice. Passer confirm=yes pour confirmer."}
+    try:
+        from app.scanner.runner import purge_tenant_data
+        counts = purge_tenant_data(tenant_id, source)
+        return {"status": "ok", "counts": counts}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
 @router.post("/admin/scanner/manifests/generate")
 def admin_scanner_generate_manifests(
     request: Request,

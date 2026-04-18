@@ -370,7 +370,11 @@ Le cœur métier. Sans ça, Raya est aveugle sur l'essentiel.
 | `of.survey.user_input.line` | 687 | Réponses utilisateurs aux formulaires |
 
 
-**Priorité 2 — Vectorisation + graphe (15 modèles)**
+**Priorité 2 — Vectorisation + graphe (16 modèles)**
+*Note 18/04 après test Phase 2 : on avait annoncé 15 modèles mais on a bien
+fini avec 16 (ajout de `of.custom.document.field` pour avoir le schéma des
+champs des documents custom, nécessaire pour vectoriser correctement les
+`of.custom.document` parents). Total P1+P2 = 32 modèles, pas 31.*
 Support métier important pour la proactivité et le suivi.
 
 | Modèle | Records | Rôle |

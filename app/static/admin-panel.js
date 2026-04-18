@@ -217,6 +217,7 @@ async function loadConnections(tenantId,idx){
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#8b5cf6" onclick="vectorizeOdoo(this)" title="Vectorisation sémantique + graphe typé">🧠 Vectoriser</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#0ea5e9" onclick="introspectOdoo(this)" title="Inventaire complet : liste tous les modèles Odoo et leurs champs">🔍 Inventaire</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#f59e0b" onclick="generateManifests(this)" title="Scanner Universel Phase 2 : génère les manifests de vectorisation pour les 31 modèles P1+P2">📋 Manifests</button>`:''}
+          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#dc2626" onclick="scanP1(this)" title="Scanner Universel Phase 3 : lance la vectorisation complète des 16 modèles P1 (purge + rebuild)">🚀 Scanner P1</button>`:''}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
           <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
         </div>
@@ -292,6 +293,59 @@ async function acknowledgeAlert(alertId){
 function escapeHtml(str){
   if(!str) return '';
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function scanP1(btn){
+  // Scanner Universel Phase 3 : vectorisation complete des 16 modeles P1
+  // avec purge prealable. Peut prendre 30-60 min selon volume (product.template = 133k).
+  if(!confirm('⚠️ ATTENTION : Lancer le Scanner P1 ?\n\nCette opération va :\n1. PURGER toutes les données vectorisées actuelles\n2. RE-VECTORISER les 16 modèles P1 (res.partner, crm.lead, sale.order, product.template, etc.)\n3. Durée estimée : 30-60 min\n4. Coût OpenAI estimé : 5-10€\n\nConfirmer ?')) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Démarrage...';
+  try{
+    const r = await fetch('/admin/scanner/run/start?priority_max=1&purge_first=true', {method:'POST'});
+    const d = await r.json();
+    if(d.status !== 'started' || !d.run_id) throw new Error(d.message || 'Démarrage échoué');
+    const runId = d.run_id;
+    setAlert('companies-alert', `🚀 Scan P1 lancé (run_id: ${runId}). Patience, cela peut prendre 30-60 min...`, 'ok');
+
+    // Polling toutes les 10s (pas trop souvent, ça tourne longtemps)
+    let tries = 0;
+    const maxTries = 720; // 720 * 10s = 2h max
+    while(tries < maxTries){
+      await new Promise(res => setTimeout(res, 10000));
+      tries++;
+      const sr = await fetch(`/admin/scanner/run/status?run_id=${runId}`);
+      const sd = await sr.json();
+      if(sd.status === 'running' || sd.status === 'pending'){
+        const p = sd.progress || {};
+        const s = sd.stats || {};
+        const cm = p.current_model || 'init';
+        const step = p.step || 'running';
+        const modelsDone = s.models_processed || 0;
+        const modelsTotal = s.models_total || 16;
+        const recordsTotal = s.records_processed || 0;
+        const chunks = s.chunks_vectorized || 0;
+        btn.innerHTML = `⏳ ${step} ${modelsDone}/${modelsTotal} — ${cm} (${recordsTotal} rec, ${chunks} chunks)`;
+        continue;
+      }
+      if(sd.status === 'ok'){
+        const s = sd.stats || {};
+        const dur = sd.finished_at && sd.started_at ? Math.round((new Date(sd.finished_at) - new Date(sd.started_at))/1000) : '?';
+        setAlert('companies-alert', `✅ Scan P1 terminé en ${dur}s : ${s.models_processed}/${s.models_total} modèles, ${s.records_processed} records, ${s.nodes_created} nœuds, ${s.edges_created} arêtes, ${s.chunks_vectorized} chunks vectorisés, ${s.errors||0} erreurs`, 'ok');
+        return;
+      }
+      if(sd.status === 'error'){
+        throw new Error(sd.error || sd.message || 'Erreur inconnue');
+      }
+    }
+    throw new Error('Timeout 2h');
+  }catch(e){
+    setAlert('companies-alert', '❌ Scan P1 échoué : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
 }
 
 async function generateManifests(btn){
