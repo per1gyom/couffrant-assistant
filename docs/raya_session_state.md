@@ -16,6 +16,27 @@
 - URL prod : `https://app.raya-ia.fr`
 - Cache-bust JS/CSS : **v=31** (admin-panel.js) / **v=79** (chat)
 - Chantier Odoo — Étape 3 (vue 360° client) : **FAIT** — module `app/connectors/odoo_client_360.py`, tag `[ACTION:ODOO_CLIENT_360:nom_ou_id]`, détection d'anomalies intelligente (facture annulée le même jour qu'impayé, impayés significatifs, dormance 180j+)
+
+## 🧠 RÈGLE ARCHITECTURALE FONDAMENTALE — Mémoire à 4 couches
+
+Voir `docs/raya_memory_architecture.md` pour le détail complet.
+
+**Règle universelle** : pour toute nouvelle source de données connectée à Raya
+(Odoo, Drive, Gmail, SharePoint, Teams, futurs ERP/CRM/messaging), les 4 couches
+doivent être implémentées :
+
+1. **Couche 1 — LIVE** : accès temps réel (lecture à la demande)
+2. **Couche 2 — Graphe sémantique typé** : nœuds + arêtes typés avec traversée
+   multi-hop (table `semantic_graph`)
+3. **Couche 3 — Vectorisation + hybrid search + reranking** : embeddings OpenAI
+   text-embedding-3-small 1536 dims + tsvector FR + RRF + Cohere rerank-3
+4. **Couche 4 — Surveillance proactive** : scanner qui alimente le briefing matinal
+
+**Mise à jour** : webhooks en priorité, sync incrémental nocturne 3h30 en filet
+de sécurité. **Pas de polling fréquent**.
+
+Aucune source n'est considérée "intégrée" tant que les 4 couches ne sont pas en
+place. Checklist détaillée dans le doc d'architecture.
 - **⚠️ PANELS SÉPARÉS** : `/admin/panel` → super admin only / `/tenant/panel` → tenant admin only
 - **⚠️ ARCHITECTURE ADMIN** : Routes dans le **package** `app/routes/admin/`
 - **⚠️ JAMAIS** supprimer `async function init()` dans `chat-main.js`
