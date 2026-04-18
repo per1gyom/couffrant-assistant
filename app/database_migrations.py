@@ -427,4 +427,39 @@ MIGRATIONS = [
     "ALTER TABLE semantic_graph_edges ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
     "ALTER TABLE odoo_semantic_content ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
     "CREATE INDEX IF NOT EXISTS idx_sg_nodes_active ON semantic_graph_nodes (tenant_id, node_type) WHERE deleted_at IS NULL",
+    # -- Phase Permissions tenant Read/Write/Delete (18/04/2026 soir) --
+    # Plan : docs/raya_permissions_plan.md
+    # Hierarchie : super_admin > tenant_admin > user (v2)
+    # En v1 : super_admin_permission_level plafonne tenant_admin_permission_level
+    "ALTER TABLE tenant_connections ADD COLUMN IF NOT EXISTS super_admin_permission_level TEXT DEFAULT 'read'",
+    "ALTER TABLE tenant_connections ADD COLUMN IF NOT EXISTS tenant_admin_permission_level TEXT DEFAULT 'read'",
+    "ALTER TABLE tenant_connections ADD COLUMN IF NOT EXISTS previous_permission_level TEXT",
+    # Contrainte soft : valeur autorisee
+    """DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_connections_super_admin_perm_check') THEN
+            ALTER TABLE tenant_connections ADD CONSTRAINT tenant_connections_super_admin_perm_check
+                CHECK (super_admin_permission_level IN ('read', 'read_write', 'read_write_delete'));
+        END IF;
+    END $$""",
+    """DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tenant_connections_tenant_admin_perm_check') THEN
+            ALTER TABLE tenant_connections ADD CONSTRAINT tenant_connections_tenant_admin_perm_check
+                CHECK (tenant_admin_permission_level IN ('read', 'read_write', 'read_write_delete'));
+        END IF;
+    END $$""",
+    # Table d audit : log chaque tentative d action avec resultat (allowed/denied)
+    """CREATE TABLE IF NOT EXISTS permission_audit_log (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        connection_id INTEGER,
+        action_tag TEXT NOT NULL,
+        current_permission_level TEXT NOT NULL,
+        required_permission_level TEXT NOT NULL,
+        allowed BOOLEAN NOT NULL,
+        user_input_excerpt TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_perm_audit_tenant ON permission_audit_log (tenant_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_perm_audit_denied ON permission_audit_log (tenant_id, created_at DESC) WHERE allowed = FALSE",
 ]
