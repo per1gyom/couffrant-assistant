@@ -118,3 +118,64 @@ Seule exception consciente : compte Guillaume en `read_write` pour tests.
 7. `[ce commit]` — Étape 7 (tests + doc livraison)
 
 **Total : ~550 lignes de code + 320 lignes de plan + 1 table DB + 3 colonnes.**
+
+
+---
+
+## 🔧 PATCH v1.1 — Nuit 18→19/04 (~3h dev UX)
+
+Après livraison v1 initiale, Guillaume a testé et signalé une série de bugs
+UX qui ont nécessité 10+ patchs correctifs. État stabilisé à 3h du matin.
+
+### Fixes livrés
+
+**Backend** (`app/permissions.py`)
+- Nouveau `get_tenant_lock_status(tenant_id)` pour état détaillé
+- Fix critique dans `toggle_all_read_only` : ne touche PLUS JAMAIS à
+  `super_admin_permission_level` (évite l'effondrement du plafond lors
+  d'un cycle verrouiller/restaurer)
+
+**Backend endpoints** (`app/routes/admin/`)
+- `GET /tenant/permissions/lock-status` (tenant admin)
+- `GET /admin/tenant/{id}/lock-status` (super admin)
+- `GET /admin/tenant/{id}/permissions` (super admin)
+- `POST /admin/tenant/{id}/permissions/update` (super admin)
+- `POST /admin/tenant/{id}/toggle-read-only` (super admin)
+
+**Frontend tenant_panel** (`app/templates/tenant_panel.html`)
+- Variable globale `_lastPermissionsState` (source unique de vérité)
+- Repaint forcé avant prompt() (2 animation frames + 50ms)
+- Cache-bust `?_=Date.now()` + {cache: 'no-store'}
+- Radios disabled + opacity 0.5 + bandeau rouge quand verrouillé
+- Cadenas correct : 🔒 Lecture seule (rouge) / 🔓 Lecture écriture (transparent)
+- Confirmation textuelle "oui" (plus de confirm())
+
+**Frontend admin-panel** (`app/static/admin-panel.js` v=51)
+- Section "🔐 Permissions des connexions" dans chaque carte tenant
+- 2 colonnes de radios : Plafond super admin / Niveau appliqué tenant
+- Bouton `🔒 Lecture seule` / `🔓 Lecture écriture` par tenant (plus de bouton global)
+- `_tenantLockState` cache local invalidé après chaque action
+- Confirmation textuelle "oui" aussi
+
+**Migration DB**
+- Valeur par défaut `super_admin_permission_level` passée de `'read'` à `'read_write_delete'`
+- UPDATE manuel des 5 connexions Couffrant Solar pour nettoyer l'historique
+
+### Cascade de permissions — règle finale
+
+```
+Plafond super_admin (read/read_write/read_write_delete)
+  └─> Niveau appliqué tenant_admin (≤ plafond)
+       └─> Permissions effectives pour Raya (middleware)
+```
+
+- Super admin peut TOUT : modifier plafond ET niveau tenant, verrouiller globalement
+- Tenant admin peut : modifier niveau appliqué jusqu'à son plafond, verrouiller son tenant
+- Les 2 actions "verrouiller" ne touchent QUE `tenant_admin_permission_level`,
+  jamais le plafond (sinon risque d'effondrement irréversible)
+
+### ⚠️ Audit recommandé
+
+Voir `docs/raya_permissions_audit_todo.md` pour checklist complète.
+
+À faire à tête reposée avant d'ouvrir les permissions à d'autres tenants.

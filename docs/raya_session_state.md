@@ -1223,3 +1223,82 @@ Les deux bugs feraient d'excellents candidats pour tester l'**auto-debug**
 quand il sera en place : rapport utilisateur → diagnostic Claude → fix
 proposé → validation → déploiement. Mais là on les traite à la main car
 auto-debug n'est pas encore construit.
+
+
+---
+
+## 📍 SESSION 18→19/04 TARD NUIT — FIX UX PERMISSIONS MARATHON (~3h dev)
+
+**Contexte** : après livraison permissions v1 (7 étapes ok), Guillaume a signalé
+une cascade de bugs UX sur les boutons de lecture seule + incohérences visuelles.
+15+ commits de correctifs successifs jusqu'à 3h du matin pour tout stabiliser.
+
+### Commits clés de cette plage horaire
+
+- `70174c6` étapes 1+2 permissions (DB + module)
+- `a949c16` étape 3 (middleware)
+- `67f5daf` étape 4 (UI tenant)
+- `9c277c6` étape 5 (UI super admin + bouton global)
+- `186b79e` étape 6 (injection prompt)
+- `b15bc50` étape 7 (tests + doc)
+- `4c2a115` refonte rôles B1+B2+B3
+- `a72f50d` rôles B4 garde-fous
+- `b76e0ac` rôles B5+B6+B7 (UI edit user + migration DB)
+- `ab5e571` fix 12 checks JS scope admin
+- `5c3d72b` fix récursion infinie isAdminOrSuper
+- `dc96ecc` bouton lecture par tenant + confirmation 'oui' + fix label vs name
+- `88572ea` Fix 1+2+3 plafonds réels + feedback visuel + UI complete super admin
+- `8d2d37b` fix cadenas correct (🔒/🔓) + textes clairs
+- `79f39ca` fix toggle_all_read_only ne touche PAS super_admin_permission_level (bug critique)
+- `b7c0d87` fix radios grisés quand verrouillé + bandeau d'avertissement
+- `e0f18cf` fix source unique de vérité pour état verrouillage (_lastPermissionsState)
+- `b8bce20` fix toggle toujours relire l'état avant (plus de cache obsolète)
+- `2fcaffb` fix cache-bust sur tous les fetchs
+- `e9d6abb` fix force repaint avant prompt() - cause racine visuelle trouvée
+
+### État fin de session (3h du mat)
+
+**DB Couffrant Solar** (après nettoyage manuel) :
+- Les 5 connexions (drive, outlook, odoo, gmail, microsoft) sont à :
+  - `super_admin_permission_level = 'read_write_delete'`
+  - `tenant_admin_permission_level = 'read_write_delete'`
+  - `previous_permission_level = NULL`
+- État propre et cohérent
+
+**Migration DB** : défaut de `super_admin_permission_level` passé de `'read'` à `'read_write_delete'`
+(les nouvelles connexions naissent avec le plafond ouvert).
+
+**Fichiers clés modifiés** :
+- `app/permissions.py` (+ `get_tenant_lock_status()`, fix `toggle_all_read_only()`)
+- `app/routes/admin/tenant_admin.py` (+ endpoint `/tenant/permissions/lock-status`)
+- `app/routes/admin/super_admin.py` (+ endpoints `/admin/tenant/{id}/permissions*`, `/lock-status`, `/toggle-read-only`)
+- `app/templates/tenant_panel.html` (refactor `loadPermissions`, `toggleReadOnly` avec repaint)
+- `app/static/admin-panel.js` v=51 (900+ lignes dont section permissions dans carte tenant)
+
+### Bugs signalés et résolus
+
+1. **Radios grisés bloqués sur Lecture** → cause : plafond super_admin=read par défaut, fix : UPDATE DB + défaut migration à read_write_delete
+2. **Cadenas inversés** (🔒 pour ouvert, 🔓 pour verrouillé) → corrigé
+3. **Bouton global GLOBAL trop dangereux** → supprimé, remplacé par bouton par tenant
+4. **Confirmation simple OK/Annuler** → remplacée par prompt textuel "oui"
+5. **"Aucune connexion configurée" alors qu'il y en a** → colonne `name` n'existait pas, fix : `label AS name`
+6. **Toggle cassait le plafond super_admin** (bug critique) → `toggle_all_read_only` ne touche plus super_admin_level
+7. **Radios modifiables même en lecture seule** → disabled + opacity 0.5 + pointer-events:none
+8. **Modal affichait état incohérent avec le bouton** → source unique de vérité (_lastPermissionsState)
+9. **Cache HTTP navigateur/Fastly** → cache-bust `?_=Date.now()` + no-store
+10. **Bouton reste rouge même quand action réussie** → force 2 animation frames + 50ms avant prompt() (bug de repaint bloqué par prompt)
+
+### ⚠️ À AUDITER APRÈS REPOS
+
+Voir `docs/raya_permissions_audit_todo.md` pour la checklist complète.
+Propositions :
+- Remplacer `prompt()` par un vrai modal HTML non-bloquant
+- Fix 4 roadmap : unifier les 2 UIs (tenant_panel + super admin panel)
+- Ajouter tests e2e Playwright
+- Headers Cache-Control côté serveur
+
+### 🚀 Next Scanner P1
+
+Guillaume va lancer le Scanner Universel Phase 1 maintenant, tournera pendant
+qu'il dort. Demain vérifier via `/admin/panel` → bouton 📊 Intégrité.
+
