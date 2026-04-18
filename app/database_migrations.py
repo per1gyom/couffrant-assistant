@@ -275,4 +275,65 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_entity_links_lookup ON entity_links (tenant_id, entity_key)",
     "CREATE INDEX IF NOT EXISTS idx_entity_links_resource ON entity_links (tenant_id, resource_source, resource_id)",
     "CREATE INDEX IF NOT EXISTS idx_entity_links_type ON entity_links (tenant_id, entity_type)",
+    # -- GRAPHE SEMANTIQUE TYPE : noeuds + aretes typees avec confidence (v1.0 18/04/2026) --
+    # Voir docs/raya_memory_architecture.md couche 2.
+    # Table unifiee (pas par source) pour permettre traversee multi-hop cross-sources.
+    """CREATE TABLE IF NOT EXISTS semantic_graph_nodes (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        node_type TEXT NOT NULL,
+        node_key TEXT NOT NULL,
+        node_label TEXT,
+        node_properties JSONB DEFAULT '{}',
+        source TEXT NOT NULL,
+        source_record_id TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (tenant_id, node_type, node_key)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_sg_nodes_lookup ON semantic_graph_nodes (tenant_id, node_type, node_key)",
+    "CREATE INDEX IF NOT EXISTS idx_sg_nodes_source ON semantic_graph_nodes (tenant_id, source, source_record_id)",
+    "CREATE INDEX IF NOT EXISTS idx_sg_nodes_label ON semantic_graph_nodes (tenant_id, node_label)",
+    """CREATE TABLE IF NOT EXISTS semantic_graph_edges (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        edge_from INT NOT NULL REFERENCES semantic_graph_nodes(id) ON DELETE CASCADE,
+        edge_to INT NOT NULL REFERENCES semantic_graph_nodes(id) ON DELETE CASCADE,
+        edge_type TEXT NOT NULL,
+        edge_confidence REAL DEFAULT 1.0,
+        edge_source TEXT NOT NULL DEFAULT 'explicit_source',
+        edge_metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (tenant_id, edge_from, edge_to, edge_type)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_sg_edges_from ON semantic_graph_edges (tenant_id, edge_from, edge_type)",
+    "CREATE INDEX IF NOT EXISTS idx_sg_edges_to ON semantic_graph_edges (tenant_id, edge_to, edge_type)",
+    "CREATE INDEX IF NOT EXISTS idx_sg_edges_type ON semantic_graph_edges (tenant_id, edge_type, edge_confidence)",
+    # -- VECTORISATION SEMANTIQUE ODOO (v1.0 18/04/2026) --
+    # Voir docs/raya_memory_architecture.md couche 3.
+    # Table unique pour tous les types de contenu Odoo (sale.order, sale.order.line,
+    # crm.lead, calendar.event, project.task, res.partner.comment, etc.). Permet
+    # la recherche hybrid dense+sparse sur TOUT le contenu Odoo en une seule requete.
+    """CREATE TABLE IF NOT EXISTS odoo_semantic_content (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        source_model TEXT NOT NULL,
+        source_record_id TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        text_content TEXT NOT NULL,
+        embedding vector(1536),
+        content_tsv tsvector,
+        related_partner_id TEXT,
+        metadata JSONB DEFAULT '{}',
+        odoo_write_date TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (tenant_id, source_model, source_record_id, content_type)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_odoo_sem_embedding ON odoo_semantic_content USING hnsw (embedding vector_cosine_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_odoo_sem_tsv ON odoo_semantic_content USING gin (content_tsv)",
+    "CREATE INDEX IF NOT EXISTS idx_odoo_sem_tenant_model ON odoo_semantic_content (tenant_id, source_model)",
+    "CREATE INDEX IF NOT EXISTS idx_odoo_sem_partner ON odoo_semantic_content (tenant_id, related_partner_id)",
+    "CREATE INDEX IF NOT EXISTS idx_odoo_sem_write_date ON odoo_semantic_content (tenant_id, source_model, odoo_write_date)",
 ]
