@@ -256,19 +256,14 @@ async function toggleReadOnly(){
     if(d.status === 'ok'){
       const lab = d.action === 'locked' ? '🔒 Verrouillé en lecture seule' : '🔓 Permissions restaurées';
       setAlert('company-alert', `${lab} (${d.affected} connexion(s))`, 'ok');
-      await loadPermissions();
-      // BUGFIX : forcer un reflow + repaint explicites pour que le bouton
-      // et le bandeau reflètent immédiatement le nouvel état (sinon il
-      // faut recliquer pour voir le changement, car le prompt() precedent
-      // a laisse le navigateur dans un etat ou il ne repeint pas
-      // automatiquement le DOM juste modifie).
-      const list = document.getElementById('permissions-list');
-      if(list) void list.offsetHeight;  // force reflow
-      const btn = document.getElementById('toggle-read-only-btn');
-      if(btn) void btn.offsetHeight;  // force reflow
+      // Pattern copie EXACT du super admin panel qui marche :
+      // 1 animation frame AVANT loadPermissions (sans await) pour laisser
+      // le navigateur peindre, puis 2 animation frames APRES.
+      await new Promise(r => requestAnimationFrame(r));
+      loadPermissions();
       await new Promise(r => requestAnimationFrame(r));
       await new Promise(r => requestAnimationFrame(r));
-      console.log('[toggleReadOnly] Apres reload + repaint :', _lastPermissionsState);
+      console.log('[toggleReadOnly] Apres reload :', _lastPermissionsState);
     } else {
       setAlert('company-alert', '❌ '+(d.message||'Erreur'), 'err');
     }
