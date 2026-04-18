@@ -229,9 +229,17 @@ async function toggleReadOnly(){
   // via une autre session ou un autre onglet).
   console.log('[toggleReadOnly] Rechargement etat avant toggle...');
   await loadPermissions();
+  // BUGFIX CRITIQUE : prompt() bloque le thread principal et empeche le
+  // navigateur de repainter le DOM qui vient d etre mis a jour par
+  // loadPermissions. Sans ces 2 await, on voit l ancien rendu (bouton
+  // rouge, bandeau rouge) alors que le vrai etat est OUVERT. Forcer
+  // 2 frames d animation + 50ms garantit le repaint.
+  await new Promise(r => requestAnimationFrame(r));
+  await new Promise(r => requestAnimationFrame(r));
+  await new Promise(r => setTimeout(r, 50));
   const isLocked = _lastPermissionsState.isLocked === true;
   const total = _lastPermissionsState.total;
-  console.log('[toggleReadOnly] Etat lu :', {isLocked, total});
+  console.log('[toggleReadOnly] Etat lu apres repaint :', {isLocked, total});
   if(total === 0){
     setAlert('company-alert', '❌ Aucune connexion a modifier', 'err');
     return;
@@ -248,7 +256,6 @@ async function toggleReadOnly(){
     if(d.status === 'ok'){
       const lab = d.action === 'locked' ? '🔒 Verrouillé en lecture seule' : '🔓 Permissions restaurées';
       setAlert('company-alert', `${lab} (${d.affected} connexion(s))`, 'ok');
-      // Recharger pour mettre a jour le bouton, le bandeau et les radios
       await loadPermissions();
       console.log('[toggleReadOnly] Apres reload :', _lastPermissionsState);
     } else {

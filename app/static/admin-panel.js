@@ -318,6 +318,12 @@ async function toggleReadOnlyForTenant(tenantId, tenantName){
     setAlert('companies-alert', '❌ Impossible de lire l etat actuel : '+e.message, 'err');
     return;
   }
+  // BUGFIX CRITIQUE : prompt() bloque le thread principal. Forcer un repaint
+  // entre l update DOM et l ouverture du prompt pour eviter l incoherence
+  // visuelle (bouton ancien etat + modal nouvel etat).
+  await new Promise(r => requestAnimationFrame(r));
+  await new Promise(r => requestAnimationFrame(r));
+  await new Promise(r => setTimeout(r, 50));
   const isLocked = cached.is_locked === true;
   const total = cached.total_connections || 0;
   if(total === 0){
