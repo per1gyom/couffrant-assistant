@@ -22,3 +22,5 @@ google-api-python-client
 reportlab
 openpyxl
 pdfplumber
+
+python-docx

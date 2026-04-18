@@ -549,6 +549,54 @@ def admin_odoo_introspect_start(
         return {"status": "error", "message": str(e)[:300]}
 
 
+@router.post("/admin/scanner/debug/extract-document")
+async def admin_scanner_debug_extract(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Diagnostic Phase 6 : teste l extraction de texte sur un fichier
+    uploade. Accepte un fichier via multipart form-data.
+
+    Usage :
+        curl -X POST /admin/scanner/debug/extract-document \\
+             -F "file=@/path/to/document.pdf"
+
+    Retourne :
+        {"filename": "...", "mime_type": "...", "size": N,
+         "text_extracted": "...", "text_length": N, "method": "pdf"}
+    """
+    try:
+        form = await request.form()
+        upload = form.get("file")
+        if not upload:
+            return {"status": "error",
+                    "message": "Pas de fichier, utiliser -F 'file=@path'"}
+        content = await upload.read()
+        filename = upload.filename or "unknown"
+        mime_type = upload.content_type or ""
+        from app.scanner.document_extractors import extract_document_text
+        text = extract_document_text(
+            content_bytes=content,
+            filename=filename,
+            mime_type=mime_type,
+            context_hint=f"Document upload depuis panel admin : {filename}",
+        )
+        return {
+            "status": "ok",
+            "filename": filename,
+            "mime_type": mime_type,
+            "size_bytes": len(content),
+            "size_kb": round(len(content) / 1024, 1),
+            "text_extracted": text[:500] + "..." if text and len(text) > 500 else text,
+            "text_length": len(text) if text else 0,
+            "full_text_preview": text,
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
 @router.get("/admin/scanner/db-size")
 def admin_scanner_db_size(
     request: Request,
