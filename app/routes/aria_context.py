@@ -113,6 +113,42 @@ def _get_messaging_summary(username: str) -> str:
         return "Non disponible"
 
 
+def _build_permissions_block(tenant_id: str) -> str:
+    """Genere le bloc PERMISSIONS injecte dans le prompt systeme de Raya.
+
+    Raya sait ainsi exactement ce qu elle a le droit de faire par connexion,
+    et peut expliquer a l utilisateur les limitations sans meme tenter l action.
+
+    Plan : docs/raya_permissions_plan.md etape 6.
+    """
+    try:
+        from app.permissions import get_all_permissions_for_tenant
+        perms = get_all_permissions_for_tenant(tenant_id)
+        if not perms:
+            return ""
+        LABELS = {
+            "read": "LECTURE SEULE (chercher, lister, consulter)",
+            "read_write": "LECTURE + ECRITURE (creer, modifier, envoyer)",
+            "read_write_delete": "CONTROLE TOTAL (tout y compris supprimer)",
+        }
+        lines = []
+        for p in perms:
+            tool = p["tool_type"]
+            level = p["tenant_admin_permission_level"]
+            label = LABELS.get(level, level)
+            lines.append(f"- {tool} : {label}")
+        return (
+            "\n\n=== TES PERMISSIONS SUR LES CONNEXIONS ===\n"
+            + "\n".join(lines)
+            + "\nRespecte ces limites : si tu n as pas le droit d une action, "
+            + "NE TENTE PAS de l executer. Explique simplement a l utilisateur "
+            + "que la permission actuelle ne te le permet pas et suggere-lui "
+            + "de demander a son admin de modifier le niveau si besoin."
+        )
+    except Exception:
+        return ""
+
+
 def _build_mailbox_block(username: str, display_name: str) -> str:
     """Génère dynamiquement le bloc boîtes mail depuis les connexions réelles."""
     try:
@@ -325,6 +361,7 @@ def build_system_prompt(
         )
 
     MAILBOX_BLOCK = _build_mailbox_block(username, display_name)
+    PERMISSIONS_BLOCK = _build_permissions_block(tenant_id)
 
     # Outils connectés — listing simple, Claude sait s'en servir
     connected_tools = [
@@ -366,6 +403,7 @@ Pour tout schéma (organigramme, flux, hiérarchie, timeline), utilise un bloc `
 === AUJOURD'HUI — {datetime.now().strftime('%A %d %B %Y')} ===
 Outils connectes pour {display_name} :
 {tools_listing}
+{PERMISSIONS_BLOCK}
 
 Agenda :
 <donnees_externes>{json.dumps(agenda, ensure_ascii=False, default=str) if agenda else "Aucun RDV."}</donnees_externes>
