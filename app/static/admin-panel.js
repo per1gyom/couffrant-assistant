@@ -1003,13 +1003,21 @@ async function loadPermissionsForTenant(tenantId, idx){
       list.innerHTML = '<div style="color:var(--text3)">Aucune connexion.</div>';
       return;
     }
+    // Detection verrouillage : majorite en tenant=read avec previous != null
+    const lockedCount = data.filter(c => c.tenant_admin_level === 'read' && c.previous_level).length;
+    const isAllLocked = lockedCount > 0 && lockedCount >= data.length / 2;
     const LABELS = {'read':'Lecture','read_write':'Lect+Écrit','read_write_delete':'Tout'};
     const ICONS = {'odoo':'🗂️','gmail':'📧','outlook':'📧','microsoft':'📧','mailbox':'📧','sharepoint':'📁','drive':'📁','teams':'💬'};
-    let html = '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--border);color:var(--text3)"><th style="text-align:left;padding:4px 6px">Connexion</th><th style="padding:4px 6px">Plafond super admin</th><th style="padding:4px 6px">Niveau applique (tenant)</th></tr></thead><tbody>';
+    let html = '';
+    if(isAllLocked){
+      html += '<div style="background:#7f1d1d;border:1px solid #dc2626;color:#fca5a5;padding:8px 12px;border-radius:6px;margin-bottom:8px;font-size:11px"><strong>🔒 Verrouillé en lecture seule.</strong> Les radios "Niveau appliqué" sont désactivés. Utilise le bouton 🔒 en haut du tenant pour restaurer.</div>';
+    }
+    html += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:1px solid var(--border);color:var(--text3)"><th style="text-align:left;padding:4px 6px">Connexion</th><th style="padding:4px 6px">Plafond super admin</th><th style="padding:4px 6px">Niveau appliqué (tenant)</th></tr></thead><tbody>';
     for(const c of data){
       const icon = ICONS[c.tool_type] || '🔧';
       const levels = ['read','read_write','read_write_delete'];
       let superRadios = '';
+      // Le plafond super admin reste toujours modifiable (meme si tenant verrouille)
       for(const lvl of levels){
         const checked = c.super_admin_level === lvl;
         superRadios += `<label style="margin-right:6px;cursor:pointer;font-size:10px"><input type="radio" name="sup-${c.connection_id}" value="${lvl}" ${checked?'checked':''} onchange="updatePermissionCap('${tenantId}',${c.connection_id},'${lvl}','super_admin',${idx})"/> ${LABELS[lvl]}</label>`;
@@ -1018,11 +1026,12 @@ async function loadPermissionsForTenant(tenantId, idx){
       let tenantRadios = '';
       for(let i=0;i<levels.length;i++){
         const lvl = levels[i];
-        const disabled = i > maxRank;
+        // Disable si : au-dessus plafond OU verrouille globalement
+        const disabled = (i > maxRank) || isAllLocked;
         const checked = c.tenant_admin_level === lvl;
         tenantRadios += `<label style="margin-right:6px;opacity:${disabled?'0.3':'1'};cursor:${disabled?'not-allowed':'pointer'};font-size:10px"><input type="radio" name="ten-${c.connection_id}" value="${lvl}" ${checked?'checked':''} ${disabled?'disabled':''} onchange="updatePermissionCap('${tenantId}',${c.connection_id},'${lvl}','tenant_admin',${idx})"/> ${LABELS[lvl]}</label>`;
       }
-      html += `<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px"><strong>${icon} ${c.name}</strong><br><span style="font-size:9px;color:var(--text3)">${c.tool_type}</span></td><td style="padding:6px">${superRadios}</td><td style="padding:6px">${tenantRadios}</td></tr>`;
+      html += `<tr style="border-bottom:1px solid var(--border)"><td style="padding:6px"><strong>${icon} ${c.name}</strong><br><span style="font-size:9px;color:var(--text3)">${c.tool_type}</span></td><td style="padding:6px">${superRadios}</td><td style="padding:6px${isAllLocked ? ';opacity:0.5' : ''}">${tenantRadios}</td></tr>`;
     }
     html += '</tbody></table>';
     list.innerHTML = html;

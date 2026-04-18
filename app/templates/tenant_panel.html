@@ -158,19 +158,24 @@ async function loadPermissions(){
     const toggleBtn = document.getElementById('toggle-read-only-btn');
     if(isAllLocked){
       toggleBtn.innerHTML = '🔒 Lecture seule';
-      toggleBtn.style.background = '#7f1d1d';
-      toggleBtn.style.borderColor = '#dc2626';
-      toggleBtn.style.color = '#fca5a5';
+      toggleBtn.style.setProperty('background', '#7f1d1d', 'important');
+      toggleBtn.style.setProperty('border-color', '#dc2626', 'important');
+      toggleBtn.style.setProperty('color', '#fca5a5', 'important');
     } else {
       toggleBtn.innerHTML = '🔓 Lecture écriture';
-      toggleBtn.style.background = 'transparent';
-      toggleBtn.style.borderColor = 'var(--border)';
-      toggleBtn.style.color = 'var(--text2)';
+      toggleBtn.style.setProperty('background', 'transparent', 'important');
+      toggleBtn.style.setProperty('border-color', 'var(--border)', 'important');
+      toggleBtn.style.setProperty('color', 'var(--text2)', 'important');
     }
     // Construction du tableau
     const LEVEL_LABELS = {'read':'Lecture','read_write':'Lect+Écrit','read_write_delete':'Tout'};
     const ICONS = {'odoo':'🗂️','gmail':'📧','mailbox':'📧','microsoft':'📧','sharepoint':'📁','drive':'📁','teams':'💬'};
-    let html = '<table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:6px">Connexion</th><th style="padding:6px">Niveau actuel</th><th style="padding:6px">Plafond super admin</th></tr></thead><tbody>';
+    // Si verrouille globalement, afficher un bandeau d avertissement
+    let html = '';
+    if(isAllLocked){
+      html += '<div style="background:#7f1d1d;border:1px solid #dc2626;color:#fca5a5;padding:10px 14px;border-radius:6px;margin-bottom:10px;font-size:12px"><strong>🔒 Mode lecture seule activé globalement.</strong><br>Toutes les connexions sont verrouillées en lecture. Les radios ci-dessous sont désactivés. Clique sur "🔒 Lecture seule" en haut pour restaurer les permissions précédentes.</div>';
+    }
+    html += '<table style="width:100%;border-collapse:collapse' + (isAllLocked ? ';opacity:0.5;pointer-events:none' : '') + '"><thead><tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:6px">Connexion</th><th style="padding:6px">Niveau actuel</th><th style="padding:6px">Plafond super admin</th></tr></thead><tbody>';
     for(const c of data){
       const icon = ICONS[c.tool_type] || '🔧';
       const levels = ['read','read_write','read_write_delete'];
@@ -178,7 +183,8 @@ async function loadPermissions(){
       let radios = '';
       for(let i=0; i<levels.length; i++){
         const lvl = levels[i];
-        const disabled = i > maxRank;
+        // Un radio est disabled si : au-dessus du plafond OU verrouille globalement
+        const disabled = (i > maxRank) || isAllLocked;
         const checked = c.tenant_admin_level === lvl;
         radios += `<label style="margin-right:10px;opacity:${disabled?'0.3':'1'};cursor:${disabled?'not-allowed':'pointer'}">
           <input type="radio" name="perm-${c.connection_id}" value="${lvl}" ${checked?'checked':''} ${disabled?'disabled':''}
