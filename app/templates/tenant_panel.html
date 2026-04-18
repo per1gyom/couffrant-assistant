@@ -37,6 +37,19 @@
     <span id="company-count" style="font-family:var(--mono);font-size:12px;color:var(--text3)"></span>
   </div>
   <div id="company-alert" class="alert"></div>
+
+  <!-- 🔐 PERMISSIONS DES CONNEXIONS (Etape 4 plan permissions) -->
+  <div id="permissions-card" style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px;margin:12px 0">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div>
+        <div style="font-weight:700;font-size:14px">🔐 Permissions des connexions</div>
+        <div style="font-size:11px;color:var(--text3)">Contrôle ce que Raya peut faire sur chaque outil. Lecture seule = sécurité maximale.</div>
+      </div>
+      <button class="btn" id="toggle-read-only-btn" onclick="toggleReadOnly()" style="background:#f59e0b;color:white;padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:600">🔒 Tout en lecture seule</button>
+    </div>
+    <div id="permissions-list" style="font-family:var(--mono);font-size:12px"><div style="color:var(--text3)">Chargement...</div></div>
+  </div>
+
   <div id="company-content"><div style="color:var(--text3);font-family:var(--mono);font-size:12px">Chargement...</div></div>
 </section>
 
@@ -120,13 +133,98 @@ function switchTab(name){
   const sec=document.getElementById('tab-'+name);
   if(sec) sec.classList.add('active');
   event.target.classList.add('active');
-  if(name==='company') loadCompany();
+  if(name==='company'){ loadCompany(); loadPermissions(); }
   if(name==='profile') loadProfile();
 }
 
 function openModal(id){document.getElementById('modal-'+id).classList.add('open');}
 function closeModal(id){document.getElementById('modal-'+id).classList.remove('open');}
 function setAlert(id,msg,type){const el=document.getElementById(id);if(!el)return;el.textContent=msg;el.className='alert alert-'+type;}
+
+// 🔐 Permissions des connexions (Etape 4 du plan permissions)
+async function loadPermissions(){
+  try{
+    const data = await (await fetch('/tenant/permissions')).json();
+    const list = document.getElementById('permissions-list');
+    if(!list) return;
+    if(!Array.isArray(data) || data.length === 0){
+      list.innerHTML = '<div style="color:var(--text3)">Aucune connexion configurée.</div>';
+      document.getElementById('toggle-read-only-btn').disabled = true;
+      return;
+    }
+    // Detection etat toggle actuel (si majorite en read avec previous != null)
+    const locked = data.filter(c => c.tenant_admin_level === 'read' && c.previous_level).length;
+    const isAllLocked = locked > 0 && locked >= data.length / 2;
+    const toggleBtn = document.getElementById('toggle-read-only-btn');
+    if(isAllLocked){
+      toggleBtn.innerHTML = '🔓 Rétablir les permissions';
+      toggleBtn.style.background = '#10b981';
+    } else {
+      toggleBtn.innerHTML = '🔒 Tout en lecture seule';
+      toggleBtn.style.background = '#f59e0b';
+    }
+    // Construction du tableau
+    const LEVEL_LABELS = {'read':'Lecture','read_write':'Lect+Écrit','read_write_delete':'Tout'};
+    const ICONS = {'odoo':'🗂️','gmail':'📧','mailbox':'📧','microsoft':'📧','sharepoint':'📁','drive':'📁','teams':'💬'};
+    let html = '<table style="width:100%;border-collapse:collapse"><thead><tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:6px">Connexion</th><th style="padding:6px">Niveau actuel</th><th style="padding:6px">Plafond super admin</th></tr></thead><tbody>';
+    for(const c of data){
+      const icon = ICONS[c.tool_type] || '🔧';
+      const levels = ['read','read_write','read_write_delete'];
+      const maxRank = levels.indexOf(c.super_admin_level);
+      let radios = '';
+      for(let i=0; i<levels.length; i++){
+        const lvl = levels[i];
+        const disabled = i > maxRank;
+        const checked = c.tenant_admin_level === lvl;
+        radios += `<label style="margin-right:10px;opacity:${disabled?'0.3':'1'};cursor:${disabled?'not-allowed':'pointer'}">
+          <input type="radio" name="perm-${c.connection_id}" value="${lvl}" ${checked?'checked':''} ${disabled?'disabled':''}
+            onchange="updatePermission(${c.connection_id}, '${lvl}')"/> ${LEVEL_LABELS[lvl]}
+        </label>`;
+      }
+      html += `<tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 6px"><strong>${icon} ${c.name}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type} · ${c.status}</span></td><td style="padding:8px 6px">${radios}</td><td style="padding:8px 6px;text-align:center"><span class="badge badge-gray">${LEVEL_LABELS[c.super_admin_level]}</span></td></tr>`;
+    }
+    html += '</tbody></table>';
+    list.innerHTML = html;
+  }catch(e){
+    document.getElementById('permissions-list').innerHTML = '<div style="color:var(--red)">Erreur: '+e.message+'</div>';
+  }
+}
+
+async function updatePermission(connectionId, newLevel){
+  try{
+    const r = await fetch('/tenant/permissions/update', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({connection_id: connectionId, new_level: newLevel})
+    });
+    const d = await r.json();
+    if(d.status === 'ok'){
+      setAlert('company-alert', `✅ Permission mise à jour : ${d.new_level}`, 'ok');
+      setTimeout(()=>loadPermissions(), 400);
+    } else {
+      setAlert('company-alert', '❌ '+(d.message||'Erreur'), 'err');
+    }
+  }catch(e){
+    setAlert('company-alert', '❌ '+e.message, 'err');
+  }
+}
+
+async function toggleReadOnly(){
+  if(!confirm('Confirmer le basculement des permissions ?')) return;
+  try{
+    const r = await fetch('/tenant/permissions/toggle-read-only', {method:'POST'});
+    const d = await r.json();
+    if(d.status === 'ok'){
+      const lab = d.action === 'locked' ? '🔒 Verrouillé en lecture' : '🔓 Permissions restaurées';
+      setAlert('company-alert', `${lab} (${d.affected} connexion(s))`, 'ok');
+      loadPermissions();
+    } else {
+      setAlert('company-alert', '❌ '+(d.message||'Erreur'), 'err');
+    }
+  }catch(e){
+    setAlert('company-alert', '❌ '+e.message, 'err');
+  }
+}
 
 async function loadCompany(){
   try{
@@ -235,6 +333,7 @@ document.querySelectorAll('.modal-overlay').forEach(o=>o.addEventListener('click
 
 // Init
 loadCompany();
+loadPermissions();
 loadProfile();
 </script>
 </body>

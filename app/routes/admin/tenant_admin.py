@@ -209,3 +209,103 @@ def tenant_panel(request: Request):
     with open("app/templates/tenant_panel.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
+
+
+# ─── PERMISSIONS (v1 : par connexion + par user) ───
+# Plan : docs/raya_permissions_plan.md etapes 4 + 7
+
+@router.get("/tenant/permissions")
+def tenant_get_permissions(request: Request, _: dict = Depends(require_tenant_admin)):
+    """Liste toutes les connexions du tenant avec leurs niveaux de permission.
+
+    Format :
+    [{"connection_id": 1, "tool_type": "odoo", "super_admin_level": "read_write",
+      "tenant_admin_level": "read", "previous_level": null}, ...]
+    """
+    tenant_id = get_session_tenant_id(request)
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, tool_type, name, status,
+                       super_admin_permission_level,
+                       tenant_admin_permission_level,
+                       previous_permission_level
+                FROM tenant_connections
+                WHERE tenant_id = %s
+                ORDER BY tool_type, id
+            """, (tenant_id,))
+            rows = cur.fetchall()
+            return [{
+                "connection_id": r[0],
+                "tool_type": r[1],
+                "name": r[2] or r[1],
+                "status": r[3],
+                "super_admin_level": r[4] or "read",
+                "tenant_admin_level": r[5] or "read",
+                "previous_level": r[6],
+            } for r in rows]
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+@router.post("/tenant/permissions/update")
+async def tenant_update_permission(
+    request: Request,
+    _: dict = Depends(require_tenant_admin),
+):
+    """Met a jour la permission d une connexion (tenant admin only).
+
+    Body JSON : {"connection_id": 1, "new_level": "read_write"}
+
+    Le new_level est automatiquement cappe au plafond super_admin_permission_level.
+    """
+    tenant_id = get_session_tenant_id(request)
+    try:
+        body = await request.json()
+        connection_id = int(body.get("connection_id"))
+        new_level = body.get("new_level")
+        if new_level not in ("read", "read_write", "read_write_delete"):
+            return {"status": "error", "message": "Niveau invalide"}
+        from app.permissions import update_permission
+        ok, msg = update_permission(
+            tenant_id=tenant_id,
+            connection_id=connection_id,
+            new_level=new_level,
+            actor_role="tenant_admin",
+        )
+        if not ok:
+            return {"status": "error", "message": msg}
+        log_admin_action(
+            tenant_id=tenant_id,
+            admin_user="tenant_admin",
+            action="permission_update",
+            target=str(connection_id),
+            details=f"level={new_level}",
+        )
+        return {"status": "ok", "connection_id": connection_id, "new_level": new_level}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+@router.post("/tenant/permissions/toggle-read-only")
+def tenant_toggle_read_only(request: Request, _: dict = Depends(require_tenant_admin)):
+    """Bouton 'Tout en lecture seule' : bascule toutes les connexions du tenant
+    en 'read' ou restaure depuis previous_permission_level.
+
+    Toggle :
+    - Si majorite actuellement en 'read' avec previous NOT NULL -> restaure
+    - Sinon -> sauve previous_permission_level et passe tout en 'read'
+    """
+    tenant_id = get_session_tenant_id(request)
+    try:
+        from app.permissions import toggle_all_read_only
+        result = toggle_all_read_only(tenant_id=tenant_id, actor_role="tenant_admin")
+        log_admin_action(
+            tenant_id=tenant_id,
+            admin_user="tenant_admin",
+            action="permission_toggle_read_only",
+            target=tenant_id,
+            details=f"action={result.get('action')} affected={result.get('affected')}",
+        )
+        return {"status": "ok", **result}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
