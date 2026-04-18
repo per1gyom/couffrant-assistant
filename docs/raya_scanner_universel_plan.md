@@ -829,3 +829,261 @@ Tu valides cette stratégie technique ?
 
 Si oui, je lance la Section 5 (phasage de développement concret + Section 6
 questions ouvertes). Sinon dis-moi ce qui coince.
+
+---
+
+## 🚀 Section 5 — Phasage de développement
+
+Découpage en **10 phases livrables** où chaque phase produit de la valeur
+utilisable, même si on s'arrête au milieu. Total estimé : ~35-40h de dev.
+
+### Phase 1 — Fondations (3h)
+- Migrations DB : `scanner_runs`, `connector_schemas`, `vectorization_queue`
+- Module `app/scanner/orchestrator.py` (squelette)
+- Module `app/scanner/adapter_odoo.py` (fetch pagine + transversaux)
+- Module `app/scanner/processor.py` (texte composite + embedding + write)
+- Endpoint admin `/admin/scanner/health` (vérifie que tout est en place)
+
+**Livrable** : socle technique prêt, pas encore de scan réel.
+
+### Phase 2 — Manifest auto-généré (2h)
+- Fonction `generate_manifest_from_introspection()` qui prend le résultat
+  d'introspection et produit le manifest JSON pour tous les modèles P1 et P2
+- UI panel admin : "Manifest de vectorisation" — éditable case par case
+- Bouton "Appliquer le manifest"
+
+**Livrable** : tu peux voir et modifier le plan avant de lancer quoi que ce soit.
+
+### Phase 3 — Vectorisation P1 sans transversaux (4h)
+- Run pour les 16 modèles P1 en mode basique (texte composite + embedding +
+  nœud + arêtes many2one)
+- **Pas encore** les messages/trackings/attachments (phase 5)
+- Dashboard de progression en temps réel
+
+**Livrable** : Raya voit les entités principales avec leurs relations
+directes. Test possible sur cas réels (SE100K, Coullet/Glandier).
+
+### Phase 4 — Vectorisation P2 et P3 (3h)
+- Même logique que P3 pour les modèles P2 (support)
+- Pour P3 : nœuds + arêtes seulement (pas de vectorisation)
+
+**Livrable** : graphe complet avec 200k+ nœuds, Raya peut traverser.
+
+### Phase 5 — Traitement transversal (5h)
+- Fetch + vectorisation de `mail.message` pour chaque record P1/P2
+- Stockage de `mail.tracking.value` en metadata
+- Arêtes `FOLLOWED_BY`, `CREATED_BY`, `LAST_MODIFIED_BY`
+- Intégration des `mail.activity` en cours
+
+**Livrable** : Raya connaît l'historique complet de chaque dossier et qui a
+fait quoi.
+
+### Phase 6 — Extraction pièces jointes (4h)
+- Ajout dépendances : `pdfplumber`, `python-docx`, `openpyxl`
+- Module `app/scanner/attachment_extractor.py`
+- Chunking + vectorisation des contenus extraits
+- OCR Tesseract en option (phase ultérieure si besoin)
+
+**Livrable** : contenus des PDF/DOCX/XLSX recherchables sémantiquement.
+
+### Phase 7 — Cas spéciaux Couffrant (4h)
+- **Kits** via `of.product.pack.lines` — arêtes `CONTAINS`
+- **Modèles de devis** + arête `BASED_ON` sur les sale.order
+- **Tournées GPS** `of.planning.tour.*` avec géocodage
+- **Formulaires de relevé** `of.survey.*` — vectorisation des réponses
+- **Signatures YouSign** — traçabilité juridique
+- **Images intervention** `of.image` — vectorisation des captions
+
+**Livrable** : tous les cas métier spécifiques couverts.
+
+### Phase 8 — Dashboard d'observabilité (3h)
+- Page `/admin/scanner/dashboard` avec :
+  - Runs actifs (avec barre de progression)
+  - Dernier run par source + durée + nb records
+  - Intégrité par modèle (count_odoo vs count_raya)
+  - Queue de webhooks
+  - Erreurs récentes
+- Rafraîchissement auto toutes les 10s
+
+**Livrable** : tu vois tout sans me demander.
+</content>
+### Phase 9 — Audit d'intégrité automatique (2h)
+- CRON hebdomadaire qui compare compte Odoo vs compte Raya par modèle
+- Si écart > 1%, alerte dans bandeau admin + déclenchement rebuild ciblé auto
+- Logs détaillés des écarts (quel modèle, combien, depuis quand)
+
+**Livrable** : garantie d'exhaustivité auto-vérifiée.
+
+### Phase 10 — Intégration webhooks Odoo au nouveau pipeline (2h)
+- Le webhook existant `app/routes/webhook_odoo.py` est connecté à la
+  `vectorization_queue` plutôt qu'au bloc 2 d'hier
+- Worker qui dépile la queue toutes les 5s
+- Idempotence : si le même record arrive 10 fois, il n'est traité qu'une fois
+
+**Livrable** : temps réel opérationnel, modifs Odoo reflétées dans Raya en <5s.
+
+### Phase bonus — Migration propre depuis les Blocs 1-4 d'hier (3h)
+Les tables `odoo_semantic_content` et certains chunks existent déjà. On doit :
+- Garder ce qui marche (structure tables, API hybrid_search)
+- Remplacer la logique de vectorisation par le nouveau scanner universel
+- Purger les anciens chunks incomplets (kits non traités) et les régénérer
+- Vérifier que `retrieval.py` continue de fonctionner avec les nouveaux nœuds
+
+### Récapitulatif temps
+
+| Phase | Effort | Cumul |
+|---|---|---|
+| 1 — Fondations | 3h | 3h |
+| 2 — Manifest | 2h | 5h |
+| 3 — Vectorisation P1 | 4h | 9h |
+| 4 — P2 + P3 | 3h | 12h |
+| 5 — Transversaux | 5h | 17h |
+| 6 — Pièces jointes | 4h | 21h |
+| 7 — Cas spéciaux | 4h | 25h |
+| 8 — Dashboard | 3h | 28h |
+| 9 — Audit intégrité | 2h | 30h |
+| 10 — Webhooks | 2h | 32h |
+| Bonus — Migration | 3h | 35h |
+
+**Total : ~35h de dev**, étalés sur plusieurs sessions. Chaque phase est
+testable et livre de la valeur indépendamment.
+
+---
+
+## ❓ Section 6 — Questions ouvertes à trancher
+
+Avant de coder la Phase 1, j'ai besoin de ton arbitrage sur **10 questions
+techniques précises**. Ce sont des choix architecturaux qui m'engagent pour
+la suite.
+
+### Q1 — product.product vs product.template
+Chez toi, `product.template` et `product.product` ont le **même volume**
+(133 112) → chaque template a 1 seule variante. Vectoriser les deux =
+doublons.
+
+**Propositions** :
+- **A** — Vectoriser `product.template`, créer nœud léger pour `product.product`
+  avec arête `VARIANT_OF` (recommandé)
+- **B** — Vectoriser les deux si tu penses qu'il peut y avoir des variantes
+  différentes dans le futur
+
+### Q2 — Profondeur des mail.message
+29 139 messages, c'est beaucoup. Certains sont automatiques (log technique
+Odoo), d'autres sont des vrais commentaires utiles.
+
+**Propositions** :
+- **A** — Tout vectoriser, sans filtre (exhaustif, ~5€ OpenAI, plus lent)
+- **B** — Filtrer sur `message_type in ['comment', 'email']` pour éviter les
+  notifications système (recommandé)
+- **C** — Seulement les messages liés aux records P1 (plus restrictif)
+
+### Q3 — OCR sur les images
+`of.image` a 1 577 photos de chantier. L'OCR Tesseract sur chacune coûterait
+du temps (~30 min de traitement).
+
+**Propositions** :
+- **A** — OCR activé par défaut (extrait les numéros de série, références
+  visibles sur les équipements installés)
+- **B** — OCR désactivé pour l'instant, on voit le besoin plus tard
+  (recommandé pour gagner du temps)
+
+### Q4 — Que faire des Blocs 1-4 d'hier
+Les tables `odoo_semantic_content` et `semantic_graph_nodes` existent déjà
+avec des chunks partiels (devis sans leurs lignes détaillées, pas de kits,
+pas de commentaires).
+
+**Propositions** :
+- **A** — Purger à fond et reconstruire depuis zéro (le plus propre)
+- **B** — Garder les tables, remplacer seulement la logique, re-vectoriser
+  par-dessus (recommandé — les INSERT ON CONFLICT gèrent)
+</content>
+### Q5 — Modèle d'embedding OpenAI
+Aujourd'hui on utilise `text-embedding-3-small` (1536 dims, ~0.02€/M tokens).
+
+**Propositions** :
+- **A** — Garder `text-embedding-3-small` (rapport qualité/prix optimal,
+  largement suffisant pour du français métier — recommandé)
+- **B** — Passer à `text-embedding-3-large` (3072 dims, ~0.13€/M tokens, +10%
+  qualité, x4 stockage) → pertinent si qualité insuffisante
+
+### Q6 — Déclenchement du rebuild après audit
+Quand l'audit détecte un écart >1%, faut-il :
+
+**Propositions** :
+- **A** — Lancer le rebuild automatiquement sans te demander (recommandé,
+  pas de friction)
+- **B** — Juste afficher une alerte et attendre que tu cliques "Rebuild"
+- **C** — Auto pour écarts <10%, manuel pour écarts >10%
+
+### Q7 — Suppressions côté Odoo
+Quand un record est supprimé dans Odoo (via le webhook `unlink` ou détecté
+par delta), que fait-on côté Raya ?
+
+**Propositions** :
+- **A** — Soft delete (marquer `deleted_at`, garder le nœud et ses arêtes)
+  pour permettre à Raya de répondre *"ce devis existait mais a été supprimé
+  le X"*
+- **B** — Hard delete complet (plus propre mais perd l'historique)
+
+**Recommandation** : **A**, avec les chunks vectorisés marqués comme "stale"
+(plus proposés dans les recherches).
+
+### Q8 — Multi-tenant
+Aujourd'hui, un seul tenant (Couffrant). Demain, plusieurs clients auront
+chacun leur Odoo.
+
+**Propositions** :
+- **A** — Le scanner est par-tenant dès maintenant (isolation stricte, chaque
+  tenant ne voit que ses données — recommandé)
+- **B** — Scanner global, on gèrera l'isolation plus tard
+
+**Recommandation** : **A**. Le modèle `semantic_graph_nodes` a déjà un champ
+`tenant_id` (ou doit l'avoir), on le respecte systématiquement.
+
+### Q9 — Provider d'extraction PDF
+Plusieurs options pour l'extraction PDF :
+
+**Propositions** :
+- **A** — `pdfplumber` (pure Python, gratuit, qualité moyenne sur PDFs
+  complexes — recommandé pour démarrer)
+- **B** — Azure Document Intelligence (cloud, meilleure qualité sur tableaux
+  et formulaires, ~1.5€/1000 pages)
+- **C** — Claude Vision via API (excellent sur PDFs scannés + tableaux, mais
+  plus cher : ~3€/1000 pages)
+
+**Recommandation** : **A** d'abord, migration vers **B** ou **C** si la
+qualité pose problème.
+
+### Q10 — Phase 0 avant tout : la Section 4.3 mentionnée précédemment
+Je n'ai pas encore proposé **comment tu valides le manifest** avant le
+premier scan. Deux options :
+
+**Propositions** :
+- **A** — Le manifest est appliqué automatiquement (pas de validation
+  manuelle), tu peux le modifier plus tard si besoin
+- **B** — Tu valides le manifest modèle par modèle dans une UI dédiée avant
+  le scan (plus lent mais sûr — recommandé pour la première fois)
+
+---
+
+## 🎯 Validation finale du plan complet
+
+Le plan Scanner Universel fait **~900 lignes de documentation structurée**.
+Il couvre :
+
+- **Section 1** : Contexte, objectif, distinction 3 niveaux, budget
+- **Section 2** : 8 principes non-négociables
+- **Section 3** : Cartographie Odoo basée sur inventaire réel (186 modèles)
+- **Section 4** : Stratégie technique (architecture 3 couches, manifest,
+  pipeline, transversaux)
+- **Section 5** : Phasage en 10+1 phases (~35h de dev)
+- **Section 6** : 10 questions à trancher avant le code
+
+**Prochaine étape** : tu réponds aux 10 questions (même brièvement, je peux
+proposer des défauts raisonnables), puis on commit le plan final et on
+attaque **Phase 1 — Fondations** en code.
+
+Si tu veux répondre aux 10 questions en une fois via "mes réponses à Q1 = A,
+Q2 = B, etc." c'est le plus efficace. Tu peux aussi dire "suis tes
+recommandations partout" et j'applique les défauts.
+</content>
