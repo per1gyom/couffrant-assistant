@@ -216,6 +216,7 @@ async function loadConnections(tenantId,idx){
           ${['odoo','microsoft','gmail'].includes(c.tool_type)?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px" onclick="discoverTool('${tenantId}','${c.tool_type}',this)">🔍 Découvrir</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#8b5cf6" onclick="vectorizeOdoo(this)" title="Vectorisation sémantique + graphe typé">🧠 Vectoriser</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#0ea5e9" onclick="introspectOdoo(this)" title="Inventaire complet : liste tous les modèles Odoo et leurs champs">🔍 Inventaire</button>`:''}
+          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#f59e0b" onclick="generateManifests(this)" title="Scanner Universel Phase 2 : génère les manifests de vectorisation pour les 31 modèles P1+P2">📋 Manifests</button>`:''}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
           <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
         </div>
@@ -291,6 +292,63 @@ async function acknowledgeAlert(alertId){
 function escapeHtml(str){
   if(!str) return '';
   return String(str).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function generateManifests(btn){
+  // Scanner Universel Phase 2 : genere les manifests pour les 31 modeles P1+P2
+  // en fetchant les champs de chaque modele via ir.model.fields et en classifiant
+  // automatiquement chaque champ (vectorize/edge/metadata/ignore).
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Génération...';
+  try{
+    setAlert('companies-alert', '📋 Génération des 31 manifests en cours (~30-60s)...', 'ok');
+    const r = await fetch('/admin/scanner/manifests/generate', {method:'POST'});
+    const d = await r.json();
+    if(d.status === 'error') throw new Error(d.message || 'Erreur inconnue');
+    if(!d.generated) throw new Error('Réponse inattendue');
+    // Construction du recap
+    const lines = d.generated.map(g => `  [P${g.priority}] ${g.model} (${g.records_count||0} records) → ${g.vectorize_count} vectorize, ${g.edges_count} edges, ${g.metadata_count} meta, ${g.ignored_count} ignored`).join('\n');
+    const errLines = (d.errors||[]).length ? '\n\nERREURS :\n  ' + d.errors.join('\n  ') : '';
+    const summary = `✅ Manifests générés : ${d.generated_count}/31\n\n${lines}${errLines}`;
+    // Reutilise le meme pattern de modale que introspection
+    const fullText = summary + '\n\n=== JSON COMPLET ===\n' + JSON.stringify(d, null, 2);
+    const backdrop = document.createElement('div');
+    backdrop.id = 'manifests-backdrop';
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9998;display:flex;align-items:center;justify-content:center';
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:var(--bg1);border:1px solid var(--border);border-radius:12px;padding:16px 20px 20px;width:90vw;max-width:1000px;height:85vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.5)';
+    const escapeHtml = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
+    modal.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-shrink:0">
+        <h3 style="margin:0">📋 Manifests générés</h3>
+        <div style="display:flex;gap:8px">
+          <button class="btn" id="manifests-copy-btn" style="background:#10b981;color:white;padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:600">📋 Tout copier</button>
+          <button class="btn" id="manifests-close-btn" style="background:#ef4444;color:white;padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:700">✕ Fermer</button>
+        </div>
+      </div>
+      <textarea id="manifests-textarea" readonly style="flex:1;width:100%;font-family:var(--mono);font-size:11px;padding:10px;background:var(--bg2);color:var(--text1);border:1px solid var(--border);border-radius:8px;overflow:auto;resize:none">${escapeHtml(fullText)}</textarea>
+      <div style="margin-top:8px;font-size:11px;color:var(--text3);flex-shrink:0">Échap ou clic en dehors pour fermer</div>`;
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+    const close = () => { backdrop.remove(); document.removeEventListener('keydown', onEsc); };
+    const onEsc = e => { if(e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onEsc);
+    backdrop.addEventListener('click', e => { if(e.target === backdrop) close(); });
+    document.getElementById('manifests-close-btn').onclick = close;
+    document.getElementById('manifests-copy-btn').onclick = async () => {
+      const b = document.getElementById('manifests-copy-btn');
+      try{ await navigator.clipboard.writeText(fullText); b.innerHTML = '✓ Copié !'; }
+      catch(err){ const ta = document.getElementById('manifests-textarea'); ta.focus(); ta.select(); document.execCommand('copy'); b.innerHTML = '✓ Copié (fb)'; }
+      setTimeout(()=>{ b.innerHTML = '📋 Tout copier'; }, 2000);
+    };
+    setAlert('companies-alert', `✅ ${d.generated_count} manifests générés`, 'ok');
+  }catch(e){
+    setAlert('companies-alert', '❌ Génération échoué : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
 }
 
 async function introspectOdoo(btn){

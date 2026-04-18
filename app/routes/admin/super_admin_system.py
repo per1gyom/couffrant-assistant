@@ -549,6 +549,94 @@ def admin_odoo_introspect_start(
         return {"status": "error", "message": str(e)[:300]}
 
 
+@router.post("/admin/scanner/manifests/generate")
+def admin_scanner_generate_manifests(
+    request: Request,
+    tenant_id: str = "couffrant",
+    source: str = "odoo",
+    _: dict = Depends(require_admin),
+):
+    """Genere tous les manifests P1+P2 pour un tenant/source depuis Odoo.
+    Phase 2 du Scanner Universel (voir docs/raya_scanner_universel_plan.md).
+
+    Fetch les champs de chaque modele via ir.model.fields et classifie
+    automatiquement chaque champ (vectorize/edge/metadata/ignore) selon
+    son type Odoo. Sauve les manifests dans connector_schemas.
+
+    Duree : ~30-60s pour 31 modeles (appels XML-RPC sequentiels)."""
+    try:
+        from app.scanner.manifest_generator import generate_all_manifests_from_odoo
+        result = generate_all_manifests_from_odoo(tenant_id, source)
+        return result
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
+@router.get("/admin/scanner/manifests")
+def admin_scanner_list_manifests(
+    request: Request,
+    tenant_id: str = "couffrant",
+    source: str = "odoo",
+    _: dict = Depends(require_admin),
+):
+    """Liste les manifests existants pour un tenant+source, tries par priorite."""
+    try:
+        from app.scanner.manifest_generator import list_manifests
+        manifests = list_manifests(tenant_id, source)
+        return {"status": "ok", "count": len(manifests), "manifests": manifests}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
+@router.get("/admin/scanner/manifests/{model_name}")
+def admin_scanner_get_manifest(
+    request: Request,
+    model_name: str,
+    tenant_id: str = "couffrant",
+    source: str = "odoo",
+    _: dict = Depends(require_admin),
+):
+    """Recupere le detail d un manifest specifique (pour edition)."""
+    try:
+        from app.scanner.manifest_generator import get_manifest
+        m = get_manifest(tenant_id, source, model_name)
+        if not m:
+            return {"status": "not_found",
+                    "message": f"Manifest {model_name} absent"}
+        return {"status": "ok", "manifest": m}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
+@router.patch("/admin/scanner/manifests/{model_name}")
+async def admin_scanner_update_manifest(
+    request: Request,
+    model_name: str,
+    tenant_id: str = "couffrant",
+    source: str = "odoo",
+    _: dict = Depends(require_admin),
+):
+    """Met a jour un manifest (enabled flag et/ou patch du JSON manifest).
+
+    Body JSON attendu : {"enabled": true/false, "manifest_patch": {...}}"""
+    try:
+        body = await request.json()
+        from app.scanner.manifest_generator import update_manifest
+        ok = update_manifest(
+            tenant_id, source, model_name,
+            enabled=body.get("enabled"),
+            manifest_patch=body.get("manifest_patch"),
+        )
+        if not ok:
+            return {"status": "not_found",
+                    "message": f"Manifest {model_name} absent"}
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
 @router.get("/admin/scanner/health")
 def admin_scanner_health(request: Request, _: dict = Depends(require_admin)):
     """Verifie l etat du Scanner Universel.
