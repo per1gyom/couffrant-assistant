@@ -189,3 +189,38 @@ def set_checkpoint(run_id: str, model_name: str, last_id: int,
     }
     prog["current_model"] = model_name
     update_progress(run_id, prog)
+
+
+def cleanup_stale_runs(stale_minutes: int = 10) -> int:
+    """Marque comme 'error' les runs 'running' ou 'pending' dont la
+    derniere mise a jour (updated_at) est plus ancienne que N minutes.
+
+    Appele au startup de l app pour nettoyer les runs fantomes laisses
+    par un crash ou un redemarrage Railway. Retourne le nombre de runs
+    nettoyes.
+
+    Ajoute le 18/04/2026 apres incident ou Railway restart a tue le
+    thread du scan sans mettre a jour le statut en DB."""
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """UPDATE scanner_runs
+                   SET status='error',
+                       finished_at=NOW(),
+                       error_message='Runtime interrupted (app restart)'
+                   WHERE status IN ('running', 'pending')
+                     AND updated_at < NOW() - INTERVAL '%s minutes'
+                   RETURNING run_id""",
+                (stale_minutes,),
+            )
+            nettoyes = [r[0] for r in cur.fetchall()]
+            conn.commit()
+            if nettoyes:
+                logger.warning("[Orchestrator] Cleanup stale runs : %d runs "
+                               "marques en erreur : %s",
+                               len(nettoyes), nettoyes)
+            return len(nettoyes)
+    except Exception as e:
+        logger.exception("[Orchestrator] Cleanup stale runs echec : %s", e)
+        return 0

@@ -119,7 +119,7 @@ def _get_fields_to_fetch(manifest: dict) -> list:
 
 def _run_scan_worker(
     run_id: str, tenant_id: str, source: str,
-    priority_max: int, purge_first: bool, batch_size: int = 100,
+    priority_max: int, purge_first: bool, batch_size: int = 50,
     record_limits: Optional[dict] = None,
 ):
     """Worker background execute par un thread. Ne retourne rien, ecrit
@@ -266,9 +266,11 @@ def _run_scan_worker(
                 if len(batch) < batch_size:
                     break
 
-                # Rate limiting doux : 100ms entre batches pour ne pas
-                # matraquer Odoo ni OpenAI
-                time.sleep(0.1)
+                # Rate limiting : 500ms entre batches (augmente le 18/04
+                # apres incident Railway qui tuait l app pour cause de
+                # healthcheck /health qui repondait trop lentement pendant
+                # le scan intensif. 500ms libere assez de CPU pour /health).
+                time.sleep(0.5)
 
 
             # Fin du modele : update le compteur records_raya dans connector_schemas
@@ -375,7 +377,7 @@ def start_scan_p1(
 
     thread = threading.Thread(
         target=_run_scan_worker,
-        args=(run_id, tenant_id, source, priority_max, purge_first, 100,
+        args=(run_id, tenant_id, source, priority_max, purge_first, 50,
               effective_limits),
         daemon=True,
         name=f"scanner-{run_id[:8]}",

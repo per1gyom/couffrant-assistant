@@ -243,6 +243,13 @@ def startup_event():
         seed_tools_registry()
     except Exception as e:
         logger.error(f"[ToolsRegistry] Erreur seed: {e}")
+    # Nettoyage des runs Scanner fantomes apres un crash/restart Railway.
+    # Marque en 'error' les runs 'running' dont updated_at > 10 min.
+    try:
+        from app.scanner.orchestrator import cleanup_stale_runs
+        cleanup_stale_runs(stale_minutes=10)
+    except Exception as e:
+        logger.warning(f"[Scanner] Cleanup stale runs : {e}")
     try:
         job_scheduler.start()
     except Exception as e:
