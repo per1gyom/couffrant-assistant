@@ -196,6 +196,50 @@ const TOOL_ICONS={'outlook':'📧','gmail':'✉️','drive':'📁','odoo':'🔧'
 
 function showAddConnection(tenantId,idx){document.getElementById('conn-add-'+idx).style.display='block';}
 
+// ─── Helpers dropdown natif HTML pour la ligne Odoo du panel admin ────
+// Refonte UI 19/04/2026 : passage de 10 a 5 boutons grace a des <details>
+// regroupant 'Setup' (3 actions rares) et 'Scanner' (4 actions de scan).
+const _ddItemStyle = "display:block;width:100%;text-align:left;padding:7px 12px;font-size:11px;background:transparent;color:#e2e8f0;border:none;border-radius:4px;cursor:pointer;white-space:nowrap";
+const _ddItemHover = "onmouseover=\"this.style.background='#1e293b'\" onmouseout=\"this.style.background='transparent'\"";
+
+function _ddItem(onclick, label, title){
+  return `<button onclick="this.closest('details').removeAttribute('open');${onclick}" style="${_ddItemStyle}" ${_ddItemHover} title="${title||''}">${label}</button>`;
+}
+
+function _ddMenu(summaryColor, summaryLabel, items){
+  return `<details style="position:relative;display:inline-block">
+    <summary style="list-style:none;cursor:pointer;padding:2px 10px;font-size:10px;background:${summaryColor};color:white;border:1px solid rgba(0,0,0,0.25);border-radius:6px;user-select:none;font-weight:600;display:inline-block">${summaryLabel} <span style="font-size:8px;opacity:0.8">▾</span></summary>
+    <div style="position:absolute;top:calc(100% + 4px);left:0;background:#0b1220;border:1px solid #334155;border-radius:6px;padding:4px;z-index:100;min-width:260px;box-shadow:0 6px 18px rgba(0,0,0,0.6)">${items.join('')}</div>
+  </details>`;
+}
+
+function renderOdooActions(tenantId, connId){
+  const setup = _ddMenu('#475569', '⚙️ Setup', [
+    _ddItem(`discoverTool('${tenantId}','odoo',this)`, '🔍 Découverte des connecteurs', 'Peuple entity_links pour drive/calendar/contacts/odoo. Une fois a la mise en place.'),
+    _ddItem('introspectOdoo(this)', '📂 Inventaire des modèles Odoo', 'Scanne tous les modeles Odoo + leurs champs. Peuple connector_schemas.'),
+    _ddItem('generateManifests(this)', '📋 Générer les manifests', 'Genere les manifests de vectorisation (vectorize_fields, metadata_fields, graph_edges).'),
+  ]);
+  const scanner = _ddMenu('#dc2626', '🚀 Scanner', [
+    _ddItem('scanTestMissing(this, 200)', '🧪 Test P1 rapide (200 records)', 'Teste les modeles P1 sans chunks. Diagnostic rapide ~10 min. Pas de purge.'),
+    _ddItem('scanTestMissing(this, 200, 2)', '🧪 Test P2 rapide (200 records)', 'Teste les modeles P2 sur 200 records. Diagnostic 5-15 min. Pas de purge.'),
+    _ddItem('scanTestMissing(this, 999999)', '📈 Compléter les manquants (volume réel)', 'Complete au volume reel les modeles vides ou partiels. Pas de purge. 10-20 min.'),
+    `<div style="height:1px;background:#334155;margin:4px 0"></div>`,
+    _ddItem('scanP1(this)', '⚠️ Scan P1 COMPLET (purge + rebuild)', 'DESTRUCTIF : purge tout puis re-vectorise les 16 modeles P1. 30-60 min.'),
+  ]);
+  const integrite = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#10b981;color:white;font-weight:600" onclick="showIntegrity(this)" title="Tableau d'integrite de la vectorisation par modele">📊 Intégrité</button>`;
+  const webhooks = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#2563eb;color:white;font-weight:600" onclick="showWebhookStatus(this)" title="Dashboard temps-reel des webhooks Odoo : worker, queue, dedup, ronde de nuit">🔌 Webhooks</button>`;
+  const stop = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#ef4444;color:white;font-weight:600" onclick="scanStop(this)" title="Arrete proprement le scan en cours (finit le modele actuel puis stop)">⏹️ Stop</button>`;
+  return `${setup} ${scanner} ${integrite} ${webhooks} ${stop}`;
+}
+
+// Fermer automatiquement les autres <details> quand on en ouvre un
+// (comportement natif du browser ne le fait pas seul)
+document.addEventListener('click', e => {
+  const opened = document.querySelector('details[open]');
+  if(!opened) return;
+  if(!opened.contains(e.target)) opened.removeAttribute('open');
+});
+
 async function loadConnections(tenantId,idx){
   const el=document.getElementById('conn-list-'+idx);
   const summaryEl=document.getElementById('conn-summary-'+idx);
@@ -249,17 +293,8 @@ async function loadConnections(tenantId,idx){
           <span style="font-size:16px">${icon}</span>
           <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px;cursor:pointer;border-bottom:1px dashed var(--text3)" onclick="renameConn(${c.id},'${tenantId}',${idx},'${c.label.replace(/'/g,"\\'")}')" title="Cliquer pour renommer">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span> ${statusBadge}</div>
           ${oauthBtn}
-          ${['odoo','microsoft','gmail'].includes(c.tool_type)?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px" onclick="discoverTool('${tenantId}','${c.tool_type}',this)">🔍 Découvrir</button>`:''}
-          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#8b5cf6" onclick="vectorizeOdoo(this)" title="Vectorisation sémantique + graphe typé">🧠 Vectoriser</button>`:''}
-          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#0ea5e9" onclick="introspectOdoo(this)" title="Inventaire complet : liste tous les modèles Odoo et leurs champs">🔍 Inventaire</button>`:''}
-          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#f59e0b" onclick="generateManifests(this)" title="Scanner Universel Phase 2 : génère les manifests de vectorisation pour les 31 modèles P1+P2">📋 Manifests</button>`:''}
-          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#dc2626" onclick="scanP1(this)" title="Scanner Universel Phase 3 : lance la vectorisation complète des 16 modèles P1 (purge + rebuild)">🚀 Scanner P1</button>`:''}
-          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#7c3aed" onclick="scanTestMissing(this)" title="Teste uniquement les modèles sans chunks sur 200 records chacun. Pas de purge. Rapide (~10 min)">🧪 Test manquants</button>`:''}
-          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#2563eb" onclick="scanTestMissing(this, 999999)" title="Complète au volume réel les modèles manquants (ou partiels). Pas de purge. 10-20 min selon volumes.">🚀 Compléter manquants</button>`:''}
-          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#0ea5e9" onclick="scanTestMissing(this, 200, 2)" title="Teste les 16 modèles P2 sur 200 records chacun (sans toucher aux P1 déjà OK). Durée 5-15 min. Diagnostic rapide.">🧪 Test P2</button>`:''}
-          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#ef4444" onclick="scanStop(this)" title="Arrête proprement le scan en cours (finit le modèle actuel puis stop)">⏹️ Stop</button>`:''}
-          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#10b981" onclick="showIntegrity(this)" title="Scanner Universel Phase 8 : tableau de l'état d'intégrité de la vectorisation par modèle">📊 Intégrité</button>`:''}
-          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#8b5cf6" onclick="showWebhookStatus(this)" title="Dashboard temps-réel des webhooks Odoo : worker, queue, dédup, ronde de nuit">🔌 Webhooks</button>`:''}
+          ${['microsoft','gmail'].includes(c.tool_type)?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px" onclick="discoverTool('${tenantId}','${c.tool_type}',this)">🔍 Découvrir</button>`:''}
+          ${c.tool_type==='odoo'?renderOdooActions(tenantId, c.id):''}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
           <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
         </div>
@@ -980,39 +1015,12 @@ async function introspectOdoo(btn){
   }
 }
 
-async function vectorizeOdoo(btn){
-  // Chantier memoire 4 couches (Bloc 2, 18/04/2026) :
-  // Lance la vectorisation Odoo -> peuple le graphe semantique type (noeuds
-  // Person/Company/Deal/Lead/Event/Product + aretes typees) et la table
-  // odoo_semantic_content (embedding + tsvector FR pour hybrid search).
-  if (!confirm('Vectoriser tout Odoo ? Ça peut prendre 1-2 minutes (partners + devis + leads + events).')) return;
-  const orig = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '⏳ Vectorisation…';
-  try{
-    const r = await fetch('/admin/odoo/vectorize', {method: 'POST'});
-    const d = await r.json();
-    if (d.status !== 'ok') throw new Error(d.message || 'Erreur inconnue');
-    const res = d.result || {};
-    // Construire le récap lisible
-    const parts = [];
-    if (res.partners) parts.push(`${res.partners.vectorized} contact(s) vectorisé(s), ${res.partners.graph_nodes} nœud(s), ${res.partners.graph_edges} arête(s)`);
-    if (res.sale_orders) parts.push(`${res.sale_orders.vectorized} devis, ${res.sale_orders.product_nodes} produit(s), ${res.sale_orders.graph_edges} arête(s)`);
-    if (res.leads) parts.push(`${res.leads.vectorized} lead(s), ${res.leads.graph_edges} arête(s)`);
-    if (res.events) parts.push(`${res.events.vectorized} événement(s), ${res.events.graph_edges} arête(s)`);
-    const gs = res.graph_stats || {};
-    const types = Object.entries(gs.nodes_by_type || {}).map(([k,v])=>`${k}=${v}`).join(', ');
-    const summary = `✅ Vectorisation OK en ${res.total_duration_sec || '?'}s. ${parts.join(' · ')}. Graphe total : ${gs.nodes_total||0} nœuds (${types}), ${gs.edges_total||0} arêtes.`;
-    setAlert('companies-alert', summary, 'ok');
-    // Recharger les alertes : la vectorisation a pu en declencher (limites atteintes)
-    loadSystemAlerts();
-  }catch(e){
-    setAlert('companies-alert', '❌ Vectorisation échouée : '+e.message, 'err');
-  }finally{
-    btn.disabled = false;
-    btn.innerHTML = orig;
-  }
-}
+// NOTE : la fonction vectorizeOdoo() a ete supprimee le 19/04/2026.
+// C etait l ancien pipeline de vectorisation Odoo hardcode du 18/04
+// (partners + devis + leads + events avec logique metier dans le route
+// /admin/odoo/vectorize). Elle est remplacee integralement par le
+// Scanner Universel (Setup > Manifests + Scanner > Test/Completer/P1).
+// L endpoint backend est conserve pour compatibilite mais plus appele.
 
 async function discoverTool(tenantId,toolType,btn){
   const orig=btn.innerHTML;
