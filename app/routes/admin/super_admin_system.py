@@ -31,6 +31,7 @@ import requests as http_requests
 from typing import Optional
 from fastapi import APIRouter, Request, Body, Depends, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse
+from typing import Optional
 
 from app.database import get_pg_conn, init_postgres
 from app.app_security import (
@@ -744,6 +745,88 @@ def admin_scanner_integrity(
                 "overall_integrity_pct": overall_integrity,
             },
             "models": models,
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
+@router.get("/admin/webhooks/status")
+def admin_webhooks_status(
+    request: Request,
+    tenant_id: Optional[str] = None,
+    _: dict = Depends(require_admin),
+):
+    """Dashboard de monitoring des webhooks Odoo (Phase A.2 roadmap v4).
+
+    Retourne compteurs 24h + etat du worker + derniers rapports ronde de nuit.
+    Si tenant_id absent : aggregat global (tous tenants confondus).
+    """
+    import os
+    try:
+        from app.webhook_queue import get_stats
+        from app.database import get_pg_conn
+
+        # 1. Stats de la queue (tous tenants ou un seul)
+        stats = get_stats(tenant_id=tenant_id)
+
+        # 2. Liste des tenants avec secret configure
+        prefix = "ODOO_WEBHOOK_SECRET_"
+        configured_tenants = sorted({
+            key[len(prefix):].lower().strip() for key in os.environ
+            if key.startswith(prefix) and os.environ[key]
+        })
+
+        # 3. Derniers rapports ronde de nuit (dernier par tenant)
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """SELECT tenant_id, severity, message, details,
+                          acknowledged, updated_at
+                   FROM system_alerts
+                   WHERE alert_type='webhook_night_patrol'
+                     AND component='webhook_queue'
+                   ORDER BY updated_at DESC
+                   LIMIT 10""",
+            )
+            patrol_reports = [
+                {"tenant_id": r[0], "severity": r[1], "message": r[2],
+                 "details": r[3], "acknowledged": r[4],
+                 "updated_at": r[5].isoformat() if r[5] else None}
+                for r in cur.fetchall()
+            ]
+
+            # 4. Details des 20 derniers webhooks traites
+            where_tenant = "AND tenant_id=%s" if tenant_id else ""
+            params = (tenant_id,) if tenant_id else ()
+            cur.execute(
+                f"""SELECT tenant_id, source, model_name, record_id, action,
+                          attempts, last_error, created_at, completed_at,
+                          nonce IS NOT NULL AS via_webhook
+                   FROM vectorization_queue
+                   WHERE 1=1 {where_tenant}
+                   ORDER BY COALESCE(completed_at, created_at) DESC
+                   LIMIT 20""",
+                params,
+            )
+            recent = [
+                {"tenant_id": r[0], "source": r[1], "model": r[2],
+                 "record_id": r[3], "action": r[4], "attempts": r[5],
+                 "error": (r[6] or "")[:200],
+                 "created_at": r[7].isoformat() if r[7] else None,
+                 "completed_at": r[8].isoformat() if r[8] else None,
+                 "via_webhook": r[9]}
+                for r in cur.fetchall()
+            ]
+
+        return {
+            "status": "ok",
+            "tenant_filter": tenant_id,
+            "stats": stats,
+            "configured_tenants": configured_tenants,
+            "patrol_reports": patrol_reports,
+            "recent_jobs": recent,
         }
     except Exception as e:
         import traceback

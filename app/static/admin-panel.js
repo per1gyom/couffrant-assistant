@@ -259,6 +259,7 @@ async function loadConnections(tenantId,idx){
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#0ea5e9" onclick="scanTestMissing(this, 200, 2)" title="Teste les 16 modèles P2 sur 200 records chacun (sans toucher aux P1 déjà OK). Durée 5-15 min. Diagnostic rapide.">🧪 Test P2</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#ef4444" onclick="scanStop(this)" title="Arrête proprement le scan en cours (finit le modèle actuel puis stop)">⏹️ Stop</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#10b981" onclick="showIntegrity(this)" title="Scanner Universel Phase 8 : tableau de l'état d'intégrité de la vectorisation par modèle">📊 Intégrité</button>`:''}
+          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#8b5cf6" onclick="showWebhookStatus(this)" title="Dashboard temps-réel des webhooks Odoo : worker, queue, dédup, ronde de nuit">🔌 Webhooks</button>`:''}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
           <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
         </div>
@@ -510,6 +511,126 @@ async function showIntegrity(btn){
     document.getElementById('integrity-close-btn').onclick = close;
   }catch(e){
     setAlert('companies-alert', '❌ Intégrité échouée : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+async function showWebhookStatus(btn){
+  // Dashboard webhooks Odoo (Phase A.2 roadmap v4).
+  // Affiche l etat du worker, les compteurs 24h, la file d attente,
+  // les derniers rapports de ronde de nuit et les derniers jobs traites.
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Chargement...';
+  try{
+    const r = await fetch('/admin/webhooks/status');
+    const d = await r.json();
+    if(d.status !== 'ok') throw new Error(d.message || 'Erreur inconnue');
+    const s = d.stats;
+    const workerOk = s.worker_alive;
+    const workerColor = workerOk ? '#10b981' : '#dc2626';
+    const workerLabel = workerOk ? '✅ Actif' : '❌ Arrêté';
+    const fmt = n => (n === null || n === undefined) ? '-' : n.toLocaleString('fr-FR');
+    const fmtDate = s => !s ? '<span style="color:var(--text3)">Jamais</span>' : new Date(s).toLocaleString('fr-FR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+
+    // Tableau des derniers jobs
+    const jobRows = (d.recent_jobs || []).map(j => {
+      const statusIcon = j.completed_at && !j.error ? '✅'
+                        : j.error ? '❌'
+                        : '⏳';
+      const sourceIcon = j.via_webhook ? '🔌' : '🌙';
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:6px 10px;font-size:11px">${sourceIcon} ${statusIcon}</td>
+        <td style="padding:6px 10px;font-size:11px;color:var(--text2)">${j.tenant_id}</td>
+        <td style="padding:6px 10px;font-size:11px;font-weight:600">${j.model}</td>
+        <td style="padding:6px 10px;font-size:11px;text-align:right">${j.record_id}</td>
+        <td style="padding:6px 10px;font-size:11px">${j.action}</td>
+        <td style="padding:6px 10px;font-size:11px;color:${j.error?'#dc2626':'var(--text2)'}">${j.error || '—'}</td>
+        <td style="padding:6px 10px;font-size:10px;color:var(--text3)">${fmtDate(j.completed_at || j.created_at)}</td>
+      </tr>`;
+    }).join('');
+
+    // Section rapports de ronde de nuit
+    const patrolRows = (d.patrol_reports || []).map(p => {
+      const sevColor = p.severity==='warning'?'#f59e0b':p.severity==='critical'?'#dc2626':'#6b7280';
+      const sevIcon = p.severity==='warning'?'⚠️':p.severity==='critical'?'🔴':'ℹ️';
+      const ackIcon = p.acknowledged ? '✓' : '';
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:6px 10px;font-size:11px;color:${sevColor}">${sevIcon} ${ackIcon}</td>
+        <td style="padding:6px 10px;font-size:11px">${p.tenant_id}</td>
+        <td style="padding:6px 10px;font-size:11px">${p.message}</td>
+        <td style="padding:6px 10px;font-size:10px;color:var(--text3)">${fmtDate(p.updated_at)}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="4" style="padding:10px;color:var(--text3);text-align:center;font-size:11px">Aucun rapport de ronde de nuit encore.</td></tr>';
+
+    // Construction de la modale
+    const backdrop = document.createElement('div');
+    backdrop.id = 'webhooks-backdrop';
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9998;display:flex;align-items:center;justify-content:center';
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:16px 20px 20px;width:95vw;max-width:1200px;height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.8)';
+    modal.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-shrink:0">
+        <div>
+          <h3 style="margin:0 0 4px 0">🔌 Webhooks Odoo — Monitoring temps-réel</h3>
+          <div style="font-size:12px;color:var(--text3)">Worker : <span style="color:${workerColor};font-weight:700">${workerLabel}</span> · Tenants configurés : <code>${d.configured_tenants.join(', ') || 'aucun (pas de secret en env)'}</code></div>
+        </div>
+        <button class="btn" id="webhooks-close-btn" style="background:#ef4444;color:white;padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:700">✕ Fermer</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px;flex-shrink:0">
+        <div style="background:var(--bg2);border:1px solid #10b981;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">✅ Traités 24h</div><div style="font-size:20px;font-weight:700;color:#10b981">${fmt(s.processed_24h)}</div></div>
+        <div style="background:var(--bg2);border:1px solid #0ea5e9;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">📥 Reçus 24h</div><div style="font-size:20px;font-weight:700;color:#0ea5e9">${fmt(s.received_24h)}</div></div>
+        <div style="background:var(--bg2);border:1px solid #dc2626;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">❌ Erreurs 24h</div><div style="font-size:20px;font-weight:700;color:#dc2626">${fmt(s.errors_24h)}</div></div>
+        <div style="background:var(--bg2);border:1px solid #f59e0b;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">⏳ En attente</div><div style="font-size:20px;font-weight:700;color:#f59e0b">${fmt(s.pending_now)}</div></div>
+        <div style="background:var(--bg2);border:1px solid #8b5cf6;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">🔁 Dédup 5s</div><div style="font-size:20px;font-weight:700;color:#8b5cf6">${fmt(s.delayed_dedup)}</div></div>
+        <div style="background:var(--bg2);border:1px solid var(--border);padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">🚦 OpenAI (dernière min)</div><div style="font-size:20px;font-weight:700">${fmt(s.rate_limit_calls_last_min)}/2000</div></div>
+      </div>
+
+      <div style="flex:1;overflow:auto;display:grid;grid-template-rows:auto 1fr auto 1fr;gap:12px;min-height:0">
+        <div style="font-size:12px;font-weight:600;color:var(--text2)">🌙 Dernières rondes de nuit (5h)</div>
+        <div style="overflow:auto;border:1px solid var(--border);border-radius:8px;min-height:80px;max-height:150px">
+          <table style="width:100%;border-collapse:collapse">
+            <thead style="background:var(--bg2);position:sticky;top:0">
+              <tr style="border-bottom:2px solid var(--border)">
+                <th style="padding:8px;text-align:left;font-size:11px">Sévérité</th>
+                <th style="padding:8px;text-align:left;font-size:11px">Tenant</th>
+                <th style="padding:8px;text-align:left;font-size:11px">Message</th>
+                <th style="padding:8px;text-align:left;font-size:11px">Date</th>
+              </tr>
+            </thead>
+            <tbody>${patrolRows}</tbody>
+          </table>
+        </div>
+        <div style="font-size:12px;font-weight:600;color:var(--text2)">📋 Derniers jobs traités (20 récents — 🔌 webhook / 🌙 ronde de nuit)</div>
+        <div style="overflow:auto;border:1px solid var(--border);border-radius:8px">
+          <table style="width:100%;border-collapse:collapse">
+            <thead style="background:var(--bg2);position:sticky;top:0">
+              <tr style="border-bottom:2px solid var(--border)">
+                <th style="padding:8px;text-align:left;font-size:11px">État</th>
+                <th style="padding:8px;text-align:left;font-size:11px">Tenant</th>
+                <th style="padding:8px;text-align:left;font-size:11px">Modèle</th>
+                <th style="padding:8px;text-align:right;font-size:11px">Record</th>
+                <th style="padding:8px;text-align:left;font-size:11px">Action</th>
+                <th style="padding:8px;text-align:left;font-size:11px">Erreur</th>
+                <th style="padding:8px;text-align:left;font-size:11px">Date</th>
+              </tr>
+            </thead>
+              <tbody>${jobRows || '<tr><td colspan="7" style="padding:14px;text-align:center;color:var(--text3);font-size:11px">Aucun webhook reçu pour le moment. Normal si aucun secret n est encore configuré dans Railway.</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:var(--text3);flex-shrink:0">Dernière activité : ${fmtDate(s.last_activity)} · Actualisation manuelle (re-cliquer sur 🔌 Webhooks)</div>`;
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+    const close = () => { backdrop.remove(); document.removeEventListener('keydown', onEsc); };
+    const onEsc = e => { if(e.key === 'Escape') close(); };
+    document.addEventListener('keydown', onEsc);
+    backdrop.addEventListener('click', e => { if(e.target === backdrop) close(); });
+    document.getElementById('webhooks-close-btn').onclick = close;
+  }catch(e){
+    setAlert('companies-alert', '❌ Webhooks status échoué : '+e.message, 'err');
   }finally{
     btn.disabled = false;
     btn.innerHTML = orig;
