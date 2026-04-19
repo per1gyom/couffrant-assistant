@@ -223,3 +223,157 @@ orchestrator.finish_run() → status='ok'
 ---
 
 **Fin du playbook.** À maintenir à jour à chaque nouveau branchement d'outil.
+
+---
+
+## 🏭 Industrialisation — Brancher un nouvel outil rapidement
+
+**Contexte** : on a mis 2 jours à connecter Odoo (17-19 avril 2026). Ce n'est pas tenable. L'objectif de cette section est de passer à **moins d'une journée** pour un outil standard (OAuth2 + REST), en capitalisant sur tout ce qu'on a appris.
+
+Référence roadmap : `docs/raya_planning_v4.md` Phase B.
+
+### 🎯 Objectifs chiffrés
+
+| Métrique | Cible |
+|---|---|
+| Temps total pour un outil OAuth2/REST standard | **< 1 jour (8h)** |
+| Temps pour un outil "exotique" (API custom, pas OAuth2) | < 3 jours |
+| Nombre de fichiers nouveaux à écrire | ≤ 3 (`adapter_<tool>.py`, `<tool>_connector.py`, test script) |
+| Couverture temps-réel dès la connexion | **100%** (pas d'implémentation séparée en 2e passe) |
+| Chunks vectorisés lors du premier scan complet | > 80% du volume Odoo théorique |
+
+
+### ✅ Checklist de connexion d'un nouvel outil (v1, à enrichir)
+
+**Estimation temps par étape pour un outil OAuth2/REST bien documenté.**
+
+#### Étape 1 — Reconnaissance (30 min)
+
+- [ ] Lire la doc API officielle de l'outil (au moins l'intro + section auth)
+- [ ] Identifier le protocole d'auth (OAuth2 Authorization Code / Client Credentials / API key)
+- [ ] Identifier les endpoints principaux (list, get, create, update, delete)
+- [ ] Vérifier les limites : rate limiting, pagination max, nombre de records
+- [ ] Vérifier la disponibilité des webhooks / change notifications (pour le temps-réel)
+- [ ] Identifier les modèles clés pour le business du client (pas tout scanner)
+
+#### Étape 2 — Credentials + connexion (1h)
+
+- [ ] Créer le compte développeur / app OAuth dans l'outil
+- [ ] Noter les scopes nécessaires (lecture seule pour la vectorisation)
+- [ ] Ajouter les env vars dans Railway : `<TOOL>_CLIENT_ID`, `<TOOL>_CLIENT_SECRET`, `<TOOL>_REDIRECT_URI`
+- [ ] Créer `app/connectors/<tool>_connector.py` (copier/adapter d'un existant — Microsoft ou Gmail font référence)
+- [ ] Créer la route OAuth callback dans `app/routes/oauth.py`
+- [ ] Tester la connexion : OAuth flow → token en base → appel test API
+
+#### Étape 3 — Adaptateur Scanner (2h)
+
+- [ ] Créer `app/scanner/adapter_<tool>.py` qui implémente :
+  - [ ] `fetch_records_batch(entity, fields, offset, limit, domain, order)`
+  - [ ] `count_records(entity, domain)`
+  - [ ] `get_available_models()`
+  - [ ] `list_modified_since(timestamp)` (pour le delta futur)
+- [ ] **Critique** : ne pas tronquer les erreurs à moins de 5000 chars (cf règle d'or #2)
+- [ ] Ajouter `<tool>` au dispatcher dans `app/scanner/runner.py`
+
+
+#### Étape 4 — Introspection + manifests (1h)
+
+- [ ] Bouton UI 🔍 Inventaire → peuple `connector_schemas` pour le nouvel outil
+- [ ] Vérifier la liste des modèles découverts, désactiver les non pertinents
+- [ ] Classer en priorités P1 (critique business) / P2 (complémentaire) / P3 (optionnel)
+- [ ] Bouton UI 📋 Manifests → génère les manifests auto
+- [ ] Ajouter les plafonds dans `MODEL_RECORD_LIMITS` (runner.py) pour les gros modèles
+
+#### Étape 5 — Test 200 records (1h-2h selon défauts rencontrés)
+
+- [ ] Clic 🧪 Test manquants → scan sur 200 records/modèle
+- [ ] Analyser chaque modèle abandonné : lire le `reason` complet dans `scanner_runs.stats`
+- [ ] Retirer les champs cassés (computed défaillants, droits manquants) via script SQL direct
+- [ ] Réitérer le test jusqu'à 0 abandon
+
+#### Étape 6 — Scan complet (temps variable selon volume)
+
+- [ ] Clic 🚀 Scanner P1 avec purge_first=True (1er scan)
+- [ ] Clic 🚀 Scanner P2 (si applicable)
+- [ ] Vérifier le dashboard Intégrité : 100% OK/Limited/Graph-only, 0% Critical
+
+#### Étape 7 — Temps-réel (2h)
+
+- [ ] Activer les webhooks / change notifications de l'outil → endpoint Raya
+- [ ] Coder l'endpoint dans `app/routes/webhooks/<tool>.py`
+- [ ] Réutiliser `processor.process_record()` sur 1 record (pas un batch)
+- [ ] Configurer le fallback polling delta si webhooks indisponibles
+- [ ] Monitorer 24h pour valider la stabilité
+
+#### Étape 8 — Documentation (30 min)
+
+- [ ] Remplir la section "Défauts connus" plus bas avec ce qu'on a rencontré sur cet outil
+- [ ] Mettre à jour l'historique des décisions de ce playbook
+- [ ] Si nouveau pattern d'erreur : ajouter au tableau "Patterns universels"
+
+**Total estimé** : ~8h pour un outil standard bien documenté. Plus si la plateforme a des surprises.
+
+
+### ⚠️ Défauts connus par plateforme
+
+À enrichir à chaque nouvelle connexion. L'idée est qu'on sache AVANT de commencer ce qui va poser problème.
+
+#### Odoo / OpenFire (expérience Couffrant Solar 17-19 avril 2026)
+
+**Gravité** : ⚠️ Plateforme avec pièges multiples mais bien documentés maintenant.
+
+| Défaut | Détail | Solution |
+|---|---|---|
+| Champs computed cassés famille `gb_*` | `of_gb_partner_tag_id`, `gb_sector_id`, `of_gb_employee_id` déclenchent `ValueError: Compute method failed to assign` | Retirer ces champs des manifests en DB |
+| Champs computed cassés `is_last` | Sur `of.sale.payment.schedule` et `of.account.move.payment.schedule` | Retirer du manifest |
+| Droit `Extra Rights/Accounting/Payments` non donné par défaut | Bloque `account.payment.line`, fait planter `account.move.line` et `account.move` en cascade via compute `payment_line_count` | Retirer `payment_line_count` + graph_edges vers `account.payment.line`, noter comme suspens |
+| Droit `Inventory/Administrator` non donné par défaut | Bloque `stock.valuation.layer`, fait planter `account.move.line` et `account.move` | Retirer les graph_edges vers `stock.valuation.layer` |
+| `mail.message` renvoie 0 records | Droits par défaut masquent les messages au user API | Nécessite config OpenFire spécifique (suspens) |
+| Erreurs Odoo massives (> 5000 chars) | Les tracebacks Python dépassent facilement 5000 chars et contiennent le nom du champ coupable après la troncature | **Ne JAMAIS tronquer avant 5000 chars** (règle d'or) |
+| Pas de webhooks natifs | Il faut configurer `base_automation` modèle par modèle | Voir `docs/odoo_webhook_setup.md` |
+| Limite records par call : 10000 | `search_read` avec `limit > 10000` peut timeout | Pagination par batch de 50 (valeur actuelle) |
+
+#### SharePoint / Microsoft Graph (à remplir quand on branche Drive)
+
+**À découvrir** — piste : Microsoft Graph a des change notifications avec renewal obligatoire tous les 3 jours max.
+
+#### Outlook / Microsoft Graph (à remplir quand on branche Outlook)
+
+**À découvrir** — piste : volumes massifs, nécessite stratégie de tranches historiques.
+
+#### Gmail API (à remplir quand on termine la connexion)
+
+**À découvrir** — piste : pas de webhooks push directs, utilise Cloud Pub/Sub (lourd) ou polling via `history.list`.
+
+
+### 🔁 Patterns universels d'erreurs (quelle que soit la plateforme)
+
+| Pattern | Cause typique | Solution |
+|---|---|---|
+| `AccessDenied` / `Forbidden` (401/403) | User API sans le bon scope ou groupe de droits | Vérifier scopes OAuth + rôles utilisateur côté plateforme |
+| `TokenExpired` / 401 intermittent | Access token expiré, refresh_token à utiliser | Auto-reconnexion via refresh_token (déjà codé pour Microsoft/Gmail) |
+| `RateLimit` / 429 | Trop d'appels dans la fenêtre | Exponential backoff + respect du `Retry-After` header |
+| `SchemaMismatch` / KeyError sur un champ | Le champ n'existe plus ou a changé de nom | Réintrospection + régénération du manifest |
+| `Timeout` / 504 | Batch trop gros pour la plateforme | Réduire `batch_size` (actuel : 50) |
+| Retourne 0 records sans erreur | Filtre implicite côté serveur (droits, visibilité) | Tester avec search_count, chercher paramètres de visibilité |
+| `ComputeField failed` (Odoo-like) | Méthode compute cassée côté serveur | Retirer le champ du manifest |
+| `CacheMiss` / erreur interne serveur | Bug côté plateforme (pas de ta faute) | Retirer le champ + signaler à l'éditeur |
+
+### 📦 Templates de code
+
+À créer dans un prochain chantier Phase B, prévus :
+
+- [ ] `app/scanner/adapter_template.py` — squelette d'adaptateur avec TODO clairs
+- [ ] `app/connectors/connector_template.py` — squelette de connecteur OAuth2
+- [ ] `scripts/test_new_tool_200.py` — script test 200 records générique
+- [ ] `app/routes/webhooks/webhook_template.py` — endpoint webhook squelette
+
+### 🎯 Évolution de ce playbook
+
+À chaque nouvel outil branché, on enrichit 3 sections :
+1. **Défauts connus par plateforme** → ajouter la nouvelle plateforme avec ses pièges
+2. **Historique des décisions** (ci-dessus) → ajouter les décisions prises
+3. **Checklist de connexion** → raffiner si on découvre des étapes manquantes
+
+Le but est qu'**après 3-4 outils connectés**, le playbook soit assez mûr pour qu'un 5e outil se branche en 4-6h sans surprise.
+

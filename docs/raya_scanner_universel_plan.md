@@ -7,6 +7,32 @@
 
 ---
 
+## ⚡ MISE À JOUR 19 AVRIL 2026 — ÉTAT RÉEL
+
+Ce document était le **plan prévisionnel** du 18/04. Voici l'état réel après les 2 jours de chantier (18-19 avril) :
+
+**Ce qui est FAIT** :
+- Scanner Odoo opérationnel sur 26 modèles
+- 36 673 chunks vectorisés en DB (P1 + partiel P2)
+- Tests P1 et P2 sur 200 records : 0 modèle abandonné
+- Manifests nettoyés (0 champs `gb_*` ni `payment_line*` problématiques)
+- Circuit breaker, bouton Stop, modale de confirmation, dashboard 6 severities
+- Méthodologie capitalisée dans `docs/raya_vectorisation_playbook.md`
+
+**Ce qui RESTE** :
+- Scan nuit complet P1+P2 (script prêt, non lancé)
+- **Mise à jour temps-réel Odoo** (chantier principal, non démarré)
+  - Endpoint `POST /webhooks/odoo/record-changed` à coder
+  - `base_automation` côté Odoo à configurer
+  - Fallback polling delta
+- Monitoring de stabilité des connexions
+
+**Roadmap active** : voir `docs/raya_planning_v4.md` Phase A.
+**Suspens documentés** : voir `docs/raya_scanner_suspens.md`.
+**Playbook méthode** : voir `docs/raya_vectorisation_playbook.md`.
+
+---
+
 ## 📖 Section 1 — Contexte et objectif
 
 ### D'où on vient (ce matin 18/04)

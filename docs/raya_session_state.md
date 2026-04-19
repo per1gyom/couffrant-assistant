@@ -1,5 +1,19 @@
 # Raya — État de session vivant
 
+> ⚠️ **ATTENTION — document historique partiellement obsolète (19/04/2026)**
+>
+> Ce document a été maintenu jusqu'au 18/04 soirée puis nous avons enchaîné 30h de chantier
+> Scanner Universel sans le mettre à jour. Depuis le 19/04 soir, la référence active est :
+>
+> - **Roadmap** : `docs/raya_planning_v4.md`
+> - **Méthode de connexion** : `docs/raya_vectorisation_playbook.md`
+> - **Suspens Scanner** : `docs/raya_scanner_suspens.md`
+>
+> Le contenu ci-dessous reste utile pour l'historique et les détails techniques
+> mais ne reflète plus les priorités ni l'état du socle.
+
+---
+
 **Dernière mise à jour : 18/04/2026 SOIRÉE — Scanner Universel Odoo Phases 1+2+3+6, incident Railway résolu, plan Bugs+Sécurité validé**
 
 ---
