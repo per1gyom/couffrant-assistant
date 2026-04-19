@@ -322,3 +322,63 @@ Août                     E. PHASE 8 — Proactivité commence !
 - `docs/raya_scanner_universel_plan.md` — historique du chantier Scanner
 - `docs/raya_planning_v3.md` — **OBSOLÈTE** (remplacé par ce document)
 
+
+---
+
+## 📋 Annexe Q2 — Répartition des 28 modèles Odoo (validé 19/04/2026)
+
+**Contexte** : on ne peut pas webhooker tous les modèles sans alourdir OpenFire et la config. On sépare en 2 groupes selon la valeur métier pour la proactivité.
+
+### 🟢 Niveau 1 — Webhook temps-réel (14 modèles)
+
+Tout ce qui a de la valeur immédiate pour la proactivité. Une règle `base_automation` par modèle côté OpenFire.
+
+**Socle business** :
+- `sale.order` — devis, montants, statuts
+- `sale.order.line` — lignes de devis
+- `crm.lead` — prospects, qualification
+- `mail.activity` — tâches, relances, échéances
+- `calendar.event` — rendez-vous, planning
+- `res.partner` — clients, contacts
+- `account.move` — factures émises/reçues
+- `account.payment` — paiements
+
+**Tout ce qui touche une intervention** (ajout 19/04 sur demande Guillaume) :
+- `of.planning.tour` — tournées
+- `of.planning.task` — interventions (contient le compte-rendu, cf captures)
+- `of.planning.intervention.template` — gabarits d'intervention
+- `of.survey.answers` — réponses questionnaires (= rapports d'intervention)
+- `of.survey.user_input.line` — lignes de réponses
+- `of.custom.document` — documents custom liés aux interventions
+
+### ⚪ Niveau 2 — Scan delta nocturne (14 modèles)
+
+Modèles à moindre valeur temps-réel. Rattrapés toutes les nuits à 3h via `write_date > last_sync`.
+
+- `account.move.line` — lignes de facturation (cascade de `account.move`)
+- `of.sale.payment.schedule`, `of.account.move.payment.schedule` — échéanciers
+- `stock.picking` — livraisons/expéditions
+- `of.image` — photos d'intervention (volumes)
+- `product.template`, `product.product` — catalogue articles (évolue lentement)
+- `of.product.pack.lines`, `product.pack.line`, `of.invoice.product.pack.lines` — composants kits
+- `sale.order.template`, `sale.order.template.line` — gabarits devis
+- `hr.employee` — collaborateurs
+- `of.planning.tour.line`, `of.planning.intervention.section` — sous-lignes
+- `of.custom.document.field` — métadonnées
+- `mail.tracking.value` — audit log (redondant avec les webhooks des modèles sources)
+- `mail.message` — bloqué suspens #3 (droits)
+- `of.service.request` — 2 records, négligeable
+
+### 🚀 Déploiement progressif validé
+
+| Phase | Modèles ajoutés | Objectif |
+|---|---|---|
+| Pilote | `sale.order`, `crm.lead`, `mail.activity` (3) | Valider l'architecture sur 48h réelles |
+| Vague 2 | `sale.order.line`, `calendar.event`, `res.partner`, `account.move`, `account.payment` (5) | Compléter le socle business |
+| Vague 3 | 6 modèles intervention | Couverture complète |
+
+### 💡 Point à rouvrir plus tard
+
+- **Étiquette `COMPTE-RENDU A LIRE`** repérée sur les interventions OpenFire : **signal proactif de grande valeur** pour la Phase 8. À exploiter quand Raya sera proactive (détection automatique → propositions d'actions).
+- **Champ exact du compte-rendu** dans `of.planning.task` : à identifier précisément au moment de configurer la première règle `base_automation`.
+</content>
