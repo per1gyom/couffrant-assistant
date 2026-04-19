@@ -533,3 +533,36 @@ Cette protection s'ajoute aux 3 autres couches de sécurité déjà en place :
 ~30 min de code côté Raya, 2 lignes ajoutées aux règles OpenFire.
 
 ---
+
+## 📋 Annexe Q5 — Tenant-awareness (validé 19/04/2026)
+
+**Rappel** : cette question avait été fusionnée dans la réponse à la Q3 (secret webhook par société). Annexe dédiée ici pour la traçabilité.
+
+### La question
+Quand un webhook arrive sur Raya, comment elle sait à **quelle société** (tenant) il appartient ? Couffrant Solar et Juillet (tenant de Charlotte) ont chacune leur Odoo.
+
+### Décision
+**Raya déduit le tenant du secret webhook utilisé**. Chaque société a son propre secret :
+- `ODOO_WEBHOOK_SECRET_COUFFRANT` → tenant `couffrant`
+- `ODOO_WEBHOOK_SECRET_JUILLET` → tenant `juillet`
+- Etc. pour les futurs clients
+
+### Pourquoi pas envoyer le tenant dans le message ?
+Si OpenFire envoie `"tenant": "couffrant"` dans le webhook, un attaquant ayant volé le secret pourrait écrire `"tenant": "juillet"` pour polluer les données de Charlotte. **Risque cross-tenant.**
+
+En déduisant le tenant depuis le secret, on garantit qu'un secret ne peut écrire que dans son propre tenant. C'est la même logique que pour une clé d'appartement : elle n'ouvre qu'une seule porte.
+
+### Implémentation côté Raya
+Table de correspondance en mémoire au démarrage :
+```
+secrets = {
+  "xxx...xxx": "couffrant",
+  "yyy...yyy": "juillet",
+}
+```
+Raya lit le header `X-Webhook-Token`, retrouve le tenant. Si inconnu → rejet 401.
+
+### Bénéfice
+Impossible de polluer un tenant avec le secret d'un autre. Cloisonnement garanti au niveau sécurité réseau, même avant d'arriver au traitement métier.
+
+---
