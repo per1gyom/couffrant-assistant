@@ -412,3 +412,74 @@ Chaque société (tenant) a son propre secret webhook. Le secret de Couffrant ne
 - Raya déduit le tenant du secret reçu (table de correspondance en mémoire).
 
 ---
+
+
+---
+
+## 📋 Annexe Q1 — Architecture de la mise à jour temps-réel (validé 19/04/2026)
+
+**Décision** : **Option C — Webhook par écriture côté Odoo + file d'attente intelligente côté Raya**.
+
+### Côté Odoo
+- Chaque modification d'un record prioritaire (création, modification, suppression) envoie immédiatement un webhook à Raya
+- Pas de bufferisation, pas d'agrégation côté Odoo (logique simple)
+
+### Côté Raya — 3 mécanismes de protection
+1. **File d'attente persistée sur disque (SQLite)** : les webhooks entrent dans la queue, un worker les traite au rythme confortable. Résiste aux bursts, aucune perte si Raya crashe.
+2. **Déduplication 5 secondes** : si le même record est modifié 3 fois en 5 secondes, Raya ne le re-vectorise qu'**une seule fois** à la fin (avec sa version finale).
+3. **Rate limiter OpenAI** : plafond à 2 000 embeddings/min (marge sur les 3 000 autorisés par notre plan).
+
+### Objectifs de latence
+- **Court terme** : quelques minutes acceptables, max 10-15 min en burst
+- **Long terme (vision Jarvis)** : < 500 ms quand tout va bien, pour permettre le conseil en direct sur les actions de Guillaume
+
+### Coût estimé
+- Volume moyen Couffrant : 500 webhooks/jour
+- Coût mensuel OpenAI : ~0,45 €/mois
+- Coût négligeable, même en période haute (1500 webhooks/jour = 1,35 €/mois)
+
+### Dashboard de monitoring
+Dashboard UI à construire pour voir en temps réel :
+- Webhooks reçus (compteur 24h)
+- Webhooks en attente dans la queue
+- Webhooks dédupliqués (économie)
+- Erreurs éventuelles
+- Dernière activité par modèle
+
+---
+
+## 📋 Annexe Q4 — Gestion des suppressions (validé 19/04/2026)
+
+**Décision** : **Règles triples côté Odoo + suppression douce côté Raya**.
+
+### Le piège Odoo à 2 comportements
+Dans OpenFire, "supprimer" peut vouloir dire 2 choses :
+- **Vraie suppression** (bouton Supprimer) → déclenche l'événement `unlink`
+- **Archivage** (cocher `active = false`) → déclenche l'événement `write` (pas `unlink`)
+
+Les deux doivent nettoyer la mémoire de Raya, sinon fantômes.
+
+### Côté Odoo
+**3 règles `base_automation` par modèle prioritaire** au lieu d'1 seule :
+- `on create` → informer Raya qu'un record est apparu
+- `on write` → informer Raya qu'un record a changé (couvre aussi `active=false` qui est un archivage)
+- `on unlink` → informer Raya qu'un record est supprimé
+
+**Volume final** : 14 modèles × 3 événements = **42 règles** à créer dans OpenFire.
+C'est mécanique : on fait les 3 règles du 1er modèle ensemble, on valide, puis on décline.
+
+### Côté Raya — Suppression douce (soft delete)
+On ne supprime **jamais** physiquement les chunks en DB. On les marque avec un timestamp `deleted_at`.
+
+**Mécanisme déjà en place** : colonne `deleted_at` existe dans `odoo_semantic_content`. Toutes les requêtes sémantiques filtrent déjà avec `WHERE deleted_at IS NULL`. À brancher sur le webhook.
+
+### Avantages du soft delete
+- **Historique préservé** : "il y avait un devis Bruneau qu'on a annulé, c'était quand ?" → Raya peut répondre
+- **Protection contre les erreurs** : si Arlène supprime par erreur, on peut restaurer
+- **Audit possible** : qui a supprimé quoi, quand
+- **Cohérence avec l'existant** : même mécanisme que pour le reste de la DB
+
+### Cas particulier de l'archivage (`active=false`)
+Quand Raya re-fetche le record sur un événement `write` et voit `active=false`, elle applique le même traitement qu'un `unlink` → marque `deleted_at`. Transparent pour OpenFire.
+
+---
