@@ -255,6 +255,7 @@ async function loadConnections(tenantId,idx){
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#f59e0b" onclick="generateManifests(this)" title="Scanner Universel Phase 2 : génère les manifests de vectorisation pour les 31 modèles P1+P2">📋 Manifests</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#dc2626" onclick="scanP1(this)" title="Scanner Universel Phase 3 : lance la vectorisation complète des 16 modèles P1 (purge + rebuild)">🚀 Scanner P1</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#7c3aed" onclick="scanTestMissing(this)" title="Teste uniquement les modèles sans chunks sur 200 records chacun. Pas de purge. Rapide (~10 min)">🧪 Test manquants</button>`:''}
+          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#2563eb" onclick="scanTestMissing(this, 999999)" title="Complète au volume réel les modèles manquants (ou partiels). Pas de purge. 10-20 min selon volumes.">🚀 Compléter manquants</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#ef4444" onclick="scanStop(this)" title="Arrête proprement le scan en cours (finit le modèle actuel puis stop)">⏹️ Stop</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#10b981" onclick="showIntegrity(this)" title="Scanner Universel Phase 8 : tableau de l'état d'intégrité de la vectorisation par modèle">📊 Intégrité</button>`:''}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
@@ -544,29 +545,36 @@ async function scanP1(btn){
   }
 }
 
-// Scanner TEST : teste uniquement les modeles sans chunks (manquants),
-// avec une limite de 200 records par modele. Pas de purge.
-// Objectif : identifier rapidement (<10 min) quels modeles plantent Odoo.
-async function scanTestMissing(btn){
-  const ok = await confirmAction(
-    '🧪 Lancer un Scanner test (200 records/modèle) ?',
-    'Cette opération va :\n• Détecter les modèles sans chunks (4 actuellement)\n• Les scanner sur 200 records chacun (rapide)\n• Ne PAS toucher aux modèles déjà vectorisés\n• Durée estimée : 5-10 min\n\nÊtes-vous sûr ?',
-    'Oui, lancer le test', 'Annuler'
-  );
+// Scanner TEST / COMPLET sur modeles manquants :
+// - sampleSize=200 (default) : test rapide diagnostique
+// - sampleSize=999999 : scan COMPLET des modeles manquants (sans purge,
+//   non destructif pour les chunks deja en DB). Pratique pour finir la
+//   vectorisation apres avoir corrige un manifest cassé.
+async function scanTestMissing(btn, sampleSize){
+  sampleSize = sampleSize || 200;
+  const isComplet = sampleSize >= 10000;
+  const titre = isComplet
+    ? '🚀 Compléter les modèles manquants (volume réel) ?'
+    : '🧪 Lancer un Scanner test (200 records/modèle) ?';
+  const msg = isComplet
+    ? 'Cette opération va :\n• Détecter les modèles sans chunks (ou partiels sur 200)\n• Les scanner au VOLUME COMPLET (pas de limite 200)\n• Ne PAS toucher aux modèles déjà vectorisés\n• Durée estimée : 10-20 min selon volumes\n\nÊtes-vous sûr ?'
+    : 'Cette opération va :\n• Détecter les modèles sans chunks\n• Les scanner sur 200 records chacun (rapide)\n• Ne PAS toucher aux modèles déjà vectorisés\n• Durée estimée : 5-10 min\n\nÊtes-vous sûr ?';
+  const ok = await confirmAction(titre, msg,
+    isComplet ? 'Oui, compléter' : 'Oui, lancer le test', 'Annuler');
   if(!ok) return;
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '⏳ Test démarrage...';
+  btn.innerHTML = isComplet ? '⏳ Complétion démarrage...' : '⏳ Test démarrage...';
   try{
-    const r = await fetch('/admin/scanner/run/test-missing?sample_size=200', {method:'POST'});
+    const r = await fetch(`/admin/scanner/run/test-missing?sample_size=${sampleSize}`, {method:'POST'});
     const d = await r.json();
-    if(d.status !== 'started' || !d.run_id) throw new Error(d.message || 'Démarrage test échoué');
+    if(d.status !== 'started' || !d.run_id) throw new Error(d.message || 'Démarrage échoué');
     const runId = d.run_id;
     const missing = (d.missing_models||[]).join(', ') || 'aucun';
-    setAlert('companies-alert', `🧪 Scanner test lancé (run_id: ${runId.slice(0,8)}...). Modèles testés : ${missing}`, 'ok');
-    // Polling toutes les 5s (plus rapide car scan court)
+    setAlert('companies-alert', `${isComplet?'🚀 Complétion':'🧪 Scanner test'} lancé (run_id: ${runId.slice(0,8)}...). Modèles : ${missing}`, 'ok');
+    // Polling toutes les 5s, timeout 30min pour mode complet (10278 records a scanner)
     let tries = 0;
-    const maxTries = 240; // 240 * 5s = 20min max
+    const maxTries = isComplet ? 720 : 240; // 720*5s=60min pour complet, 240*5s=20min pour test
     while(tries < maxTries){
       await new Promise(res => setTimeout(res, 5000));
       tries++;
@@ -575,26 +583,28 @@ async function scanTestMissing(btn){
       if(sd.status === 'running' || sd.status === 'pending'){
         const p = sd.progress || {};
         const s = sd.stats || {};
-        btn.innerHTML = `⏳ Test ${s.models_processed||0}/${s.models_total||'?'} — ${p.current_model||'...'} (${s.chunks_vectorized||0} chunks)`;
+        const prefix = isComplet ? '🚀 Complétion' : '⏳ Test';
+        btn.innerHTML = `${prefix} ${s.models_processed||0}/${s.models_total||'?'} — ${p.current_model||'...'} (${s.chunks_vectorized||0} chunks)`;
         continue;
       }
       if(sd.status === 'ok'){
         const s = sd.stats || {};
         const aborted = s.models_aborted || [];
-        let msg = `✅ Test terminé : ${s.chunks_vectorized||0} chunks créés, ${s.errors||0} erreurs`;
+        const label = isComplet ? 'Complétion' : 'Test';
+        let msg = `✅ ${label} terminé : ${s.chunks_vectorized||0} chunks créés, ${s.errors||0} erreurs`;
         if(aborted.length) msg += `, ${aborted.length} modèle(s) abandonné(s) : ${aborted.map(a=>a.model).join(', ')}`;
         setAlert('companies-alert', msg, aborted.length ? 'err' : 'ok');
         return;
       }
       if(sd.status === 'error'){ throw new Error(sd.error || 'Erreur inconnue'); }
       if(sd.status === 'stopped'){
-        setAlert('companies-alert', '⏹️ Test arrêté manuellement', 'ok');
+        setAlert('companies-alert', '⏹️ Scan arrêté manuellement', 'ok');
         return;
       }
     }
-    throw new Error('Timeout test 20 min');
+    throw new Error(`Timeout ${isComplet?'60 min':'20 min'}`);
   }catch(e){
-    setAlert('companies-alert', '❌ Test échoué : '+e.message, 'err');
+    setAlert('companies-alert', '❌ Scan échoué : '+e.message, 'err');
   }finally{
     btn.disabled = false;
     btn.innerHTML = orig;

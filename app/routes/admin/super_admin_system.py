@@ -947,24 +947,28 @@ def admin_scanner_run_test_missing(
     sample_size: int = 200,
     _: dict = Depends(require_admin),
 ):
-    """Scanner TEST : lance un scan sur les modeles MANQUANTS (sans chunks)
-    uniquement, avec une limite de sample_size records par modele.
+    """Scanner TEST / COMPLET sur modeles manquants ou partiels.
 
-    Objectif : tester rapidement (<10 min) quels modeles peuvent etre scannes
-    avec succes, sans impacter les modeles deja vectorises avec succes.
+    - sample_size<=1000 : TEST rapide. Selectionne uniquement les modeles
+      avec 0 chunks en DB. Objectif : diagnostiquer rapidement.
+    - sample_size>=10000 : COMPLET. Selectionne les modeles avec 0 chunks
+      OU qui n ont PAS atteint records_count_odoo (donc partiels). Objectif :
+      completer la vectorisation apres correction d un manifest.
 
-    - purge_first = False (ne touche pas aux chunks existants)
-    - record_limits automatique : sample_size pour les manquants, 0 pour ceux
-      deja vectorises (skip)
+    Toujours :
+    - purge_first=False (jamais destructif sur les chunks existants)
+    - Les modeles 'OK' (complets) sont skippes (record_limits[m]=0)
     """
     try:
         from app.scanner.runner import start_scan_p1
         from app.database import get_pg_conn
-        # Detecter les modeles manquants (0 chunks en DB)
+        is_complet = sample_size >= 10000
+        # On recupere aussi records_count_odoo pour detecter les partiels
         with get_pg_conn() as conn:
             cur = conn.cursor()
             cur.execute(
                 """SELECT cs.model_name,
+                          cs.records_count_odoo,
                           COALESCE((SELECT COUNT(*) FROM odoo_semantic_content
                                     WHERE tenant_id=cs.tenant_id
                                       AND source_model=cs.model_name
@@ -975,24 +979,47 @@ def admin_scanner_run_test_missing(
                 (tenant_id, source),
             )
             rows = cur.fetchall()
-        missing = [r[0] for r in rows if r[1] == 0]
-        ok_models = [r[0] for r in rows if r[1] > 0]
-        # Construire record_limits : sample_size pour manquants, 0 pour OK
-        # (0 = skip dans le runner)
-        record_limits = {m: sample_size for m in missing}
+        # Logique de selection :
+        # - mode TEST : manquants = chunks_db == 0
+        # - mode COMPLET : manquants = chunks_db == 0 OU chunks_db < records_count_odoo
+        #   (en tenant compte des limites applicatives MODEL_RECORD_LIMITS)
+        from app.scanner.runner import MODEL_RECORD_LIMITS
+        to_scan = []
+        ok_models = []
+        for model_name, rc_odoo, chunks_db in rows:
+            rc_odoo = rc_odoo or 0
+            # Limite applicative : plafond eventuel
+            app_limit = MODEL_RECORD_LIMITS.get(model_name)
+            expected = min(rc_odoo, app_limit) if app_limit and app_limit > 0 else rc_odoo
+            if app_limit == 0:
+                # Modele explicitement skippe (ex: res.city)
+                ok_models.append(model_name)
+                continue
+            if chunks_db == 0:
+                to_scan.append(model_name)
+            elif is_complet and chunks_db < (expected * 0.90):
+                # Partiel : il manque plus de 10% des records attendus
+                # (tolerance 10% alignee sur le seuil OK>=90% du dashboard
+                # Integrite, car records_count_odoo est parfois une estimation
+                # et certains records n ont pas de display_name donc pas de chunk)
+                to_scan.append(model_name)
+            else:
+                ok_models.append(model_name)
+        # Construire record_limits : sample_size pour a-scanner, 0 pour OK (skip)
+        record_limits = {m: sample_size for m in to_scan}
         for m in ok_models:
             record_limits[m] = 0
         run_id = start_scan_p1(
             tenant_id=tenant_id, source=source,
             priority_max=1, purge_first=False,
-            run_type="test",
+            run_type="test" if not is_complet else "complete",
             record_limits=record_limits,
         )
         return {
             "status": "started", "run_id": run_id,
-            "mode": "test-missing",
+            "mode": "complete" if is_complet else "test-missing",
             "sample_size": sample_size,
-            "missing_models": missing,
+            "missing_models": to_scan,
             "skipped_models_ok": ok_models,
         }
     except Exception as e:
