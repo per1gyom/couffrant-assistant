@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/auth_service.dart';
 import '../services/chat_service.dart';
 import '../services/tts_service.dart';
 import '../services/feedback_service.dart';
+import '../services/voice_input_service.dart';
 import 'login_screen.dart';
 import 'topics_sheet.dart';
 import '../services/topics_service.dart';
@@ -20,6 +22,7 @@ class _ChatScreenState extends State<ChatScreen> {
   final _chatService = ChatService();
   final _tts = TtsService();
   final _feedback = FeedbackService();
+  final _voice = VoiceInputService();
   final _inputController = TextEditingController();
   final _scrollController = ScrollController();
   final _inputFocus = FocusNode();
@@ -30,6 +33,8 @@ class _ChatScreenState extends State<ChatScreen> {
   bool _loading = false;
   bool _historyLoaded = false;
   bool _autoSpeak = true;
+  bool _isRecording = false;
+  String _textBeforeRecording = '';
   String _username = '';
   final Set<int> _likedIds = {};
   final Set<int> _dislikedIds = {};
@@ -39,6 +44,36 @@ class _ChatScreenState extends State<ChatScreen> {
     super.initState();
     _username = _authService.getUsername() ?? '';
     _loadHistory();
+    // Init moteur STT (demande permissions iOS a la 1ere utilisation)
+    _voice.init(
+      onStatus: (status) {
+        // Synchronise l'etat UI avec celui du moteur
+        if (status == 'done' || status == 'notListening') {
+          if (mounted && _isRecording) {
+            setState(() => _isRecording = false);
+          }
+        }
+      },
+      onError: (err) {
+        if (mounted) {
+          setState(() => _isRecording = false);
+          _showSnack('🎤 ${_voiceErrorMessage(err)}');
+        }
+      },
+    );
+  }
+
+  String _voiceErrorMessage(String err) {
+    if (err.contains('permission') || err.contains('denied')) {
+      return 'Accès au micro refusé. Active-le dans Réglages.';
+    }
+    if (err.contains('network')) {
+      return 'Réseau indisponible pour la reconnaissance.';
+    }
+    if (err.contains('no-speech') || err.contains('no match')) {
+      return "Je n'ai rien entendu.";
+    }
+    return "Reconnaissance vocale indisponible.";
   }
 
   Future<void> _loadHistory() async {
@@ -264,6 +299,61 @@ class _ChatScreenState extends State<ChatScreen> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))));
   }
 
+  // --- DICTEE VOCALE (STT) ---
+
+  /// Toggle ecoute vocale.
+  /// Tap 1 : demarre (texte apparait en live dans l'input)
+  /// Tap 2 : arrete manuellement (ou silence 2.5s declenche stop auto)
+  /// AUCUN envoi auto : l'utilisateur relit/corrige/envoie manuellement.
+  Future<void> _toggleVoiceInput() async {
+    if (_loading) return;
+
+    if (_isRecording) {
+      // Stop manuel : le onFinal du service posera le texte dans l'input
+      HapticFeedback.lightImpact();
+      await _voice.stop();
+      return;
+    }
+
+    // Start : memoriser le texte existant pour pouvoir concatener
+    // (cas ou l'utilisateur a deja tape debut de phrase puis dicte la suite)
+    _textBeforeRecording = _inputController.text;
+    _tts.stop(); // couper la voix de Raya pendant qu'on ecoute
+
+    HapticFeedback.mediumImpact();
+    final started = await _voice.start(
+      onPartial: _onVoicePartial,
+      onFinal: _onVoiceFinal,
+    );
+    if (started && mounted) {
+      setState(() => _isRecording = true);
+    } else if (!started && mounted) {
+      _showSnack('🎤 Impossible de démarrer la dictée.');
+    }
+  }
+
+  void _onVoicePartial(String partial) {
+    if (!mounted) return;
+    final separator = _textBeforeRecording.isEmpty ? '' : ' ';
+    _inputController.text = '$_textBeforeRecording$separator$partial';
+    _inputController.selection = TextSelection.fromPosition(
+      TextPosition(offset: _inputController.text.length),
+    );
+  }
+
+  void _onVoiceFinal(String finalText) {
+    if (!mounted) return;
+    HapticFeedback.lightImpact();
+    final separator = _textBeforeRecording.isEmpty ? '' : ' ';
+    _inputController.text = '$_textBeforeRecording$separator$finalText'.trim();
+    _inputController.selection = TextSelection.fromPosition(
+      TextPosition(offset: _inputController.text.length),
+    );
+    setState(() => _isRecording = false);
+    // Donne le focus au champ pour edition/correction
+    _inputFocus.requestFocus();
+  }
+
   // --- NAVIGATION ---
 
   void _scrollToBottom({bool animate = true}) {
@@ -323,7 +413,10 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   @override
-  void dispose() { _inputController.dispose(); _scrollController.dispose(); _inputFocus.dispose(); _tts.dispose(); super.dispose(); }
+  void dispose() {
+    _voice.cancel();
+    _inputController.dispose(); _scrollController.dispose(); _inputFocus.dispose(); _tts.dispose(); super.dispose();
+  }
 
   // --- BUILD ---
 
@@ -542,6 +635,36 @@ class _ChatScreenState extends State<ChatScreen> {
       ]));
   }
 
+  /// Bouton micro avec etat actif (rouge pulse pendant l'ecoute,
+  /// vert au repos). Tap = toggle.
+  Widget _buildMicButton() {
+    final color = _isRecording ? const Color(0xFFEF4444) : const Color(0xFF22C55E);
+    return GestureDetector(
+      onTap: _toggleVoiceInput,
+      child: TweenAnimationBuilder<double>(
+        duration: const Duration(milliseconds: 600),
+        tween: Tween(begin: 1.0, end: _isRecording ? 1.12 : 1.0),
+        curve: Curves.easeInOut,
+        builder: (_, scale, child) => Transform.scale(scale: scale, child: child),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 44, height: 44,
+          decoration: BoxDecoration(
+            color: color, shape: BoxShape.circle,
+            boxShadow: _isRecording
+                ? [BoxShadow(color: color.withOpacity(0.5), blurRadius: 16, spreadRadius: 2)]
+                : null,
+          ),
+          child: Icon(
+            _isRecording ? Icons.stop_rounded : Icons.mic,
+            color: Colors.white,
+            size: _isRecording ? 24 : 22,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildInputBar() {
     return Container(padding: const EdgeInsets.fromLTRB(8, 8, 8, 16),
       decoration: BoxDecoration(border: Border(top: BorderSide(color: Colors.white.withOpacity(0.08)))),
@@ -555,9 +678,7 @@ class _ChatScreenState extends State<ChatScreen> {
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(21), borderSide: BorderSide.none)),
           textInputAction: TextInputAction.send, onSubmitted: (_) => _sendMessage())),
         const SizedBox(width: 8),
-        GestureDetector(onTap: () {}, child: Container(width: 44, height: 44,
-          decoration: const BoxDecoration(color: Color(0xFF22C55E), shape: BoxShape.circle),
-          child: const Icon(Icons.mic, color: Colors.white, size: 22))),
+        _buildMicButton(),
         const SizedBox(width: 6),
         GestureDetector(onTap: _sendMessage, child: Container(width: 36, height: 36,
           decoration: BoxDecoration(color: Colors.white.withOpacity(0.1), shape: BoxShape.circle),
