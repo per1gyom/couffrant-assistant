@@ -1,3 +1,11 @@
+# ⚠️ DOCUMENT OBSOLÈTE — roadmap archivée
+
+**La roadmap active est** `docs/raya_planning_v4.md`.
+
+Ce document est conservé pour l'historique uniquement.
+
+---
+
 # Mise à jour roadmap V2.1 — Phase 5D terminée
 
 **Date :** 12/04/2026 soir

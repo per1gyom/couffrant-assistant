@@ -1,4 +1,18 @@
-# RAYA — PLANNING D'AVANCEMENT V3
+# ⚠️ DOCUMENT OBSOLÈTE — remplacé par `raya_planning_v4.md`
+
+**Ce document est conservé pour l'historique uniquement.**
+**La roadmap active est dans** `docs/raya_planning_v4.md` **(19/04/2026).**
+
+Raison de la refonte : après les 2 jours passés sur la vectorisation Odoo (17-19 avril), Guillaume a recadré les priorités. La proactivité (Phase 8) devient l'**objectif final** après avoir :
+1. Sécurisé la connexion Odoo avec **mise à jour temps-réel**
+2. **Industrialisé** la méthode pour brancher de nouveaux outils rapidement
+3. **Étendu** la vectorisation à Drive, Outlook et Gmail
+
+Voir `raya_planning_v4.md` pour le détail.
+
+---
+
+# RAYA — PLANNING D'AVANCEMENT V3 (archivé)
 
 **Auteur :** Opus — validé par Guillaume
 **Date :** 12/04/2026 soir

@@ -1,3 +1,11 @@
+# ⚠️ DOCUMENT OBSOLÈTE — roadmap archivée
+
+**La roadmap active est** `docs/raya_planning_v4.md`.
+
+Ce document est conservé pour l'historique uniquement.
+
+---
+
 # RAYA — FEUILLE DE ROUTE V2
 
 **Auteur :** Opus (architecte) — validé par Guillaume
