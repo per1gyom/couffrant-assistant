@@ -986,6 +986,7 @@ def admin_scanner_run_test_missing(
     tenant_id: str = "couffrant",
     source: str = "odoo",
     sample_size: int = 200,
+    priority_max: int = 1,
     _: dict = Depends(require_admin),
 ):
     """Scanner TEST / COMPLET sur modeles manquants ou partiels.
@@ -995,6 +996,9 @@ def admin_scanner_run_test_missing(
     - sample_size>=10000 : COMPLET. Selectionne les modeles avec 0 chunks
       OU qui n ont PAS atteint records_count_odoo (donc partiels). Objectif :
       completer la vectorisation apres correction d un manifest.
+
+    - priority_max=1 (default) : modeles P1 uniquement
+    - priority_max=2 : P1+P2 (utile pour tester P2 sans toucher P1)
 
     Toujours :
     - purge_first=False (jamais destructif sur les chunks existants)
@@ -1009,6 +1013,7 @@ def admin_scanner_run_test_missing(
             cur = conn.cursor()
             cur.execute(
                 """SELECT cs.model_name,
+                          cs.priority,
                           cs.records_count_odoo,
                           COALESCE((SELECT COUNT(*) FROM odoo_semantic_content
                                     WHERE tenant_id=cs.tenant_id
@@ -1016,8 +1021,8 @@ def admin_scanner_run_test_missing(
                                       AND deleted_at IS NULL), 0) AS chunks_db
                    FROM connector_schemas cs
                    WHERE cs.tenant_id=%s AND cs.source=%s
-                     AND cs.enabled=TRUE AND cs.priority<=1""",
-                (tenant_id, source),
+                     AND cs.enabled=TRUE AND cs.priority<=%s""",
+                (tenant_id, source, priority_max),
             )
             rows = cur.fetchall()
         # Logique de selection :
@@ -1027,7 +1032,7 @@ def admin_scanner_run_test_missing(
         from app.scanner.runner import MODEL_RECORD_LIMITS
         to_scan = []
         ok_models = []
-        for model_name, rc_odoo, chunks_db in rows:
+        for model_name, prio, rc_odoo, chunks_db in rows:
             rc_odoo = rc_odoo or 0
             # Limite applicative : plafond eventuel
             app_limit = MODEL_RECORD_LIMITS.get(model_name)
@@ -1052,13 +1057,14 @@ def admin_scanner_run_test_missing(
             record_limits[m] = 0
         run_id = start_scan_p1(
             tenant_id=tenant_id, source=source,
-            priority_max=1, purge_first=False,
+            priority_max=priority_max, purge_first=False,
             run_type="test" if not is_complet else "complete",
             record_limits=record_limits,
         )
         return {
             "status": "started", "run_id": run_id,
             "mode": "complete" if is_complet else "test-missing",
+            "priority_max": priority_max,
             "sample_size": sample_size,
             "missing_models": to_scan,
             "skipped_models_ok": ok_models,
