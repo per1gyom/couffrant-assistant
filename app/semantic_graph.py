@@ -64,18 +64,33 @@ EDGE_TYPES = EDGE_TYPES_EXPLICIT | EDGE_TYPES_IMPLICIT
 EDGE_SOURCES = {"explicit_source", "llm_inferred", "manual"}
 
 
+# Regex de validation formelle (pas une liste fermee : le manifest_generator
+# cree des types dynamiquement a partir des noms de modeles Odoo et de leurs
+# champs many2one, donc il est impossible de lister TOUS les types possibles).
+# La liste ci-dessus reste utile comme documentation des types "canoniques".
+import re
+_NODE_TYPE_PATTERN = re.compile(r"^[A-Z][A-Za-z0-9_]{0,63}$")
+_EDGE_TYPE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
+
+
 def _validate_node_type(node_type: str) -> None:
-    """Lève une erreur si le type de nœud n'est pas connu.
-    Permet d'éviter les typos silencieuses."""
-    if node_type not in NODE_TYPES:
-        logger.warning("[Graph] Type de nœud inconnu : %s (types valides : %s)",
-                       node_type, sorted(NODE_TYPES))
+    """Log un warning seulement si le format est invalide (vide, caracteres
+    speciaux, commence par minuscule ou chiffre). Les types canoniques
+    (Person, Company, Deal...) ET les types dynamiques (Message, Value,
+    Fields, etc. derives automatiquement de noms de modeles Odoo) sont
+    tous les deux acceptes silencieusement."""
+    if not node_type or not _NODE_TYPE_PATTERN.match(node_type):
+        logger.warning("[Graph] node_type invalide (format incorrect) : %r", node_type)
 
 
 def _validate_edge_type(edge_type: str) -> None:
-    """Lève un warning si le type d'arête n'est pas connu."""
-    if edge_type not in EDGE_TYPES:
-        logger.warning("[Graph] Type d'arête inconnu : %s", edge_type)
+    """Log un warning seulement si le format est invalide. Les types
+    canoniques snake_case (parent_of, has_line...) ET les types dynamiques
+    UPPER_SNAKE_CASE (CREATED_BY, LINKS_PARTNER, LAST_MODIFIED_BY, etc.
+    generes par _edge_type_for_field du manifest_generator) sont tous les
+    deux acceptes silencieusement."""
+    if not edge_type or not _EDGE_TYPE_PATTERN.match(edge_type):
+        logger.warning("[Graph] edge_type invalide (format incorrect) : %r", edge_type)
 
 
 # ─── ÉCRITURE : NŒUDS ─────────────────────────────────────────
