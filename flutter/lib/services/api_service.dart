@@ -2,11 +2,12 @@ import 'package:dio/dio.dart';
 import 'package:dio_cookie_manager/dio_cookie_manager.dart';
 import 'package:cookie_jar/cookie_jar.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:path_provider/path_provider.dart';
 import '../config/api_config.dart';
 
 /// Client HTTP singleton avec gestion des cookies de session.
 /// Le backend Raya utilise des cookies de session (pas JWT).
-/// Sur mobile : PersistCookieJar (survit aux redémarrages).
+/// Sur mobile : PersistCookieJar sur disque (survit aux redémarrages).
 /// Sur web : CookieJar en mémoire (le navigateur gère les cookies).
 class ApiService {
   static ApiService? _instance;
@@ -40,10 +41,20 @@ class ApiService {
       },
     ));
 
-    // Sur mobile : cookie jar avec intercepteur dio
-    // Sur web : le navigateur gère les cookies automatiquement
+    // Sur mobile : cookie jar PERSISTANT sur disque (survit aux redemarrages)
+    // Sur web : le navigateur gere les cookies automatiquement
     if (!kIsWeb) {
-      cookieJar = CookieJar();
+      try {
+        final dir = await getApplicationDocumentsDirectory();
+        final cookiePath = '${dir.path}/.raya_cookies/';
+        cookieJar = PersistCookieJar(
+          storage: FileStorage(cookiePath),
+          ignoreExpires: false,
+        );
+      } catch (_) {
+        // Fallback si le file system echoue (tests, etc.) : memory jar
+        cookieJar = CookieJar();
+      }
       dio.interceptors.add(CookieManager(cookieJar!));
     } else {
       // Sur web, activer withCredentials pour envoyer les cookies
