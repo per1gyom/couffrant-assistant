@@ -256,6 +256,7 @@ async function loadConnections(tenantId,idx){
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#dc2626" onclick="scanP1(this)" title="Scanner Universel Phase 3 : lance la vectorisation complète des 16 modèles P1 (purge + rebuild)">🚀 Scanner P1</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#7c3aed" onclick="scanTestMissing(this)" title="Teste uniquement les modèles sans chunks sur 200 records chacun. Pas de purge. Rapide (~10 min)">🧪 Test manquants</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#2563eb" onclick="scanTestMissing(this, 999999)" title="Complète au volume réel les modèles manquants (ou partiels). Pas de purge. 10-20 min selon volumes.">🚀 Compléter manquants</button>`:''}
+          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#0ea5e9" onclick="scanTestMissing(this, 200, 2)" title="Teste les 16 modèles P2 sur 200 records chacun (sans toucher aux P1 déjà OK). Durée 5-15 min. Diagnostic rapide.">🧪 Test P2</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#ef4444" onclick="scanStop(this)" title="Arrête proprement le scan en cours (finit le modèle actuel puis stop)">⏹️ Stop</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#10b981" onclick="showIntegrity(this)" title="Scanner Universel Phase 8 : tableau de l'état d'intégrité de la vectorisation par modèle">📊 Intégrité</button>`:''}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
@@ -582,15 +583,30 @@ async function scanP1(btn){
 // - sampleSize=999999 : scan COMPLET des modeles manquants (sans purge,
 //   non destructif pour les chunks deja en DB). Pratique pour finir la
 //   vectorisation apres avoir corrige un manifest cassé.
-async function scanTestMissing(btn, sampleSize){
+// - priorityMax=1 (default) : P1 uniquement
+// - priorityMax=2 : P1+P2 (teste les modeles P2 sans toucher P1)
+async function scanTestMissing(btn, sampleSize, priorityMax){
   sampleSize = sampleSize || 200;
+  priorityMax = priorityMax || 1;
   const isComplet = sampleSize >= 10000;
-  const titre = isComplet
-    ? '🚀 Compléter les modèles manquants (volume réel) ?'
-    : '🧪 Lancer un Scanner test (200 records/modèle) ?';
-  const msg = isComplet
-    ? 'Cette opération va :\n• Détecter les modèles sans chunks (ou partiels sur 200)\n• Les scanner au VOLUME COMPLET (pas de limite 200)\n• Ne PAS toucher aux modèles déjà vectorisés\n• Durée estimée : 10-20 min selon volumes\n\nÊtes-vous sûr ?'
-    : 'Cette opération va :\n• Détecter les modèles sans chunks\n• Les scanner sur 200 records chacun (rapide)\n• Ne PAS toucher aux modèles déjà vectorisés\n• Durée estimée : 5-10 min\n\nÊtes-vous sûr ?';
+  const isP2 = priorityMax >= 2;
+  const prioLabel = isP2 ? 'P1+P2' : 'P1';
+  let titre;
+  if(isP2 && !isComplet){
+    titre = '🧪 Test P2 (200 records/modèle) ?';
+  }else if(isComplet){
+    titre = '🚀 Compléter les modèles manquants (volume réel) ?';
+  }else{
+    titre = '🧪 Lancer un Scanner test (200 records/modèle) ?';
+  }
+  let msg;
+  if(isP2 && !isComplet){
+    msg = 'Cette opération va :\n• Scanner les 16 modèles P2 sur 200 records chacun\n• Ne PAS toucher aux modèles déjà vectorisés (P1)\n• Identifier rapidement quels modèles P2 plantent / fonctionnent\n• Durée estimée : 5-15 min\n\nÊtes-vous sûr ?';
+  }else if(isComplet){
+    msg = `Cette opération va :\n• Détecter les modèles sans chunks (ou partiels sur 200)\n• Les scanner au VOLUME COMPLET (pas de limite 200)\n• Scope : ${prioLabel}\n• Ne PAS toucher aux modèles déjà vectorisés\n• Durée estimée : 10-20 min selon volumes\n\nÊtes-vous sûr ?`;
+  }else{
+    msg = 'Cette opération va :\n• Détecter les modèles sans chunks\n• Les scanner sur 200 records chacun (rapide)\n• Ne PAS toucher aux modèles déjà vectorisés\n• Durée estimée : 5-10 min\n\nÊtes-vous sûr ?';
+  }
   const ok = await confirmAction(titre, msg,
     isComplet ? 'Oui, compléter' : 'Oui, lancer le test', 'Annuler');
   if(!ok) return;
@@ -598,7 +614,8 @@ async function scanTestMissing(btn, sampleSize){
   btn.disabled = true;
   btn.innerHTML = isComplet ? '⏳ Complétion démarrage...' : '⏳ Test démarrage...';
   try{
-    const r = await fetch(`/admin/scanner/run/test-missing?sample_size=${sampleSize}`, {method:'POST'});
+    const url = `/admin/scanner/run/test-missing?sample_size=${sampleSize}&priority_max=${priorityMax}`;
+    const r = await fetch(url, {method:'POST'});
     const d = await r.json();
     if(d.status !== 'started' || !d.run_id) throw new Error(d.message || 'Démarrage échoué');
     const runId = d.run_id;
