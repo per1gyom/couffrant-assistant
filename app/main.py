@@ -250,6 +250,15 @@ def startup_event():
         cleanup_stale_runs(stale_minutes=10)
     except Exception as e:
         logger.warning(f"[Scanner] Cleanup stale runs : {e}")
+    # Demarrage du worker webhook-queue (Phase A.2 roadmap v4).
+    # Thread daemon qui depile vectorization_queue et traite les webhooks
+    # en tache de fond. Idempotent - safe si relance plusieurs fois.
+    try:
+        from app.webhook_queue import start_worker
+        start_worker()
+        logger.info("[WebhookQueue] Worker demarre")
+    except Exception as e:
+        logger.error(f"[WebhookQueue] Demarrage worker echoue : {e}")
     try:
         job_scheduler.start()
     except Exception as e:
@@ -263,3 +272,9 @@ def shutdown_event():
         job_scheduler.stop()
     except Exception as e:
         logger.error(f"[Scheduler] Erreur arret: {e}")
+    # Arret propre du worker webhook-queue
+    try:
+        from app.webhook_queue import stop_worker
+        stop_worker()
+    except Exception as e:
+        logger.error(f"[WebhookQueue] Erreur arret worker: {e}")

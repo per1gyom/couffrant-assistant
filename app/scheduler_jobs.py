@@ -189,3 +189,26 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("[Scheduler] Job DÉSACTIVÉ : external_observer (activer via SCHEDULER_OBSERVER_ENABLED=true)")
 
+    # Ronde de nuit webhook (Phase A.2 roadmap v4, annexe Q7/Q5).
+    # Chaque jour a 5h du matin : compare les records Odoo modifies dans la
+    # journee avec les webhooks effectivement recus + traites. Si ecart,
+    # rattrape (delta sync) et prepare une alerte envoyee a 7h.
+    if _job_enabled("SCHEDULER_WEBHOOK_NIGHT_PATROL_ENABLED", True):
+        try:
+            from app.jobs.webhook_night_patrol import run_night_patrol, send_patrol_alert_if_needed
+            scheduler.add_job(func=run_night_patrol,
+                              trigger=CronTrigger(hour=5, minute=0),
+                              id="webhook_night_patrol",
+                              name="Ronde de nuit webhook (5h)",
+                              replace_existing=True)
+            scheduler.add_job(func=send_patrol_alert_if_needed,
+                              trigger=CronTrigger(hour=7, minute=0),
+                              id="webhook_patrol_alert",
+                              name="Alerte ronde de nuit (7h)",
+                              replace_existing=True)
+            logger.info("[Scheduler] Job enregistré : webhook_night_patrol (5h) + alerte (7h)")
+        except Exception as e:
+            logger.error(f"[Scheduler] Import échoué pour webhook_night_patrol: {e}")
+    else:
+        logger.info("[Scheduler] Job DÉSACTIVÉ : webhook_night_patrol")
+
