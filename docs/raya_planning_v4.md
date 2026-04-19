@@ -483,3 +483,28 @@ On ne supprime **jamais** physiquement les chunks en DB. On les marque avec un t
 Quand Raya re-fetche le record sur un événement `write` et voit `active=false`, elle applique le même traitement qu'un `unlink` → marque `deleted_at`. Transparent pour OpenFire.
 
 ---
+
+## 📋 Annexe Q5 — Surveillance de la santé des webhooks (validé 19/04/2026)
+
+**Décision** : pas de canari temps réel, uniquement une ronde de nuit avec comparaison systématique.
+
+### ❌ Canari abandonné
+L'alerte "aucun webhook reçu en 3h" aurait généré trop de faux positifs. Chez Couffrant, il arrive régulièrement que personne ne touche Odoo pendant une matinée entière (travail sur le terrain, administratif, chantiers). Le canari se déclencherait pour rien.
+
+### ✅ Ronde de nuit (seule protection retenue)
+
+**À 5h du matin chaque jour** :
+1. Raya interroge Odoo pour lister tous les records modifiés dans les dernières 24h (via `write_date`)
+2. Elle compare avec la liste des webhooks qu'elle a effectivement reçus et traités
+3. Si écart : elle rattrape les records manquants (scan delta) + prépare une alerte
+
+**Alerte WhatsApp envoyée à 7h** uniquement si la ronde de nuit a détecté un écart significatif :
+- Format : "X records manquants sur modèle Y ont été rattrapés cette nuit. Webhook possiblement en panne, à vérifier."
+- Heure 7h choisie pour ne pas réveiller Guillaume ni envoyer l'alerte dans la nuit
+
+### Bénéfices
+- Aucun faux positif (on compare au réel, pas à une estimation)
+- Rattrapage automatique si les webhooks ont failli → aucune perte de données
+- Heure 7h compatible avec démarrage journée : Guillaume est au courant avant l'activité
+
+---
