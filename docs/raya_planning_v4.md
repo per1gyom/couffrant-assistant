@@ -508,3 +508,28 @@ L'alerte "aucun webhook reçu en 3h" aurait généré trop de faux positifs. Che
 - Heure 7h compatible avec démarrage journée : Guillaume est au courant avant l'activité
 
 ---
+
+## 📋 Annexe Q6 — Protection anti-rejeu des webhooks (validé 19/04/2026)
+
+**Décision** : protection activée. Sécurité = priorité absolue selon Guillaume.
+
+### Principe
+Chaque webhook envoyé par OpenFire inclut :
+- Un **timestamp d'émission** (heure exacte de l'envoi)
+- Un **identifiant unique** (comme un numéro de série)
+
+### Raya rejette automatiquement
+- Les webhooks **plus vieux que 5 minutes** (retardataires suspects)
+- Les webhooks avec un **identifiant déjà vu** (rejeu pur et simple)
+
+### Combiné aux autres décisions
+Cette protection s'ajoute aux 3 autres couches de sécurité déjà en place :
+1. **Secret webhook par société** (Q3) : 1 badge par tenant, impossible de polluer Juillet avec le secret Couffrant
+2. **Re-fetch systématique** (Q3) : même si un attaquant forge un webhook signé, il ne peut rien injecter (Raya relit Odoo, pas le payload)
+3. **Validation tenant depuis le secret** (Q3) : impossible d'écrire dans le mauvais tenant
+4. **Protection anti-rejeu** (Q6) : impossible de rejouer un webhook capturé
+
+### Coût
+~30 min de code côté Raya, 2 lignes ajoutées aux règles OpenFire.
+
+---

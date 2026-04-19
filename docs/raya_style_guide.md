@@ -46,3 +46,14 @@
 - Jamais lancer de vectorisation sans "go" explicite de Guillaume
 - Jamais toucher au Flutter (géré ailleurs)
 - Tutoiement, français, concision
+
+## 🔒 Priorité sécurité (validé 19/04/2026)
+
+Guillaume a exigé le blindage maximal de la sécurité. À chaque fois qu'un choix architectural peut renforcer la sécurité sans coût prohibitif, le prendre par défaut. Jamais de compromis "on verra plus tard" sur les entrées système.
+
+Points de vigilance :
+- Secrets par tenant (jamais de secret global)
+- Validation croisée (ex: secret + timestamp + identifiant unique)
+- Pas de données en clair dans les messages (principe "va voir" plutôt que "je dicte")
+- Audit des accès sensibles (base_automation, webhooks, OAuth)
+- Rotation des secrets possible sans tout casser
