@@ -121,12 +121,18 @@ def _run_scan_worker(
     run_id: str, tenant_id: str, source: str,
     priority_max: int, purge_first: bool, batch_size: int = 50,
     record_limits: Optional[dict] = None,
+    model_domains: Optional[dict] = None,
 ):
     """Worker background execute par un thread. Ne retourne rien, ecrit
     tout dans scanner_runs via orchestrator.update_progress.
 
     record_limits : {model_name: max_records} pour limiter le volume traite.
     0 = skip complet, None ou absent = illimite.
+
+    model_domains : {model_name: [["field","op",value], ...]} pour
+    appliquer un filtre Odoo sur un modele specifique. Sert notamment a
+    scanner product.template uniquement sur les articles utilises dans
+    les devis + kits.
     """
     from app.scanner import orchestrator
     from app.scanner import adapter_odoo
@@ -233,12 +239,16 @@ def _run_scan_worker(
 
 
                 # Fetch batch
+                # Domain filter optionnel par modele (ajoute 19/04 pour permettre
+                # un scan cible sur product.template filtre sur articles utiles)
+                model_domain = (model_domains or {}).get(model_name) if model_domains else None
                 try:
                     batch = adapter_odoo.fetch_records_batch(
                         model_name=model_name,
                         fields=fields,
                         offset=offset,
                         limit=batch_size,
+                        domain=model_domain,
                         order="id asc",
                     )
                 except Exception as e:
@@ -429,7 +439,9 @@ MODEL_RECORD_LIMITS = {
     "product.product": 5000,      # meme logique (pas prevu en P1 mais securite)
     "product.supplierinfo": 10000,  # relations fournisseur
     "mail.message": 10000,        # historique 10k messages recents
-    "mail.tracking.value": 10000,
+    # mail.tracking.value : 25k (releve de 10k le 19/04) pour couvrir les 22850
+    # existants + 2150 de marge. Couffrant a 22850 trackings au 19/04/2026.
+    "mail.tracking.value": 25000,
     "res.city": 0,                # referentiel geo = graphe only, skip
     "res.city.zip": 0,
 }
@@ -442,6 +454,7 @@ def start_scan_p1(
     purge_first: bool = True,
     run_type: str = "init",
     record_limits: Optional[dict] = None,
+    model_domains: Optional[dict] = None,
 ) -> str:
     """Lance un scan P1 en background thread.
 
@@ -453,6 +466,8 @@ def start_scan_p1(
         run_type: 'init' (premiere fois) / 'rebuild' (re-run ulterieur)
         record_limits: override optionnel des limites par modele
             (ex: {"product.template": 1000}). Par defaut MODEL_RECORD_LIMITS.
+        model_domains: filtres Odoo par modele, ex:
+            {"product.template": [["id","in",[1,2,3]]]}
 
     Retourne le run_id. Le statut est interrogeable via
     orchestrator.get_run_status(run_id).
@@ -472,13 +487,14 @@ def start_scan_p1(
             "purge_first": purge_first,
             "scope": "P1" if priority_max == 1 else f"P1-P{priority_max}",
             "record_limits": effective_limits,
+            "model_domains_keys": list((model_domains or {}).keys()),
         },
     )
 
     thread = threading.Thread(
         target=_run_scan_worker,
         args=(run_id, tenant_id, source, priority_max, purge_first, 50,
-              effective_limits),
+              effective_limits, model_domains),
         daemon=True,
         name=f"scanner-{run_id[:8]}",
     )
