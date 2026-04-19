@@ -191,6 +191,66 @@ def set_checkpoint(run_id: str, model_name: str, last_id: int,
     update_progress(run_id, prog)
 
 
+def request_stop(run_id: str) -> bool:
+    """Demande l arret propre d un run en cours. Le worker verifiera ce flag
+    apres chaque modele termine (option A : finit le modele en cours).
+    Retourne True si le flag a ete pose, False si le run n existait pas
+    ou etait deja termine."""
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """UPDATE scanner_runs
+                   SET stop_requested=TRUE, updated_at=NOW()
+                   WHERE run_id=%s AND status='running'
+                   RETURNING run_id""",
+                (run_id,),
+            )
+            ok = cur.fetchone() is not None
+            conn.commit()
+        if ok:
+            logger.warning("[Orchestrator] Stop requested pour run %s", run_id)
+        return ok
+    except Exception as e:
+        logger.exception("[Orchestrator] request_stop %s : %s", run_id, e)
+        return False
+
+
+def is_stop_requested(run_id: str) -> bool:
+    """Verifie si un stop a ete demande pour ce run. Appele par le worker
+    entre chaque modele traite."""
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT stop_requested FROM scanner_runs WHERE run_id=%s",
+                (run_id,),
+            )
+            row = cur.fetchone()
+            return bool(row and row[0])
+    except Exception:
+        return False
+
+
+def stop_run(run_id: str, reason: str = "Arret manuel demande par l admin"):
+    """Marque un run comme arrete proprement (status='stopped'). Different
+    de fail_run (erreur technique) : stopped = action volontaire."""
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """UPDATE scanner_runs
+                   SET status='stopped', finished_at=NOW(),
+                       error=%s, updated_at=NOW()
+                   WHERE run_id=%s""",
+                (reason[:500], run_id),
+            )
+            conn.commit()
+        logger.info("[Orchestrator] Run stopped proprement : %s", run_id)
+    except Exception as e:
+        logger.exception("[Orchestrator] stop_run %s : %s", run_id, e)
+
+
 def cleanup_stale_runs(stale_minutes: int = 10) -> int:
     """Marque comme 'error' les runs 'running' ou 'pending' dont la
     derniere mise a jour (updated_at) est plus ancienne que N minutes.

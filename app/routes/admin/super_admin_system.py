@@ -898,6 +898,109 @@ def admin_scanner_run_status(
         return {"status": "error", "message": str(e)[:300]}
 
 
+@router.post("/admin/scanner/run/stop")
+def admin_scanner_run_stop(
+    request: Request, run_id: str,
+    _: dict = Depends(require_admin),
+):
+    """Demande l arret propre d un run en cours (bouton Stop).
+
+    Option A validee par Guillaume : le worker finit le modele en cours
+    puis s arrete proprement avant le modele suivant. Les chunks deja
+    vectorises sont conserves en DB.
+
+    Retourne {ok: bool} - ok=false si le run n existe pas ou est deja
+    termine."""
+    try:
+        from app.scanner import orchestrator
+        ok = orchestrator.request_stop(run_id)
+        if ok:
+            return {"status": "ok", "message": "Stop demande, le worker s arretera apres le modele en cours"}
+        return {"status": "not_found",
+                "message": f"Run {run_id} introuvable ou deja termine"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
+@router.get("/admin/scanner/run/list")
+def admin_scanner_run_list(
+    request: Request,
+    tenant_id: str = "couffrant",
+    limit: int = 10,
+    _: dict = Depends(require_admin),
+):
+    """Liste les N derniers runs d un tenant (tries par started_at DESC).
+    Utile pour le bouton Stop qui a besoin de trouver le run en cours."""
+    try:
+        from app.scanner import orchestrator
+        runs = orchestrator.list_recent_runs(tenant_id, limit=limit)
+        return {"status": "ok", "runs": runs}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
+@router.post("/admin/scanner/run/test-missing")
+def admin_scanner_run_test_missing(
+    request: Request,
+    tenant_id: str = "couffrant",
+    source: str = "odoo",
+    sample_size: int = 200,
+    _: dict = Depends(require_admin),
+):
+    """Scanner TEST : lance un scan sur les modeles MANQUANTS (sans chunks)
+    uniquement, avec une limite de sample_size records par modele.
+
+    Objectif : tester rapidement (<10 min) quels modeles peuvent etre scannes
+    avec succes, sans impacter les modeles deja vectorises avec succes.
+
+    - purge_first = False (ne touche pas aux chunks existants)
+    - record_limits automatique : sample_size pour les manquants, 0 pour ceux
+      deja vectorises (skip)
+    """
+    try:
+        from app.scanner.runner import start_scan_p1
+        from app.database import get_pg_conn
+        # Detecter les modeles manquants (0 chunks en DB)
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """SELECT cs.model_name,
+                          COALESCE((SELECT COUNT(*) FROM odoo_semantic_content
+                                    WHERE tenant_id=cs.tenant_id
+                                      AND source_model=cs.model_name
+                                      AND deleted_at IS NULL), 0) AS chunks_db
+                   FROM connector_schemas cs
+                   WHERE cs.tenant_id=%s AND cs.source=%s
+                     AND cs.enabled=TRUE AND cs.priority<=1""",
+                (tenant_id, source),
+            )
+            rows = cur.fetchall()
+        missing = [r[0] for r in rows if r[1] == 0]
+        ok_models = [r[0] for r in rows if r[1] > 0]
+        # Construire record_limits : sample_size pour manquants, 0 pour OK
+        # (0 = skip dans le runner)
+        record_limits = {m: sample_size for m in missing}
+        for m in ok_models:
+            record_limits[m] = 0
+        run_id = start_scan_p1(
+            tenant_id=tenant_id, source=source,
+            priority_max=1, purge_first=False,
+            run_type="test",
+            record_limits=record_limits,
+        )
+        return {
+            "status": "started", "run_id": run_id,
+            "mode": "test-missing",
+            "sample_size": sample_size,
+            "missing_models": missing,
+            "skipped_models_ok": ok_models,
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
 @router.post("/admin/scanner/purge")
 def admin_scanner_purge(
     request: Request,

@@ -379,6 +379,10 @@ MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_scanner_runs_tenant_status ON scanner_runs (tenant_id, status, started_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_scanner_runs_source ON scanner_runs (tenant_id, source, started_at DESC)",
+    # Flag stop_requested : permet a l admin de demander l arret propre d un run
+    # en cours via le bouton Stop du panel. Le worker verifie ce flag apres
+    # chaque modele termine (option A : laisser finir le modele en cours).
+    "ALTER TABLE scanner_runs ADD COLUMN IF NOT EXISTS stop_requested BOOLEAN DEFAULT FALSE",
     # Table connector_schemas : manifest de vectorisation par modele et par
     # source. JSON decrit quels champs vectoriser, quelles aretes creer, etc.
     # Genere automatiquement par introspection, editable via panel admin.

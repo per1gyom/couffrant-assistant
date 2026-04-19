@@ -6,6 +6,38 @@ let isSuperAdmin=false, currentUserScope='', currentUserTenantId='';
 // Utilise partout a la place de currentUserScope==='admin' qui ne reconnait
 // pas les super_admin et les fait basculer sur les endpoints /tenant en 403.
 function isAdminOrSuper(){ return currentUserScope==='admin' || currentUserScope==='super_admin'; }
+
+// Modale de confirmation "Etes-vous sur ?" pour les actions destructives.
+// Remplace confirm() natif qui bloque le thread et empeche le repaint.
+// Retourne une Promise<boolean>, true si Oui, false si Non.
+// Usage : if(!(await confirmAction('Titre', 'Message'))) return;
+function confirmAction(title, message, okLabel='Oui', cancelLabel='Non'){
+  return new Promise(resolve => {
+    // Supprime toute modale existante pour eviter les doublons
+    const old = document.getElementById('raya-confirm-modal');
+    if(old) old.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'raya-confirm-modal';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:99999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)';
+    overlay.innerHTML = `
+      <div style="background:#1a1a1a;border:1px solid #333;border-radius:8px;max-width:500px;width:90%;padding:24px;box-shadow:0 10px 40px rgba(0,0,0,.5)">
+        <h3 style="margin:0 0 12px;color:#fff;font-size:18px">${title}</h3>
+        <div style="color:#ccc;font-size:14px;line-height:1.5;margin-bottom:20px;white-space:pre-line">${message}</div>
+        <div style="display:flex;gap:10px;justify-content:flex-end">
+          <button id="raya-confirm-cancel" class="btn btn-ghost" style="padding:8px 18px">${cancelLabel}</button>
+          <button id="raya-confirm-ok" class="btn btn-danger" style="padding:8px 18px">${okLabel}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const cleanup = (val) => { overlay.remove(); resolve(val); };
+    document.getElementById('raya-confirm-ok').onclick = () => cleanup(true);
+    document.getElementById('raya-confirm-cancel').onclick = () => cleanup(false);
+    overlay.onclick = (e) => { if(e.target === overlay) cleanup(false); };
+    // Esc pour annuler
+    const onKey = (e) => { if(e.key==='Escape'){ document.removeEventListener('keydown', onKey); cleanup(false); } };
+    document.addEventListener('keydown', onKey);
+  });
+}
 let _lastTenants=[];
 let currentEditTenantId=null, tenantToDelete=null;
 
@@ -222,6 +254,8 @@ async function loadConnections(tenantId,idx){
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#0ea5e9" onclick="introspectOdoo(this)" title="Inventaire complet : liste tous les modèles Odoo et leurs champs">🔍 Inventaire</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#f59e0b" onclick="generateManifests(this)" title="Scanner Universel Phase 2 : génère les manifests de vectorisation pour les 31 modèles P1+P2">📋 Manifests</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#dc2626" onclick="scanP1(this)" title="Scanner Universel Phase 3 : lance la vectorisation complète des 16 modèles P1 (purge + rebuild)">🚀 Scanner P1</button>`:''}
+          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#7c3aed" onclick="scanTestMissing(this)" title="Teste uniquement les modèles sans chunks sur 200 records chacun. Pas de purge. Rapide (~10 min)">🧪 Test manquants</button>`:''}
+          ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#ef4444" onclick="scanStop(this)" title="Arrête proprement le scan en cours (finit le modèle actuel puis stop)">⏹️ Stop</button>`:''}
           ${c.tool_type==='odoo'?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#10b981" onclick="showIntegrity(this)" title="Scanner Universel Phase 8 : tableau de l'état d'intégrité de la vectorisation par modèle">📊 Intégrité</button>`:''}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
           <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
@@ -451,7 +485,12 @@ async function showIntegrity(btn){
 async function scanP1(btn){
   // Scanner Universel Phase 3 : vectorisation complete des 16 modeles P1
   // avec purge prealable. Peut prendre 30-60 min selon volume (product.template = 133k).
-  if(!confirm('⚠️ ATTENTION : Lancer le Scanner P1 ?\n\nCette opération va :\n1. PURGER toutes les données vectorisées actuelles\n2. RE-VECTORISER les 16 modèles P1 (res.partner, crm.lead, sale.order, product.template, etc.)\n3. Durée estimée : 30-60 min\n4. Coût OpenAI estimé : 5-10€\n\nConfirmer ?')) return;
+  const ok = await confirmAction(
+    '⚠️ Lancer le Scanner P1 complet ?',
+    'Cette opération va :\n• PURGER toutes les données vectorisées actuelles\n• RE-VECTORISER les 16 modèles P1\n• Durée estimée : 30-60 min\n• Coût OpenAI estimé : 5-10€\n\nÊtes-vous sûr ?',
+    'Oui, purger et relancer', 'Annuler'
+  );
+  if(!ok) return;
   const orig = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '⏳ Démarrage...';
@@ -491,10 +530,112 @@ async function scanP1(btn){
       if(sd.status === 'error'){
         throw new Error(sd.error || sd.message || 'Erreur inconnue');
       }
+      if(sd.status === 'stopped'){
+        setAlert('companies-alert', `⏹️ Scan arrêté manuellement : ${sd.error || 'stop demandé'}`, 'ok');
+        return;
+      }
     }
     throw new Error('Timeout 2h');
   }catch(e){
     setAlert('companies-alert', '❌ Scan P1 échoué : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+// Scanner TEST : teste uniquement les modeles sans chunks (manquants),
+// avec une limite de 200 records par modele. Pas de purge.
+// Objectif : identifier rapidement (<10 min) quels modeles plantent Odoo.
+async function scanTestMissing(btn){
+  const ok = await confirmAction(
+    '🧪 Lancer un Scanner test (200 records/modèle) ?',
+    'Cette opération va :\n• Détecter les modèles sans chunks (4 actuellement)\n• Les scanner sur 200 records chacun (rapide)\n• Ne PAS toucher aux modèles déjà vectorisés\n• Durée estimée : 5-10 min\n\nÊtes-vous sûr ?',
+    'Oui, lancer le test', 'Annuler'
+  );
+  if(!ok) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Test démarrage...';
+  try{
+    const r = await fetch('/admin/scanner/run/test-missing?sample_size=200', {method:'POST'});
+    const d = await r.json();
+    if(d.status !== 'started' || !d.run_id) throw new Error(d.message || 'Démarrage test échoué');
+    const runId = d.run_id;
+    const missing = (d.missing_models||[]).join(', ') || 'aucun';
+    setAlert('companies-alert', `🧪 Scanner test lancé (run_id: ${runId.slice(0,8)}...). Modèles testés : ${missing}`, 'ok');
+    // Polling toutes les 5s (plus rapide car scan court)
+    let tries = 0;
+    const maxTries = 240; // 240 * 5s = 20min max
+    while(tries < maxTries){
+      await new Promise(res => setTimeout(res, 5000));
+      tries++;
+      const sr = await fetch(`/admin/scanner/run/status?run_id=${runId}`);
+      const sd = await sr.json();
+      if(sd.status === 'running' || sd.status === 'pending'){
+        const p = sd.progress || {};
+        const s = sd.stats || {};
+        btn.innerHTML = `⏳ Test ${s.models_processed||0}/${s.models_total||'?'} — ${p.current_model||'...'} (${s.chunks_vectorized||0} chunks)`;
+        continue;
+      }
+      if(sd.status === 'ok'){
+        const s = sd.stats || {};
+        const aborted = s.models_aborted || [];
+        let msg = `✅ Test terminé : ${s.chunks_vectorized||0} chunks créés, ${s.errors||0} erreurs`;
+        if(aborted.length) msg += `, ${aborted.length} modèle(s) abandonné(s) : ${aborted.map(a=>a.model).join(', ')}`;
+        setAlert('companies-alert', msg, aborted.length ? 'err' : 'ok');
+        return;
+      }
+      if(sd.status === 'error'){ throw new Error(sd.error || 'Erreur inconnue'); }
+      if(sd.status === 'stopped'){
+        setAlert('companies-alert', '⏹️ Test arrêté manuellement', 'ok');
+        return;
+      }
+    }
+    throw new Error('Timeout test 20 min');
+  }catch(e){
+    setAlert('companies-alert', '❌ Test échoué : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+// Bouton Stop : arrete proprement le run en cours (option A, finit le
+// modele courant puis stoppe avant le suivant)
+async function scanStop(btn, runId){
+  if(!runId){
+    // Auto-detect le run actif via /admin/scanner/run/list
+    try{
+      const r = await fetch('/admin/scanner/run/list?limit=1');
+      const d = await r.json();
+      const last = (d.runs || [])[0];
+      if(last && last.status === 'running') runId = last.run_id;
+    }catch(e){}
+  }
+  if(!runId){
+    setAlert('companies-alert', 'Aucun scan en cours à arrêter.', 'err');
+    return;
+  }
+  const ok = await confirmAction(
+    '⏹️ Arrêter le scan en cours ?',
+    'Le worker finira le modèle actuel (quelques minutes) puis s\'arrêtera avant le modèle suivant.\n\nLes chunks déjà vectorisés sont conservés.\n\nÊtes-vous sûr ?',
+    'Oui, arrêter', 'Annuler'
+  );
+  if(!ok) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏹️ Arrêt...';
+  try{
+    const r = await fetch(`/admin/scanner/run/stop?run_id=${runId}`, {method:'POST'});
+    const d = await r.json();
+    if(d.status === 'ok'){
+      setAlert('companies-alert', '⏹️ Stop demandé. Le scan s\'arrêtera après le modèle en cours.', 'ok');
+    }else{
+      setAlert('companies-alert', '❌ '+(d.message||'Stop échoué'), 'err');
+    }
+  }catch(e){
+    setAlert('companies-alert', '❌ Stop échoué : '+e.message, 'err');
   }finally{
     btn.disabled = false;
     btn.innerHTML = orig;

@@ -161,6 +161,17 @@ def _run_scan_worker(
         }
 
         for model_idx, mdef in enumerate(manifests):
+            # Verification stop_requested avant CHAQUE modele (option A validee
+            # par Guillaume : on laisse finir le modele en cours, on ne commence
+            # pas le suivant si stop demande)
+            if orchestrator.is_stop_requested(run_id):
+                logger.warning("[Runner run=%s] Stop requested : arret avant modele %s (%d/%d deja traites)",
+                               run_id, mdef["model_name"],
+                               global_stats["models_processed"], total_models)
+                orchestrator.stop_run(run_id,
+                    f"Arret manuel apres {global_stats['models_processed']}/{total_models} modeles")
+                # Important : on sort du worker, le finally se chargera du nettoyage cache threads
+                return
             model_name = mdef["model_name"]
             manifest = mdef["manifest"]
             total_records = mdef["records_count_odoo"] or 0
@@ -194,6 +205,9 @@ def _run_scan_worker(
             consecutive_errors = 0
             CIRCUIT_BREAKER_THRESHOLD = 5
             model_aborted_reason = None
+            # Stocke le MESSAGE COMPLET de la 1ere erreur pour diagnostic
+            # (sans troncature a 200 chars comme avant)
+            last_error_detail = ""
 
             while True:
                 # Stop si on a atteint la limite du modele
@@ -228,18 +242,24 @@ def _run_scan_worker(
                         order="id asc",
                     )
                 except Exception as e:
-                    logger.exception("[Runner run=%s] fetch %s offset=%d",
-                                     run_id, model_name, offset)
+                    # Log complet avec traceback dans Railway pour debug
+                    logger.exception("[Runner run=%s] fetch %s offset=%d : %s",
+                                     run_id, model_name, offset, str(e))
                     global_stats["errors"] += 1
                     consecutive_errors += 1
+                    # Garde le message complet du 1er echec (pas seulement le dernier)
+                    if not last_error_detail:
+                        last_error_detail = str(e)
                     # Circuit breaker : stop le modele si trop d erreurs
                     if consecutive_errors >= CIRCUIT_BREAKER_THRESHOLD:
+                        # On stocke le message d erreur COMPLET (pas tronque)
+                        # pour qu on puisse identifier la cause racine
                         model_aborted_reason = (
                             f"Circuit breaker: {consecutive_errors} erreurs "
                             f"consecutives sur fetch (dernier offset={offset}). "
-                            f"Dernier erreur: {str(e)[:200]}"
+                            f"Erreur complete: {last_error_detail}"
                         )
-                        logger.error("[Runner run=%s] %s : %s",
+                        logger.error("[Runner run=%s] %s ABANDONNE : %s",
                                      run_id, model_name, model_aborted_reason)
                         break
                     # Sinon on skip ce batch, on tente le suivant
