@@ -1,6 +1,6 @@
 # Raya Flutter — État de session & Suivi
 
-**Dernière mise à jour : 15/04/2026 00h15** — Opus (exécutant Flutter)
+**Dernière mise à jour : 19/04/2026** — Opus (exécutant Flutter)
 **Conversation dédiée : développement app native iOS/Android**
 **Repo :** `per1gyom/couffrant-assistant` branche `main`, dossier `flutter/`
 
@@ -216,14 +216,8 @@ Balises spéciales dans `answer` (nettoyées par Flutter avant affichage) :
 
 ## BUG CONNU À CORRIGER
 
-### Regex CREATE_TOPIC double-escaped
-Ligne 70 de `chat_screen.dart` : le regex utilise `\\[` (double backslash) au lieu de `\[` (simple). À corriger :
-```dart
-// AVANT (bug) :
-final topicMatch = RegExp(r'\\[ACTION:CREATE_TOPIC:([^\\]]+)\\]').firstMatch(answer);
-// APRÈS (fix) :
-final topicMatch = RegExp(r'\[ACTION:CREATE_TOPIC:([^\]]+)\]').firstMatch(answer);
-```
+### ~~Regex CREATE_TOPIC double-escaped~~ ✅ FIX 19/04 (commit d6ec52f)
+Ligne 70 de `chat_screen.dart` : le regex utilisait `\\[` (double backslash) au lieu de `\[` (simple). Corrigé. Bonus : caractère U+FFFD (replacement char) dans "Mentions légales" ligne 331 remplacé par vrai `é` UTF-8.
 
 ---
 
@@ -256,12 +250,20 @@ Classes à déposer : 9, 35, 38, 42, 45. Coût ~310€ INPI.
 - UX figé, documentation complète
 
 ### Priorités prochaine session
-1. **Corriger bug regex CREATE_TOPIC** (double backslash)
-2. **Tester sur iPhone réel** (brancher USB, configurer Apple ID dans Xcode Signing)
-3. **Re-ajouter speech_to_text** pour le micro natif STT
-4. **Re-ajouter file_picker/image_picker** pour les pièces jointes
-5. **Thème personnalisé** (couleurs, fonts, dark/light, splash, icône)
+1. ~~Corriger bug regex CREATE_TOPIC~~ ✅ 19/04 (d6ec52f)
+2. **Re-ajouter speech_to_text** pour le micro natif STT (héros UX bouton vert)
+3. **Re-ajouter file_picker/image_picker** pour les pièces jointes (tester compat Xcode 26)
+4. **Thème personnalisé ELYO** (couleurs, fonts, dark/light, splash, icône)
+5. **Tester sur iPhone réel** (brancher USB, configurer Apple ID dans Xcode Signing)
 6. **Préparer TestFlight** (compte Apple Developer 99€/an)
+
+### Session 19/04/2026 — Reprise (Opus 4.7)
+**Contexte :** entre le 15/04 et le 19/04, seuls des commits backend/PWA (permissions, scanner, connecteurs) ont eu lieu. Flutter resté en l'état.
+
+**Commits :**
+- `d6ec52f` — fix regex CREATE_TOPIC + encoding Mentions légales
+
+**À venir :** audit projet complet + micro STT natif
 
 ---
 
