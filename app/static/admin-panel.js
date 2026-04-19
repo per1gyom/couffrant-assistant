@@ -411,24 +411,55 @@ async function showIntegrity(btn){
     // Couleur de la barre de progression globale
     const overallPct = ov.overall_integrity_pct || 0;
     const overallColor = overallPct >= 90 ? '#10b981' : overallPct >= 50 ? '#f59e0b' : '#dc2626';
-    // Icones severity
-    const sevIcon = s => s === 'ok' ? '✅' : s === 'warning' ? '⚠️' : s === 'critical' ? '🔴' : '⚪';
-    const sevColor = s => s === 'ok' ? '#10b981' : s === 'warning' ? '#f59e0b' : s === 'critical' ? '#dc2626' : '#6b7280';
+    // Icones & couleurs etendus (19/04/2026) : on distingue desormais
+    // - limited    : modele plafonne volontairement (orange doux)
+    // - graph_only : modele sans vectorize_fields, normal a 0 (gris)
+    const sevIcon = s => ({
+      ok: '✅', warning: '⚠️', critical: '🔴',
+      limited: '🟡', graph_only: '⚙️', unknown: '⚪'
+    })[s] || '⚪';
+    const sevColor = s => ({
+      ok: '#10b981', warning: '#f59e0b', critical: '#dc2626',
+      limited: '#f59e0b', graph_only: '#6b7280', unknown: '#6b7280'
+    })[s] || '#6b7280';
+    const sevLabel = s => ({
+      ok: 'OK', warning: 'Warning', critical: 'Erreur',
+      limited: 'Limité', graph_only: 'Graph-only', unknown: 'Non scanné'
+    })[s] || 'Inconnu';
     // Formattage des chiffres
     const fmt = n => (n === null || n === undefined) ? '-' : n.toLocaleString('fr-FR');
     const fmtPct = p => (p === null || p === undefined) ? '-' : p.toFixed(1) + '%';
     const fmtDate = s => !s ? '<span style="color:var(--text3)">Jamais</span>' : new Date(s).toLocaleString('fr-FR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-    // Construction du tableau
-    const rows = d.models.map(m => `
-      <tr style="border-bottom:1px solid var(--border)">
+    // Construction du tableau — on affiche different selon severity :
+    // - graph_only : "graph-only" a la place de chiffres trompeurs
+    // - limited    : affiche X/LIMITE (100% de la limite) au lieu de X/totalOdoo
+    const rows = d.models.map(m => {
+      let integrityCell, chunksCell;
+      if(m.severity === 'graph_only'){
+        integrityCell = `<span style="color:#6b7280;font-style:italic">graph-only</span>`;
+        chunksCell = `<span style="color:#6b7280">—</span>`;
+      }else if(m.severity === 'limited'){
+        const pctVsLimit = m.applicative_limit ? Math.round(100*(m.records_count_raya||0)/m.applicative_limit) : 100;
+        integrityCell = `<span style="color:#f59e0b;font-weight:700">${pctVsLimit}% (limité)</span>`;
+        chunksCell = fmt(m.chunks_in_db);
+      }else{
+        integrityCell = `<span style="color:${sevColor(m.severity)};font-weight:700">${fmtPct(m.integrity_pct)}</span>`;
+        chunksCell = fmt(m.chunks_in_db);
+      }
+      const recordsOdooCell = m.severity === 'limited' && m.applicative_limit
+        ? `${fmt(m.records_count_odoo)} <span style="color:#f59e0b;font-size:10px">(cap ${fmt(m.applicative_limit)})</span>`
+        : fmt(m.records_count_odoo);
+      return `
+      <tr style="border-bottom:1px solid var(--border)" title="${sevLabel(m.severity)}">
         <td style="padding:8px 10px;font-weight:600">${sevIcon(m.severity)} ${m.model_name}</td>
         <td style="padding:8px 10px;text-align:center"><span style="background:${m.priority===1?'#7c3aed':'#0ea5e9'};color:white;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700">P${m.priority}</span></td>
-        <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmt(m.records_count_odoo)}</td>
+        <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${recordsOdooCell}</td>
         <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmt(m.records_count_raya)}</td>
-        <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmt(m.chunks_in_db)}</td>
-        <td style="padding:8px 10px;text-align:right;font-weight:700;color:${sevColor(m.severity)};font-variant-numeric:tabular-nums">${fmtPct(m.integrity_pct)}</td>
+        <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${chunksCell}</td>
+        <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${integrityCell}</td>
         <td style="padding:8px 10px;text-align:right;font-size:11px;color:var(--text2)">${fmtDate(m.last_scanned_at)}</td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
     // Construction de la modale
     const backdrop = document.createElement('div');
     backdrop.id = 'integrity-backdrop';
@@ -443,13 +474,14 @@ async function showIntegrity(btn){
         </div>
         <button class="btn" id="integrity-close-btn" style="background:#ef4444;color:white;padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:700">✕ Fermer</button>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px;flex-shrink:0">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px;flex-shrink:0">
         <div style="background:var(--bg2);border:1px solid var(--border);padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Modèles</div><div style="font-size:20px;font-weight:700">${ov.models_total}</div></div>
         <div style="background:var(--bg2);border:1px solid #10b981;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">✅ OK ≥90%</div><div style="font-size:20px;font-weight:700;color:#10b981">${ov.models_ok}</div></div>
-        <div style="background:var(--bg2);border:1px solid #f59e0b;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">⚠️ Warning</div><div style="font-size:20px;font-weight:700;color:#f59e0b">${ov.models_warning}</div></div>
-        <div style="background:var(--bg2);border:1px solid #dc2626;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">🔴 Critique</div><div style="font-size:20px;font-weight:700;color:#dc2626">${ov.models_critical}</div></div>
+        <div style="background:var(--bg2);border:1px solid #f59e0b;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">🟡 Limité</div><div style="font-size:20px;font-weight:700;color:#f59e0b">${ov.models_limited||0}</div></div>
+        <div style="background:var(--bg2);border:1px solid #6b7280;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">⚙️ Graph-only</div><div style="font-size:20px;font-weight:700;color:#6b7280">${ov.models_graph_only||0}</div></div>
+        <div style="background:var(--bg2);border:1px solid #dc2626;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">🔴 Erreur</div><div style="font-size:20px;font-weight:700;color:#dc2626">${ov.models_critical}</div></div>
         <div style="background:var(--bg2);border:1px solid var(--border);padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">⚪ Non scanné</div><div style="font-size:20px;font-weight:700;color:var(--text3)">${ov.models_unknown}</div></div>
-        <div style="background:var(--bg2);border:1px solid ${overallColor};padding:10px;border-radius:8px;grid-column:span 2"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Intégrité globale</div><div style="font-size:20px;font-weight:700;color:${overallColor}">${overallPct.toFixed(1)}%</div><div style="font-size:11px;color:var(--text3)">${ov.total_records_raya.toLocaleString('fr-FR')} / ${ov.total_records_odoo.toLocaleString('fr-FR')} records</div></div>
+        <div style="background:var(--bg2);border:1px solid ${overallColor};padding:10px;border-radius:8px;grid-column:span 2"><div style="font-size:10px;color:var(--text3);text-transform:uppercase" title="Calcul sur les modèles vectorisables hors limités/graph-only">Intégrité globale</div><div style="font-size:20px;font-weight:700;color:${overallColor}">${overallPct.toFixed(1)}%</div><div style="font-size:11px;color:var(--text3)">${ov.total_records_raya.toLocaleString('fr-FR')} / ${ov.total_records_odoo.toLocaleString('fr-FR')} records</div></div>
       </div>
       <div style="flex:1;overflow:auto;border:1px solid var(--border);border-radius:8px">
         <table style="width:100%;border-collapse:collapse;font-size:12px">

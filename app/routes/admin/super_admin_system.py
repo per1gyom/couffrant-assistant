@@ -655,14 +655,46 @@ def admin_scanner_integrity(
             # node_type peut etre 'contact', 'devis', etc. — mapping rapide
             nodes_by_type = {r[0]: r[1] for r in cur.fetchall()}
 
+            # 2bis. Recupere les manifests pour detecter les modeles graph-only
+            #       (pas de vectorize_fields = pas de chunks attendus)
+            cur.execute(
+                """SELECT model_name, manifest FROM connector_schemas
+                   WHERE tenant_id=%s AND source=%s""",
+                (tenant_id, source),
+            )
+            manifests_by_model = {r[0]: r[1] for r in cur.fetchall()}
+
         # 3. Construction du rapport par modele
+        # Severity avancee (19/04/2026) :
+        # - 'ok'         : integrity >= 90% (vert)
+        # - 'warning'    : 50 <= integrity < 90% (orange)
+        # - 'critical'   : integrity < 50% (rouge) — SEULEMENT si pas limit/graph
+        # - 'limited'    : modele plafonne par MODEL_RECORD_LIMITS (orange doux)
+        # - 'graph_only' : manifest sans vectorize_fields (gris, normal)
+        # - 'unknown'    : pas encore scanne
+        from app.scanner.runner import MODEL_RECORD_LIMITS
         models = []
         for r in rows:
             model_name, priority, enabled, odoo_count = r[0], r[1], r[2], r[3]
             raya_count, integrity, last_scan = r[4], r[5], r[6]
             chunks = chunks_by_model.get(model_name, 0)
-            # Severity basee sur integrity_pct
-            if integrity is None or enabled is False:
+            manifest = manifests_by_model.get(model_name) or {}
+            vec_fields = manifest.get("vectorize_fields") or []
+            is_graph_only = len(vec_fields) == 0
+            limit = MODEL_RECORD_LIMITS.get(model_name)
+            # Detection du plafond volontaire :
+            # - limit is None => pas de plafond, logique classique
+            # - limit == 0   => skip volontaire (ex: res.city)
+            # - limit > 0    => plafond, si on a atteint >= 95% du plafond -> "limited"
+            is_capped = (limit is not None and limit > 0 and raya_count and
+                         raya_count >= limit * 0.95)
+            if is_graph_only:
+                # Pas de vectorize_fields = on ne cree pas de chunks, c'est normal
+                severity = "graph_only"
+            elif is_capped:
+                # Plafond atteint volontairement (ex: product.template 5000/133k)
+                severity = "limited"
+            elif integrity is None or enabled is False:
                 severity = "unknown"
             elif integrity >= 90:
                 severity = "ok"
@@ -679,12 +711,19 @@ def admin_scanner_integrity(
                 "chunks_in_db": chunks,
                 "integrity_pct": float(integrity) if integrity else None,
                 "severity": severity,
+                "applicative_limit": limit,
+                "is_graph_only": is_graph_only,
                 "last_scanned_at": last_scan.isoformat() if last_scan else None,
             })
 
         # 4. Totaux
-        total_odoo = sum(m["records_count_odoo"] or 0 for m in models)
-        total_raya = sum(m["records_count_raya"] or 0 for m in models)
+        # Intégrité globale calculée UNIQUEMENT sur les modèles qui doivent
+        # être vectorisés (on exclut graph_only qui sont normaux à 0, et
+        # limited qui ont atteint leur plafond volontairement).
+        models_countable = [m for m in models
+                            if m["severity"] not in ("graph_only", "limited")]
+        total_odoo = sum(m["records_count_odoo"] or 0 for m in models_countable)
+        total_raya = sum(m["records_count_raya"] or 0 for m in models_countable)
         total_chunks = sum(m["chunks_in_db"] for m in models)
         overall_integrity = round(100 * total_raya / total_odoo, 1) if total_odoo else 0
         return {
@@ -696,6 +735,8 @@ def admin_scanner_integrity(
                 "models_ok": sum(1 for m in models if m["severity"] == "ok"),
                 "models_warning": sum(1 for m in models if m["severity"] == "warning"),
                 "models_critical": sum(1 for m in models if m["severity"] == "critical"),
+                "models_limited": sum(1 for m in models if m["severity"] == "limited"),
+                "models_graph_only": sum(1 for m in models if m["severity"] == "graph_only"),
                 "models_unknown": sum(1 for m in models if m["severity"] == "unknown"),
                 "total_records_odoo": total_odoo,
                 "total_records_raya": total_raya,
