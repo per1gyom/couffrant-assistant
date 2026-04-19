@@ -382,3 +382,33 @@ Modèles à moindre valeur temps-réel. Rattrapés toutes les nuits à 3h via `w
 - **Étiquette `COMPTE-RENDU A LIRE`** repérée sur les interventions OpenFire : **signal proactif de grande valeur** pour la Phase 8. À exploiter quand Raya sera proactive (détection automatique → propositions d'actions).
 - **Champ exact du compte-rendu** dans `of.planning.task` : à identifier précisément au moment de configurer la première règle `base_automation`.
 </content>
+
+---
+
+## 📋 Annexe Q3 — Contenu du webhook (validé 19/04/2026)
+
+**Décision** : **OpenFire dit juste "va voir" à Raya, Raya relit le record elle-même** (aucune donnée dans le message webhook).
+
+**Raisons** :
+1. Si on change ce que Raya veut savoir, on ne modifie **qu'un seul endroit** (pas 14 règles OpenFire à retoucher)
+2. En modifications rapides, Raya ne lit que la version finale (grâce à la dédup 5s)
+3. Aucun risque d'injection de fausses données (même si quelqu'un vole le secret)
+4. Configuration OpenFire triviale : 3 lignes Python identiques pour toutes les règles
+
+**Contenu minimal du message webhook** :
+```
+model  : "sale.order"
+id     : 42
+op     : "create" / "write" / "unlink"
+```
+
+**Coût de perf** : +200 ms par webhook (Raya fait un appel Odoo pour relire). Imperceptible à l'échelle de quelques minutes de latence tolérée.
+
+### Sécurité — 1 badge par société
+
+Chaque société (tenant) a son propre secret webhook. Le secret de Couffrant ne peut pas être utilisé pour polluer les données de Juillet (tenant Charlotte). Si un secret fuite, l'impact est limité à sa société.
+
+- Variable d'env Railway : `ODOO_WEBHOOK_SECRET_COUFFRANT`, `ODOO_WEBHOOK_SECRET_JUILLET`, etc.
+- Raya déduit le tenant du secret reçu (table de correspondance en mémoire).
+
+---
