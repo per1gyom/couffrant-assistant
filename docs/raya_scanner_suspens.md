@@ -83,3 +83,28 @@ Cette opération est autorisée pour les groupes suivants :
 | `stock.valuation.layer` (via `account.move`) | Droit `Inventory/Administrator` manquant | 🟢 Négligeable |
 
 **Quand Guillaume obtient les droits Odoo** : relancer Test P2 ciblé sur ces modèles, si ça passe → relancer Compléter manquants et ces modèles s'ajouteront à la base vectorisée sans toucher au reste.
+
+---
+
+## 📝 Historique des retraits manifests (19/04/2026)
+
+### Session 1 (après P1 run #6)
+- `of.planning.tour.graph_edges.gb_sector_id` (compute cassé)
+- `sale.order.line.graph_edges.of_gb_partner_tag_id` (compute cassé)
+- `calendar.event.graph_edges.of_gb_employee_id` (compute cassé)
+
+### Session 2 (après test P2 run #13)
+- `of.sale.payment.schedule.metadata_fields.is_last` (compute cassé)
+- `of.account.move.payment.schedule.metadata_fields.is_last` (compute cassé)
+- `account.move.line.graph_edges.payment_line_ids` (droit manquant — suspens #1)
+- `account.move.line.graph_edges.stock_valuation_layer_ids` (droit manquant — suspens #2)
+- `account.move.graph_edges.stock_valuation_layer_ids` (droit manquant — suspens #2)
+
+### Session 3 (après test P2 run #14)
+- `account.move.line.graph_edges.of_gb_partner_tag_id` (compute `gb_*` cassé)
+- `account.move.metadata_fields.payment_line_count` (compute lit account.payment.line — suspens #1)
+- `account.payment.metadata_fields.payment_line_count` (préventif, même cause — suspens #1)
+- `account.payment.graph_edges.payment_line_ids` (préventif — suspens #1)
+
+### Pattern-check final
+Aucun champ contenant `gb_*` ni `payment_line*` ne subsiste dans les manifests P1+P2 actifs.
