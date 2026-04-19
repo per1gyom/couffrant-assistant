@@ -55,11 +55,13 @@ def odoo_call(model: str, method: str, args: list = [], kwargs: dict = {}) -> an
     )
 
     if response.status_code != 200:
-        raise Exception(f"Odoo HTTP {response.status_code}: {response.text[:500]}")
+        raise Exception(f"Odoo HTTP {response.status_code}: {response.text[:5000]}")
 
     result = response.json()
     if "error" in result:
-        raise Exception(f"Odoo error: {json.dumps(result['error'])[:500]}")
+        # Troncature augmentee a 5000 chars (18/04) pour avoir le nom du
+        # champ Odoo coupable dans le traceback (avant c etait 500, insuffisant)
+        raise Exception(f"Odoo error: {json.dumps(result['error'])[:5000]}")
 
     return result.get("result")
 
