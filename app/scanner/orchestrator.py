@@ -204,15 +204,18 @@ def cleanup_stale_runs(stale_minutes: int = 10) -> int:
     try:
         with get_pg_conn() as conn:
             cur = conn.cursor()
+            # NOTE : la colonne s appelle 'error' (pas 'error_message').
+            # Bug historique qui a laisse 4 runs fantomes en running pendant 18h.
+            # Le type du param doit etre un entier dans le SQL : on interpole
+            # directement stale_minutes dans la chaine (controlle cote code).
             cur.execute(
-                """UPDATE scanner_runs
+                f"""UPDATE scanner_runs
                    SET status='error',
                        finished_at=NOW(),
-                       error_message='Runtime interrupted (app restart)'
+                       error='Runtime interrupted (app restart, cleanup auto)'
                    WHERE status IN ('running', 'pending')
-                     AND updated_at < NOW() - INTERVAL '%s minutes'
+                     AND updated_at < NOW() - INTERVAL '{int(stale_minutes)} minutes'
                    RETURNING run_id""",
-                (stale_minutes,),
             )
             nettoyes = [r[0] for r in cur.fetchall()]
             conn.commit()

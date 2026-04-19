@@ -155,6 +155,9 @@ def _run_scan_worker(
             "models_processed": 0, "models_total": total_models,
             "records_processed": 0, "nodes_created": 0,
             "edges_created": 0, "chunks_vectorized": 0, "errors": 0,
+            # NOUVEAU : liste des modeles abandonnes par circuit breaker
+            # (format [{model, reason, chunks_before_abort}])
+            "models_aborted": [],
         }
 
         for model_idx, mdef in enumerate(manifests):
@@ -183,6 +186,14 @@ def _run_scan_worker(
             offset = 0
             records_done_this_model = 0
             records_raya = 0
+            # Circuit breaker : compte les erreurs CONSECUTIVES sur ce modele.
+            # Apres 5 d affile, on abandonne le modele et on passe au suivant.
+            # Evite le scenario vu sur mail.message ou 109 erreurs se sont
+            # accumulees sur 200 batches rates avant que le worker ne deborde
+            # de total_records + 2*batch_size.
+            consecutive_errors = 0
+            CIRCUIT_BREAKER_THRESHOLD = 5
+            model_aborted_reason = None
 
             while True:
                 # Stop si on a atteint la limite du modele
@@ -220,7 +231,18 @@ def _run_scan_worker(
                     logger.exception("[Runner run=%s] fetch %s offset=%d",
                                      run_id, model_name, offset)
                     global_stats["errors"] += 1
-                    # On skip ce batch, on tente le suivant
+                    consecutive_errors += 1
+                    # Circuit breaker : stop le modele si trop d erreurs
+                    if consecutive_errors >= CIRCUIT_BREAKER_THRESHOLD:
+                        model_aborted_reason = (
+                            f"Circuit breaker: {consecutive_errors} erreurs "
+                            f"consecutives sur fetch (dernier offset={offset}). "
+                            f"Dernier erreur: {str(e)[:200]}"
+                        )
+                        logger.error("[Runner run=%s] %s : %s",
+                                     run_id, model_name, model_aborted_reason)
+                        break
+                    # Sinon on skip ce batch, on tente le suivant
                     offset += batch_size
                     if offset > (total_records or 0) + batch_size * 2:
                         # Si on depasse largement le total attendu, on abandonne
@@ -231,7 +253,11 @@ def _run_scan_worker(
                     # Plus rien a fetch
                     break
 
+                # Fetch OK : reset du compteur d erreurs consecutives
+                consecutive_errors = 0
+
                 # Process chaque record du batch
+                batch_had_errors = 0
                 for record in batch:
                     try:
                         result = process_record(
@@ -254,6 +280,21 @@ def _run_scan_worker(
                         logger.exception("[Runner run=%s] process %s:%s",
                                          run_id, model_name, record.get("id"))
                         global_stats["errors"] += 1
+                        batch_had_errors += 1
+
+                # Si TOUT le batch a foire cote process, compte comme 1 erreur
+                # consecutive (circuit breaker cote process aussi)
+                if batch_had_errors == len(batch) and len(batch) > 0:
+                    consecutive_errors += 1
+                    if consecutive_errors >= CIRCUIT_BREAKER_THRESHOLD:
+                        model_aborted_reason = (
+                            f"Circuit breaker: {consecutive_errors} batches "
+                            f"consecutifs avec 100% d echec sur process "
+                            f"(dernier offset={offset}, {len(batch)} records)"
+                        )
+                        logger.error("[Runner run=%s] %s : %s",
+                                     run_id, model_name, model_aborted_reason)
+                        break
 
                 # Checkpoint en DB apres chaque batch
                 orchestrator.set_checkpoint(run_id, model_name, checkpoint,
@@ -273,11 +314,24 @@ def _run_scan_worker(
                 time.sleep(0.5)
 
 
-            # Fin du modele : update le compteur records_raya dans connector_schemas
+            # Fin du modele : recompte REEL des chunks vectorises en DB
+            # (pas l estimation in-memory qui peut diverger de la realite
+            # si un crash a eu lieu entre process_record et le commit).
+            # C est la VRAIE source de verite, celle qui sera affichee dans
+            # le dashboard Integrite.
             global_stats["models_processed"] += 1
             try:
                 with get_pg_conn() as conn:
                     cur = conn.cursor()
+                    # 1. Recompte reel en DB
+                    cur.execute(
+                        """SELECT COUNT(*) FROM odoo_semantic_content
+                           WHERE tenant_id=%s AND source_model=%s
+                             AND deleted_at IS NULL""",
+                        (tenant_id, model_name),
+                    )
+                    real_chunks = cur.fetchone()[0] or 0
+                    # 2. Update les compteurs avec la vraie valeur
                     cur.execute(
                         """UPDATE connector_schemas
                            SET records_count_raya=%s,
@@ -288,17 +342,43 @@ def _run_scan_worker(
                                last_scanned_at=NOW(),
                                updated_at=NOW()
                            WHERE tenant_id=%s AND source=%s AND model_name=%s""",
-                        (records_raya, records_raya, tenant_id, source, model_name),
+                        (real_chunks, real_chunks, tenant_id, source, model_name),
                     )
                     conn.commit()
             except Exception:
                 logger.exception("[Runner run=%s] update connector_schemas %s",
                                  run_id, model_name)
+                real_chunks = records_raya  # fallback
 
-            logger.info("[Runner run=%s] === Fin %s : %d records processed, %d edges, %d chunks ===",
-                        run_id, model_name, records_done_this_model,
-                        global_stats["edges_created"],
-                        global_stats["chunks_vectorized"])
+            # Verdict du modele : note pour Guillaume dans les logs
+            if model_aborted_reason:
+                # On garde trace du modele abandonne pour l afficher dans
+                # le recap de fin de run + dashboard Integrite.
+                global_stats["models_aborted"].append({
+                    "model": model_name,
+                    "reason": model_aborted_reason,
+                    "chunks_before_abort": real_chunks,
+                    "records_done": records_done_this_model,
+                })
+                logger.error(
+                    "[Runner run=%s] === ECHEC %s : %s | chunks reels en DB=%d ===",
+                    run_id, model_name, model_aborted_reason, real_chunks)
+            elif total_records > 0:
+                integrity = round(100.0 * real_chunks / total_records, 1)
+                if integrity >= 95:
+                    verdict = "OK"
+                elif integrity >= 50:
+                    verdict = "WARNING"
+                else:
+                    verdict = "CRITICAL"
+                logger.info(
+                    "[Runner run=%s] === Fin %s [%s] : %d chunks reels / %d attendus (%.1f%%) ===",
+                    run_id, model_name, verdict,
+                    real_chunks, total_records, integrity)
+            else:
+                logger.info(
+                    "[Runner run=%s] === Fin %s : 0 attendus, %d chunks ===",
+                    run_id, model_name, real_chunks)
 
         # Run termine avec succes
         orchestrator.finish_run(run_id, stats=global_stats)
