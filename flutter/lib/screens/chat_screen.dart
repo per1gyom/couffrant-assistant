@@ -56,6 +56,7 @@ class _ChatScreenState extends State<ChatScreen> {
     if (text.isEmpty || _loading) return;
     _inputController.clear();
     _tts.stop();
+    final sentAt = DateTime.now();
     setState(() {
       _messages.add(ChatMessage(text: text, isUser: true));
       _loading = true; _askChoice = null;
@@ -74,21 +75,71 @@ class _ChatScreenState extends State<ChatScreen> {
       answer = answer.replaceAll(RegExp(r'\[ACTION:[A-Z_]+:[^\]]*\]'), '');
       answer = answer.replaceAll(RegExp(r'\[SPEAK_SPEED:[\d.]+\]'), '');
       answer = answer.trim();
-      if (mounted) {
+      if (!mounted) return;
+
+      // --- GHOST TIMEOUT : le backend a timeout mais Python continue ---
+      // On affiche un message transitoire et on poll /chat/history 90s pour
+      // recuperer la vraie reponse quand elle arrive.
+      if (response.isGhostTimeout) {
         setState(() {
-          _messages.add(ChatMessage(text: answer, isUser: false,
-            ariaMemoryId: response.ariaMemoryId, modelTier: response.modelTier));
-          _pendingActions = response.pendingActions;
-          _askChoice = response.askChoice; _loading = false;
+          _messages.add(ChatMessage(
+            text: answer.isNotEmpty
+                ? answer
+                : 'Je mets plus de temps que prévu sur celle-ci… je continue en arrière-plan.',
+            isUser: false,
+            isTransient: true,
+          ));
+          _loading = false;
         });
         _scrollToBottom();
-        if (_autoSpeak && answer.isNotEmpty) _tts.speak(answer);
+        // Index du message transitoire pour le remplacer quand la reponse arrive
+        final transientIndex = _messages.length - 1;
+        _startGhostPolling(text, sentAt, transientIndex);
+        return;
       }
+
+      setState(() {
+        _messages.add(ChatMessage(text: answer, isUser: false,
+          ariaMemoryId: response.ariaMemoryId, modelTier: response.modelTier));
+        _pendingActions = response.pendingActions;
+        _askChoice = response.askChoice; _loading = false;
+      });
+      _scrollToBottom();
+      if (_autoSpeak && answer.isNotEmpty) _tts.speak(answer);
     } catch (e) {
       if (mounted) setState(() {
         _messages.add(ChatMessage(text: 'Erreur de connexion \u00e0 Raya.', isUser: false));
         _loading = false;
       });
+    }
+  }
+
+  /// Polling fantome : tourne en arriere-plan pendant 90s pour essayer de
+  /// recuperer la vraie reponse Raya si /raya a timeout mais que le thread
+  /// backend a continue.
+  Future<void> _startGhostPolling(
+      String userText, DateTime sentAt, int transientIndex) async {
+    _showSnack('⏳ Raya met plus de temps que prévu, je surveille…');
+    final match = await _chatService.pollForGhostResponse(
+      userText: userText,
+      sentAt: sentAt,
+    );
+    if (!mounted) return;
+    if (match == null) return; // echec silencieux, le message transitoire reste
+    // Remplacer le message transitoire par la vraie reponse
+    if (transientIndex >= 0 && transientIndex < _messages.length) {
+      final existing = _messages[transientIndex];
+      if (existing.isTransient) {
+        setState(() {
+          _messages[transientIndex] = ChatMessage(
+            text: match.answer,
+            isUser: false,
+            ariaMemoryId: match.ariaMemoryId,
+          );
+        });
+        _showSnack('✨ Réponse récupérée');
+        if (_autoSpeak && match.answer.isNotEmpty) _tts.speak(match.answer);
+      }
     }
   }
 
@@ -386,14 +437,24 @@ class _ChatScreenState extends State<ChatScreen> {
           crossAxisAlignment: isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(
-              color: isUser ? const Color(0xFF1E3A5F).withOpacity(0.5) : Colors.white.withOpacity(0.06),
+              color: isUser
+                  ? const Color(0xFF1E3A5F).withOpacity(0.5)
+                  : (msg.isTransient
+                      ? const Color(0xFFF59E0B).withOpacity(0.10)
+                      : Colors.white.withOpacity(0.06)),
               borderRadius: BorderRadius.only(
                 topLeft: Radius.circular(isUser ? 16 : 4), topRight: Radius.circular(isUser ? 4 : 16),
-                bottomLeft: const Radius.circular(16), bottomRight: const Radius.circular(16))),
+                bottomLeft: const Radius.circular(16), bottomRight: const Radius.circular(16)),
+              border: msg.isTransient
+                  ? Border.all(color: const Color(0xFFF59E0B).withOpacity(0.3), width: 0.5)
+                  : null),
               child: isUser
                 ? Text(msg.text, style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.5))
                 : MarkdownBody(data: msg.text, styleSheet: MarkdownStyleSheet(
-                    p: const TextStyle(color: Colors.white, fontSize: 14, height: 1.5),
+                    p: TextStyle(
+                      color: msg.isTransient ? const Color(0xFFFBBF77) : Colors.white,
+                      fontSize: 14, height: 1.5,
+                      fontStyle: msg.isTransient ? FontStyle.italic : FontStyle.normal),
                     h1: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w600),
                     h2: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w600),
                     h3: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),

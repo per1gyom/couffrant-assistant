@@ -8,6 +8,9 @@ class ChatMessage {
   final int? ariaMemoryId;
   final String? modelTier;
   final DateTime timestamp;
+  // Message transitoire = erreur timeout affichee en attendant la reponse
+  // fantome recuperee par polling /chat/history
+  final bool isTransient;
 
   ChatMessage({
     required this.text,
@@ -15,6 +18,7 @@ class ChatMessage {
     this.ariaMemoryId,
     this.modelTier,
     DateTime? timestamp,
+    this.isTransient = false,
   }) : timestamp = timestamp ?? DateTime.now();
 }
 
@@ -65,6 +69,10 @@ class RayaResponse {
   final int? ariaMemoryId;
   final String? modelTier;
   final AskChoice? askChoice;
+  // Timeout "fantome" : le backend a renvoye un timeout mais le thread Python
+  // continue en arriere-plan. Le client doit poller /chat/history.
+  final bool isError;
+  final String? errorType;
 
   RayaResponse({
     required this.answer,
@@ -73,7 +81,11 @@ class RayaResponse {
     this.ariaMemoryId,
     this.modelTier,
     this.askChoice,
+    this.isError = false,
+    this.errorType,
   });
+
+  bool get isGhostTimeout => isError && errorType == 'timeout';
 
   factory RayaResponse.fromJson(Map<String, dynamic> json) {
     return RayaResponse(
@@ -88,6 +100,8 @@ class RayaResponse {
       askChoice: json['ask_choice'] != null
           ? AskChoice.fromJson(json['ask_choice'])
           : null,
+      isError: json['is_error'] == true,
+      errorType: json['error_type'] as String?,
     );
   }
 }
@@ -145,4 +159,69 @@ class ChatService {
     }
     return [];
   }
+
+  /// Polling fantôme : quand /raya a renvoyé un timeout mais que le thread
+  /// Python a continué à s'executer en arriere-plan. On verifie /chat/history
+  /// toutes les 3s pendant 90s (30 tentatives) pour recuperer la vraie reponse.
+  ///
+  /// [userText] : le texte envoye par l'user (pour matcher l'entree historique)
+  /// [sentAt]   : timestamp d'envoi (tolerance 15s avant pour latence reseau)
+  ///
+  /// Retourne la reponse Raya si trouvee, null sinon.
+  Future<GhostMatch?> pollForGhostResponse({
+    required String userText,
+    required DateTime sentAt,
+    int maxAttempts = 30,
+    Duration interval = const Duration(seconds: 3),
+  }) async {
+    final userTextNorm = userText.trim();
+    final userKey = userTextNorm.length > 200
+        ? userTextNorm.substring(0, 200)
+        : userTextNorm;
+    // Tolerance de 15s avant l'envoi pour absorber l'horloge serveur
+    final minTs = sentAt.subtract(const Duration(seconds: 15));
+
+    for (int i = 0; i < maxAttempts; i++) {
+      await Future.delayed(interval);
+      try {
+        final r = await _api.get(
+          ApiConfig.historyEndpoint,
+          params: {'limit': 3},
+        );
+        if (r.statusCode != 200 || r.data is! List) continue;
+        for (final item in r.data) {
+          if (item is! Map) continue;
+          final itemUser = (item['user'] as String?)?.trim() ?? '';
+          final itemRaya = item['raya'] as String?;
+          if (itemRaya == null || itemRaya.isEmpty) continue;
+          final itemUserKey = itemUser.length > 200
+              ? itemUser.substring(0, 200)
+              : itemUser;
+          if (itemUserKey != userKey) continue;
+          // Parse timestamp serveur (format ISO ou timestamp)
+          DateTime? itemTs;
+          final tsRaw = item['created_at'] ?? item['ts'];
+          if (tsRaw is String) {
+            try { itemTs = DateTime.parse(tsRaw); } catch (_) {}
+          }
+          if (itemTs == null || itemTs.isBefore(minTs)) continue;
+          // Match trouve
+          return GhostMatch(
+            answer: itemRaya,
+            ariaMemoryId: item['id'] is int ? item['id'] as int : null,
+          );
+        }
+      } catch (_) {
+        // ignore, on retente
+      }
+    }
+    return null;
+  }
+}
+
+/// Resultat du polling fantome
+class GhostMatch {
+  final String answer;
+  final int? ariaMemoryId;
+  GhostMatch({required this.answer, this.ariaMemoryId});
 }
