@@ -251,19 +251,40 @@ Classes à déposer : 9, 35, 38, 42, 45. Coût ~310€ INPI.
 
 ### Priorités prochaine session
 1. ~~Corriger bug regex CREATE_TOPIC~~ ✅ 19/04 (d6ec52f)
-2. **Re-ajouter speech_to_text** pour le micro natif STT (héros UX bouton vert)
-3. **Re-ajouter file_picker/image_picker** pour les pièces jointes (tester compat Xcode 26)
-4. **Thème personnalisé ELYO** (couleurs, fonts, dark/light, splash, icône)
-5. **Tester sur iPhone réel** (brancher USB, configurer Apple ID dans Xcode Signing)
-6. **Préparer TestFlight** (compte Apple Developer 99€/an)
+2. ~~Re-ajouter speech_to_text pour le micro natif STT~~ ✅ 19/04 (95372b8, 4e290d4, 43ef3c0)
+3. **Push notifications Firebase** (inversion paradigme : Raya t'interpelle)
+4. **Widget iOS lockscreen** (dernières alertes visibles sans ouvrir l'app)
+5. **Siri Shortcut "Dis à [nom marque]..."** (mains libres gratuit via Apple)
+6. **Coordination topics ↔ narratives** avec Opus backend (enrichissement RAG)
+7. **Face ID / Touch ID** à l'ouverture (local_auth déjà installé)
+8. **Re-ajouter file_picker/image_picker** pour les pièces jointes
+9. **Thème personnalisé** (colors, fonts, dark/light, splash, icône — attend nom validé)
+10. **Tester sur iPhone réel** (Apple ID Xcode Signing)
+11. **Préparer TestFlight** (compte Apple Developer 99€/an)
 
-### Session 19/04/2026 — Reprise (Opus 4.7)
+### Session 19/04/2026 — Audit + fixes critiques + STT natif (Opus 4.7)
 **Contexte :** entre le 15/04 et le 19/04, seuls des commits backend/PWA (permissions, scanner, connecteurs) ont eu lieu. Flutter resté en l'état.
 
 **Commits :**
 - `d6ec52f` — fix regex CREATE_TOPIC + encoding Mentions légales
+- `7c4cd06` — fix timeout receive 30s → 90s (parité backend Opus 4.7 + 8192 tokens)
+- `fadd962` — fix cookies persistants (PersistCookieJar au lieu de memory)
+- `8a70ee5` — feat polling ghost response sur timeout (parité PWA `_pollGhostResponse`)
+- `95372b8` — feat re-intègre speech_to_text 6.6.0 + permissions iOS Info.plist
+- `4e290d4` — feat VoiceInputService (wrapper propre autour de speech_to_text)
+- `43ef3c0` — feat bouton micro tactile fonctionnel dans chat_screen.dart
 
-**À venir :** audit projet complet + micro STT natif
+**Décisions architecturales majeures :**
+- **Wake-word Picovoice REJETÉ** pour le MVP : coût 6k$/an non justifié, contrainte iOS foreground-only, SFSpeechRecognizer Apple gratuit et excellent en FR
+- **STT via speech_to_text 6.6.0** : utilise SFSpeechRecognizer natif iOS (on-device, gratuit, confidentiel)
+- **UX validation humaine** : transcription affichée dans l'input, pas d'envoi auto (l'user relit/corrige/envoie)
+- **Nom ELYO abandonné**, candidat actuel SAYAN (à valider INPI + avocat PI)
+
+**Audit projet livré :**
+- Vue d'ensemble + 6 erreurs identifiées dans vue critique
+- topics ↔ narratives déconnectés (user_topics CRUD vs dossier_narratives RAG) — chantier backend à coordonner
+- Contrainte iOS acceptée : wake-word impossible en background, Siri Shortcut comme fallback gratuit
+- Philosophie Jarvis vs Alexa : priorité aux push notifs (Raya t'interpelle) > wake-word (tu interpelles Raya)
 
 ---
 
