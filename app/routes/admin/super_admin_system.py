@@ -752,6 +752,36 @@ def admin_scanner_integrity(
                 "trace": traceback.format_exc()[:1500]}
 
 
+@router.post("/admin/scanner/scan-nuit-complet")
+def admin_scanner_scan_nuit_complet(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Lance le scan de nuit COMPLET en arriere-plan sur Railway.
+    Enchaine les 4 etapes : mail.tracking + res.partner + products utiles + P2 complet.
+    Duree 2h-3h. Suivi via dashboard Integrite."""
+    try:
+        from app.jobs.scan_nuit_complet_job import launch_async
+        return launch_async(tenant_id="couffrant", source="odoo")
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
+@router.get("/admin/scanner/scan-nuit-complet/status")
+def admin_scanner_scan_nuit_complet_status(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Retourne l etat du scan de nuit (en cours / pas en cours)."""
+    try:
+        from app.jobs.scan_nuit_complet_job import is_running
+        return {"status": "ok", "running": is_running()}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
 @router.get("/admin/webhooks/status")
 def admin_webhooks_status(
     request: Request,

@@ -224,6 +224,8 @@ function renderOdooActions(tenantId, connId){
     _ddItem('scanTestMissing(this, 200, 2)', '🧪 Test P2 rapide (200 records)', 'Teste les modeles P2 sur 200 records. Diagnostic 5-15 min. Pas de purge.'),
     _ddItem('scanTestMissing(this, 999999)', '📈 Compléter les manquants (volume réel)', 'Complete au volume reel les modeles vides ou partiels. Pas de purge. 10-20 min.'),
     `<div style="height:1px;background:#334155;margin:4px 0"></div>`,
+    _ddItem('scanNuitComplet(this)', '🌙 Scan de nuit COMPLET (2h-3h)', 'Enchaine 4 etapes : mail.tracking + res.partner + products utiles + P2 complet. Tourne sur Railway, tu peux fermer le navigateur.'),
+    `<div style="height:1px;background:#334155;margin:4px 0"></div>`,
     _ddItem('scanP1(this)', '⚠️ Scan P1 COMPLET (purge + rebuild)', 'DESTRUCTIF : purge tout puis re-vectorise les 16 modeles P1. 30-60 min.'),
   ]);
   const integrite = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#10b981;color:white;font-weight:600" onclick="showIntegrity(this)" title="Tableau d'integrite de la vectorisation par modele">📊 Intégrité</button>`;
@@ -546,6 +548,50 @@ async function showIntegrity(btn){
     document.getElementById('integrity-close-btn').onclick = close;
   }catch(e){
     setAlert('companies-alert', '❌ Intégrité échouée : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+async function scanNuitComplet(btn){
+  // Scan de nuit COMPLET (Option 1 validee 19/04/2026, refonte UI 20/04) :
+  // Enchaine les 4 etapes (mail.tracking + res.partner + products utiles + P2
+  // complet) cote Railway (et non plus en terminal local). Guillaume peut
+  // fermer le navigateur : Railway tourne seul 2h a 3h. Le suivi se fait
+  // via le bouton 📊 Integrite.
+  const ok = await confirmAction(
+    '🌙 Lancer le scan de nuit COMPLET ?',
+    'Cette operation va :\n' +
+    '• Completer mail.tracking.value (~22 850 records)\n' +
+    '• Rattraper res.partner (~1 226 records)\n' +
+    '• Vectoriser product.template uniquement pour les articles utiles (~500-2000)\n' +
+    '• Scanner TOUS les modeles P2 au volume reel\n\n' +
+    'Duree estimee : 2h a 3h.\n' +
+    'Tourne sur Railway : tu peux fermer le navigateur.\n' +
+    'Suivi de progression : bouton 📊 Integrite.\n\n' +
+    'Lancer maintenant ?',
+    'Oui, lancer le scan de nuit', 'Annuler'
+  );
+  if(!ok) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Démarrage...';
+  try{
+    const r = await fetch('/admin/scanner/scan-nuit-complet', {method: 'POST'});
+    const d = await r.json();
+    if(d.status === 'already_running'){
+      setAlert('companies-alert',
+        '⚠️ Un scan de nuit est deja en cours. Attends qu\u2019il se termine (voir 📊 Integrite).', 'warn');
+      return;
+    }
+    if(d.status !== 'started') throw new Error(d.message || 'Démarrage échoué');
+    setAlert('companies-alert',
+      '🌙 Scan de nuit COMPLET lance sur Railway. Duree estimee 2h-3h. ' +
+      'Tu peux fermer le navigateur — Railway continue tout seul. ' +
+      'Suis la progression via 📊 Integrite.', 'ok');
+  }catch(e){
+    setAlert('companies-alert', '❌ Scan de nuit echoue : '+e.message, 'err');
   }finally{
     btn.disabled = false;
     btn.innerHTML = orig;
