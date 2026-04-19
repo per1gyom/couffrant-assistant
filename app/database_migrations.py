@@ -424,6 +424,12 @@ MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_queue_pending ON vectorization_queue (tenant_id, completed_at, scheduled_at) WHERE completed_at IS NULL",
     "CREATE INDEX IF NOT EXISTS idx_queue_record ON vectorization_queue (tenant_id, source, model_name, record_id)",
+    # Anti-rejeu des webhooks (Q6 valide 19/04/2026) : chaque webhook entrant
+    # est signe par un identifiant unique (nonce) genere cote Odoo. Raya
+    # rejette tout webhook dont le nonce a deja ete vu pour ce tenant.
+    # L index UNIQUE partiel permet un rejet en O(log n).
+    "ALTER TABLE vectorization_queue ADD COLUMN IF NOT EXISTS nonce TEXT",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_nonce ON vectorization_queue (tenant_id, nonce) WHERE nonce IS NOT NULL",
     # Soft delete sur semantic_graph_nodes (Q7=A : tracabilite totale).
     # Quand un record Odoo est supprime, on marque deleted_at mais on garde
     # le noeud et ses aretes. Les recherches filtrent sur deleted_at IS NULL.
