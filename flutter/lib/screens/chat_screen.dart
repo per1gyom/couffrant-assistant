@@ -67,7 +67,7 @@ class _ChatScreenState extends State<ChatScreen> {
       final speedMatch = RegExp(r'\[SPEAK_SPEED:([\d.]+)\]').firstMatch(answer);
       if (speedMatch != null) _tts.speed = double.tryParse(speedMatch.group(1)!) ?? 1.2;
       // Auto-create topic from Raya ACTION
-      final topicMatch = RegExp(r'\\[ACTION:CREATE_TOPIC:([^\\]]+)\\]').firstMatch(answer);
+      final topicMatch = RegExp(r'\[ACTION:CREATE_TOPIC:([^\]]+)\]').firstMatch(answer);
       if (topicMatch != null) {
         TopicsService().createTopic(topicMatch.group(1)!.trim());
       }
@@ -328,7 +328,7 @@ class _ChatScreenState extends State<ChatScreen> {
             ])),
             PopupMenuItem(value: 'legal', child: Row(children: [
               Icon(Icons.gavel, color: Colors.white54, size: 18), SizedBox(width: 10),
-              Text('Mentions légales', style: TextStyle(color: Colors.white54)),
+              Text('Mentions lÃ©gales', style: TextStyle(color: Colors.white54)),
             ])),
             const PopupMenuDivider(),
             const PopupMenuItem(value: 'logout', child: Row(children: [
