@@ -66,5 +66,9 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Raya a besoin du micro pour transcrire vos messages vocaux en texte.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Raya utilise la reconnaissance vocale d'Apple (sur l'appareil) pour convertir votre voix en texte.</string>
 </dict>
 </plist>
