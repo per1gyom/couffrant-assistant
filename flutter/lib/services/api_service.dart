@@ -28,7 +28,12 @@ class ApiService {
       baseUrl: ApiConfig.baseUrl,
       connectTimeout: Duration(seconds: ApiConfig.connectTimeout),
       receiveTimeout: Duration(seconds: ApiConfig.receiveTimeout),
+      sendTimeout: Duration(seconds: ApiConfig.sendTimeout),
       followRedirects: false,
+      // On garde permissif (< 500) pour que login puisse lire un 401 comme
+      // "identifiant incorrect" au lieu de throw. Un intercepteur dedie
+      // pourra etre ajoute plus tard pour gerer 401/403 sur les routes
+      // authentifiees (redirection login auto).
       validateStatus: (status) => status != null && status < 500,
       headers: {
         'Accept': 'application/json',
