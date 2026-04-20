@@ -254,6 +254,18 @@ C'est **le cœur de la valeur Raya**. Une fois les données à jour, on lui appr
 
 ---
 
+## 🧠 Couche 5 — Apprentissage permanent (idée capturée 20/04/2026)
+
+Pendant le point matinal du 20/04, Guillaume a soulevé un sujet qui n'était couvert nulle part : la mémoire d'apprentissage des recherches web. Exemple concret : quand un nouveau dossier Consuel (SC 145) remplace l'ancien (SC 144), Raya devrait le retenir de façon permanente au lieu de refaire la recherche web à chaque fois.
+
+**Nuance importante** : pas question de tout vectoriser systématiquement (exemple contre : une question sur la météo ne doit rien laisser en graphe). Il y a un vrai sujet d'arbitrage à concevoir.
+
+**Document de capture** : `docs/raya_couche5_apprentissage_permanent.md`
+
+**Statut** : idée posée, pas encore conçue. À attaquer APRÈS finalisation Odoo (webhooks activés et stables sur 48h). Probablement en parallèle ou avant la Phase 8.
+
+---
+
 ## 🎯 MILESTONE CHARLOTTE (inchangé)
 
 Charlotte (tenant `juillet`) est déjà en test sur `https://app.raya-ia.fr`. Reste à faire :
