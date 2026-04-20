@@ -72,6 +72,7 @@ from app.routes.prompt_blocks import (
     build_alerts_block, build_report_block, build_team_block,
     build_topics_block, build_web_info, build_ton_block,
 )
+from app.routes.prompt_guardrails import GUARDRAILS
 
 # ─── Loaders réexportés pour compatibilité avec raya.py ───
 from app.routes.aria_loaders import (
@@ -419,4 +420,6 @@ Consignes specifiques : {chr(10).join(instructions) if instructions else "Aucune
 {build_actions_prompt(domains, tools)}
 
 {CORE_RULES}
+
+{GUARDRAILS}
 """
