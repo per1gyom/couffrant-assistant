@@ -275,13 +275,56 @@ def _store_chunk(tenant_id: str, folder_id: int, file_info: dict,
         return False
 
 
+def _is_already_up_to_date(tenant_id: str, file_id: str,
+                             drive_modified_iso: str) -> bool:
+    """Renvoie True si ce fichier a deja ete vectorise avec succes ET
+    qu il n a pas ete modifie depuis.
+
+    Critere : il existe au moins 1 ligne level=1 en base, avec une
+    drive_modified_at >= celle du fichier Drive. Cela permet :
+    - De skipper les fichiers deja OK (gain massif sur rescan)
+    - De retraiter automatiquement les fichiers en erreur (pas de ligne L1)
+    - De retraiter les fichiers modifies (drive_modified_at plus recente)
+    """
+    if not drive_modified_iso:
+        return False
+    try:
+        from app.database import get_pg_conn
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """SELECT drive_modified_at FROM drive_semantic_content
+                   WHERE tenant_id = %s AND file_id = %s AND level = 1
+                     AND deleted_at IS NULL
+                   LIMIT 1""",
+                (tenant_id, file_id),
+            )
+            row = cur.fetchone()
+        if not row or not row[0]:
+            return False
+        stored = row[0]
+        # Odoo/Graph : "YYYY-MM-DDTHH:MM:SSZ" -> datetime
+        drive_dt = datetime.fromisoformat(drive_modified_iso.replace("Z", "+00:00"))
+        if stored.tzinfo is None:
+            stored = stored.replace(tzinfo=timezone.utc)
+        return stored >= drive_dt
+    except Exception as e:
+        logger.debug("[DriveScanner] check up_to_date failed : %s", str(e)[:150])
+        return False
+
+
 def _process_file(tenant_id: str, folder_db_id: int, token_ref: list,
-                   username: str, drive_id: str, file_info: dict) -> dict:
+                   username: str, drive_id: str, file_info: dict,
+                   force_rescan: bool = False) -> dict:
     """Traite UN fichier : download + extract + chunk + store niveaux 1 et 2.
     Retourne un dict de stats.
 
     token_ref est une liste a 1 element [token] pour permettre le refresh
     automatique en cas de 401 (les tokens Graph expirent apres 1h).
+
+    Si force_rescan=False (defaut) et que le fichier est deja a jour en DB
+    (mtime Drive <= mtime stocke), on skip sans rien faire. Permet un
+    rescan incremental tres rapide apres un premier scan complet.
     """
     name = file_info.get("name", "?")
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
@@ -297,6 +340,11 @@ def _process_file(tenant_id: str, folder_db_id: int, token_ref: list,
     if ext not in SUPPORTED_EXTENSIONS:
         logger.debug("[DriveScanner] SKIP %s : ext %s non supportee", name, ext)
         return {"status": "skipped", "reason": "unsupported_ext", "file": name}
+
+    # Scan incremental : skip si deja a jour
+    if not force_rescan and _is_already_up_to_date(
+            tenant_id, file_info["id"], file_info.get("modified_at", "")):
+        return {"status": "skipped", "reason": "up_to_date", "file": name}
 
     # Download + extraction (token peut etre rafraichi in-place via token_ref)
     file_bytes = _download_file(token_ref, username, drive_id, file_info["id"])
@@ -391,9 +439,13 @@ def _ensure_folder_registered(tenant_id: str, token: str) -> Optional[dict]:
             "folder_path": folder_path, "site_name": site_name}
 
 
-def _run_scan(tenant_id: str, username: str):
+def _run_scan(tenant_id: str, username: str, force_rescan: bool = False):
     """Thread principal du scan. Liste recursivement le dossier SharePoint,
-    traite chaque fichier, stocke stats, nettoie l etat a la fin."""
+    traite chaque fichier, stocke stats, nettoie l etat a la fin.
+
+    Si force_rescan=True : re-traite meme les fichiers deja a jour en DB.
+    Par defaut False = scan incremental (rapide apres un 1er passage).
+    """
     global _scan_running
     from app.database import get_pg_conn
 
@@ -439,7 +491,8 @@ def _run_scan(tenant_id: str, username: str):
             try:
                 result = _process_file(tenant_id, folder["folder_db_id"],
                                         token_ref, username,
-                                        folder["drive_id"], f)
+                                        folder["drive_id"], f,
+                                        force_rescan=force_rescan)
                 stats["processed"] += 1
                 if result["status"] == "ok":
                     stats["ok"] += 1
@@ -485,11 +538,15 @@ def _run_scan(tenant_id: str, username: str):
             _scan_running = False
 
 
-def launch_async(tenant_id: str = "couffrant_solar", username: str = None) -> dict:
+def launch_async(tenant_id: str = "couffrant_solar", username: str = None,
+                  force_rescan: bool = False) -> dict:
     """Declenche le scan Drive en thread daemon. Retourne immediatement.
     Appele par le bouton Scanner Drive du panel admin.
 
     Si aucun username fourni, prend APP_USERNAME de l env (Guillaume).
+
+    Si force_rescan=True : retraite TOUS les fichiers meme deja OK en DB.
+    Sinon (defaut) : scan incremental - skip les fichiers deja a jour.
     """
     global _scan_running
     if username is None:
@@ -502,16 +559,18 @@ def launch_async(tenant_id: str = "couffrant_solar", username: str = None) -> di
         _scan_running = True
 
     t = threading.Thread(
-        target=_run_scan, args=(tenant_id, username),
+        target=_run_scan, args=(tenant_id, username, force_rescan),
         name="drive-scanner", daemon=True,
     )
     t.start()
-    logger.info("[DriveScanner] Thread lance tenant=%s user=%s",
-                tenant_id, username)
+    mode = "force_rescan=all" if force_rescan else "incremental"
+    logger.info("[DriveScanner] Thread lance tenant=%s user=%s mode=%s",
+                tenant_id, username, mode)
     return {
         "status": "started",
         "tenant_id": tenant_id,
-        "message": "Scan Drive lance. Suivi via le bouton Drive du panel.",
+        "mode": mode,
+        "message": f"Scan Drive lance ({mode}). Suivi via le bouton Drive du panel.",
     }
 
 

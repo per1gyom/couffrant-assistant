@@ -785,16 +785,27 @@ def admin_scanner_scan_nuit_complet_status(
 @router.post("/admin/drive/scan-start")
 def admin_drive_scan_start(
     request: Request,
+    force_rescan: bool = False,
     _: dict = Depends(require_admin),
 ):
-    """Lance un scan complet du dossier SharePoint configure pour le tenant.
+    """Lance un scan du dossier SharePoint configure pour le tenant.
     Tourne en arriere-plan (thread daemon Railway). Applique le principe
-    memoire 3 niveaux (meta + detail + live via re-fetch)."""
+    memoire 3 niveaux (meta + detail + live via re-fetch).
+
+    Param force_rescan :
+      - False (defaut) : scan incremental, skip les fichiers deja a jour.
+        Rapide apres un 1er scan complet, retraite seulement les nouveaux
+        et les modifies et rattrape les erreurs precedentes.
+      - True : retraite TOUS les fichiers, meme deja OK. A utiliser apres
+        une correction majeure de logique d extraction ou pour refresh
+        complet des embeddings.
+    """
     try:
         from app.jobs.drive_scanner import launch_async
         import os
         username = os.getenv("APP_USERNAME", "guillaume").strip()
-        return launch_async(tenant_id="couffrant_solar", username=username)
+        return launch_async(tenant_id="couffrant_solar", username=username,
+                            force_rescan=force_rescan)
     except Exception as e:
         import traceback
         return {"status": "error", "message": str(e)[:300],

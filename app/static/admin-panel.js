@@ -215,11 +215,12 @@ function _ddMenu(summaryColor, summaryLabel, items){
 
 function renderMicrosoftActions(tenantId, connId){
   // Phase D (Drive SharePoint) - 20/04/2026.
-  // Dropdown 🚀 Drive avec Scanner (scan complet du dossier SharePoint
-  // configure) + Etat (dernier scan, stats niveaux 1 et 2).
+  // Dropdown 🚀 Drive avec Scanner incremental + Force rescan + Etat.
   const driveMenu = _ddMenu('#2563eb', '🚀 Drive', [
-    _ddItem('scanDriveStart(this)', '🚀 Scanner tout le dossier SharePoint',
-      'Parcourt le dossier Photovoltaique et vectorise tous les fichiers supportes (pdf, docx, xlsx, images). Duree 30 min a 2h selon volume. Tourne sur Railway - tu peux fermer le navigateur.'),
+    _ddItem('scanDriveStart(this, false)', '🚀 Scanner (incremental)',
+      'Scanne le dossier SharePoint. Skip les fichiers deja a jour, retraite les nouveaux / modifies / en erreur. Rapide apres un 1er scan complet.'),
+    _ddItem('scanDriveStart(this, true)', '♻️ Rescan complet (tous fichiers)',
+      'Retraite TOUS les fichiers meme deja OK. A utiliser apres correction majeure de la logique d extraction. Coute plus cher (re-embeddings).'),
     _ddItem('scanDriveStatus(this)', '📊 Etat du dernier scan',
       'Affiche le resultat du dernier scan Drive : fichiers traites, chunks crees, erreurs.'),
   ]);
@@ -1845,26 +1846,35 @@ async function changePassword(){
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') document.querySelectorAll('.modal-overlay.open').forEach(m=>m.classList.remove('open')); });
 document.querySelectorAll('.modal-overlay').forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('open'); }));
 
-async function scanDriveStart(btn){
+async function scanDriveStart(btn, forceRescan){
+  forceRescan = !!forceRescan;
+  const mode = forceRescan ? 'RESCAN COMPLET' : 'scan incremental';
+  const msg = forceRescan
+    ? 'Cette opération RETRAITE TOUS LES FICHIERS, y compris ceux déjà OK.\n\n' +
+      'Durée : 2-3h pour 3491 fichiers.\n' +
+      'Coût OpenAI : ~0.40€ (re-embeddings complets).\n\n' +
+      'A utiliser uniquement après correction majeure de la logique.\n' +
+      'Sinon préfère le scan incrémental (très rapide après 1er passage).\n\n' +
+      'Lancer le RESCAN COMPLET ?'
+    : 'Cette opération va :\n' +
+      '• Parcourir récursivement le dossier Photovoltaique\n' +
+      '• Skip les fichiers déjà à jour en DB (gain énorme)\n' +
+      '• Retraiter les nouveaux / modifiés / en erreur précédente\n' +
+      '• Tourne sur Railway : tu peux fermer le navigateur\n\n' +
+      'Lancer le scan incrémental ?';
   const ok = await confirmAction(
-    '🚀 Lancer le scan Drive SharePoint ?',
-    'Cette opération va :\n' +
-    '• Parcourir récursivement le dossier Photovoltaique\n' +
-    '• Extraire le texte de chaque fichier (pdf, docx, xlsx, images)\n' +
-    '• Pour chaque fichier, créer :\n' +
-    '    - 1 ligne Niveau 1 (résumé méta, toujours stockée)\n' +
-    '    - N chunks Niveau 2 (détail vectorisé, si extraction OK)\n' +
-    '• Durée estimée : 30 min à 2h selon volume\n' +
-    '• Tourne sur Railway : tu peux fermer le navigateur\n\n' +
-    'Lancer maintenant ?',
-    'Oui, lancer le scan Drive', 'Annuler'
+    forceRescan ? '♻️ Rescan COMPLET du Drive ?' : '🚀 Lancer le scan Drive incrémental ?',
+    msg,
+    forceRescan ? 'Oui, rescan complet' : 'Oui, lancer',
+    'Annuler'
   );
   if(!ok) return;
   const orig = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '⏳ Démarrage...';
   try{
-    const r = await fetch('/admin/drive/scan-start', {method: 'POST'});
+    const url = '/admin/drive/scan-start' + (forceRescan ? '?force_rescan=true' : '');
+    const r = await fetch(url, {method: 'POST'});
     const d = await r.json();
     if(d.status === 'already_running'){
       setAlert('companies-alert',
@@ -1874,7 +1884,7 @@ async function scanDriveStart(btn){
     }
     if(d.status !== 'started') throw new Error(d.message || 'Démarrage échoué');
     setAlert('companies-alert',
-      '🚀 Scan Drive lance sur Railway. Tu peux fermer le navigateur. ' +
+      `🚀 ${mode} lance sur Railway. Tu peux fermer le navigateur. ` +
       'Verifie la progression via 🚀 Drive > 📊 Etat du dernier scan.',
       'ok');
   }catch(e){
