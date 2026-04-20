@@ -698,63 +698,105 @@ async function showWebhookStatus(btn){
       </tr>`;
     }).join('') || '<tr><td colspan="4" style="padding:10px;color:var(--text3);text-align:center;font-size:11px">Aucun rapport de ronde de nuit encore.</td></tr>';
 
-    // Construction de la modale
+    // Construction de la modale — Phase dashboards neophyte (20/04/2026)
+    // Structure : verdict (niveau 1) + resume (niveau 2) + details (niveau 3)
     const backdrop = document.createElement('div');
     backdrop.id = 'webhooks-backdrop';
     backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9998;display:flex;align-items:center;justify-content:center';
     const modal = document.createElement('div');
-    modal.style.cssText = 'background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:16px 20px 20px;width:95vw;max-width:1200px;height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.8)';
+    modal.style.cssText = 'background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:16px 20px 20px;width:95vw;max-width:1200px;height:90vh;display:flex;flex-direction:column;box-shadow:0 10px 40px rgba(0,0,0,0.8);overflow:auto';
+
+    // Niveau 2 : cartes metriques cles avec tooltips
+    const recentMin = s.recent_window_minutes || 15;
+    const metricsHtml = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">
+      ${renderMetricCard('✅','Traités ('+recentMin+' min)',fmt(s.processed_recent),'#10b981',
+        'Nombre de jobs Odoo traités avec succès dans les '+recentMin+' dernières minutes. C est l indicateur principal de santé : si > 0, ça marche bien maintenant.')}
+      ${renderMetricCard('❌','Erreurs ('+recentMin+' min)',fmt(s.errors_recent),s.errors_recent>0?'#dc2626':'#64748b',
+        'Erreurs survenues dans les '+recentMin+' dernières minutes. Si 0 = tout va bien. Si > 0 = à investiguer via l accordéon détails plus bas.')}
+      ${renderMetricCard('⏳','En attente',fmt(s.pending_now),'#f59e0b',
+        'Jobs en file d attente prêts à être traités. Normal en flux continu (0 à quelques dizaines). Si gros chiffre qui ne baisse pas = worker saturé.')}
+      ${renderMetricCard('🌙','Erreurs fantômes 24h',fmt(s.phantom_errors_24h),'#8b5cf6',
+        'Erreurs sur des modèles officiellement désactivés (ex: of.survey.answers, mail.message). Sans impact. Peuvent être purgées pour nettoyer l affichage.')}
+      ${renderMetricCard('⚠️','Erreurs réelles 24h',fmt(s.real_errors_24h),s.real_errors_24h>0?'#f59e0b':'#64748b',
+        'Erreurs sur des modèles encore actifs. À investiguer quand tu as un moment, sans urgence si le verdict global est vert.')}
+      ${renderMetricCard('🚦','OpenAI (dernière min)',fmt(s.rate_limit_calls_last_min)+'/2000','#64748b',
+        'Nombre d appels à l API OpenAI dans la dernière minute. Limite configurée à 2000. Si on s approche = throttling auto.')}
+    </div>`;
+
+    // Niveau 3 : detail technique regroupé par modèle
+    const errorsByModelRows = (s.errors_by_model_24h || []).map(em => {
+      const tag = em.is_phantom
+        ? '<span style="background:#7c3aed20;color:#a78bfa;padding:2px 6px;border-radius:4px;font-size:10px">🌙 fantôme</span>'
+        : '<span style="background:#f59e0b20;color:#fbbf24;padding:2px 6px;border-radius:4px;font-size:10px">⚠️ réelle</span>';
+      const reason = em.reason ? `<div style="font-size:10px;color:var(--text3);margin-top:2px">${em.reason}</div>` : '';
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:6px 10px;font-size:11px">${tag}</td>
+        <td style="padding:6px 10px;font-size:11px;font-weight:600">${em.model}${reason}</td>
+        <td style="padding:6px 10px;font-size:11px;text-align:right">${em.count}</td>
+        <td style="padding:6px 10px;font-size:10px;color:var(--text3);max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(em.sample_error||'').replace(/"/g,'&quot;')}">${(em.sample_error||'').substring(0,100)}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="4" style="padding:14px;text-align:center;color:var(--text3);font-size:11px">Aucune erreur sur les dernières 24h 🎉</td></tr>';
+
+    const errorsByModelTable = `<div style="overflow:auto;border:1px solid var(--border);border-radius:8px">
+      <table style="width:100%;border-collapse:collapse">
+        <thead style="background:var(--bg2);position:sticky;top:0">
+          <tr style="border-bottom:2px solid var(--border)">
+            <th style="padding:8px;text-align:left;font-size:11px">Catégorie</th>
+            <th style="padding:8px;text-align:left;font-size:11px">Modèle</th>
+            <th style="padding:8px;text-align:right;font-size:11px">Nb erreurs</th>
+            <th style="padding:8px;text-align:left;font-size:11px">Exemple d erreur</th>
+          </tr>
+        </thead>
+        <tbody>${errorsByModelRows}</tbody>
+      </table>
+    </div>`;
+
+    // Tableau jobs bruts (20 derniers)
+    const jobsTable = `<div style="overflow:auto;border:1px solid var(--border);border-radius:8px;max-height:400px">
+      <table style="width:100%;border-collapse:collapse">
+        <thead style="background:var(--bg2);position:sticky;top:0">
+          <tr style="border-bottom:2px solid var(--border)">
+            <th style="padding:8px;text-align:left;font-size:11px">État</th>
+            <th style="padding:8px;text-align:left;font-size:11px">Tenant</th>
+            <th style="padding:8px;text-align:left;font-size:11px">Modèle</th>
+            <th style="padding:8px;text-align:right;font-size:11px">Record</th>
+            <th style="padding:8px;text-align:left;font-size:11px">Action</th>
+            <th style="padding:8px;text-align:left;font-size:11px">Erreur</th>
+            <th style="padding:8px;text-align:left;font-size:11px">Date</th>
+          </tr>
+        </thead>
+        <tbody>${jobRows || '<tr><td colspan="7" style="padding:14px;text-align:center;color:var(--text3);font-size:11px">Aucun job traité récemment</td></tr>'}</tbody>
+      </table>
+    </div>`;
+
+    const patrolTable = `<div style="overflow:auto;border:1px solid var(--border);border-radius:8px;max-height:150px">
+      <table style="width:100%;border-collapse:collapse">
+        <thead style="background:var(--bg2);position:sticky;top:0">
+          <tr style="border-bottom:2px solid var(--border)">
+            <th style="padding:8px;text-align:left;font-size:11px">Sévérité</th>
+            <th style="padding:8px;text-align:left;font-size:11px">Tenant</th>
+            <th style="padding:8px;text-align:left;font-size:11px">Message</th>
+            <th style="padding:8px;text-align:left;font-size:11px">Date</th>
+          </tr>
+        </thead>
+        <tbody>${patrolRows}</tbody>
+      </table>
+    </div>`;
+
     modal.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-shrink:0">
         <div>
-          <h3 style="margin:0 0 4px 0">🔌 Webhooks Odoo — Monitoring temps-réel</h3>
-          <div style="font-size:12px;color:var(--text3)">Worker : <span style="color:${workerColor};font-weight:700">${workerLabel}</span> · Tenants configurés : <code>${d.configured_tenants.join(', ') || 'aucun (pas de secret en env)'}</code></div>
+          <h3 style="margin:0 0 4px 0">🔌 Webhooks Odoo — Monitoring</h3>
+          <div style="font-size:12px;color:var(--text3)">Worker : <span style="color:${workerColor};font-weight:700">${workerLabel}</span> · Tenants configurés : <code>${d.configured_tenants.join(', ') || 'aucun'}</code> · Dernière activité : ${fmtDate(s.last_activity)}</div>
         </div>
         <button class="btn" id="webhooks-close-btn" style="background:#ef4444;color:white;padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:700">✕ Fermer</button>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px;flex-shrink:0">
-        <div style="background:var(--bg2);border:1px solid #10b981;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">✅ Traités 24h</div><div style="font-size:20px;font-weight:700;color:#10b981">${fmt(s.processed_24h)}</div></div>
-        <div style="background:var(--bg2);border:1px solid #0ea5e9;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">📥 Reçus 24h</div><div style="font-size:20px;font-weight:700;color:#0ea5e9">${fmt(s.received_24h)}</div></div>
-        <div style="background:var(--bg2);border:1px solid #dc2626;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">❌ Erreurs 24h</div><div style="font-size:20px;font-weight:700;color:#dc2626">${fmt(s.errors_24h)}</div></div>
-        <div style="background:var(--bg2);border:1px solid #f59e0b;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">⏳ En attente</div><div style="font-size:20px;font-weight:700;color:#f59e0b">${fmt(s.pending_now)}</div></div>
-        <div style="background:var(--bg2);border:1px solid #8b5cf6;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">🔁 Dédup 5s</div><div style="font-size:20px;font-weight:700;color:#8b5cf6">${fmt(s.delayed_dedup)}</div></div>
-        <div style="background:var(--bg2);border:1px solid var(--border);padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">🚦 OpenAI (dernière min)</div><div style="font-size:20px;font-weight:700">${fmt(s.rate_limit_calls_last_min)}/2000</div></div>
-      </div>
-
-      <div style="flex:1;overflow:auto;display:grid;grid-template-rows:auto 1fr auto 1fr;gap:12px;min-height:0">
-        <div style="font-size:12px;font-weight:600;color:var(--text2)">🌙 Dernières rondes de nuit (5h)</div>
-        <div style="overflow:auto;border:1px solid var(--border);border-radius:8px;min-height:80px;max-height:150px">
-          <table style="width:100%;border-collapse:collapse">
-            <thead style="background:var(--bg2);position:sticky;top:0">
-              <tr style="border-bottom:2px solid var(--border)">
-                <th style="padding:8px;text-align:left;font-size:11px">Sévérité</th>
-                <th style="padding:8px;text-align:left;font-size:11px">Tenant</th>
-                <th style="padding:8px;text-align:left;font-size:11px">Message</th>
-                <th style="padding:8px;text-align:left;font-size:11px">Date</th>
-              </tr>
-            </thead>
-            <tbody>${patrolRows}</tbody>
-          </table>
-        </div>
-        <div style="font-size:12px;font-weight:600;color:var(--text2)">📋 Derniers jobs traités (20 récents — 🔌 webhook / 🌙 ronde de nuit)</div>
-        <div style="overflow:auto;border:1px solid var(--border);border-radius:8px">
-          <table style="width:100%;border-collapse:collapse">
-            <thead style="background:var(--bg2);position:sticky;top:0">
-              <tr style="border-bottom:2px solid var(--border)">
-                <th style="padding:8px;text-align:left;font-size:11px">État</th>
-                <th style="padding:8px;text-align:left;font-size:11px">Tenant</th>
-                <th style="padding:8px;text-align:left;font-size:11px">Modèle</th>
-                <th style="padding:8px;text-align:right;font-size:11px">Record</th>
-                <th style="padding:8px;text-align:left;font-size:11px">Action</th>
-                <th style="padding:8px;text-align:left;font-size:11px">Erreur</th>
-                <th style="padding:8px;text-align:left;font-size:11px">Date</th>
-              </tr>
-            </thead>
-              <tbody>${jobRows || '<tr><td colspan="7" style="padding:14px;text-align:center;color:var(--text3);font-size:11px">Aucun webhook reçu pour le moment. Normal si aucun secret n est encore configuré dans Railway.</td></tr>'}</tbody>
-          </table>
-        </div>
-      </div>
-      <div style="margin-top:8px;font-size:11px;color:var(--text3);flex-shrink:0">Dernière activité : ${fmtDate(s.last_activity)} · Actualisation manuelle (re-cliquer sur 🔌 Webhooks)</div>`;
+      ${renderVerdictBanner(d.verdict)}
+      ${metricsHtml}
+      ${renderAccordion('🎯 Erreurs 24h regroupées par modèle (cliquer pour comprendre les fantômes vs réelles)', errorsByModelTable, true)}
+      ${renderAccordion('🌙 Dernières rondes de nuit (5h)', patrolTable, false)}
+      ${renderAccordion('📋 20 derniers jobs traités (détail technique brut)', jobsTable, false)}
+      <div style="margin-top:8px;font-size:11px;color:var(--text3)">Historique 24h : ${fmt(s.processed_24h)} traités · ${fmt(s.received_24h)} reçus · ${fmt(s.errors_24h)} erreurs (${fmt(s.phantom_errors_24h)} fantômes + ${fmt(s.real_errors_24h)} réelles) · Actualisation manuelle (re-cliquer sur 🔌 Webhooks)</div>`;
     backdrop.appendChild(modal);
     document.body.appendChild(backdrop);
     const close = () => { backdrop.remove(); document.removeEventListener('keydown', onEsc); };
