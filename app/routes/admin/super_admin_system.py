@@ -665,13 +665,27 @@ def admin_scanner_integrity(
             )
             manifests_by_model = {r[0]: r[1] for r in cur.fetchall()}
 
+            # 2ter. Recupere les modeles desactives/suspens connus
+            #       pour distinguer les vrais problemes des "fantomes documentes"
+            cur.execute(
+                """SELECT model_name, reason, category, doc_link
+                   FROM deactivated_models WHERE source=%s""",
+                (source,),
+            )
+            deactivated = {r[0]: {"reason": r[1], "category": r[2],
+                                   "doc_link": r[3]} for r in cur.fetchall()}
+
         # 3. Construction du rapport par modele
-        # Severity avancee (19/04/2026) :
+        # Severity avancee (19/04 puis 20/04) :
         # - 'ok'         : integrity >= 90% (vert)
         # - 'warning'    : 50 <= integrity < 90% (orange)
-        # - 'critical'   : integrity < 50% (rouge) — SEULEMENT si pas limit/graph
+        # - 'critical'   : integrity < 50% (rouge) SEULEMENT si vraie erreur
         # - 'limited'    : modele plafonne par MODEL_RECORD_LIMITS (orange doux)
         # - 'graph_only' : manifest sans vectorize_fields (gris, normal)
+        # - 'pending_rights' : documente dans deactivated_models avec category=
+        #                      pending_rights (en attente droits OpenFire) - bleu/info
+        # - 'deactivated'  : documente dans deactivated_models (desactive volontaire) - gris
+        # - 'ignored'      : documente dans deactivated_models (pas d usage metier) - gris
         # - 'unknown'    : pas encore scanne
         from app.scanner.runner import MODEL_RECORD_LIMITS
         models = []
@@ -683,17 +697,20 @@ def admin_scanner_integrity(
             vec_fields = manifest.get("vectorize_fields") or []
             is_graph_only = len(vec_fields) == 0
             limit = MODEL_RECORD_LIMITS.get(model_name)
-            # Detection du plafond volontaire :
-            # - limit is None => pas de plafond, logique classique
-            # - limit == 0   => skip volontaire (ex: res.city)
-            # - limit > 0    => plafond, si on a atteint >= 95% du plafond -> "limited"
             is_capped = (limit is not None and limit > 0 and raya_count and
                          raya_count >= limit * 0.95)
-            if is_graph_only:
-                # Pas de vectorize_fields = on ne cree pas de chunks, c'est normal
+            deact_info = deactivated.get(model_name)
+
+            # ORDRE DE PRIORITE pour la severity :
+            # 1. Modele documente comme desactive/pending (meme si 🔴 brut)
+            # 2. Graph-only (pas de chunks attendus)
+            # 3. Cappe (plafond volontaire)
+            # 4. Classification standard par pct d integrite
+            if deact_info:
+                severity = deact_info["category"]  # pending_rights / deactivated / ignored
+            elif is_graph_only:
                 severity = "graph_only"
             elif is_capped:
-                # Plafond atteint volontairement (ex: product.template 5000/133k)
                 severity = "limited"
             elif integrity is None or enabled is False:
                 severity = "unknown"
@@ -714,36 +731,49 @@ def admin_scanner_integrity(
                 "severity": severity,
                 "applicative_limit": limit,
                 "is_graph_only": is_graph_only,
+                "deactivated_reason": deact_info["reason"] if deact_info else None,
+                "deactivated_doc": deact_info["doc_link"] if deact_info else None,
                 "last_scanned_at": last_scan.isoformat() if last_scan else None,
             })
 
         # 4. Totaux
         # Intégrité globale calculée UNIQUEMENT sur les modèles qui doivent
-        # être vectorisés (on exclut graph_only qui sont normaux à 0, et
-        # limited qui ont atteint leur plafond volontairement).
-        models_countable = [m for m in models
-                            if m["severity"] not in ("graph_only", "limited")]
+        # être vectorisés (on exclut graph_only, limited, et les modeles
+        # documentes pending_rights/deactivated/ignored qui sont connus).
+        benign = ("graph_only", "limited", "pending_rights",
+                  "deactivated", "ignored")
+        models_countable = [m for m in models if m["severity"] not in benign]
         total_odoo = sum(m["records_count_odoo"] or 0 for m in models_countable)
         total_raya = sum(m["records_count_raya"] or 0 for m in models_countable)
         total_chunks = sum(m["chunks_in_db"] for m in models)
         overall_integrity = round(100 * total_raya / total_odoo, 1) if total_odoo else 0
+
+        overall = {
+            "models_total": len(models),
+            "models_ok": sum(1 for m in models if m["severity"] == "ok"),
+            "models_warning": sum(1 for m in models if m["severity"] == "warning"),
+            "models_critical": sum(1 for m in models if m["severity"] == "critical"),
+            "models_limited": sum(1 for m in models if m["severity"] == "limited"),
+            "models_graph_only": sum(1 for m in models if m["severity"] == "graph_only"),
+            "models_pending_rights": sum(1 for m in models if m["severity"] == "pending_rights"),
+            "models_deactivated": sum(1 for m in models if m["severity"] == "deactivated"),
+            "models_ignored": sum(1 for m in models if m["severity"] == "ignored"),
+            "models_unknown": sum(1 for m in models if m["severity"] == "unknown"),
+            "total_records_odoo": total_odoo,
+            "total_records_raya": total_raya,
+            "total_chunks_in_db": total_chunks,
+            "overall_integrity_pct": overall_integrity,
+        }
+
+        # Verdict global pour le super-admin neophyte
+        verdict = _compute_integrity_verdict(overall, models)
+
         return {
             "status": "ok",
             "tenant_id": tenant_id,
             "source": source,
-            "overall": {
-                "models_total": len(models),
-                "models_ok": sum(1 for m in models if m["severity"] == "ok"),
-                "models_warning": sum(1 for m in models if m["severity"] == "warning"),
-                "models_critical": sum(1 for m in models if m["severity"] == "critical"),
-                "models_limited": sum(1 for m in models if m["severity"] == "limited"),
-                "models_graph_only": sum(1 for m in models if m["severity"] == "graph_only"),
-                "models_unknown": sum(1 for m in models if m["severity"] == "unknown"),
-                "total_records_odoo": total_odoo,
-                "total_records_raya": total_raya,
-                "total_chunks_in_db": total_chunks,
-                "overall_integrity_pct": overall_integrity,
-            },
+            "overall": overall,
+            "verdict": verdict,
             "models": models,
         }
     except Exception as e:
@@ -963,6 +993,65 @@ def _compute_webhook_verdict(stats: dict) -> dict:
     return {"level": "ok", "icon": "🟢",
             "title": "Tout va bien",
             "message": "Le polling Odoo tourne normalement, zero erreur.",
+            "details": details}
+
+
+def _compute_integrity_verdict(overall: dict, models: list) -> dict:
+    """Verdict global pour le dashboard Integrite.
+    Applique la meme grammaire que _compute_webhook_verdict.
+
+    Principe : les modeles documentes comme pending_rights, deactivated ou
+    ignored ne sont PAS des problemes (ils sont connus). Seuls les critical
+    non-documentes et le pourcentage d integrite global comptent.
+    """
+    pct = overall.get("overall_integrity_pct", 0)
+    critical = overall.get("models_critical", 0)
+    warning = overall.get("models_warning", 0)
+    pending = overall.get("models_pending_rights", 0)
+    deactivated = overall.get("models_deactivated", 0)
+    ignored = overall.get("models_ignored", 0)
+    ok_count = overall.get("models_ok", 0)
+    total = overall.get("models_total", 0)
+
+    details = [
+        f"Modeles totaux : {total}",
+        f"Integrite globale : {pct}% (calculee sur les modeles 'actifs a vectoriser')",
+        f"✅ OK : {ok_count}",
+    ]
+    if warning:
+        details.append(f"🟡 Warning : {warning} (vectorisation partielle)")
+    if critical:
+        details.append(f"🔴 Critical : {critical} (vraie erreur a investiguer)")
+    if pending + deactivated + ignored > 0:
+        details.append(
+            f"🌙 Connus et documentes : {pending+deactivated+ignored} "
+            f"({pending} en attente droits, {deactivated} desactives, "
+            f"{ignored} ignores metier) - sans impact sur le verdict"
+        )
+
+    if critical > 0:
+        return {"level": "critical", "icon": "🔴",
+                "title": f"{critical} modele(s) en erreur critique",
+                "message": "Vraie erreur a investiguer - integrite tres basse "
+                           "sur des modeles qui ne sont pas documentes comme desactives.",
+                "details": details}
+    if pct < 50 and total > 0:
+        return {"level": "attention", "icon": "🟠",
+                "title": f"Integrite globale basse ({pct}%)",
+                "message": "La majorite des records Odoo ne sont pas vectorises. "
+                           "Probablement a cause d un scan interrompu - relancer.",
+                "details": details}
+    if warning > 0:
+        return {"level": "warning", "icon": "🟡",
+                "title": f"{warning} modele(s) en vectorisation partielle",
+                "message": f"Integrite globale : {pct}%. Quelques modeles "
+                           f"partiellement vectorises. A regarder sans urgence.",
+                "details": details}
+    return {"level": "ok", "icon": "🟢",
+            "title": f"Integrite globale : {pct}%",
+            "message": f"Tous les modeles actifs sont bien vectorises. "
+                       f"Les {pending+deactivated+ignored} modeles documentes "
+                       f"(droits manquants, desactives, ignores) n affectent pas le verdict.",
             "details": details}
 
 

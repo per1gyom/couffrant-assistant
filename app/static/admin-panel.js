@@ -502,28 +502,40 @@ async function showIntegrity(btn){
     // Couleur de la barre de progression globale
     const overallPct = ov.overall_integrity_pct || 0;
     const overallColor = overallPct >= 90 ? '#10b981' : overallPct >= 50 ? '#f59e0b' : '#dc2626';
-    // Icones & couleurs etendus (19/04/2026) : on distingue desormais
-    // - limited    : modele plafonne volontairement (orange doux)
-    // - graph_only : modele sans vectorize_fields, normal a 0 (gris)
+    // Icones & couleurs etendus (19/04 puis 20/04) : on distingue desormais
+    // - limited        : modele plafonne volontairement (orange doux)
+    // - graph_only     : modele sans vectorize_fields, normal a 0 (gris)
+    // - pending_rights : droits Odoo manquants, en attente OpenFire (bleu)
+    // - deactivated    : manifest cassé, desactive volontaire (gris violet)
+    // - ignored        : pas d usage metier, ignore definitif (gris)
     const sevIcon = s => ({
       ok: '✅', warning: '⚠️', critical: '🔴',
-      limited: '🟡', graph_only: '⚙️', unknown: '⚪'
+      limited: '🟡', graph_only: '⚙️',
+      pending_rights: '🔐', deactivated: '🚫', ignored: '💤',
+      unknown: '⚪'
     })[s] || '⚪';
     const sevColor = s => ({
       ok: '#10b981', warning: '#f59e0b', critical: '#dc2626',
-      limited: '#f59e0b', graph_only: '#6b7280', unknown: '#6b7280'
+      limited: '#f59e0b', graph_only: '#6b7280',
+      pending_rights: '#0ea5e9', deactivated: '#8b5cf6', ignored: '#6b7280',
+      unknown: '#6b7280'
     })[s] || '#6b7280';
     const sevLabel = s => ({
       ok: 'OK', warning: 'Warning', critical: 'Erreur',
-      limited: 'Limité', graph_only: 'Graph-only', unknown: 'Non scanné'
+      limited: 'Limité', graph_only: 'Graph-only',
+      pending_rights: 'En attente droits', deactivated: 'Désactivé',
+      ignored: 'Ignoré (pas d usage metier)',
+      unknown: 'Non scanné'
     })[s] || 'Inconnu';
     // Formattage des chiffres
     const fmt = n => (n === null || n === undefined) ? '-' : n.toLocaleString('fr-FR');
     const fmtPct = p => (p === null || p === undefined) ? '-' : p.toFixed(1) + '%';
     const fmtDate = s => !s ? '<span style="color:var(--text3)">Jamais</span>' : new Date(s).toLocaleString('fr-FR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     // Construction du tableau — on affiche different selon severity :
-    // - graph_only : "graph-only" a la place de chiffres trompeurs
-    // - limited    : affiche X/LIMITE (100% de la limite) au lieu de X/totalOdoo
+    // - graph_only        : "graph-only" a la place de chiffres trompeurs
+    // - limited           : affiche X/LIMITE (100% de la limite) au lieu de X/totalOdoo
+    // - pending_rights    : affiche la raison + lien doc dans le tableau
+    // - deactivated/ignored : idem
     const rows = d.models.map(m => {
       let integrityCell, chunksCell;
       if(m.severity === 'graph_only'){
@@ -531,7 +543,10 @@ async function showIntegrity(btn){
         chunksCell = `<span style="color:#6b7280">—</span>`;
       }else if(m.severity === 'limited'){
         const pctVsLimit = m.applicative_limit ? Math.round(100*(m.records_count_raya||0)/m.applicative_limit) : 100;
-        integrityCell = `<span style="color:#f59e0b;font-weight:700">${pctVsLimit}% (limité)</span>`;
+        integrityCell = `<span style="color:#f59e0b;font-weight:700">${pctVsLimit}% (cap)</span>`;
+        chunksCell = fmt(m.chunks_in_db);
+      }else if(m.severity === 'pending_rights' || m.severity === 'deactivated' || m.severity === 'ignored'){
+        integrityCell = `<span style="color:${sevColor(m.severity)};font-weight:700;font-style:italic">${sevLabel(m.severity)}</span>`;
         chunksCell = fmt(m.chunks_in_db);
       }else{
         integrityCell = `<span style="color:${sevColor(m.severity)};font-weight:700">${fmtPct(m.integrity_pct)}</span>`;
@@ -540,9 +555,13 @@ async function showIntegrity(btn){
       const recordsOdooCell = m.severity === 'limited' && m.applicative_limit
         ? `${fmt(m.records_count_odoo)} <span style="color:#f59e0b;font-size:10px">(cap ${fmt(m.applicative_limit)})</span>`
         : fmt(m.records_count_odoo);
+      // Ligne raison sous le nom si modele documente
+      const reasonLine = m.deactivated_reason
+        ? `<div style="font-size:10px;color:var(--text3);margin-top:2px;font-weight:400">💡 ${m.deactivated_reason}${m.deactivated_doc ? ` <span style="color:#0ea5e9">(voir ${m.deactivated_doc})</span>` : ''}</div>`
+        : '';
       return `
       <tr style="border-bottom:1px solid var(--border)" title="${sevLabel(m.severity)}">
-        <td style="padding:8px 10px;font-weight:600">${sevIcon(m.severity)} ${m.model_name}</td>
+        <td style="padding:8px 10px;font-weight:600">${sevIcon(m.severity)} ${m.model_name}${reasonLine}</td>
         <td style="padding:8px 10px;text-align:center"><span style="background:${m.priority===1?'#7c3aed':'#0ea5e9'};color:white;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:700">P${m.priority}</span></td>
         <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${recordsOdooCell}</td>
         <td style="padding:8px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmt(m.records_count_raya)}</td>
@@ -561,18 +580,28 @@ async function showIntegrity(btn){
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-shrink:0">
         <div>
           <h3 style="margin:0 0 4px 0">📊 Intégrité de la vectorisation</h3>
-          <div style="font-size:12px;color:var(--text3)">Tenant : <code>${d.tenant_id}</code> · Source : <code>${d.source}</code></div>
+          <div style="font-size:12px;color:var(--text3)">Tenant : <code>${d.tenant_id}</code> · Source : <code>${d.source}</code> · Intégrité globale : <span style="color:${overallColor};font-weight:700">${overallPct.toFixed(1)}%</span></div>
         </div>
         <button class="btn" id="integrity-close-btn" style="background:#ef4444;color:white;padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:700">✕ Fermer</button>
       </div>
+      ${renderVerdictBanner(d.verdict)}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px;flex-shrink:0">
-        <div style="background:var(--bg2);border:1px solid var(--border);padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">Modèles</div><div style="font-size:20px;font-weight:700">${ov.models_total}</div></div>
-        <div style="background:var(--bg2);border:1px solid #10b981;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">✅ OK ≥90%</div><div style="font-size:20px;font-weight:700;color:#10b981">${ov.models_ok}</div></div>
-        <div style="background:var(--bg2);border:1px solid #f59e0b;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">🟡 Limité</div><div style="font-size:20px;font-weight:700;color:#f59e0b">${ov.models_limited||0}</div></div>
-        <div style="background:var(--bg2);border:1px solid #6b7280;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">⚙️ Graph-only</div><div style="font-size:20px;font-weight:700;color:#6b7280">${ov.models_graph_only||0}</div></div>
-        <div style="background:var(--bg2);border:1px solid #dc2626;padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">🔴 Erreur</div><div style="font-size:20px;font-weight:700;color:#dc2626">${ov.models_critical}</div></div>
-        <div style="background:var(--bg2);border:1px solid var(--border);padding:10px;border-radius:8px"><div style="font-size:10px;color:var(--text3);text-transform:uppercase">⚪ Non scanné</div><div style="font-size:20px;font-weight:700;color:var(--text3)">${ov.models_unknown}</div></div>
-        <div style="background:var(--bg2);border:1px solid ${overallColor};padding:10px;border-radius:8px;grid-column:span 2"><div style="font-size:10px;color:var(--text3);text-transform:uppercase" title="Calcul sur les modèles vectorisables hors limités/graph-only">Intégrité globale</div><div style="font-size:20px;font-weight:700;color:${overallColor}">${overallPct.toFixed(1)}%</div><div style="font-size:11px;color:var(--text3)">${ov.total_records_raya.toLocaleString('fr-FR')} / ${ov.total_records_odoo.toLocaleString('fr-FR')} records</div></div>
+        ${renderMetricCard('📦','Modèles total',ov.models_total,'#64748b',
+          'Nombre total de modèles Odoo suivis pour le tenant.')}
+        ${renderMetricCard('✅','OK (≥90%)',ov.models_ok,'#10b981',
+          'Modèles dont au moins 90% des records Odoo sont vectorisés côté Raya. État nominal.')}
+        ${renderMetricCard('⚠️','Warning',ov.models_warning||0,'#f59e0b',
+          'Modèles partiellement vectorisés (entre 50% et 90%). Probablement un scan interrompu, relancer.')}
+        ${renderMetricCard('🔴','Critique',ov.models_critical||0,ov.models_critical?'#dc2626':'#64748b',
+          'Modèles sous 50% de vectorisation QUI NE SONT PAS documentés comme suspens. Ce sont de vraies erreurs à investiguer.')}
+        ${renderMetricCard('🟡','Cap volontaire',ov.models_limited||0,'#f59e0b',
+          'Modèles plafonnés intentionnellement via MODEL_RECORD_LIMITS (ex: product.template à 5000). Pas une erreur.')}
+        ${renderMetricCard('⚙️','Graph-only',ov.models_graph_only||0,'#6b7280',
+          'Modèles sans champs à vectoriser (juste des edges de graphe). Normal à 0 chunks.')}
+        ${renderMetricCard('🔐','Droits attendus',ov.models_pending_rights||0,'#0ea5e9',
+          'Modèles documentés en attente d ouverture de droits côté OpenFire (mail.message, account.payment.line, etc.). Sans impact sur le reste.')}
+        ${renderMetricCard('🚫','Désactivés',(ov.models_deactivated||0)+(ov.models_ignored||0),'#8b5cf6',
+          'Modèles volontairement désactivés (manifest cassé) ou ignorés (pas d usage métier).')}
       </div>
       <div style="flex:1;overflow:auto;border:1px solid var(--border);border-radius:8px">
         <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -590,7 +619,7 @@ async function showIntegrity(btn){
           <tbody>${rows}</tbody>
         </table>
       </div>
-      <div style="margin-top:8px;font-size:11px;color:var(--text3);flex-shrink:0">Chunks DB = nombre réel de chunks vectorisés en base (source de vérité live). Records Raya = comptage du dernier scan complet.</div>`;
+      <div style="margin-top:8px;font-size:11px;color:var(--text3);flex-shrink:0">Chunks DB = nombre réel de chunks vectorisés en base (source de vérité live). Records Raya = comptage du dernier scan complet. Les modèles avec 💡 sont documentés (en attente droits, désactivés, ignorés).</div>`;
     backdrop.appendChild(modal);
     document.body.appendChild(backdrop);
     const close = () => { backdrop.remove(); document.removeEventListener('keydown', onEsc); };
