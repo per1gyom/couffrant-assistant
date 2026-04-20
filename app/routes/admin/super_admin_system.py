@@ -1246,6 +1246,34 @@ def _summarize_connection_config(tool_type: str, config: dict) -> dict:
     return safe
 
 
+@router.post("/admin/audit/purge-gmail-legacy")
+def admin_audit_purge_gmail_legacy(
+    request: Request,
+    username: str = "guillaume",
+    _: dict = Depends(require_admin),
+):
+    """Supprime les entrees gmail_tokens legacy pour un username donne.
+    Ces tokens sont residus d une ancienne architecture (pre-tenant_connections).
+    Si l user a deja une connexion gmail dans tenant_connections, ces tokens
+    legacy sont obsoletes et peuvent etre purges sans risque."""
+    try:
+        from app.database import get_pg_conn
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "DELETE FROM gmail_tokens WHERE username = %s",
+                (username,),
+            )
+            deleted = cur.rowcount
+            conn.commit()
+        return {"status": "ok", "deleted": deleted,
+                "message": f"{deleted} token(s) gmail_tokens legacy supprime(s) pour user={username}."}
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
 def _compute_integrity_verdict(overall: dict, models: list) -> dict:
     """Verdict global pour le dashboard Integrite.
     Applique la meme grammaire que _compute_webhook_verdict.

@@ -192,7 +192,7 @@ async function addToolToUser(){
 
 // ─── CONNEXIONS V2 ───
 const connApiBase=()=>isAdminOrSuper()?'/admin':'/tenant';
-const TOOL_ICONS={'outlook':'📧','gmail':'✉️','drive':'📁','odoo':'🔧','teams':'💬','whatsapp':'📱','microsoft':'🔵','google':'🟢'};
+const TOOL_ICONS={'outlook':'📧','gmail':'✉️','drive':'🗂️','odoo':'🔧','teams':'💬','whatsapp':'📱','microsoft':'🟦','google':'🟢'};
 
 function showAddConnection(tenantId,idx){document.getElementById('conn-add-'+idx).style.display='block';}
 
@@ -214,17 +214,28 @@ function _ddMenu(summaryColor, summaryLabel, items){
 }
 
 function renderMicrosoftActions(tenantId, connId){
-  // Phase D (Drive SharePoint) - 20/04/2026.
-  // Dropdown 🚀 Drive avec Scanner incremental + Force rescan + Etat.
-  const driveMenu = _ddMenu('#2563eb', '🚀 Drive', [
+  // Refonte 20/04 soir : la ligne microsoft ne porte PLUS les boutons Drive.
+  // Ces boutons ont ete deplaces sur la ligne 'drive' (SharePoint Commun)
+  // car c est semantiquement la que se trouve le SharePoint vectorise
+  // (scope tenant partage, pas scope user individuel).
+  // La ligne microsoft reste utile uniquement pour detenir les tokens
+  // OAuth du user (Outlook / OneDrive / SharePoint acces personnel).
+  return '';
+}
+
+function renderDriveActions(tenantId, connId){
+  // Nouveau 20/04 soir : boutons associes a la connexion 'drive' =
+  // SharePoint commun au tenant. Scope tenant, pas user.
+  const driveMenu = _ddMenu('#2563eb', '🗂️ Scanner SharePoint', [
     _ddItem('scanDriveStart(this, false)', '🚀 Scanner (incremental)',
-      'Scanne le dossier SharePoint. Skip les fichiers deja a jour, retraite les nouveaux / modifies / en erreur. Rapide apres un 1er scan complet.'),
+      'Scanne le dossier SharePoint configure. Skip les fichiers deja a jour, retraite les nouveaux / modifies / en erreur.'),
     _ddItem('scanDriveStart(this, true)', '♻️ Rescan complet (tous fichiers)',
-      'Retraite TOUS les fichiers meme deja OK. A utiliser apres correction majeure de la logique d extraction. Coute plus cher (re-embeddings).'),
+      'Retraite TOUS les fichiers meme deja OK. A utiliser apres correction majeure de la logique d extraction.'),
     _ddItem('scanDriveStatus(this)', '📊 Etat du dernier scan',
-      'Affiche le resultat du dernier scan Drive : fichiers traites, chunks crees, erreurs.'),
+      'Affiche le resultat du dernier scan : fichiers traites, chunks crees, erreurs.'),
   ]);
-  return `${driveMenu}`;
+  const auditBtn = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#8b5cf6;color:white;font-weight:600" onclick="showAudit(this)" title="Audit des connexions (doublons, emails croises) + arborescence SharePoint scannee niveaux 1 et 2">🔎 Audit</button>`;
+  return `${driveMenu} ${auditBtn}`;
 }
 
 function renderOdooActions(tenantId, connId){
@@ -242,11 +253,10 @@ function renderOdooActions(tenantId, connId){
     `<div style="height:1px;background:#334155;margin:4px 0"></div>`,
     _ddItem('scanP1(this)', '⚠️ Scan P1 COMPLET (purge + rebuild)', 'DESTRUCTIF : purge tout puis re-vectorise les 16 modeles P1. 30-60 min.'),
   ]);
-  const integrite = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#10b981;color:white;font-weight:600" onclick="showIntegrity(this)" title="Tableau d'integrite de la vectorisation par modele">📊 Intégrité</button>`;
+  const integrite = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#10b981;color:white;font-weight:600" onclick="showIntegrity(this)" title="Tableau d'integrite de la vectorisation par modele Odoo">📊 Intégrité</button>`;
   const webhooks = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#2563eb;color:white;font-weight:600" onclick="showWebhookStatus(this)" title="Dashboard temps-reel des webhooks Odoo : worker, queue, dedup, ronde de nuit">🔌 Webhooks</button>`;
-  const audit = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#8b5cf6;color:white;font-weight:600" onclick="showAudit(this)" title="Audit des connexions (doublons, emails croises) + arborescence Drive SharePoint scannee">🔎 Audit</button>`;
-  const stop = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#ef4444;color:white;font-weight:600" onclick="scanStop(this)" title="Arrete proprement le scan en cours (finit le modele actuel puis stop)">⏹️ Stop</button>`;
-  return `${setup} ${scanner} ${integrite} ${webhooks} ${audit} ${stop}`;
+  const stop = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#ef4444;color:white;font-weight:600" onclick="scanStop(this)" title="Arrete proprement le scan Odoo en cours (finit le modele actuel puis stop)">⏹️ Stop</button>`;
+  return `${setup} ${scanner} ${integrite} ${webhooks} ${stop}`;
 }
 
 // Fermer automatiquement les autres <details> quand on en ouvre un
@@ -285,8 +295,20 @@ async function loadConnections(tenantId,idx){
     }
 
     if(!conns.length){el.innerHTML='<span style="color:var(--text3)">Aucune connexion configurée.</span>';return;}
+    // Tooltips explicatifs par tool_type (refonte 20/04 soir)
+    // But : dire clairement a Guillaume/l admin a quoi sert chaque ligne
+    // de connexion (scope tenant vs scope user, role metier).
+    const TOOL_HELP = {
+      drive:     'SharePoint commun au tenant. Vectorisation au scope TENANT (1 fois pour toute la boite). Les users assignes peuvent questionner Raya sur ce contenu.',
+      microsoft: 'Compte Microsoft 365 d un user (tokens OAuth). Donne acces a SA boite Outlook, SON OneDrive, ET sert a alimenter le scanner SharePoint commun. Scope USER.',
+      outlook:   'Ligne de droits sur la boite Outlook du user. Les users assignes ici peuvent interroger Raya sur ces mails. Scope USER.',
+      gmail:     'Compte Gmail d un user. Les users assignes peuvent interroger Raya sur ces mails. Scope USER.',
+      odoo:      'Connexion API Odoo du tenant (aujourd hui 1 seule API key partagee). Scope TENANT. Le polling + la vectorisation se font avec cette cle. A terme : 1 API key par user pour tracabilite des actions.',
+    };
     el.innerHTML=conns.map(c=>{
       const icon=TOOL_ICONS[c.tool_type]||'🔌';
+      const helpText = TOOL_HELP[c.tool_type] || '';
+      const helpBadge = helpText ? `<span style="display:inline-block;width:14px;height:14px;border-radius:50%;background:var(--bg2);border:1px solid var(--border);text-align:center;font-size:9px;line-height:13px;color:var(--text3);cursor:help;margin-left:4px;vertical-align:middle" title="${helpText.replace(/"/g,'&quot;')}">?</span>` : '';
       const statusBadge=c.status==='connected'
         ?`<span class="badge badge-green" style="font-size:9px">✅ ${c.connected_email||'connecté'}</span>`
         :c.status==='expired'
@@ -308,10 +330,11 @@ async function loadConnections(tenantId,idx){
       return `<div style="padding:8px 12px;background:var(--bg1);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <span style="font-size:16px">${icon}</span>
-          <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px;cursor:pointer;border-bottom:1px dashed var(--text3)" onclick="renameConn(${c.id},'${tenantId}',${idx},'${c.label.replace(/'/g,"\\'")}')" title="Cliquer pour renommer">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span> ${statusBadge}</div>
+          <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px;cursor:pointer;border-bottom:1px dashed var(--text3)" onclick="renameConn(${c.id},'${tenantId}',${idx},'${c.label.replace(/'/g,"\\'")}')" title="Cliquer pour renommer">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span>${helpBadge} ${statusBadge}</div>
           ${oauthBtn}
           ${['microsoft','gmail'].includes(c.tool_type)?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px" onclick="discoverTool('${tenantId}','${c.tool_type}',this)">🔍 Découvrir</button>`:''}
           ${c.tool_type==='microsoft'?renderMicrosoftActions(tenantId, c.id):''}
+          ${c.tool_type==='drive'?renderDriveActions(tenantId, c.id):''}
           ${c.tool_type==='odoo'?renderOdooActions(tenantId, c.id):''}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
           <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
@@ -2211,7 +2234,10 @@ async function showAudit(btn){
     const gmTokens = d.gmail_tokens_legacy || [];
     const gmBlock = gmTokens.length
       ? `<div style="background:#78350f;border:1px dashed #f59e0b;border-radius:8px;padding:10px;margin-bottom:10px;color:#fef3c7;font-size:11px">
-           <div style="font-weight:700;margin-bottom:4px">📦 ${gmTokens.length} token(s) gmail_tokens (ancienne architecture)</div>
+           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+             <div style="font-weight:700">📦 ${gmTokens.length} token(s) gmail_tokens (ancienne architecture)</div>
+             <button id="audit-purge-gmail-btn" style="background:#f59e0b;color:#1e293b;padding:4px 10px;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:11px" title="Supprime les tokens gmail_tokens legacy pour le user guillaume. Sans risque si une connexion gmail existe deja dans tenant_connections.">🧹 Purger les tokens legacy</button>
+           </div>
            ${gmTokens.map(t => `<div style="margin:2px 0">• user <code>${t.username}</code> — email <code>${t.email}</code> — maj ${(t.updated_at||'').substring(0,16)}</div>`).join('')}
            <div style="font-size:10px;margin-top:4px;opacity:0.8">💡 Ces entrees viennent d une ancienne architecture. Si le user utilise deja tenant_connections, ces tokens sont potentiellement obsoletes.</div>
          </div>`
@@ -2315,6 +2341,31 @@ async function showAudit(btn){
     const close = () => backdrop.remove();
     backdrop.addEventListener('click', e => { if(e.target === backdrop) close(); });
     document.getElementById('audit-close').onclick = close;
+    const purgeBtn = document.getElementById('audit-purge-gmail-btn');
+    if(purgeBtn){
+      purgeBtn.onclick = async () => {
+        const ok = await confirmAction(
+          '🧹 Purger les tokens gmail_tokens legacy ?',
+          'Cette operation supprime les entrees obsoletes de l ancienne archi.\n\n' +
+          'Sans risque : ta connexion Gmail actuelle (tenant_connections #4) reste intacte.',
+          'Oui, purger', 'Annuler'
+        );
+        if(!ok) return;
+        purgeBtn.disabled = true;
+        purgeBtn.innerHTML = '⏳...';
+        try{
+          const res = await fetch('/admin/audit/purge-gmail-legacy?username=guillaume', {method:'POST'});
+          const pd = await res.json();
+          if(pd.status !== 'ok') throw new Error(pd.message || 'Echec');
+          setAlert('companies-alert', '🧹 '+pd.message+' Re-clique sur 🔎 Audit pour rafraichir.', 'ok');
+          close();
+        }catch(e){
+          setAlert('companies-alert', '❌ Purge echouee : '+e.message, 'err');
+          purgeBtn.disabled = false;
+          purgeBtn.innerHTML = '🧹 Purger';
+        }
+      };
+    }
   }catch(e){
     setAlert('companies-alert', '❌ Audit echoue : '+e.message, 'err');
   }finally{

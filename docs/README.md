@@ -33,8 +33,10 @@ Les documents historiques (roadmaps v1/v2, spécifications remplacées, livrable
 
 | Document | Statut |
 |---|---|
+| `architecture_connexions.md` | 📐 Modèle mental de référence pour toute source de données |
 | `odoo_integration_etat_actuel.md` | ✅ Polling en place (1-2 min latence) |
 | `audit_drive_sharepoint_20avril.md` | ✅ Scan initial réussi (3252/3492 fichiers), plan Drive complet |
+| `guide_configuration_shared_mailbox.md` | 📋 Guide pour toi : configurer `contact@couffrant-solar.fr` en shared mailbox M365 |
 | `raya_couche5_apprentissage_permanent.md` | 💭 Idée capturée, implémentation à venir |
 | `raya_scanner_suspens.md` | 🔗 Suspens techniques par modèle Odoo (droits manquants, etc.) |
 
