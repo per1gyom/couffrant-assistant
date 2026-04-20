@@ -759,17 +759,37 @@ def _dense_search_conversation(
 def _odoo_to_unified(raw_results: list) -> list:
     """Convertit les résultats de _dense_search / _sparse_search (format
     historique Odoo) vers le format unifié utilisé par unified_search.
-    Évite de dupliquer les fonctions SQL existantes."""
+    Évite de dupliquer les fonctions SQL existantes.
+
+    IMPORTANT : extrait le VRAI NOM (personne, devis, event...) depuis
+    text_content pour le mettre en display_label. Sinon Opus ne le voit
+    qu'en 2e ligne et peut halluciner les prenoms (bug Legroux 21/04)."""
     unified = []
     for r in raw_results:
+        # Extraction du nom propre depuis text_content :
+        # - Partner : "Arrault Legroux — à Saint-Pryvé..." -> "Arrault Legroux"
+        # - Order   : "D2500225 — pour Arrault Legroux..." -> "D2500225 — pour Arrault Legroux"
+        # - Event   : "LEGROUX Jean-Bernard 45750... — le 2026-03-23" -> tronqué
+        # - Lead    : "2406 - PV pro - LEGROUX — SARL DES MOINES..." -> tronqué
+        text = r.get("text_content", "") or ""
+        # Couper a la premiere virgule OU au 2e tiret OU 100 caracteres
+        first_segment = text.split(" — ", 2)
+        if len(first_segment) >= 2:
+            # Garder les 2 premiers segments (ex: "D2500225 — pour Arrault Legroux")
+            real_label = (first_segment[0] + " — " + first_segment[1])[:140]
+        else:
+            real_label = text[:140]
+        real_label = real_label.strip() or r.get("content_type", "record")
+
         unified.append({
             "id": f"odoo-{r['id']}",
             "source": "odoo",
             "source_key": f"{r['source_model']}#{r['source_record_id']}",
             "source_model": r["source_model"],
             "source_record_id": r["source_record_id"],
-            "display_label": r.get("content_type", "record"),
-            "display_meta": r.get("source_model", ""),
+            "display_label": real_label,
+            "display_meta": f"{r.get('source_model', '')} #{r.get('source_record_id', '')}",
+            "content_type": r.get("content_type", ""),
             "text_content": r.get("text_content", ""),
             "metadata": r.get("metadata") or {},
             "related_partner_id": r.get("related_partner_id"),
@@ -1017,11 +1037,14 @@ def format_unified_results(data: dict, max_items: int = 15) -> str:
         if len(text) > 300:
             text = text[:297] + "..."
 
-        header = f"{idx}. {icon} [{src}] {label}"
+        # Header EVIDENT avec le vrai nom : aide Opus a ne pas halluciner
+        # les noms propres (bug Legroux 21/04 : 'Christiane' inventee).
+        header = f"{idx}. {icon} {label}"
         if meta:
-            header += f"  ·  {meta}"
+            header += f"  [{meta}]"
         lines.append(header)
-        if text:
+        # Afficher text_content seulement si different du label (sinon redondant)
+        if text and text[:100] != label[:100]:
             lines.append(f"   {text}")
 
         # Scores pour diagnostic (debug)
