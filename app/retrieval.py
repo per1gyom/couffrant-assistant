@@ -510,3 +510,547 @@ def format_search_results(data: dict, max_items: int = 10) -> str:
         lines.append("")
 
     return "\n".join(lines)
+
+
+
+# ═══════════════════════════════════════════════════════════════
+# UNIFIED SEARCH MULTI-SOURCE (étape A, 20/04/2026 nuit)
+#
+# Recherche unifiée sur TOUTES les mémoires de Raya en parallèle :
+#   - odoo_semantic_content (ERP : clients, devis, factures, events...)
+#   - drive_semantic_content (SharePoint : fichiers, photos, PDF...)
+#   - mail_memory (emails analysés Outlook/Gmail)
+#   - aria_memory (historique conversations Raya)
+#
+# Principe architectural (voir docs/vision_architecture_raya.md) :
+#   - 4 requêtes Postgres en parallèle via ThreadPoolExecutor
+#   - Chaque table garde ses index optimaux (HNSW + GIN où dispo)
+#   - Fusion RRF unifiée, reranking Cohere sur l'union
+#   - Chaque résultat tagué avec sa source pour traçabilité
+#   - Rétrocompatibilité : hybrid_search(...) continue de fonctionner
+#
+# Ce bloc ne remplace PAS hybrid_search. Il ajoute unified_search() en
+# parallèle. Branché manuellement côté prompt après validation.
+# ═══════════════════════════════════════════════════════════════
+
+
+# ─── DRIVE : DENSE ─────────────────────────────────────────────
+
+def _dense_search_drive(
+    tenant_id: str,
+    query_embedding: list,
+    limit: int = HYBRID_TOP_N,
+) -> list:
+    """Recherche pgvector cosine sur drive_semantic_content.
+    Retourne les nœuds level 1 (méta) et level 2 (chunks détail) ensemble.
+    Le reranking gèrera le choix final."""
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        vec_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+        c.execute("""
+            SELECT id, file_id, file_name, file_path, web_url, file_ext,
+                   level, chunk_index, text_content, metadata, mime_type,
+                   1 - (embedding <=> %s::vector) AS similarity
+            FROM drive_semantic_content
+            WHERE tenant_id = %s
+              AND embedding IS NOT NULL
+              AND deleted_at IS NULL
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s
+        """, (vec_str, tenant_id, vec_str, limit))
+        results = []
+        for idx, row in enumerate(c.fetchall()):
+            results.append({
+                "id": f"drive-{row[0]}",
+                "source": "drive",
+                "source_key": row[1],
+                "display_label": row[2],
+                "display_meta": row[3] or "",
+                "web_url": row[4],
+                "file_ext": row[5],
+                "level": row[6],
+                "chunk_index": row[7],
+                "text_content": row[8],
+                "metadata": row[9] or {},
+                "mime_type": row[10],
+                "similarity": float(row[11]),
+                "dense_rank": idx + 1,
+            })
+        return results
+    except Exception as e:
+        logger.warning("[UnifiedRetrieval] dense_drive échoué : %s", str(e)[:200])
+        return []
+    finally:
+        if conn: conn.close()
+
+
+# ─── DRIVE : SPARSE (BM25 via tsvector) ────────────────────────
+
+def _sparse_search_drive(
+    tenant_id: str,
+    query_text: str,
+    limit: int = HYBRID_TOP_N,
+) -> list:
+    """Recherche BM25 sur drive_semantic_content.content_tsv.
+    Capte les noms de fichiers exacts, références produit dans les docs,
+    etc. Même logique que _sparse_search Odoo : french + simple fusionnés."""
+    if not query_text or not query_text.strip():
+        return []
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        q = query_text.strip()
+        c.execute("""
+            SELECT id, file_id, file_name, file_path, web_url, file_ext,
+                   level, chunk_index, text_content, metadata, mime_type,
+                   ts_rank_cd(content_tsv,
+                              plainto_tsquery('french', %s)
+                              || plainto_tsquery('simple', %s)) AS rank_score
+            FROM drive_semantic_content
+            WHERE tenant_id = %s
+              AND deleted_at IS NULL
+              AND content_tsv @@ (plainto_tsquery('french', %s)
+                                  || plainto_tsquery('simple', %s))
+            ORDER BY rank_score DESC
+            LIMIT %s
+        """, (q, q, tenant_id, q, q, limit))
+        results = []
+        for idx, row in enumerate(c.fetchall()):
+            results.append({
+                "id": f"drive-{row[0]}",
+                "source": "drive",
+                "source_key": row[1],
+                "display_label": row[2],
+                "display_meta": row[3] or "",
+                "web_url": row[4],
+                "file_ext": row[5],
+                "level": row[6],
+                "chunk_index": row[7],
+                "text_content": row[8],
+                "metadata": row[9] or {},
+                "mime_type": row[10],
+                "bm25_score": float(row[11]),
+                "sparse_rank": idx + 1,
+            })
+        return results
+    except Exception as e:
+        logger.warning("[UnifiedRetrieval] sparse_drive échoué : %s", str(e)[:200])
+        return []
+    finally:
+        if conn: conn.close()
+
+
+# ─── MAIL : DENSE (pas de tsvector, dense uniquement) ──────────
+
+def _dense_search_mail(
+    tenant_id: str,
+    username: str,
+    query_embedding: list,
+    limit: int = HYBRID_TOP_N,
+) -> list:
+    """Recherche pgvector sur mail_memory.
+    Scope : tenant_id + username (mails scopés par utilisateur).
+    text_content reconstruit = subject + short_summary + raw_body_preview
+    pour que Cohere ait du contexte riche au reranking."""
+    if not username:
+        return []
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        vec_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+        c.execute("""
+            SELECT id, message_id, thread_id, from_email, subject,
+                   short_summary, raw_body_preview, received_at,
+                   category, mailbox_source, display_title,
+                   1 - (embedding <=> %s::vector) AS similarity
+            FROM mail_memory
+            WHERE tenant_id = %s AND username = %s
+              AND embedding IS NOT NULL
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s
+        """, (vec_str, tenant_id, username, vec_str, limit))
+        results = []
+        for idx, row in enumerate(c.fetchall()):
+            subject = row[4] or ""
+            summary = row[5] or ""
+            preview = (row[6] or "")[:500]
+            text_full = "\n".join([t for t in [subject, summary, preview] if t])
+            results.append({
+                "id": f"mail-{row[0]}",
+                "source": "mail",
+                "source_key": row[1],  # message_id
+                "display_label": row[10] or subject or "(sans objet)",
+                "display_meta": f"de {row[3]} · {row[7] or ''}",
+                "text_content": text_full,
+                "metadata": {
+                    "thread_id": row[2], "from_email": row[3],
+                    "category": row[8], "mailbox": row[9],
+                },
+                "similarity": float(row[11]),
+                "dense_rank": idx + 1,
+            })
+        return results
+    except Exception as e:
+        logger.warning("[UnifiedRetrieval] dense_mail échoué : %s", str(e)[:200])
+        return []
+    finally:
+        if conn: conn.close()
+
+
+# ─── CONVERSATION : DENSE (aria_memory) ────────────────────────
+
+def _dense_search_conversation(
+    tenant_id: str,
+    username: str,
+    query_embedding: list,
+    limit: int = HYBRID_TOP_N,
+) -> list:
+    """Recherche pgvector sur aria_memory (historique conversations).
+    Scope : tenant_id + username. text_content = user_input + aria_response
+    pour capter les deux côtés d'un échange."""
+    if not username:
+        return []
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        vec_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+        c.execute("""
+            SELECT id, user_input, aria_response, created_at,
+                   1 - (embedding <=> %s::vector) AS similarity
+            FROM aria_memory
+            WHERE tenant_id = %s AND username = %s
+              AND embedding IS NOT NULL
+            ORDER BY embedding <=> %s::vector
+            LIMIT %s
+        """, (vec_str, tenant_id, username, vec_str, limit))
+        results = []
+        for idx, row in enumerate(c.fetchall()):
+            user_q = (row[1] or "")[:200]
+            response = (row[2] or "")[:500]
+            text_full = f"Q: {user_q}\nR: {response}"
+            # Label court = premiers mots de la question
+            label = user_q[:80] + ("..." if len(user_q) > 80 else "")
+            results.append({
+                "id": f"conv-{row[0]}",
+                "source": "conversation",
+                "source_key": str(row[0]),
+                "display_label": label or "(échange ancien)",
+                "display_meta": str(row[3]) if row[3] else "",
+                "text_content": text_full,
+                "metadata": {"created_at": str(row[3]) if row[3] else None},
+                "similarity": float(row[4]),
+                "dense_rank": idx + 1,
+            })
+        return results
+    except Exception as e:
+        logger.warning("[UnifiedRetrieval] dense_conversation échoué : %s", str(e)[:200])
+        return []
+    finally:
+        if conn: conn.close()
+
+
+# ─── ODOO : ADAPTATEURS AU FORMAT UNIFIÉ ───────────────────────
+
+def _odoo_to_unified(raw_results: list) -> list:
+    """Convertit les résultats de _dense_search / _sparse_search (format
+    historique Odoo) vers le format unifié utilisé par unified_search.
+    Évite de dupliquer les fonctions SQL existantes."""
+    unified = []
+    for r in raw_results:
+        unified.append({
+            "id": f"odoo-{r['id']}",
+            "source": "odoo",
+            "source_key": f"{r['source_model']}#{r['source_record_id']}",
+            "source_model": r["source_model"],
+            "source_record_id": r["source_record_id"],
+            "display_label": r.get("content_type", "record"),
+            "display_meta": r.get("source_model", ""),
+            "text_content": r.get("text_content", ""),
+            "metadata": r.get("metadata") or {},
+            "related_partner_id": r.get("related_partner_id"),
+            "similarity": r.get("similarity"),
+            "bm25_score": r.get("bm25_score"),
+            "dense_rank": r.get("dense_rank"),
+            "sparse_rank": r.get("sparse_rank"),
+        })
+    return unified
+
+
+# ─── FUSION RRF MULTI-SOURCE ───────────────────────────────────
+
+def _rrf_multi_source(dense_lists: list, sparse_lists: list,
+                     k: int = RRF_K) -> list:
+    """RRF étendu pour N listes dense + M listes sparse.
+    Chaque liste a son propre classement (rank 1 = top de SA source).
+    Le score final est la somme des 1/(k+rank) sur toutes les listes.
+    Les résultats qui apparaissent dans plusieurs listes remontent naturellement.
+    Déduplication par id unique (préfixé par source : odoo-xxx, drive-xxx...)."""
+    scores = {}  # id -> accumulateur
+    for lst in dense_lists:
+        for res in lst:
+            rid = res["id"]
+            rank = res.get("dense_rank", len(lst) + 1)
+            if rid not in scores:
+                scores[rid] = {"score": 0.0, "doc": res,
+                               "dense_ranks": [], "sparse_ranks": []}
+            scores[rid]["score"] += 1.0 / (k + rank)
+            scores[rid]["dense_ranks"].append(rank)
+    for lst in sparse_lists:
+        for res in lst:
+            rid = res["id"]
+            rank = res.get("sparse_rank", len(lst) + 1)
+            if rid not in scores:
+                scores[rid] = {"score": 0.0, "doc": res,
+                               "dense_ranks": [], "sparse_ranks": []}
+            scores[rid]["score"] += 1.0 / (k + rank)
+            scores[rid]["sparse_ranks"].append(rank)
+    sorted_items = sorted(scores.values(), key=lambda x: x["score"], reverse=True)
+    fused = []
+    for item in sorted_items:
+        doc = dict(item["doc"])
+        doc["rrf_score"] = item["score"]
+        doc["dense_ranks"] = item["dense_ranks"]
+        doc["sparse_ranks"] = item["sparse_ranks"]
+        fused.append(doc)
+    return fused
+
+
+# ─── FONCTION PRINCIPALE UNIFIED SEARCH ────────────────────────
+
+UNIFIED_FINAL_TOP_K = 15  # Plus large que FINAL_TOP_K=10 car union de 4 sources
+
+
+def unified_search(
+    query: str,
+    tenant_id: str,
+    username: Optional[str] = None,
+    sources: Optional[list] = None,
+    top_n_fusion: int = HYBRID_TOP_N,
+    top_k_final: int = UNIFIED_FINAL_TOP_K,
+    use_rerank: bool = True,
+    enrich_graph: bool = True,
+) -> dict:
+    """Recherche multi-source parallèle sur toutes les mémoires de Raya.
+
+    Args:
+      query: question utilisateur en langage naturel
+      tenant_id: tenant scope (isolation multi-tenant)
+      username: requis pour inclure mail_memory et aria_memory
+      sources: liste de sources à inclure (défaut : toutes selon contexte)
+          Valeurs possibles : ['odoo', 'drive', 'mail', 'conversation']
+      top_n_fusion: candidats par source avant RRF
+      top_k_final: résultats finaux après rerank
+      use_rerank: activer le reranking Cohere
+      enrich_graph: ajouter les nœuds voisins du graphe aux résultats Odoo
+
+    Retourne un dict avec results (liste unifiée) + stats par source.
+    """
+    from app.embedding import embed, is_available as embed_available
+    from concurrent.futures import ThreadPoolExecutor
+
+    # Sources effectives : toutes par défaut, mail/conversation skip si pas de username
+    if sources is None:
+        sources = ["odoo", "drive"]
+        if username:
+            sources.extend(["mail", "conversation"])
+    sources = set(sources)
+
+    stats = {
+        "sources_queried": sorted(sources),
+        "per_source_dense": {}, "per_source_sparse": {},
+        "fused_count": 0, "final_count": 0,
+        "embedding_available": embed_available(),
+        "rerank_used": False,
+    }
+
+    if not query or not query.strip():
+        return {"query": query, "tenant_id": tenant_id, "results": [], "stats": stats}
+
+    # 1 seul embedding de la question, réutilisé sur toutes les sources
+    query_vec = embed(query) if stats["embedding_available"] else None
+
+    # ─ Étage 1 : exécution parallèle de toutes les recherches ─
+    dense_lists = []
+    sparse_lists = []
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {}
+        if "odoo" in sources:
+            # Sparse Odoo (toujours possible, pas besoin d'embedding)
+            futures["sp_odoo"] = executor.submit(
+                _sparse_search, tenant_id, query, top_n_fusion, None)
+            if query_vec:
+                futures["dn_odoo"] = executor.submit(
+                    _dense_search, tenant_id, query_vec, top_n_fusion, None)
+        if "drive" in sources:
+            futures["sp_drive"] = executor.submit(
+                _sparse_search_drive, tenant_id, query, top_n_fusion)
+            if query_vec:
+                futures["dn_drive"] = executor.submit(
+                    _dense_search_drive, tenant_id, query_vec, top_n_fusion)
+        if "mail" in sources and query_vec and username:
+            futures["dn_mail"] = executor.submit(
+                _dense_search_mail, tenant_id, username, query_vec, top_n_fusion)
+        if "conversation" in sources and query_vec and username:
+            futures["dn_conv"] = executor.submit(
+                _dense_search_conversation, tenant_id, username, query_vec, top_n_fusion)
+
+        # Récupération résultats (wait up to 8s par source)
+        results_by_key = {}
+        for key, fut in futures.items():
+            try:
+                results_by_key[key] = fut.result(timeout=8)
+            except Exception as e:
+                logger.warning("[UnifiedRetrieval] %s timeout/erreur : %s",
+                               key, str(e)[:150])
+                results_by_key[key] = []
+
+    # Normaliser Odoo au format unifié + alimenter dense/sparse lists
+    if "dn_odoo" in results_by_key:
+        raw = results_by_key["dn_odoo"]
+        stats["per_source_dense"]["odoo"] = len(raw)
+        dense_lists.append(_odoo_to_unified(raw))
+    if "sp_odoo" in results_by_key:
+        raw = results_by_key["sp_odoo"]
+        stats["per_source_sparse"]["odoo"] = len(raw)
+        sparse_lists.append(_odoo_to_unified(raw))
+    if "dn_drive" in results_by_key:
+        stats["per_source_dense"]["drive"] = len(results_by_key["dn_drive"])
+        dense_lists.append(results_by_key["dn_drive"])
+    if "sp_drive" in results_by_key:
+        stats["per_source_sparse"]["drive"] = len(results_by_key["sp_drive"])
+        sparse_lists.append(results_by_key["sp_drive"])
+    if "dn_mail" in results_by_key:
+        stats["per_source_dense"]["mail"] = len(results_by_key["dn_mail"])
+        dense_lists.append(results_by_key["dn_mail"])
+    if "dn_conv" in results_by_key:
+        stats["per_source_dense"]["conversation"] = len(results_by_key["dn_conv"])
+        dense_lists.append(results_by_key["dn_conv"])
+
+
+    # ─ Étage 2 : fusion RRF multi-source ─
+    fused = _rrf_multi_source(dense_lists, sparse_lists, k=RRF_K)
+    stats["fused_count"] = len(fused)
+
+    # Tronquer à top_n_fusion pour limiter l'envoi à Cohere
+    candidates = fused[:top_n_fusion]
+
+    # ─ Étage 3 : reranking Cohere sur l'union ─
+    if use_rerank and candidates:
+        reranked = _rerank_with_cohere(query, candidates, top_k=top_k_final)
+        stats["rerank_used"] = any("rerank_score" in r for r in reranked)
+        results = reranked
+    else:
+        results = candidates[:top_k_final]
+    stats["final_count"] = len(results)
+
+    # ─ Étage 4 : enrichissement graphe (Odoo pour l'instant, drive en commit 2) ─
+    if enrich_graph and results:
+        # On ne peut enrich que les résultats Odoo tant que drive/mail/conv
+        # ne sont pas dans le graphe (commits 2 et 5 à venir). On sépare pour
+        # ne pas polluer les résultats non-Odoo avec des related_nodes vides.
+        odoo_results = [r for r in results if r.get("source") == "odoo"]
+        other_results = [r for r in results if r.get("source") != "odoo"]
+        if odoo_results:
+            # Adapter au format attendu par _enrich_with_graph (avec source_model
+            # + source_record_id exposés à la racine, ce qu'_odoo_to_unified fait)
+            enriched = _enrich_with_graph(tenant_id, odoo_results,
+                                          max_hops=GRAPH_MAX_HOPS)
+            # Re-fusionner en conservant l'ordre du rerank
+            enriched_by_id = {r["id"]: r for r in enriched}
+            results = [enriched_by_id.get(r["id"], r) for r in results]
+
+    return {
+        "query": query,
+        "tenant_id": tenant_id,
+        "username": username,
+        "results": results,
+        "stats": stats,
+    }
+
+
+# ─── FORMATAGE DES RÉSULTATS UNIFIÉS ───────────────────────────
+
+def format_unified_results(data: dict, max_items: int = 15) -> str:
+    """Formate les résultats unified_search en texte pour Raya.
+    Chaque entrée porte un icône par source + son display_label + meta."""
+    if not data or not data.get("results"):
+        stats = data.get("stats") if data else {}
+        if stats and not stats.get("embedding_available"):
+            return "⚠️ Recherche sémantique indisponible (OPENAI_API_KEY manquant)."
+        return "🔍 Aucun résultat trouvé pour cette requête."
+
+    results = data["results"][:max_items]
+    stats = data.get("stats", {})
+    query = data.get("query", "")
+
+    src_stats = []
+    for src in stats.get("sources_queried", []):
+        dense = stats.get("per_source_dense", {}).get(src, 0)
+        sparse = stats.get("per_source_sparse", {}).get(src, 0)
+        parts = []
+        if dense: parts.append(f"d={dense}")
+        if sparse: parts.append(f"s={sparse}")
+        if parts: src_stats.append(f"{src}:{'/'.join(parts)}")
+
+    lines = [f"🔍 Recherche multi-source : '{query}'"]
+    lines.append(f"({stats.get('final_count', 0)} résultats · "
+                 f"{', '.join(src_stats) if src_stats else 'aucune source'}"
+                 f"{' · reranké' if stats.get('rerank_used') else ''})")
+    lines.append("")
+
+    icon_by_source = {
+        "odoo": "📋", "drive": "📁", "mail": "📧", "conversation": "💬"
+    }
+
+    for idx, r in enumerate(results, 1):
+        src = r.get("source", "?")
+        icon = icon_by_source.get(src, "•")
+        label = r.get("display_label") or "(sans titre)"
+        meta = r.get("display_meta") or ""
+        text = (r.get("text_content") or "").strip()
+        if len(text) > 300:
+            text = text[:297] + "..."
+
+        header = f"{idx}. {icon} [{src}] {label}"
+        if meta:
+            header += f"  ·  {meta}"
+        lines.append(header)
+        if text:
+            lines.append(f"   {text}")
+
+        # Scores pour diagnostic (debug)
+        score_bits = []
+        if r.get("rerank_score") is not None:
+            score_bits.append(f"rerank={r['rerank_score']:.3f}")
+        elif r.get("rrf_score") is not None:
+            score_bits.append(f"rrf={r['rrf_score']:.4f}")
+        if score_bits:
+            lines.append(f"   ({' · '.join(score_bits)})")
+
+        # Contexte graphe (uniquement pour Odoo aujourd'hui)
+        related = r.get("related_nodes") or []
+        if related:
+            by_type = {}
+            for n in related:
+                by_type.setdefault(n["type"], []).append(n["label"] or "?")
+            ctx_parts = []
+            for t, labels in by_type.items():
+                shown = ", ".join(labels[:3])
+                if len(labels) > 3:
+                    shown += f" +{len(labels)-3}"
+                ctx_parts.append(f"{t}: {shown}")
+            lines.append(f"   🔗 {' · '.join(ctx_parts)}")
+
+        # Lien direct si Drive
+        if src == "drive" and r.get("web_url"):
+            lines.append(f"   🔗 {r['web_url']}")
+
+        lines.append("")
+
+    return "\n".join(lines)

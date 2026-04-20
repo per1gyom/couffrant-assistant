@@ -1953,3 +1953,72 @@ def admin_test_semantic_search(
         import traceback
         return {"status": "error", "message": str(e)[:300],
                 "trace": traceback.format_exc()[:1500]}
+
+
+
+@router.get("/admin/unified-search/test")
+def admin_test_unified_search(
+    request: Request,
+    q: str,
+    sources: Optional[str] = None,
+    limit: int = 15,
+    use_rerank: bool = True,
+    enrich_graph: bool = True,
+    _: dict = Depends(require_admin),
+):
+    """Teste le pipeline unified_search multi-source (Odoo + Drive + mail + aria).
+    Contrairement à /admin/odoo/test-search, celui-ci balaie toutes les memoires
+    de Raya en parallele via ThreadPoolExecutor, fusionne par RRF, rerank Cohere.
+
+    Exemple : GET /admin/unified-search/test?q=Legroux+onduleur&sources=odoo,drive
+    GET /admin/unified-search/test?q=chantier+AZEM (toutes sources par defaut)
+    """
+    try:
+        from app.tenant_manager import get_user_tenants
+        from app.retrieval import unified_search
+        username = request.session.get("username", "")
+        tenants = get_user_tenants(username)
+        tenant_id = tenants[0] if tenants else "couffrant_solar"
+
+        sources_list = None
+        if sources:
+            sources_list = [s.strip() for s in sources.split(',') if s.strip()]
+
+        result = unified_search(
+            query=q,
+            tenant_id=tenant_id,
+            username=username,
+            sources=sources_list,
+            top_k_final=min(limit, 30),
+            use_rerank=use_rerank,
+            enrich_graph=enrich_graph,
+        )
+
+        compact_results = []
+        for r in result.get("results", []):
+            compact_results.append({
+                "source": r.get("source"),
+                "source_key": r.get("source_key"),
+                "display_label": r.get("display_label"),
+                "display_meta": r.get("display_meta"),
+                "text_preview": (r.get("text_content") or "")[:250],
+                "web_url": r.get("web_url"),
+                "rrf_score": r.get("rrf_score"),
+                "rerank_score": r.get("rerank_score"),
+                "dense_ranks": r.get("dense_ranks"),
+                "sparse_ranks": r.get("sparse_ranks"),
+                "related_nodes_count": len(r.get("related_nodes") or []),
+            })
+        return {
+            "status": "ok",
+            "query": q,
+            "sources_requested": sources_list,
+            "tenant_id": tenant_id,
+            "username": username,
+            "stats": result.get("stats"),
+            "results": compact_results,
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}

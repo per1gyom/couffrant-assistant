@@ -123,6 +123,29 @@ Stockées dans `aria_rules`, `aria_insights`, `aria_memory` avec un score de con
 **C'est ça qui fait que Raya = Jarvis de Guillaume spécifiquement**, pas Jarvis générique. Le modèle est le même pour tout le monde ; la mémoire est unique à chaque utilisateur.
 
 
+## 🧬 Choix du modèle d'embedding (20/04/2026 nuit)
+
+**Modèle retenu** : `text-embedding-3-small` d'OpenAI, **dimension 1536**.
+
+**Pourquoi ce choix** :
+- Déjà utilisé sur les ~80 000 chunks Odoo et les ~30 000 chunks Drive
+- Cohérence indispensable : **tous les nœuds du graphe unifié DOIVENT utiliser le même modèle**, sinon les vecteurs vivent dans des espaces mathématiques différents et la comparaison est cassée
+- Largement suffisant pour 95% des cas métier (la précision finale vient surtout du reranker Cohere + de la traversée du graphe, pas de la dimension brute des embeddings)
+- L'unification du graphe apporte bien plus de gain que passer à 3072 dims
+
+**Alternative pour upgrade futur** (si dérive observée après 6+ mois d'usage réel) :
+- `text-embedding-3-large` 3072 dims (même fournisseur, facile à migrer)
+- Voyage-3 (meilleur benchmark 2026 mais ajoute une dépendance)
+- Cohere embed-v4 multilingue (excellent français)
+
+**Condition de déclenchement de l'upgrade** : si on observe en usage réel que Raya rate des questions où la subtilité sémantique est critique, ET que le reranker Cohere ne compense pas, ET qu'on a exploré toutes les autres pistes (enrichir le graphe, améliorer la mémoire Couche 5, etc.).
+
+**Coût de l'upgrade le jour venu** : ~15€ une fois pour re-vectoriser tout + x6 sur les coûts récurrents d'embedding (marginaux). 4-5h de re-scan complet.
+
+**Règle d'or** : ne pas changer de modèle d'embedding sans re-vectoriser l'intégralité du graphe. Pas de mix possible.
+
+---
+
 ## 📋 Plan d'exécution
 
 ### Étape A — Multi-source unifié (prochaine session)
@@ -168,6 +191,35 @@ Avant toute nouvelle règle dans le code ou le prompt, dérouler cette check-lis
 5. **Si on observe des dérives réelles en usage**, alors seulement → envisager une règle, la plus légère possible, documenter dans `docs/archives/approches_abandonnees_YYYYMMDD.md` avec la raison qui motive son retour
 
 Principe : **il est plus facile d'ajouter des contraintes que de les retirer**. Démarrer libéré.
+
+## 🧮 Choix du modèle d'embeddings
+
+**Décision (20/04/2026 nuit)** : conserver `text-embedding-3-small` d'OpenAI, dimension **1536**.
+
+### Pourquoi ce choix
+
+La précision de recherche dépend de 3 couches empilées :
+1. **Embedding** (vectorisation du texte) — impact modéré
+2. **Reranker Cohere** (re-classement sémantique fin) — impact fort
+3. **Graphe unifié + traversée** (contexte relationnel) — impact fort
+
+Les couches 2 et 3 compensent largement la précision brute de la couche 1. Upgrader à `text-embedding-3-large` (3072 dims) apporterait ~5 points de précision isolés, mais les gains réels sont marginaux vu notre pipeline.
+
+### Règle critique à respecter
+
+**Tous les nœuds du graphe unifié DOIVENT utiliser le même modèle d'embedding.** Sinon on compare des vecteurs vivant dans des espaces mathématiques différents et la recherche casse. Aujourd'hui tout est en `text-embedding-3-small` 1536, on garde.
+
+### Conditions de futur upgrade
+
+Upgrader le modèle nécessitera **re-vectoriser toutes les tables** (Odoo, Drive, mails, conversations). Coût estimé :
+- Re-vectorisation complète : ~15€ one-shot
+- Temps : 4-5h de re-scan
+- Coût récurrent x6 sur les embeddings (~0.60€/mois)
+
+À envisager uniquement si :
+- Passage à un grand nombre d'utilisateurs avec exigence de précision élevée
+- Observation de limites réelles en recherche qui ne se résolvent pas par enrichissement du graphe ou amélioration du reranker
+- Sortie d'un modèle notablement supérieur (Voyage-3, Cohere embed-v4, OpenAI text-embedding-4...)
 
 ## 📚 Historique et archives
 
