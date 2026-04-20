@@ -40,6 +40,9 @@ ACTION_PERMISSION_MAP = {
     "ODOO_INTROSPECT": "read",
     "ODOO_GET": "read",
     "ODOO_LIST": "read",
+    # Recherche unifiee multi-source (etape A commit 3/5, 21/04/2026)
+    # Balaie Odoo + Drive + mails + conversations en une seule passe.
+    "SEARCH": "read",
     # Mail
     "READ_MAIL": "read",
     "SEARCHMAIL": "read",

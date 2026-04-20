@@ -102,6 +102,25 @@ Onboarding :
   [ACTION:ODOO_UPDATE:model|record_id|{"field":"nouvelle_valeur"}]
   [ACTION:ODOO_NOTE:partner_id|texte de la note]"""
         sections.append(f"""Odoo (ERP) :
+  [ACTION:SEARCH:question en langage naturel] -> NOUVEAU TAG MULTI-SOURCE
+    Balaie EN PARALLELE toutes les memoires de Raya en une seule passe :
+      - Odoo (clients, devis, factures, events, contacts, leads)
+      - Drive SharePoint (fichiers, photos, PDF, docs techniques)
+      - Mails analyses Outlook/Gmail
+      - Historique des conversations
+    Fusion RRF des resultats, reranking Cohere, enrichissement graphe.
+    Chaque resultat est tague avec sa source (📋 odoo, 📁 drive, 📧 mail, 💬 conv).
+
+    A utiliser quand la question peut avoir des elements de reponse dans PLUSIEURS
+    sources, par exemple :
+      [ACTION:SEARCH:dernieres echanges avec Legroux]
+      [ACTION:SEARCH:ou en est le chantier Vauvelle]
+      [ACTION:SEARCH:devis et photos AZEM onduleur SE100K]
+
+    Filtre optionnel sur les sources via '|' :
+      [ACTION:SEARCH:kit de fixation|drive] (uniquement Drive)
+      [ACTION:SEARCH:Coullet|odoo,mail] (Odoo + mails uniquement)
+
   [ACTION:ODOO_SEMANTIC:requete en langage naturel] -> TON REFLEXE PAR DEFAUT pour TOUTE question impliquant Odoo
     C'est LE tag a utiliser EN PREMIER pour 90% des questions. Il combine :
       - Recherche dense (embeddings OpenAI sur nom, description, commentaires, lignes de devis)

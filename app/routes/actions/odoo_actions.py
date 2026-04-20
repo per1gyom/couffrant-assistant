@@ -181,6 +181,52 @@ def _handle_odoo_actions(response, username, tenant_id, tools):
         except Exception as e:
             confirmed.append(f"❌ CLIENT_360 : {str(e)[:200]}")
 
+    # SEARCH : [ACTION:SEARCH:question en langage naturel]
+    # Nouveau tag principal (etape A commit 3/5, 21/04/2026).
+    # Balaie TOUTES les memoires de Raya en parallele via unified_search() :
+    #   - Odoo (clients, devis, factures, events, contacts...)
+    #   - Drive SharePoint (fichiers, photos, PDF, docs techniques...)
+    #   - Mails analyses (Outlook et Gmail vectorises)
+    #   - Historique conversations (aria_memory)
+    # Voir app/retrieval.py et docs/vision_architecture_raya.md.
+    #
+    # Coexiste avec ODOO_SEMANTIC pendant la phase de transition.
+    # A utiliser en reflexe par defaut pour toute question metier qui
+    # peut avoir des elements de reponse dans plusieurs sources.
+    #
+    # Filtre optionnel sur les sources : "query|odoo,drive" par exemple.
+    for content in _extract_action_tags(response, "SEARCH"):
+        query = content.strip()
+        if not query:
+            confirmed.append("❌ SEARCH : requête vide (attendu : question en langage naturel)")
+            continue
+        sources = None
+        if '|' in query:
+            q_parts = query.split('|', 1)
+            query = q_parts[0].strip()
+            sources_str = q_parts[1].strip()
+            if sources_str:
+                sources = [s.strip() for s in sources_str.split(',') if s.strip()]
+        try:
+            from app.retrieval import unified_search, format_unified_results
+            data = unified_search(
+                query=query,
+                tenant_id=tenant_id or "couffrant_solar",
+                username=username,
+                sources=sources,
+                top_k_final=15,
+                use_rerank=True,
+                enrich_graph=True,
+            )
+            formatted = format_unified_results(data, max_items=15)
+            confirmed.append(formatted)
+            log_activity(username, "unified_search", "",
+                         f"query={query[:80]}|sources={','.join(sources) if sources else 'all'}"
+                         f"|results={data.get('stats',{}).get('final_count',0)}",
+                         tenant_id=tenant_id)
+        except Exception as e:
+            confirmed.append(f"❌ SEARCH : {str(e)[:200]}")
+
     # ODOO_SEMANTIC : [ACTION:ODOO_SEMANTIC:query en langage naturel]
     # Recherche sémantique hybrid (dense + sparse) + reranking Cohere +
     # enrichissement par traverse du graphe sémantique typé. Permet à Raya
