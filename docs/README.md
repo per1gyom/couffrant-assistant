@@ -12,10 +12,11 @@ Les documents historiques (roadmaps v1/v2, spécifications remplacées, livrable
 
 1. **`raya_vision_guillaume.md`** — la vision globale du projet, le "pourquoi"
 2. **`vision_architecture_raya.md`** — 🔥 **référence architecturale** (minimaliste, anti-bâillonnage, 20/04 soir)
-3. **`raya_planning_v4.md`** — la roadmap active, ce qu'on fait en ce moment
-4. **`raya_principe_memoire_3_niveaux.md`** — principe architectural universel (adopté 20/04)
-5. **`raya_memory_architecture.md`** — les 4 couches mémoire (Live / Graphe / Vectorisation / Surveillance)
-6. **`architecture_connexions.md`** — modèle mental connexions (scope tenant vs user)
+3. **`plan_resilience_et_securite.md`** — 🛡️ **plan de protection** (2FA, backups auto, bascule d'urgence)
+4. **`raya_planning_v4.md`** — la roadmap active, ce qu'on fait en ce moment
+5. **`raya_principe_memoire_3_niveaux.md`** — principe architectural universel (adopté 20/04)
+6. **`raya_memory_architecture.md`** — les 4 couches mémoire (Live / Graphe / Vectorisation / Surveillance)
+7. **`architecture_connexions.md`** — modèle mental connexions (scope tenant vs user)
 
 ## 🛠️ Références techniques
 
