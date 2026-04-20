@@ -69,6 +69,7 @@ Le chat mobile Flutter est dans la roadmap mais pas prioritaire pour le moment. 
 | `raya_session_18avril_soiree.md` | Session de travail du 18/04 soir |
 | `raya_addendum_phase25_briefing_phase3.md` | Briefing transition phase 2.5 → 3 |
 | `raya_bugs_et_securite_plan.md` | Plan bugs et sécu (traité) |
+| `approches_abandonnees_20avril.md` | 🧭 Architectures discutées puis écartées le 20/04 soir (tags par source, détecteur de doute, mode recovery scripté, règles conditionnelles, routage Sonnet, bâillonnages divers) — à relire avant de ré-ajouter des règles |
 
 ---
 
