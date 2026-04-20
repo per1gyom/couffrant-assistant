@@ -64,6 +64,27 @@ Conséquence directe : la proactivité (Phase 8) n'est attaquée **qu'après** a
 
 ### A.2 — Mise à jour temps-réel Odoo (CHANTIER PRINCIPAL RESTANT)
 
+**⚠️ Mise à jour 20/04/2026** : la sandbox `safe_eval` d'Odoo 16 Community
+interdit tous les imports (`urllib`, `requests`, etc.) dans les actions
+`base_automation`. Voir erreur `forbidden opcode(s)` et détails dans
+`docs/demande_openfire_webhooks_temps_reel.md`.
+
+**Solution adoptée en deux temps** :
+
+1. **Court terme (maintenant)** : **polling côté Raya** toutes les 1-2 min.
+   Filtre par `write_date > last_seen` sur les modèles webhookés. Latence
+   1-2 min (acceptable vs. scan manuel actuel). Réutilise l'infrastructure
+   déjà codée hier soir (queue, dédup, anti-rejeu, worker, dashboard, ronde
+   de nuit). Seul l'**émetteur change** : au lieu d'être Odoo, c'est un
+   cron Raya qui pousse dans la même queue.
+
+2. **Long terme** : **demande envoyée à OpenFire** pour développer un module
+   custom qui expose une méthode `_notify_external_webhook()` appelable
+   depuis `base_automation`. Documenté dans
+   `docs/demande_openfire_webhooks_temps_reel.md`. Quand ils livrent, on
+   bascule du polling vers du vrai temps-réel sans rien changer côté Raya
+   (l'endpoint `/webhooks/odoo/record-changed` est déjà prêt et reste).
+
 **Problème** : aujourd'hui, si Arlène crée un devis à 14h, Raya ne le verra pas avant le prochain scan complet (manuel). Impossible d'être proactif dans ces conditions.
 
 **Solution architecturale** (spec déjà écrite dans `docs/odoo_webhook_setup.md`, **non implémentée**) :
