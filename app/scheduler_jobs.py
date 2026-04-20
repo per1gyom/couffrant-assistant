@@ -212,3 +212,21 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("[Scheduler] Job DÉSACTIVÉ : webhook_night_patrol")
 
+    # Polling Odoo toutes les 2 min (palliatif en attendant le module
+    # OpenFire temps-reel, voir docs/demande_openfire_webhooks_temps_reel.md).
+    # Simule les webhooks : detecte les records Odoo modifies et les enqueue
+    # dans vectorization_queue (meme chemin que l aurait fait un vrai webhook).
+    if _job_enabled("SCHEDULER_ODOO_POLLING_ENABLED", True):
+        try:
+            from app.jobs.odoo_polling import run_odoo_polling
+            scheduler.add_job(func=run_odoo_polling,
+                              trigger=IntervalTrigger(minutes=2),
+                              id="odoo_polling",
+                              name="Polling Odoo (2 min)",
+                              replace_existing=True)
+            logger.info("[Scheduler] Job enregistré : odoo_polling (2 min)")
+        except Exception as e:
+            logger.error(f"[Scheduler] Import échoué pour odoo_polling: {e}")
+    else:
+        logger.info("[Scheduler] Job DÉSACTIVÉ : odoo_polling")
+
