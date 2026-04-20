@@ -472,4 +472,66 @@ MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_perm_audit_tenant ON permission_audit_log (tenant_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_perm_audit_denied ON permission_audit_log (tenant_id, created_at DESC) WHERE allowed = FALSE",
+    # -- Phase D Drive SharePoint (20/04/2026) --
+    # Voir docs/audit_drive_sharepoint_20avril.md et
+    # docs/raya_principe_memoire_3_niveaux.md
+    # Permet aux webhooks et au scan Drive d utiliser des identifiants
+    # externes non-numeriques (file_id SharePoint type '01ABCD...')
+    "ALTER TABLE vectorization_queue ADD COLUMN IF NOT EXISTS record_external_id TEXT",
+    "ALTER TABLE vectorization_queue ALTER COLUMN record_id DROP NOT NULL",
+    # Liste des dossiers Drive surveilles par tenant. Chaque dossier peut
+    # etre scanne initialement et surveille en temps-reel via webhook.
+    """CREATE TABLE IF NOT EXISTS drive_folders (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        provider TEXT NOT NULL DEFAULT 'sharepoint',
+        folder_name TEXT NOT NULL,
+        site_name TEXT,
+        drive_id TEXT,
+        folder_id TEXT,
+        folder_path TEXT,
+        enabled BOOLEAN DEFAULT TRUE,
+        last_full_scan_at TIMESTAMP,
+        last_scan_stats JSONB DEFAULT '{}',
+        subscription_id TEXT,
+        subscription_expires_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (tenant_id, provider, folder_name)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_drive_folders_enabled ON drive_folders (tenant_id, enabled)",
+    # Table de stockage du contenu vectorise Drive.
+    # Applique le principe universel memoire 3 niveaux :
+    #   level = 1 : resume meta (1 phrase, toujours stocke, tres leger)
+    #   level = 2 : detail vectorise (chunks de contenu pour recherche precise)
+    # Le niveau 3 (re-fetch live) ne necessite pas de stockage - utilise
+    # directement l API Drive au moment de la question.
+    """CREATE TABLE IF NOT EXISTS drive_semantic_content (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        folder_id INT,
+        file_id TEXT NOT NULL,
+        file_name TEXT NOT NULL,
+        file_path TEXT,
+        web_url TEXT,
+        mime_type TEXT,
+        file_ext TEXT,
+        file_size_bytes BIGINT,
+        level INT NOT NULL DEFAULT 1,
+        chunk_index INT DEFAULT 0,
+        content_type TEXT NOT NULL DEFAULT 'document',
+        text_content TEXT NOT NULL,
+        embedding vector(1536),
+        content_tsv tsvector,
+        metadata JSONB DEFAULT '{}',
+        drive_modified_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        deleted_at TIMESTAMP,
+        UNIQUE (tenant_id, file_id, level, chunk_index)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_drive_sem_embedding ON drive_semantic_content USING hnsw (embedding vector_cosine_ops)",
+    "CREATE INDEX IF NOT EXISTS idx_drive_sem_tsv ON drive_semantic_content USING gin (content_tsv)",
+    "CREATE INDEX IF NOT EXISTS idx_drive_sem_tenant_level ON drive_semantic_content (tenant_id, level) WHERE deleted_at IS NULL",
+    "CREATE INDEX IF NOT EXISTS idx_drive_sem_file ON drive_semantic_content (tenant_id, file_id) WHERE deleted_at IS NULL",
 ]
