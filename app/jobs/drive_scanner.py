@@ -313,6 +313,127 @@ def _is_already_up_to_date(tenant_id: str, file_id: str,
         return False
 
 
+# ═══════════════════════════════════════════════════════════════
+# INTÉGRATION GRAPHE SÉMANTIQUE UNIFIÉ (commit 2/5 étape A, 21/04/2026)
+#
+# Chaque fichier scanné crée des nœuds dans semantic_graph_nodes :
+#   - 1 nœud File par fichier (clé : drive-file-{file_id})
+#   - N nœuds Folder pour la hiérarchie (clé : drive-folder-{full_path})
+#   - Edges contains entre dossiers et vers le fichier
+#
+# Idempotent : add_node/add_edge font des UPSERT. Appelable autant de fois
+# que nécessaire sans duplication. Protégé par try/except global pour ne
+# jamais casser le scan même si le graphe a un souci.
+# ═══════════════════════════════════════════════════════════════
+
+
+def _sync_file_to_graph(tenant_id: str, file_info: dict) -> dict:
+    """Crée ou met à jour dans le graphe sémantique les nœuds correspondant
+    à un fichier Drive + sa hiérarchie de dossiers.
+
+    Ne lève jamais d'exception : si le graphe est indisponible, retourne
+    juste des stats vides. Le scan continue normalement.
+
+    Retourne : {"file_node": int|None, "folder_nodes": int, "edges": int}
+    """
+    try:
+        from app.semantic_graph import add_node, add_edge_by_keys
+    except Exception as e:
+        logger.debug("[DriveScanner] semantic_graph indispo : %s", str(e)[:150])
+        return {"file_node": None, "folder_nodes": 0, "edges": 0}
+
+    file_id = file_info.get("id")
+    file_name = file_info.get("name", "")
+    file_path = file_info.get("path", "")
+    web_url = file_info.get("web_url", "")
+    mime_type = file_info.get("mime_type", "")
+    ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+
+    if not file_id or not file_name:
+        return {"file_node": None, "folder_nodes": 0, "edges": 0}
+
+    stats = {"file_node": None, "folder_nodes": 0, "edges": 0}
+
+    # 1) Décomposer le path en hiérarchie de dossiers
+    # Ex: "1_Photovoltaïque/1_1 Chiffrage Particulier/Legroux/devis.pdf"
+    # -> parents ["1_Photovoltaïque", "1_Photovoltaïque/1_1 Chiffrage Particulier",
+    #             "1_Photovoltaïque/1_1 Chiffrage Particulier/Legroux"]
+    path_parts = [p for p in file_path.split("/") if p]
+    # Retirer le dernier élément (c'est le nom du fichier)
+    folder_parts = path_parts[:-1] if len(path_parts) > 0 else []
+
+    folder_keys = []
+    cumulative = ""
+    for part in folder_parts:
+        cumulative = f"{cumulative}/{part}" if cumulative else part
+        folder_key = f"drive-folder-{cumulative}"
+        folder_keys.append((folder_key, part, cumulative))
+        # UPSERT nœud Folder
+        fid = add_node(
+            tenant_id=tenant_id,
+            node_type="Folder",
+            node_key=folder_key,
+            node_label=part,
+            node_properties={"full_path": cumulative, "source": "sharepoint"},
+            source="drive",
+            source_record_id=cumulative,
+        )
+        if fid:
+            stats["folder_nodes"] += 1
+
+    # 2) Créer edges Folder → Folder (hiérarchie contains)
+    for i in range(len(folder_keys) - 1):
+        parent_key = folder_keys[i][0]
+        child_key = folder_keys[i + 1][0]
+        try:
+            add_edge_by_keys(
+                tenant_id=tenant_id,
+                from_type="Folder", from_key=parent_key,
+                to_type="Folder", to_key=child_key,
+                edge_type="contains",
+                edge_confidence=1.0,
+                edge_source="explicit_source",
+            )
+            stats["edges"] += 1
+        except Exception:
+            pass  # edge déjà existant, pas grave
+
+    # 3) Créer le nœud File
+    file_key = f"drive-file-{file_id}"
+    file_node_id = add_node(
+        tenant_id=tenant_id,
+        node_type="File",
+        node_key=file_key,
+        node_label=file_name,
+        node_properties={
+            "file_path": file_path, "web_url": web_url,
+            "mime_type": mime_type, "ext": ext,
+            "size_bytes": file_info.get("size", 0),
+        },
+        source="drive",
+        source_record_id=file_id,
+    )
+    stats["file_node"] = file_node_id
+
+    # 4) Edge Folder parent → File (contains)
+    if folder_keys and file_node_id:
+        parent_folder_key = folder_keys[-1][0]
+        try:
+            add_edge_by_keys(
+                tenant_id=tenant_id,
+                from_type="Folder", from_key=parent_folder_key,
+                to_type="File", to_key=file_key,
+                edge_type="contains",
+                edge_confidence=1.0,
+                edge_source="explicit_source",
+            )
+            stats["edges"] += 1
+        except Exception:
+            pass
+
+    return stats
+
+
 def _process_file(tenant_id: str, folder_db_id: int, token_ref: list,
                    username: str, drive_id: str, file_info: dict,
                    force_rescan: bool = False) -> dict:
@@ -368,6 +489,18 @@ def _process_file(tenant_id: str, folder_db_id: int, token_ref: list,
 
     logger.info("[DriveScanner] OK %s : L1=1 + L2=%d chunks",
                 name, level2_count)
+
+    # Synchronisation graphe sémantique unifié (étape A commit 2/5)
+    # Non-bloquant : si le graphe a un pb, on ne casse pas le scan.
+    try:
+        graph_stats = _sync_file_to_graph(tenant_id, file_info)
+        if graph_stats.get("file_node"):
+            logger.debug("[DriveScanner] graph OK %s : folders=%d, edges=%d",
+                         name, graph_stats["folder_nodes"], graph_stats["edges"])
+    except Exception as e:
+        logger.warning("[DriveScanner] sync graph échoué pour %s : %s",
+                       name, str(e)[:150])
+
     return {"status": "ok", "file": name,
             "level1_chunks": 1, "level2_chunks": level2_count}
 
@@ -693,3 +826,97 @@ def _compute_drive_verdict(folders: list, running: bool) -> dict:
             "title": "Jamais scanne",
             "message": "Les dossiers sont configures mais jamais scannes. Lance un scan pour commencer.",
             "details": []}
+
+
+
+# ═══════════════════════════════════════════════════════════════
+# MIGRATION RÉTROACTIVE VERS LE GRAPHE UNIFIÉ (étape A commit 2/5)
+#
+# Les 3252 fichiers déjà vectorisés n'ont pas de nœuds graphe (la fonction
+# _sync_file_to_graph n'existait pas au moment de leur scan). Cette routine
+# parcourt tous les fichiers level=1 de drive_semantic_content et recrée
+# rétroactivement les nœuds File + Folder + edges contains.
+#
+# Idempotente : peut être relancée autant de fois que nécessaire sans
+# duplicata grâce aux ON CONFLICT d'add_node/add_edge.
+# ═══════════════════════════════════════════════════════════════
+
+
+def migrate_existing_files_to_graph(tenant_id: str, limit: Optional[int] = None) -> dict:
+    """Crée rétroactivement les nœuds graphe pour les fichiers Drive déjà
+    vectorisés. Parcourt drive_semantic_content level=1 (1 ligne par fichier)
+    et appelle _sync_file_to_graph pour chacun.
+
+    Args:
+      tenant_id: scope de la migration
+      limit: optionnel, pour tester sur un échantillon d'abord
+
+    Retourne un dict de stats : files_processed, file_nodes_created,
+    folder_nodes_created, edges_created, errors.
+    """
+    from app.database import get_pg_conn
+
+    stats = {
+        "files_processed": 0,
+        "file_nodes_created": 0,
+        "folder_nodes_created": 0,
+        "edges_created": 0,
+        "errors": 0,
+        "errors_sample": [],
+    }
+
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            sql = """SELECT DISTINCT ON (file_id)
+                       file_id, file_name, file_path, web_url,
+                       mime_type, file_ext, file_size_bytes
+                     FROM drive_semantic_content
+                     WHERE tenant_id = %s
+                       AND level = 1
+                       AND deleted_at IS NULL
+                     ORDER BY file_id"""
+            params = [tenant_id]
+            if limit:
+                sql += " LIMIT %s"
+                params.append(limit)
+            cur.execute(sql, params)
+            rows = cur.fetchall()
+    except Exception as e:
+        logger.error("[DriveMigration] SELECT échoué : %s", str(e)[:300])
+        return {**stats, "fatal_error": str(e)[:300]}
+
+    logger.info("[DriveMigration] Début migration : %d fichiers à traiter", len(rows))
+
+    for row in rows:
+        file_info = {
+            "id": row[0],
+            "name": row[1],
+            "path": row[2] or "",
+            "web_url": row[3] or "",
+            "mime_type": row[4] or "",
+            "size": row[6] or 0,
+        }
+        try:
+            file_stats = _sync_file_to_graph(tenant_id, file_info)
+            stats["files_processed"] += 1
+            if file_stats.get("file_node"):
+                stats["file_nodes_created"] += 1
+            stats["folder_nodes_created"] += file_stats.get("folder_nodes", 0)
+            stats["edges_created"] += file_stats.get("edges", 0)
+        except Exception as e:
+            stats["errors"] += 1
+            if len(stats["errors_sample"]) < 5:
+                stats["errors_sample"].append(
+                    f"{row[1]} : {str(e)[:150]}")
+
+        # Log progression toutes les 200 lignes
+        if stats["files_processed"] % 200 == 0:
+            logger.info("[DriveMigration] %d/%d fichiers traités, "
+                        "nodes=%d, edges=%d",
+                        stats["files_processed"], len(rows),
+                        stats["file_nodes_created"] + stats["folder_nodes_created"],
+                        stats["edges_created"])
+
+    logger.info("[DriveMigration] TERMINÉ : %s", stats)
+    return stats

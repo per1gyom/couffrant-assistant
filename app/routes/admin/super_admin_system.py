@@ -2022,3 +2022,101 @@ def admin_test_unified_search(
         import traceback
         return {"status": "error", "message": str(e)[:300],
                 "trace": traceback.format_exc()[:1500]}
+
+
+
+@router.post("/admin/drive/migrate-to-graph")
+def admin_drive_migrate_to_graph(
+    request: Request,
+    limit: Optional[int] = None,
+    _: dict = Depends(require_admin),
+):
+    """Migration retroactive : cree dans semantic_graph_nodes les noeuds
+    File + Folder + edges contains pour tous les fichiers deja vectorises
+    dans drive_semantic_content.
+
+    Idempotent : peut etre relance autant de fois que necessaire (add_node
+    fait un UPSERT, add_edge fait ON CONFLICT DO NOTHING).
+
+    Parametres optionnels :
+      - limit : pour tester sur un echantillon d abord (ex: ?limit=50)
+
+    Retourne le dict de stats de la migration.
+    """
+    try:
+        from app.tenant_manager import get_user_tenants
+        from app.jobs.drive_scanner import migrate_existing_files_to_graph
+        username = request.session.get("username", "")
+        tenants = get_user_tenants(username)
+        tenant_id = tenants[0] if tenants else "couffrant_solar"
+
+        stats = migrate_existing_files_to_graph(tenant_id, limit=limit)
+        return {
+            "status": "ok",
+            "tenant_id": tenant_id,
+            "limit": limit,
+            "stats": stats,
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
+@router.get("/admin/drive/graph-stats")
+def admin_drive_graph_stats(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Retourne le nombre de noeuds Drive et edges dans le graphe
+    semantique pour le tenant courant. Utile pour verifier l etat
+    apres migration et surveiller la croissance du graphe au fil des scans.
+    """
+    try:
+        from app.tenant_manager import get_user_tenants
+        from app.database import get_pg_conn
+        username = request.session.get("username", "")
+        tenants = get_user_tenants(username)
+        tenant_id = tenants[0] if tenants else "couffrant_solar"
+
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT node_type, COUNT(*) FROM semantic_graph_nodes
+                WHERE tenant_id = %s AND source = 'drive'
+                  AND (deleted_at IS NULL)
+                GROUP BY node_type ORDER BY COUNT(*) DESC
+            """, (tenant_id,))
+            nodes_by_type = {r[0]: r[1] for r in cur.fetchall()}
+
+            cur.execute("""
+                SELECT e.edge_type, COUNT(*) FROM semantic_graph_edges e
+                JOIN semantic_graph_nodes n1 ON n1.id = e.edge_from
+                WHERE e.tenant_id = %s AND n1.source = 'drive'
+                  AND (e.deleted_at IS NULL)
+                GROUP BY e.edge_type ORDER BY COUNT(*) DESC
+            """, (tenant_id,))
+            edges_by_type = {r[0]: r[1] for r in cur.fetchall()}
+
+            cur.execute("""
+                SELECT COUNT(*) FROM drive_semantic_content
+                WHERE tenant_id = %s AND level = 1 AND deleted_at IS NULL
+            """, (tenant_id,))
+            total_files_vectorized = cur.fetchone()[0]
+
+        file_nodes = nodes_by_type.get("File", 0)
+        coverage_pct = round(file_nodes * 100 / max(total_files_vectorized, 1), 1)
+
+        return {
+            "status": "ok",
+            "tenant_id": tenant_id,
+            "nodes": nodes_by_type,
+            "edges": edges_by_type,
+            "total_files_vectorized": total_files_vectorized,
+            "file_nodes_in_graph": file_nodes,
+            "coverage_pct": coverage_pct,
+        }
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
