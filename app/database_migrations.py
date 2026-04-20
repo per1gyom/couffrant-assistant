@@ -534,4 +534,42 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_drive_sem_tsv ON drive_semantic_content USING gin (content_tsv)",
     "CREATE INDEX IF NOT EXISTS idx_drive_sem_tenant_level ON drive_semantic_content (tenant_id, level) WHERE deleted_at IS NULL",
     "CREATE INDEX IF NOT EXISTS idx_drive_sem_file ON drive_semantic_content (tenant_id, file_id) WHERE deleted_at IS NULL",
+    # -- Phase Dashboards Nettoyes (20/04/2026) --
+    # Voir docs/raya_principe_memoire_3_niveaux.md pour la philosophie.
+    # Permet de classifier les erreurs en :
+    #   - reelles (a investiguer)
+    #   - fantomes (sur modele desactive, sans impact)
+    #   - suspens connus (droits Odoo manquants, documentes)
+    # Affiche un verdict clair au lieu d'alarmer le super-admin non-dev.
+    """CREATE TABLE IF NOT EXISTS deactivated_models (
+        id SERIAL PRIMARY KEY,
+        source TEXT NOT NULL,
+        model_name TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'deactivated',
+        doc_link TEXT,
+        deactivated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (source, model_name)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_deact_models_source ON deactivated_models (source)",
+    # Seed initial : modeles desactives connus au 20/04/2026.
+    # Les ON CONFLICT DO NOTHING permettent d ajouter des seeds sans
+    # ecraser des modifs manuelles futures.
+    """INSERT INTO deactivated_models (source, model_name, reason, category, doc_link) VALUES
+        ('odoo', 'of.survey.answers',
+         'Manifest reference le champ name qui n existe pas sur ce modele chez Couffrant',
+         'deactivated', 'docs/raya_scanner_suspens.md'),
+        ('odoo', 'of.survey.user_input.line',
+         'Manifest reference le champ name qui n existe pas sur ce modele chez Couffrant',
+         'deactivated', 'docs/raya_scanner_suspens.md'),
+        ('odoo', 'mail.message',
+         'Droits Odoo - le user API ne voit que ses propres messages. En attente ouverture droits chez OpenFire',
+         'pending_rights', 'docs/demande_openfire_droits_produits_lignes.md'),
+        ('odoo', 'account.payment.line',
+         'Droit Extra Rights/Accounting/Payments manquant. En attente ouverture chez OpenFire',
+         'pending_rights', 'docs/demande_openfire_droits_produits_lignes.md'),
+        ('odoo', 'stock.valuation.layer',
+         'Droit Inventory/Administrator manquant. Pas utilise metier = pas de resolution prevue',
+         'ignored', 'docs/raya_scanner_suspens.md')
+       ON CONFLICT (source, model_name) DO NOTHING""",
 ]

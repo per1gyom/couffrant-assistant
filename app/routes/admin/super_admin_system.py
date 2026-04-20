@@ -898,6 +898,7 @@ def admin_webhooks_status(
             "status": "ok",
             "tenant_filter": tenant_id,
             "stats": stats,
+            "verdict": _compute_webhook_verdict(stats),
             "configured_tenants": configured_tenants,
             "patrol_reports": patrol_reports,
             "recent_jobs": recent,
@@ -906,6 +907,63 @@ def admin_webhooks_status(
         import traceback
         return {"status": "error", "message": str(e)[:300],
                 "trace": traceback.format_exc()[:1500]}
+
+
+def _compute_webhook_verdict(stats: dict) -> dict:
+    """Calcule un verdict de sante agrege destine au super-admin non-dev.
+
+    Retourne : {level, icon, title, message, details}
+    - level : 'ok' (vert), 'warning' (jaune), 'attention' (orange),
+              'critical' (rouge)
+    - details : liste de points qui ont influence le verdict
+    """
+    import os
+    recent_min = stats.get("recent_window_minutes", 15)
+    worker_alive = stats.get("worker_alive", False)
+    errors_recent = stats.get("errors_recent", 0)
+    processed_recent = stats.get("processed_recent", 0)
+    real_errors = stats.get("real_errors_24h", 0)
+    phantom_errors = stats.get("phantom_errors_24h", 0)
+    last_activity = stats.get("last_activity")
+    details = []
+
+    if not worker_alive:
+        return {"level": "critical", "icon": "🔴",
+                "title": "Polling arrete",
+                "message": "Le worker webhook n'est pas actif. Les changements Odoo ne sont plus traites en temps-reel.",
+                "details": ["Worker non demarre ou crash - verifier les logs Railway"]}
+
+    # Evalue si activite recente existe
+    details.append(f"Worker actif")
+    details.append(f"Fenetre de controle : {recent_min} min")
+    if processed_recent > 0:
+        details.append(f"{processed_recent} jobs traites avec succes dans les {recent_min} dernieres min")
+    else:
+        details.append(f"Aucun job traite dans les {recent_min} dernieres min (normal si peu d'activite Odoo)")
+
+    if errors_recent > 0:
+        return {"level": "attention", "icon": "🟠",
+                "title": f"{errors_recent} erreur(s) dans les {recent_min} dernieres min",
+                "message": "Des erreurs viennent d apparaitre. A investiguer.",
+                "details": details + [f"{errors_recent} erreur(s) recente(s) - voir detail technique"]}
+
+    if real_errors > 0:
+        return {"level": "warning", "icon": "🟡",
+                "title": "Fonctionne avec erreurs residuelles",
+                "message": f"Le polling tourne bien mais {real_errors} erreur(s) reelle(s) sur 24h sur des modeles actifs. A regarder quand tu as un moment.",
+                "details": details + [f"{real_errors} erreur(s) sur modele(s) encore actif(s)",
+                                       f"{phantom_errors} erreur(s) fantome(s) (modeles desactives, sans impact)"]}
+
+    if phantom_errors > 0:
+        return {"level": "ok", "icon": "🟢",
+                "title": "Tout va bien",
+                "message": "Le polling Odoo tourne normalement.",
+                "details": details + [f"{phantom_errors} erreur(s) fantome(s) sur modeles desactives - sans impact"]}
+
+    return {"level": "ok", "icon": "🟢",
+            "title": "Tout va bien",
+            "message": "Le polling Odoo tourne normalement, zero erreur.",
+            "details": details}
 
 
 @router.get("/admin/scanner/db-size")

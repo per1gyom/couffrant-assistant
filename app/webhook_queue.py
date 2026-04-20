@@ -370,13 +370,28 @@ def stop_worker():
 
 
 def get_stats(tenant_id: Optional[str] = None) -> dict:
-    """Stats pour le dashboard de monitoring. Si tenant_id=None, aggregat global."""
+    """Stats pour le dashboard de monitoring. Si tenant_id=None, aggregat global.
+
+    Enrichi le 20/04 pour la refonte dashboards neophyte-friendly :
+    - Fenetre recente configurable via env RECENT_WINDOW_MINUTES (default 15)
+    - Separation erreurs reelles vs erreurs fantomes (modeles desactives)
+    - Regroupement par modele pour affichage compact
+    """
+    import os
     from app.database import get_pg_conn
+    recent_min = int(os.getenv("RECENT_WINDOW_MINUTES", "15"))
     where = "WHERE tenant_id=%s" if tenant_id else ""
     params = (tenant_id,) if tenant_id else ()
     with get_pg_conn() as conn:
         cur = conn.cursor()
-        # Compteurs 24h
+        # 1. Liste des modeles officiellement desactives (source=odoo)
+        cur.execute(
+            "SELECT model_name, reason, category FROM deactivated_models WHERE source='odoo'"
+        )
+        deact = {r[0]: {"reason": r[1], "category": r[2]} for r in cur.fetchall()}
+        deact_models_list = list(deact.keys())
+
+        # 2. Compteurs 24h (existants)
         cur.execute(f"""
             SELECT
                 COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '24 hours') AS received_24h,
@@ -392,6 +407,53 @@ def get_stats(tenant_id: Optional[str] = None) -> dict:
             FROM vectorization_queue {where}
         """, params)
         row = cur.fetchone()
+
+        # 3. Compteurs fenetre recente (configurable, defaut 15 min)
+        recent_where = where + (f" AND " if where else "WHERE ") + \
+            f"completed_at > NOW() - INTERVAL '{recent_min} minutes'"
+        cur.execute(f"""
+            SELECT
+                COUNT(*) FILTER (WHERE last_error IS NULL) AS processed_recent,
+                COUNT(*) FILTER (WHERE last_error IS NOT NULL) AS errors_recent
+            FROM vectorization_queue {recent_where}
+        """, params)
+        recent = cur.fetchone()
+
+        # 4. Separation erreurs reelles vs fantomes (sur 24h)
+        if deact_models_list:
+            placeholders = ",".join(["%s"] * len(deact_models_list))
+            phantom_where = where + (" AND " if where else "WHERE ")
+            cur.execute(f"""
+                SELECT
+                    COUNT(*) FILTER (WHERE model_name IN ({placeholders})) AS phantom_errors,
+                    COUNT(*) FILTER (WHERE model_name NOT IN ({placeholders})) AS real_errors
+                FROM vectorization_queue
+                {phantom_where} completed_at > NOW() - INTERVAL '24 hours'
+                  AND last_error IS NOT NULL
+            """, (*params, *deact_models_list, *deact_models_list))
+            sep = cur.fetchone()
+            phantom_24h, real_24h = sep[0] or 0, sep[1] or 0
+        else:
+            phantom_24h, real_24h = 0, row[2] or 0
+
+        # 5. Regroupement par modele des erreurs 24h (top 10)
+        cur.execute(f"""
+            SELECT model_name, COUNT(*) AS n, MAX(last_error) AS last_err
+            FROM vectorization_queue
+            {where} {" AND " if where else "WHERE "}
+              completed_at > NOW() - INTERVAL '24 hours'
+              AND last_error IS NOT NULL
+            GROUP BY model_name
+            ORDER BY n DESC LIMIT 10
+        """, params)
+        errors_by_model = [
+            {"model": r[0], "count": r[1], "sample_error": (r[2] or "")[:200],
+             "is_phantom": r[0] in deact,
+             "reason": deact.get(r[0], {}).get("reason"),
+             "category": deact.get(r[0], {}).get("category", "unknown")}
+            for r in cur.fetchall()
+        ]
+
         return {
             "received_24h": row[0] or 0,
             "processed_24h": row[1] or 0,
@@ -401,4 +463,12 @@ def get_stats(tenant_id: Optional[str] = None) -> dict:
             "last_activity": row[5].isoformat() if row[5] else None,
             "worker_alive": _worker_thread.is_alive() if _worker_thread else False,
             "rate_limit_calls_last_min": len(_openai_calls_timestamps),
+            # Nouveaux champs
+            "recent_window_minutes": recent_min,
+            "processed_recent": recent[0] or 0,
+            "errors_recent": recent[1] or 0,
+            "phantom_errors_24h": phantom_24h,
+            "real_errors_24h": real_24h,
+            "errors_by_model_24h": errors_by_model,
+            "deactivated_models": deact,
         }
