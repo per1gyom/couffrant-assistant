@@ -233,6 +233,10 @@ function renderDriveActions(tenantId, connId){
       'Retraite TOUS les fichiers meme deja OK. A utiliser apres correction majeure de la logique d extraction.'),
     _ddItem('scanDriveStatus(this)', '📊 Etat du dernier scan',
       'Affiche le resultat du dernier scan : fichiers traites, chunks crees, erreurs.'),
+    _ddItem('driveGraphStats(this)', '🌐 Etat du graphe Drive',
+      'Affiche combien de fichiers et dossiers Drive sont presents dans le graphe semantique unifie + couverture par rapport au total vectorise.'),
+    _ddItem('driveGraphMigrate(this)', '⚡ Migrer Drive vers graphe',
+      'Rattrape les fichiers vectorises avant le commit 2/5 en creant leurs noeuds File + Folder + edges contains. Idempotent, relancable sans risque.'),
   ]);
   const auditBtn = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#8b5cf6;color:white;font-weight:600" onclick="showAudit(this)" title="Audit des connexions (doublons, emails croises) + arborescence SharePoint scannee niveaux 1 et 2">🔎 Audit</button>`;
   return `${driveMenu} ${auditBtn}`;
@@ -2415,3 +2419,159 @@ function renderMetricCard(icon, label, value, color, tooltipText){
 
 // Fin des helpers dashboards
 // ============================================================================
+
+
+// ============================================================================
+// GRAPHE SÉMANTIQUE DRIVE (commit 2/5 étape A - 21/04/2026)
+// ============================================================================
+//
+// 2 fonctions qui exposent dans l UI les endpoints admin :
+//   - driveGraphStats : GET /admin/drive/graph-stats -> affiche couverture
+//   - driveGraphMigrate : POST /admin/drive/migrate-to-graph -> lance migration
+//
+// Idempotent cote serveur : relancable sans risque de duplication.
+// ============================================================================
+
+async function driveGraphStats(btn){
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Chargement...';
+  try{
+    const r = await fetch('/admin/drive/graph-stats');
+    const d = await r.json();
+    if(d.status !== 'ok') throw new Error(d.message || 'Erreur');
+
+    const fmt = n => (n === null || n === undefined) ? '-' : n.toLocaleString('fr-FR');
+    const nodesRows = Object.entries(d.nodes || {}).map(([type, count]) =>
+      `<tr><td style="padding:6px 10px;font-weight:600">${type}</td>
+           <td style="padding:6px 10px;text-align:right">${fmt(count)}</td></tr>`
+    ).join('') || '<tr><td colspan="2" style="padding:10px;color:var(--text3);text-align:center">Aucun nœud Drive dans le graphe pour l instant. Lance la migration pour rattraper les fichiers deja vectorises.</td></tr>';
+
+    const edgesRows = Object.entries(d.edges || {}).map(([type, count]) =>
+      `<tr><td style="padding:6px 10px;font-weight:600">${type}</td>
+           <td style="padding:6px 10px;text-align:right">${fmt(count)}</td></tr>`
+    ).join('') || '<tr><td colspan="2" style="padding:10px;color:var(--text3);text-align:center">Aucune arete.</td></tr>';
+
+    const cov = d.coverage_pct || 0;
+    const covColor = cov >= 95 ? '#10b981' : cov >= 50 ? '#f59e0b' : '#dc2626';
+    const covLabel = cov >= 95 ? 'COMPLET' : cov >= 50 ? 'PARTIEL' : 'A RATTRAPER';
+
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9998;display:flex;align-items:center;justify-content:center';
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:18px 22px;width:90vw;max-width:700px;max-height:85vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,0.8)';
+    modal.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <h3 style="margin:0">🌐 État du graphe sémantique Drive</h3>
+        <button id="gstats-close" style="background:#ef4444;color:white;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:700">✕ Fermer</button>
+      </div>
+      <div style="background:${covColor}15;border:2px solid ${covColor};border-radius:10px;padding:14px;margin-bottom:14px;text-align:center">
+        <div style="font-size:36px;font-weight:800;color:${covColor}">${cov}%</div>
+        <div style="font-size:12px;color:${covColor};font-weight:700;margin-top:3px">COUVERTURE ${covLabel}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:6px">
+          ${fmt(d.file_nodes_in_graph)} nœud(s) File dans le graphe / ${fmt(d.total_files_vectorized)} fichier(s) vectorisé(s)
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+        <div>
+          <h4 style="margin:0 0 8px 0;font-size:13px">🔵 Nœuds Drive</h4>
+          <table style="width:100%;border-collapse:collapse;background:var(--bg1);border-radius:6px;overflow:hidden">
+            <thead><tr style="background:var(--bg2)"><th style="padding:8px;text-align:left">Type</th><th style="padding:8px;text-align:right">Nombre</th></tr></thead>
+            <tbody>${nodesRows}</tbody>
+          </table>
+        </div>
+        <div>
+          <h4 style="margin:0 0 8px 0;font-size:13px">🔗 Arêtes (edges)</h4>
+          <table style="width:100%;border-collapse:collapse;background:var(--bg1);border-radius:6px;overflow:hidden">
+            <thead><tr style="background:var(--bg2)"><th style="padding:8px;text-align:left">Type</th><th style="padding:8px;text-align:right">Nombre</th></tr></thead>
+            <tbody>${edgesRows}</tbody>
+          </table>
+        </div>
+      </div>
+      ${cov < 95 ? `<div style="margin-top:14px;padding:10px;background:#f59e0b10;border-left:3px solid #f59e0b;border-radius:6px;font-size:12px">
+        💡 <strong>Couverture incomplète.</strong> Utilise le bouton <em>⚡ Migrer Drive vers graphe</em> pour rattraper les fichiers vectorisés avant le commit 2/5. C est idempotent, relançable sans risque.
+      </div>` : `<div style="margin-top:14px;padding:10px;background:#10b98110;border-left:3px solid #10b981;border-radius:6px;font-size:12px">
+        ✅ <strong>Graphe Drive complet.</strong> Tous les fichiers vectorisés ont leurs nœuds dans le graphe sémantique unifié.
+      </div>`}
+    `;
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+    modal.querySelector('#gstats-close').onclick = () => backdrop.remove();
+    backdrop.onclick = e => { if(e.target === backdrop) backdrop.remove(); };
+  }catch(err){
+    alert('❌ ' + err.message);
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+
+async function driveGraphMigrate(btn){
+  // Confirmation : la migration peut durer ~1 min sur 3252 fichiers
+  if(!confirm('⚡ Lancer la migration Drive vers le graphe sémantique ?\n\n'+
+              'Crée les nœuds File + Folder + edges contains pour tous les '+
+              'fichiers déjà vectorisés.\n\n'+
+              'Durée estimée : ~1 minute pour 3000 fichiers.\n'+
+              'Idempotent : relançable sans risque.\n\n'+
+              'Astuce : teste d abord avec limit=50 dans l URL directement '+
+              'si tu veux valider sur un echantillon.')) return;
+
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Migration en cours...';
+  try{
+    const r = await fetch('/admin/drive/migrate-to-graph', {method:'POST'});
+    const d = await r.json();
+    if(d.status !== 'ok') throw new Error(d.message || 'Erreur');
+
+    const s = d.stats || {};
+    const fmt = n => (n === null || n === undefined) ? '-' : n.toLocaleString('fr-FR');
+    const hasErrors = (s.errors || 0) > 0;
+
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9998;display:flex;align-items:center;justify-content:center';
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:18px 22px;width:90vw;max-width:640px;max-height:85vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,0.8)';
+
+    const errorsHtml = hasErrors && s.errors_sample ?
+      `<div style="margin-top:12px;padding:10px;background:#dc262610;border-left:3px solid #dc2626;border-radius:6px;font-size:12px">
+        <strong>⚠️ ${s.errors} erreur(s) non bloquante(s) :</strong>
+        <ul style="margin:6px 0 0 16px;padding:0">
+          ${s.errors_sample.map(e => `<li style="margin-bottom:3px;color:var(--text3)">${e}</li>`).join('')}
+        </ul>
+      </div>` : '';
+
+    modal.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <h3 style="margin:0">⚡ Migration Drive → graphe sémantique</h3>
+        <button id="gmig-close" style="background:#ef4444;color:white;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:700">✕ Fermer</button>
+      </div>
+      <div style="background:#10b98115;border:2px solid #10b981;border-radius:10px;padding:14px;margin-bottom:14px;text-align:center">
+        <div style="font-size:28px;font-weight:800;color:#10b981">✅ Terminé</div>
+        <div style="font-size:13px;color:var(--text2);margin-top:6px">
+          ${fmt(s.files_processed)} fichier(s) traité(s)
+        </div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;background:var(--bg1);border-radius:6px;overflow:hidden;font-size:13px">
+        <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 12px">Nœuds File créés / mis à jour</td><td style="padding:8px 12px;text-align:right;color:#0ea5e9;font-weight:700">${fmt(s.file_nodes_created)}</td></tr>
+        <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 12px">Nœuds Folder créés / mis à jour</td><td style="padding:8px 12px;text-align:right;color:#8b5cf6;font-weight:700">${fmt(s.folder_nodes_created)}</td></tr>
+        <tr style="border-bottom:1px solid var(--border)"><td style="padding:8px 12px">Arêtes contains créées</td><td style="padding:8px 12px;text-align:right;color:#10b981;font-weight:700">${fmt(s.edges_created)}</td></tr>
+        <tr><td style="padding:8px 12px">Erreurs (non bloquantes)</td><td style="padding:8px 12px;text-align:right;color:${hasErrors?'#dc2626':'var(--text3)'};font-weight:700">${fmt(s.errors)}</td></tr>
+      </table>
+      ${errorsHtml}
+      <div style="margin-top:14px;padding:10px;background:#0ea5e910;border-left:3px solid #0ea5e9;border-radius:6px;font-size:12px">
+        💡 <strong>Prochaines étapes :</strong> utilise <em>🌐 Etat du graphe Drive</em> pour verifier la couverture, puis teste <code>/admin/unified-search/test?q=Legroux&enrich_graph=true</code> pour voir les resultats Drive enrichis par leur hierarchie de dossiers.
+      </div>
+    `;
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+    modal.querySelector('#gmig-close').onclick = () => backdrop.remove();
+    backdrop.onclick = e => { if(e.target === backdrop) backdrop.remove(); };
+  }catch(err){
+    alert('❌ Migration échouée : ' + err.message);
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
