@@ -782,6 +782,39 @@ def admin_scanner_scan_nuit_complet_status(
         return {"status": "error", "message": str(e)[:300]}
 
 
+@router.post("/admin/drive/scan-start")
+def admin_drive_scan_start(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Lance un scan complet du dossier SharePoint configure pour le tenant.
+    Tourne en arriere-plan (thread daemon Railway). Applique le principe
+    memoire 3 niveaux (meta + detail + live via re-fetch)."""
+    try:
+        from app.jobs.drive_scanner import launch_async
+        import os
+        username = os.getenv("APP_USERNAME", "guillaume").strip()
+        return launch_async(tenant_id="couffrant_solar", username=username)
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
+@router.get("/admin/drive/scan-status")
+def admin_drive_scan_status(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Retourne l etat du scan Drive (en cours + stats du dernier scan
+    par dossier surveille). Utilise par le panel admin pour l affichage."""
+    try:
+        from app.jobs.drive_scanner import get_last_scan_stats
+        return get_last_scan_stats(tenant_id="couffrant_solar")
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
 @router.get("/admin/webhooks/status")
 def admin_webhooks_status(
     request: Request,

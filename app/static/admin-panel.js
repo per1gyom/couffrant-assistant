@@ -213,6 +213,19 @@ function _ddMenu(summaryColor, summaryLabel, items){
   </details>`;
 }
 
+function renderMicrosoftActions(tenantId, connId){
+  // Phase D (Drive SharePoint) - 20/04/2026.
+  // Dropdown 🚀 Drive avec Scanner (scan complet du dossier SharePoint
+  // configure) + Etat (dernier scan, stats niveaux 1 et 2).
+  const driveMenu = _ddMenu('#2563eb', '🚀 Drive', [
+    _ddItem('scanDriveStart(this)', '🚀 Scanner tout le dossier SharePoint',
+      'Parcourt le dossier Photovoltaique et vectorise tous les fichiers supportes (pdf, docx, xlsx, images). Duree 30 min a 2h selon volume. Tourne sur Railway - tu peux fermer le navigateur.'),
+    _ddItem('scanDriveStatus(this)', '📊 Etat du dernier scan',
+      'Affiche le resultat du dernier scan Drive : fichiers traites, chunks crees, erreurs.'),
+  ]);
+  return `${driveMenu}`;
+}
+
 function renderOdooActions(tenantId, connId){
   const setup = _ddMenu('#475569', '⚙️ Setup', [
     _ddItem(`discoverTool('${tenantId}','odoo',this)`, '🔍 Découverte des connecteurs', 'Peuple entity_links pour drive/calendar/contacts/odoo. Une fois a la mise en place.'),
@@ -296,6 +309,7 @@ async function loadConnections(tenantId,idx){
           <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px;cursor:pointer;border-bottom:1px dashed var(--text3)" onclick="renameConn(${c.id},'${tenantId}',${idx},'${c.label.replace(/'/g,"\\'")}')" title="Cliquer pour renommer">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span> ${statusBadge}</div>
           ${oauthBtn}
           ${['microsoft','gmail'].includes(c.tool_type)?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px" onclick="discoverTool('${tenantId}','${c.tool_type}',this)">🔍 Découvrir</button>`:''}
+          ${c.tool_type==='microsoft'?renderMicrosoftActions(tenantId, c.id):''}
           ${c.tool_type==='odoo'?renderOdooActions(tenantId, c.id):''}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>
           <button class="btn btn-danger" style="padding:2px 8px;font-size:10px" onclick="deleteConn(${c.id},'${tenantId}',${idx})">🗑️</button>
@@ -1830,6 +1844,125 @@ async function changePassword(){
 
 document.addEventListener('keydown',e=>{ if(e.key==='Escape') document.querySelectorAll('.modal-overlay.open').forEach(m=>m.classList.remove('open')); });
 document.querySelectorAll('.modal-overlay').forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('open'); }));
+
+async function scanDriveStart(btn){
+  const ok = await confirmAction(
+    '🚀 Lancer le scan Drive SharePoint ?',
+    'Cette opération va :\n' +
+    '• Parcourir récursivement le dossier Photovoltaique\n' +
+    '• Extraire le texte de chaque fichier (pdf, docx, xlsx, images)\n' +
+    '• Pour chaque fichier, créer :\n' +
+    '    - 1 ligne Niveau 1 (résumé méta, toujours stockée)\n' +
+    '    - N chunks Niveau 2 (détail vectorisé, si extraction OK)\n' +
+    '• Durée estimée : 30 min à 2h selon volume\n' +
+    '• Tourne sur Railway : tu peux fermer le navigateur\n\n' +
+    'Lancer maintenant ?',
+    'Oui, lancer le scan Drive', 'Annuler'
+  );
+  if(!ok) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Démarrage...';
+  try{
+    const r = await fetch('/admin/drive/scan-start', {method: 'POST'});
+    const d = await r.json();
+    if(d.status === 'already_running'){
+      setAlert('companies-alert',
+        '⚠️ Un scan Drive est deja en cours. Attends qu il se termine.',
+        'warn');
+      return;
+    }
+    if(d.status !== 'started') throw new Error(d.message || 'Démarrage échoué');
+    setAlert('companies-alert',
+      '🚀 Scan Drive lance sur Railway. Tu peux fermer le navigateur. ' +
+      'Verifie la progression via 🚀 Drive > 📊 Etat du dernier scan.',
+      'ok');
+  }catch(e){
+    setAlert('companies-alert', '❌ Scan Drive echoue : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+async function scanDriveStatus(btn){
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Chargement...';
+  try{
+    const r = await fetch('/admin/drive/scan-status');
+    const d = await r.json();
+    if(d.status !== 'ok') throw new Error(d.message || 'Erreur');
+
+    const runBadge = d.scan_running
+      ? '<span style="color:#10b981;font-weight:700">🟢 SCAN EN COURS</span>'
+      : '<span style="color:var(--text3)">⚪ Aucun scan en cours</span>';
+
+    const folders = (d.folders || []);
+    const rows = folders.map(f => {
+      const s = f.stats || {};
+      const pct = s.total_files ? Math.round((s.processed||0) * 100 / s.total_files) : 0;
+      const lastScan = f.last_full_scan_at
+        ? new Date(f.last_full_scan_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
+        : '<span style="color:var(--text3)">Jamais</span>';
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px;font-weight:600">${f.folder_name}</td>
+        <td style="padding:8px;font-size:11px;color:var(--text3)">${f.folder_path || ''}</td>
+        <td style="padding:8px;text-align:right">${s.total_files || 0}</td>
+        <td style="padding:8px;text-align:right;color:#10b981">${s.ok || 0}</td>
+        <td style="padding:8px;text-align:right;color:#f59e0b">${s.skipped || 0}</td>
+        <td style="padding:8px;text-align:right;color:#dc2626">${s.errors || 0}</td>
+        <td style="padding:8px;text-align:right;color:#0ea5e9">${s.level1_chunks || 0}</td>
+        <td style="padding:8px;text-align:right;color:#8b5cf6">${s.level2_chunks || 0}</td>
+        <td style="padding:8px;text-align:center">${pct}%</td>
+        <td style="padding:8px;font-size:10px;color:var(--text3)">${lastScan}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="10" style="padding:14px;text-align:center;color:var(--text3)">Aucun dossier surveille. Lance un scan pour commencer.</td></tr>';
+
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9998;display:flex;align-items:center;justify-content:center';
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:18px 22px;width:95vw;max-width:1100px;max-height:85vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,0.8)';
+    modal.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <h3 style="margin:0">🚀 État des scans Drive</h3>
+        <button id="drive-close" style="background:#ef4444;color:white;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:700">✕ Fermer</button>
+      </div>
+      <div style="margin-bottom:12px">${runBadge}</div>
+      <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px">
+        <table style="width:100%;border-collapse:collapse">
+          <thead style="background:var(--bg2)">
+            <tr style="border-bottom:2px solid var(--border)">
+              <th style="padding:10px;text-align:left;font-size:11px">Dossier</th>
+              <th style="padding:10px;text-align:left;font-size:11px">Chemin</th>
+              <th style="padding:10px;text-align:right;font-size:11px">Total</th>
+              <th style="padding:10px;text-align:right;font-size:11px">✅ OK</th>
+              <th style="padding:10px;text-align:right;font-size:11px">⏭️ Skip</th>
+              <th style="padding:10px;text-align:right;font-size:11px">❌ Err</th>
+              <th style="padding:10px;text-align:right;font-size:11px">N1 méta</th>
+              <th style="padding:10px;text-align:right;font-size:11px">N2 détail</th>
+              <th style="padding:10px;text-align:center;font-size:11px">%</th>
+              <th style="padding:10px;text-align:left;font-size:11px">Dernier scan</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text3)">
+        Niveau 1 = résumé méta (toujours stocké) · Niveau 2 = chunks détaillés vectorisés · Re-cliquer sur 📊 pour rafraîchir
+      </div>`;
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+    const close = () => backdrop.remove();
+    backdrop.addEventListener('click', e => { if(e.target === backdrop) close(); });
+    document.getElementById('drive-close').onclick = close;
+  }catch(e){
+    setAlert('companies-alert', '❌ Status Drive echoue : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
 
 loadMemoryStatus().catch(e=>console.warn('[Admin] loadMemoryStatus failed:',e));
 initUserScope().catch(e=>console.warn('[Admin] initUserScope failed:',e));
