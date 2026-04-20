@@ -275,6 +275,22 @@ C'est **le cœur de la valeur Raya**. Une fois les données à jour, on lui appr
 
 ---
 
+## 🧠 Principe universel — mémoire à 3 niveaux (adopté 20/04/2026)
+
+Décision structurante prise au moment du cadrage Drive : **Raya mémorise
+comme un humain**, en 3 niveaux :
+
+1. **Niveau 1 — Résumé méta** : on sait que ça existe, 1 phrase, accès rapide
+2. **Niveau 2 — Détail vectorisé** : chunks précis pour la recherche sémantique
+3. **Niveau 3 — À la demande** : re-fetch live quand on a besoin du détail rare
+
+**À appliquer à TOUTES les sources** : Drive (Phase D), Odoo (rétrofit
+progressif), Couche 5 web, Outlook/Gmail.
+
+**Document de référence** : `docs/raya_principe_memoire_3_niveaux.md`
+
+---
+
 ## 🧠 Couche 5 — Apprentissage permanent (idée capturée 20/04/2026)
 
 Pendant le point matinal du 20/04, Guillaume a soulevé un sujet qui n'était couvert nulle part : la mémoire d'apprentissage des recherches web. Exemple concret : quand un nouveau dossier Consuel (SC 145) remplace l'ancien (SC 144), Raya devrait le retenir de façon permanente au lieu de refaire la recherche web à chaque fois.
