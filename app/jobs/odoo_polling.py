@@ -26,13 +26,19 @@ logger = logging.getLogger("raya.odoo_polling")
 
 # Liste identique aux modeles que le module OpenFire couvrira plus tard
 # (voir webhook_night_patrol.WEBHOOKED_MODELS pour coherence)
+# NOTE 20/04 : of.survey.answers et of.survey.user_input.line sont
+# temporairement desactives car leur manifest reference le champ 'name'
+# qui n existe pas sur ces modeles chez Couffrant (boucle d erreur
+# "Invalid field 'name' on model of.survey.answers"). A re-activer
+# apres purge/regeneration de leurs manifests.
 POLLED_MODELS = [
     "sale.order", "sale.order.line", "crm.lead",
     "mail.activity", "calendar.event", "res.partner",
     "account.move", "account.payment",
     "of.planning.tour", "of.planning.task",
     "of.planning.intervention.template",
-    "of.survey.answers", "of.survey.user_input.line",
+    # "of.survey.answers",           # DESACTIVE - manifest champ name invalide
+    # "of.survey.user_input.line",   # DESACTIVE - manifest champ name invalide
     "of.custom.document",
 ]
 

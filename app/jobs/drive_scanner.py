@@ -92,22 +92,40 @@ def _list_folder_recursive(token: str, drive_id: str, folder_id: str,
     return files
 
 
-def _download_file(token: str, drive_id: str, file_id: str) -> Optional[bytes]:
-    """Telecharge le contenu brut d un fichier SharePoint."""
+def _download_file(token_ref: list, username: str, drive_id: str,
+                     file_id: str) -> Optional[bytes]:
+    """Telecharge le contenu brut d un fichier SharePoint.
+
+    Le token est passe dans une liste (token_ref) pour permettre sa mise a
+    jour automatique : si on recoit un HTTP 401, on re-fetch un token frais
+    et on retente. Les tokens Graph expirent apres 1h, or un scan Drive peut
+    durer plusieurs heures.
+    """
     import requests
     GRAPH = "https://graph.microsoft.com/v1.0"
-    try:
-        r = requests.get(f"{GRAPH}/drives/{drive_id}/items/{file_id}/content",
-                         headers={"Authorization": f"Bearer {token}"},
-                         timeout=60, allow_redirects=True)
-        if r.status_code == 200:
-            return r.content
-        logger.warning("[DriveScanner] download HTTP %d pour %s",
-                       r.status_code, file_id[:12])
-        return None
-    except Exception as e:
-        logger.error("[DriveScanner] download crash : %s", str(e)[:200])
-        return None
+    for attempt in range(2):
+        token = token_ref[0]
+        try:
+            r = requests.get(f"{GRAPH}/drives/{drive_id}/items/{file_id}/content",
+                             headers={"Authorization": f"Bearer {token}"},
+                             timeout=60, allow_redirects=True)
+            if r.status_code == 200:
+                return r.content
+            if r.status_code == 401 and attempt == 0:
+                logger.info("[DriveScanner] HTTP 401 - refresh token en cours")
+                new_token = _get_graph_token(username)
+                if new_token and new_token != token:
+                    token_ref[0] = new_token
+                    continue
+                logger.error("[DriveScanner] Refresh token echec - abandon")
+                return None
+            logger.warning("[DriveScanner] download HTTP %d pour %s",
+                           r.status_code, file_id[:12])
+            return None
+        except Exception as e:
+            logger.error("[DriveScanner] download crash : %s", str(e)[:200])
+            return None
+    return None
 
 
 def _extract_text_from_file(file_bytes: bytes, filename: str,
@@ -227,10 +245,14 @@ def _store_chunk(tenant_id: str, folder_id: int, file_info: dict,
         return False
 
 
-def _process_file(tenant_id: str, folder_db_id: int, token: str, drive_id: str,
-                   file_info: dict) -> dict:
+def _process_file(tenant_id: str, folder_db_id: int, token_ref: list,
+                   username: str, drive_id: str, file_info: dict) -> dict:
     """Traite UN fichier : download + extract + chunk + store niveaux 1 et 2.
-    Retourne un dict de stats."""
+    Retourne un dict de stats.
+
+    token_ref est une liste a 1 element [token] pour permettre le refresh
+    automatique en cas de 401 (les tokens Graph expirent apres 1h).
+    """
     name = file_info.get("name", "?")
     ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
     size = file_info.get("size", 0)
@@ -246,8 +268,8 @@ def _process_file(tenant_id: str, folder_db_id: int, token: str, drive_id: str,
         logger.debug("[DriveScanner] SKIP %s : ext %s non supportee", name, ext)
         return {"status": "skipped", "reason": "unsupported_ext", "file": name}
 
-    # Download + extraction
-    file_bytes = _download_file(token, drive_id, file_info["id"])
+    # Download + extraction (token peut etre rafraichi in-place via token_ref)
+    file_bytes = _download_file(token_ref, username, drive_id, file_info["id"])
     if not file_bytes:
         return {"status": "error", "reason": "download_failed", "file": name}
 
@@ -370,10 +392,24 @@ def _run_scan(tenant_id: str, username: str):
                  "level1_chunks": 0, "level2_chunks": 0}
         _save_progress(folder["folder_db_id"], stats)
 
+        # token_ref mutable pour permettre le refresh in-place sur HTTP 401
+        token_ref = [token]
+        # Refresh proactif : re-fetch un token frais toutes les 30 min
+        # pour ne jamais laisser expirer en cours de scan
+        last_refresh = time.time()
+
         for i, f in enumerate(files):
+            # Refresh proactif toutes les 30 min (1800s)
+            if time.time() - last_refresh > 1800:
+                fresh = _get_graph_token(username)
+                if fresh:
+                    token_ref[0] = fresh
+                    last_refresh = time.time()
+                    logger.info("[DriveScanner] Token refresh proactif OK")
             try:
                 result = _process_file(tenant_id, folder["folder_db_id"],
-                                        token, folder["drive_id"], f)
+                                        token_ref, username,
+                                        folder["drive_id"], f)
                 stats["processed"] += 1
                 if result["status"] == "ok":
                     stats["ok"] += 1

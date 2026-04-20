@@ -158,6 +158,58 @@ def extract_text_from_xlsx(content_bytes: bytes,
         return None
 
 
+def extract_text_from_pdf_via_claude(content_bytes: bytes,
+                                       filename: str = "") -> Optional[str]:
+    """Fallback Claude pour PDF scannes (sans couche texte).
+
+    Utilise le type `document` natif d Anthropic (pas `image`) : Claude lit
+    directement le PDF, fait l OCR natif et comprend les tableaux.
+    Jusqu a 100 pages / 32 Mo par PDF.
+    Ref : https://docs.anthropic.com/en/docs/build-with-claude/pdf-support
+    """
+    import os
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    if not api_key:
+        logger.warning("[DocExtract] ANTHROPIC_API_KEY absente pour PDF")
+        return None
+    try:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key)
+    except ImportError:
+        logger.error("[DocExtract] anthropic SDK non installe")
+        return None
+    try:
+        pdf_b64 = base64.standard_b64encode(content_bytes).decode("utf-8")
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4000,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "document", "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": pdf_b64,
+                    }},
+                    {"type": "text", "text": (
+                        "Extrais TOUT le texte de ce PDF et retourne-le tel "
+                        "quel, sans commentaire. Si c est un devis ou un "
+                        "document structure, conserve la structure. Si "
+                        "aucun texte lisible, reponds 'AUCUN_TEXTE'."
+                    )},
+                ],
+            }],
+        )
+        text = response.content[0].text.strip()
+        if text == "AUCUN_TEXTE" or not text:
+            return None
+        return text[:MAX_TEXT_LENGTH]
+    except Exception as e:
+        logger.warning("[DocExtract] Claude PDF echec %s : %s",
+                       filename[:40], str(e)[:200])
+        return None
+
+
 def extract_text_from_image(content_bytes: bytes,
                              mime_type: str = "image/jpeg",
                              context_hint: str = "") -> Optional[str]:
@@ -285,12 +337,11 @@ def extract_document_text(
     # 2. Dispatch
     if extractor_type == "pdf":
         text = extract_text_from_pdf(content_bytes)
-        # Fallback : PDF sans couche texte -> tenter Claude Vision
+        # Fallback : PDF sans couche texte -> Claude avec type document
         if not text and fallback_vision_for_pdf:
-            logger.info("[DocExtract] PDF vide, fallback Vision")
-            text = extract_text_from_image(
-                content_bytes, mime_type="application/pdf",
-                context_hint=f"PDF scanne : {filename}")
+            logger.info("[DocExtract] PDF vide, fallback Claude (type=document)")
+            text = extract_text_from_pdf_via_claude(
+                content_bytes, filename=filename)
         return text
     if extractor_type == "docx":
         return extract_text_from_docx(content_bytes)
