@@ -41,7 +41,7 @@ MAX_TEXT_LENGTH = 8000
 
 
 def extract_text_from_pdf(content_bytes: bytes,
-                           max_pages: int = 50) -> Optional[str]:
+                           max_pages: int = 100) -> Optional[str]:
     """Extrait le texte d un PDF via pdfplumber.
 
     Args:

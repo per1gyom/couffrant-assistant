@@ -131,7 +131,16 @@ def _download_file(token_ref: list, username: str, drive_id: str,
 def _extract_text_from_file(file_bytes: bytes, filename: str,
                               mime_type: str = "") -> Optional[str]:
     """Utilise le module existant document_extractors pour extraire le texte.
-    Gere PDF (avec fallback Claude Vision pour les scans), DOCX, XLSX, images."""
+    Gere PDF (avec fallback Claude pour les scans), DOCX, XLSX, images.
+
+    Les .doc (format Word binaire legacy) ne sont pas supportes par
+    python-docx, on les saute explicitement pour eviter les erreurs
+    bruyantes (le meta niveau 1 est tout de meme cree par l appelant).
+    """
+    # Filtre .doc legacy - non supporte par python-docx
+    if filename.lower().endswith(".doc"):
+        logger.debug("[DriveScanner] .doc legacy non supporte : %s", filename)
+        return None
     try:
         from app.scanner.document_extractors import extract_document_text
         return extract_document_text(
@@ -194,7 +203,13 @@ def _chunk_text(text: str, max_len: int = MAX_TEXT_LENGTH_PER_CHUNK) -> list:
 def _store_chunk(tenant_id: str, folder_id: int, file_info: dict,
                   level: int, chunk_index: int, text: str) -> bool:
     """Insere ou met a jour 1 chunk dans drive_semantic_content.
-    Calcule l embedding OpenAI. Retourne True si OK."""
+    Calcule l embedding OpenAI. Retourne True si OK.
+
+    Gere le rate limit OpenAI avec backoff exponentiel (3 tentatives) :
+    sur un scan de 3491 fichiers x ~6 chunks moyens = 20000+ appels embed,
+    des pics de rate limit sont probables et doivent etre absorbes sans
+    perdre les chunks.
+    """
     try:
         from app.database import get_pg_conn
         from app.embedding import embed
@@ -203,7 +218,22 @@ def _store_chunk(tenant_id: str, folder_id: int, file_info: dict,
         if not text or not text.strip():
             return False
 
-        embedding = embed(text[:MAX_TEXT_LENGTH_PER_CHUNK])
+        # Retry avec backoff sur rate limit OpenAI
+        embedding = None
+        for attempt in range(3):
+            try:
+                embedding = embed(text[:MAX_TEXT_LENGTH_PER_CHUNK])
+                if embedding is not None:
+                    break
+            except Exception as e:
+                err_str = str(e).lower()
+                if "rate" in err_str or "429" in err_str or "throttl" in err_str:
+                    wait = 2 ** attempt  # 1s, 2s, 4s
+                    logger.info("[DriveScanner] Rate limit embed, retry dans %ds", wait)
+                    time.sleep(wait)
+                    continue
+                logger.warning("[DriveScanner] embed exception : %s", str(e)[:150])
+                break
         if embedding is None:
             logger.warning("[DriveScanner] embed None pour %s chunk %d",
                            file_info.get("name", "?"), chunk_index)
@@ -430,6 +460,11 @@ def _run_scan(tenant_id: str, username: str):
                 _save_progress(folder["folder_db_id"], stats)
                 logger.info("[DriveScanner] Progression %d/%d (ok=%d skip=%d err=%d)",
                             i + 1, total, stats["ok"], stats["skipped"], stats["errors"])
+
+            # Micro-pause entre fichiers pour lisser la charge OpenAI
+            # embed (5000 rpm) et Graph download (10k req / 10 min).
+            # 100 ms = max 10 fichiers/s = tres en-dessous des limites.
+            time.sleep(0.1)
 
         stats["finished_at"] = datetime.now(timezone.utc).isoformat()
         _save_progress(folder["folder_db_id"], stats)
