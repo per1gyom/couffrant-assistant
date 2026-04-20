@@ -451,6 +451,43 @@ async function toggleReadOnlyForTenant(tenantId, tenantName){
   }
 }
 
+// ============================================================================
+// HELPERS DASHBOARDS (Phase dashboards neophyte-friendly, 20/04/2026)
+// Reutilisables par showIntegrity / showWebhookStatus / scanDriveStatus
+// ============================================================================
+
+// Bannière verdict coloree en haut d une modale. Affiche une phrase claire
+// + accordeon optionnel pour afficher les criteres du verdict.
+// Params : verdict = {level, icon, title, message, details: []}
+function renderVerdictBanner(verdict){
+  if(!verdict) return '';
+  const colors = {
+    ok:        {bg:'#065f46', border:'#10b981', text:'#d1fae5'},
+    warning:   {bg:'#78350f', border:'#f59e0b', text:'#fef3c7'},
+    attention: {bg:'#7c2d12', border:'#ea580c', text:'#fed7aa'},
+    critical:  {bg:'#7f1d1d', border:'#dc2626', text:'#fecaca'},
+  };
+  const c = colors[verdict.level] || colors.ok;
+  const detailsHtml = (verdict.details || []).map(d =>
+    `<li style="margin:2px 0">${d}</li>`).join('');
+  const detailsBlock = detailsHtml
+    ? `<details style="margin-top:8px;cursor:pointer">
+         <summary style="font-size:11px;opacity:0.85">▼ Voir les criteres du verdict</summary>
+         <ul style="margin:6px 0 0 18px;font-size:11px;opacity:0.9">${detailsHtml}</ul>
+       </details>`
+    : '';
+  return `<div style="background:${c.bg};border:2px solid ${c.border};border-radius:10px;padding:14px 18px;margin-bottom:14px;color:${c.text}">
+    <div style="display:flex;align-items:center;gap:10px">
+      <div style="font-size:28px">${verdict.icon || 'ℹ️'}</div>
+      <div style="flex:1">
+        <div style="font-size:15px;font-weight:700;margin-bottom:2px">${verdict.title || ''}</div>
+        <div style="font-size:12px;opacity:0.9">${verdict.message || ''}</div>
+      </div>
+    </div>
+    ${detailsBlock}
+  </div>`;
+}
+
 async function showIntegrity(btn){
   // Scanner Universel Phase 8 : dashboard d integrite visuel
   // Affiche une modale avec un tableau du % de vectorisation par modele
@@ -1976,3 +2013,43 @@ async function scanDriveStatus(btn){
 
 loadMemoryStatus().catch(e=>console.warn('[Admin] loadMemoryStatus failed:',e));
 initUserScope().catch(e=>console.warn('[Admin] initUserScope failed:',e));
+
+
+// Tooltip [?] explicatif inline. Le texte apparait au survol.
+// Params : tooltipText = le texte francais a afficher au hover
+function renderHelpTooltip(tooltipText){
+  const safe = String(tooltipText).replace(/"/g, '&quot;');
+  return `<span style="display:inline-block;width:14px;height:14px;
+    border-radius:50%;background:var(--bg2);border:1px solid var(--border);
+    text-align:center;font-size:9px;line-height:13px;color:var(--text3);
+    cursor:help;margin-left:4px" title="${safe}">?</span>`;
+}
+
+// Accordeon generique. Titre cliquable, contenu replie par defaut.
+// Params : title (avec icone), contentHtml, openByDefault (bool)
+function renderAccordion(title, contentHtml, openByDefault){
+  return `<details ${openByDefault?'open':''} style="margin:10px 0;
+    border:1px solid var(--border);border-radius:8px;background:var(--bg2)">
+    <summary style="padding:10px 14px;cursor:pointer;font-weight:600;
+      font-size:12px;color:var(--text2);user-select:none">${title}</summary>
+    <div style="padding:10px 14px;border-top:1px solid var(--border)">
+      ${contentHtml}
+    </div>
+  </details>`;
+}
+
+// Metrique compacte avec tooltip. Pour les cartes de chiffres.
+// Params : icon, label, value, color, tooltipText
+function renderMetricCard(icon, label, value, color, tooltipText){
+  const tt = tooltipText ? renderHelpTooltip(tooltipText) : '';
+  return `<div style="background:var(--bg2);border:1px solid ${color};
+    padding:10px;border-radius:8px">
+    <div style="font-size:10px;color:var(--text3);text-transform:uppercase">
+      ${icon} ${label}${tt}
+    </div>
+    <div style="font-size:20px;font-weight:700;color:${color}">${value}</div>
+  </div>`;
+}
+
+// Fin des helpers dashboards
+// ============================================================================
