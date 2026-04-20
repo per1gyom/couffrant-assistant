@@ -1041,6 +1041,211 @@ def admin_webhooks_purge_phantoms(
                 "trace": traceback.format_exc()[:1500]}
 
 
+@router.get("/admin/audit/connections-and-drive")
+def admin_audit_connections_and_drive(
+    request: Request,
+    tenant_id: str = "couffrant_solar",
+    _: dict = Depends(require_admin),
+):
+    """Audit complet des connexions du tenant + listing des dossiers
+    scannes du Drive SharePoint aux niveaux 1 et 2.
+
+    Sert a debusquer les doublons accumules au fil des sessions et a
+    savoir precisement ce qui a ete vectorise cote Drive. Lecture pure,
+    aucune modification.
+
+    Retourne :
+      - connections : toutes les entrees de tenant_connections du tenant
+      - gmail_tokens_legacy : les entrees de la table historique gmail_tokens
+        (ancienne archi, pour voir si elles traient encore)
+      - duplicates : doublons detectes (meme email + meme tool_type)
+      - cross_tool_emails : emails utilises sur plusieurs tool_type
+      - drive_folders : dossiers configures pour le scan
+      - drive_tree : arborescence des dossiers scannes (niveau 1 et 2)
+      - drive_totals : compteurs globaux
+    """
+    try:
+        from app.database import get_pg_conn
+        report = {"status": "ok", "tenant_id": tenant_id}
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            # 1. tenant_connections
+            cur.execute(
+                """SELECT id, tool_type, label, auth_type, status,
+                          connected_email, created_by, created_at, updated_at,
+                          config
+                   FROM tenant_connections
+                   WHERE tenant_id = %s
+                   ORDER BY tool_type, created_at""",
+                (tenant_id,),
+            )
+            conns = []
+            for r in cur.fetchall():
+                conns.append({
+                    "id": r[0], "tool_type": r[1], "label": r[2],
+                    "auth_type": r[3], "status": r[4],
+                    "connected_email": (r[5] or "").lower().strip(),
+                    "created_by": r[6],
+                    "created_at": str(r[7]) if r[7] else None,
+                    "updated_at": str(r[8]) if r[8] else None,
+                    "config_summary": _summarize_connection_config(r[1], r[9] or {}),
+                })
+            report["connections"] = conns
+
+            # 2. gmail_tokens legacy (ancienne archi, possibles residus)
+            try:
+                cur.execute(
+                    """SELECT username, email, created_at, updated_at
+                       FROM gmail_tokens
+                       ORDER BY updated_at DESC NULLS LAST"""
+                )
+                report["gmail_tokens_legacy"] = [
+                    {"username": r[0], "email": (r[1] or "").lower().strip(),
+                     "created_at": str(r[2]) if r[2] else None,
+                     "updated_at": str(r[3]) if r[3] else None}
+                    for r in cur.fetchall()
+                ]
+            except Exception:
+                report["gmail_tokens_legacy"] = []
+
+            # 3. Detection de doublons
+            # a) Meme tool_type + meme email = clairement un doublon
+            # b) Meme email sur des tool_type differents = pas forcement un
+            #    doublon (ex: Outlook + OneDrive sur la meme boite) mais
+            #    a signaler pour audit visuel
+            from collections import defaultdict
+            by_tool_email = defaultdict(list)
+            by_email = defaultdict(list)
+            for c in conns:
+                key_tool = (c["tool_type"], c["connected_email"])
+                if c["connected_email"]:
+                    by_tool_email[key_tool].append(c)
+                    by_email[c["connected_email"]].append(c)
+            duplicates = []
+            for (tool, email), items in by_tool_email.items():
+                if len(items) > 1:
+                    duplicates.append({
+                        "tool_type": tool, "email": email,
+                        "count": len(items),
+                        "connection_ids": [x["id"] for x in items],
+                        "labels": [x["label"] for x in items],
+                    })
+            cross_tool = []
+            for email, items in by_email.items():
+                tools = sorted({x["tool_type"] for x in items})
+                if len(tools) > 1:
+                    cross_tool.append({
+                        "email": email, "tool_types": tools,
+                        "connection_ids": [x["id"] for x in items],
+                    })
+            report["duplicates"] = duplicates
+            report["cross_tool_emails"] = cross_tool
+
+            # 4. drive_folders configures
+            cur.execute(
+                """SELECT id, folder_name, folder_path, enabled,
+                          last_full_scan_at, last_scan_stats
+                   FROM drive_folders WHERE tenant_id = %s
+                   ORDER BY folder_name""",
+                (tenant_id,),
+            )
+            report["drive_folders"] = [
+                {"id": r[0], "folder_name": r[1], "folder_path": r[2],
+                 "enabled": r[3],
+                 "last_full_scan_at": str(r[4]) if r[4] else None,
+                 "stats": r[5] or {}}
+                for r in cur.fetchall()
+            ]
+
+            # 5. Listing niveaux 1 et 2 des dossiers scannes
+            # file_path contient le chemin complet du fichier. On agrege
+            # par 1er segment (niveau 1) et 2eme segment (niveau 2).
+            # On ne compte qu'une fois par file_id (sinon chunks N2 gonflent).
+            cur.execute(
+                """SELECT DISTINCT ON (file_id) file_id, file_path, file_ext,
+                          file_size_bytes
+                   FROM drive_semantic_content
+                   WHERE tenant_id = %s AND deleted_at IS NULL
+                     AND file_path IS NOT NULL
+                   ORDER BY file_id, level ASC""",
+                (tenant_id,),
+            )
+            rows_files = cur.fetchall()
+        # Agregation (hors connexion DB, c est du Python pur)
+        tree = defaultdict(lambda: {
+            "file_count": 0, "total_size_bytes": 0,
+            "extensions": defaultdict(int),
+            "subfolders": defaultdict(lambda: {
+                "file_count": 0, "total_size_bytes": 0,
+                "extensions": defaultdict(int)
+            }),
+        })
+        total_files = 0
+        total_bytes = 0
+        for file_id, fp, ext, size in rows_files:
+            if not fp:
+                continue
+            parts = [p for p in fp.split("/") if p]
+            if not parts:
+                continue
+            lvl1 = parts[0]
+            node = tree[lvl1]
+            node["file_count"] += 1
+            node["total_size_bytes"] += size or 0
+            node["extensions"][(ext or "?").lower()] += 1
+            if len(parts) >= 3:
+                lvl2 = parts[1]
+                sn = node["subfolders"][lvl2]
+                sn["file_count"] += 1
+                sn["total_size_bytes"] += size or 0
+                sn["extensions"][(ext or "?").lower()] += 1
+            total_files += 1
+            total_bytes += size or 0
+
+        drive_tree = []
+        for lvl1_name, data in sorted(tree.items(),
+                                      key=lambda x: -x[1]["file_count"]):
+            subs = [
+                {"name": sn_name, "file_count": sd["file_count"],
+                 "total_size_mb": round(sd["total_size_bytes"] / 1_048_576, 2),
+                 "extensions": dict(sd["extensions"])}
+                for sn_name, sd in sorted(data["subfolders"].items(),
+                                          key=lambda x: -x[1]["file_count"])
+            ]
+            drive_tree.append({
+                "level1_name": lvl1_name,
+                "file_count": data["file_count"],
+                "total_size_mb": round(data["total_size_bytes"] / 1_048_576, 2),
+                "extensions": dict(data["extensions"]),
+                "subfolders_level2": subs,
+            })
+        report["drive_tree"] = drive_tree
+        report["drive_totals"] = {
+            "distinct_files": total_files,
+            "total_size_mb": round(total_bytes / 1_048_576, 2),
+            "level1_folders_count": len(drive_tree),
+        }
+        return report
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
+def _summarize_connection_config(tool_type: str, config: dict) -> dict:
+    """Extrait les infos pertinentes du config JSONB selon le tool_type,
+    sans jamais exposer de secrets/tokens."""
+    if not config:
+        return {}
+    safe = {}
+    for k in ("scopes", "account_id", "site_id", "site_url", "site_name",
+              "drive_id", "drive_name", "default_folder", "provider",
+              "database", "url", "host", "port", "server_type"):
+        if k in config:
+            safe[k] = config[k]
+    return safe
+
+
 def _compute_integrity_verdict(overall: dict, models: list) -> dict:
     """Verdict global pour le dashboard Integrite.
     Applique la meme grammaire que _compute_webhook_verdict.

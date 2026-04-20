@@ -244,8 +244,9 @@ function renderOdooActions(tenantId, connId){
   ]);
   const integrite = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#10b981;color:white;font-weight:600" onclick="showIntegrity(this)" title="Tableau d'integrite de la vectorisation par modele">📊 Intégrité</button>`;
   const webhooks = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#2563eb;color:white;font-weight:600" onclick="showWebhookStatus(this)" title="Dashboard temps-reel des webhooks Odoo : worker, queue, dedup, ronde de nuit">🔌 Webhooks</button>`;
+  const audit = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#8b5cf6;color:white;font-weight:600" onclick="showAudit(this)" title="Audit des connexions (doublons, emails croises) + arborescence Drive SharePoint scannee">🔎 Audit</button>`;
   const stop = `<button class="btn btn-accent" style="padding:2px 10px;font-size:10px;background:#ef4444;color:white;font-weight:600" onclick="scanStop(this)" title="Arrete proprement le scan en cours (finit le modele actuel puis stop)">⏹️ Stop</button>`;
-  return `${setup} ${scanner} ${integrite} ${webhooks} ${stop}`;
+  return `${setup} ${scanner} ${integrite} ${webhooks} ${audit} ${stop}`;
 }
 
 // Fermer automatiquement les autres <details> quand on en ouvre un
@@ -2149,6 +2150,180 @@ async function scanDriveStatus(btn){
 
 loadMemoryStatus().catch(e=>console.warn('[Admin] loadMemoryStatus failed:',e));
 initUserScope().catch(e=>console.warn('[Admin] initUserScope failed:',e));
+
+// ============================================================================
+// 🔎 AUDIT — modale d audit des connexions + Drive scanne (20/04/2026 soir)
+// ============================================================================
+async function showAudit(btn){
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Chargement...';
+  try{
+    const r = await fetch('/admin/audit/connections-and-drive?tenant_id=couffrant_solar');
+    const d = await r.json();
+    if(d.status !== 'ok') throw new Error(d.message || 'Erreur audit');
+
+    const fmt = n => (n === null || n === undefined) ? '-' : n.toLocaleString('fr-FR');
+    const escapeAttr = s => String(s||'').replace(/"/g, '&quot;');
+    const toolIcon = t => ({
+      microsoft: '🟦', outlook: '📧', onedrive: '☁️', sharepoint: '🗂️',
+      google: '🔴', gmail: '✉️', gdrive: '📁',
+      odoo: '🟪', openfire: '🔥'
+    })[t] || '🔌';
+
+    // --- SECTION 1 : Connexions
+    const connRows = (d.connections || []).map(c => {
+      const status = c.status === 'connected'
+        ? '<span style="color:#10b981">✅ connected</span>'
+        : `<span style="color:#f59e0b">⚠️ ${c.status}</span>`;
+      return `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px;font-size:11px;color:var(--text3)">#${c.id}</td>
+        <td style="padding:8px;font-weight:600">${toolIcon(c.tool_type)} ${c.tool_type}</td>
+        <td style="padding:8px">${c.label || '<span style="color:var(--text3)">-</span>'}</td>
+        <td style="padding:8px;font-family:monospace;font-size:11px">${c.connected_email || '<span style="color:var(--text3)">-</span>'}</td>
+        <td style="padding:8px;font-size:11px">${c.auth_type}</td>
+        <td style="padding:8px;font-size:11px">${status}</td>
+        <td style="padding:8px;font-size:10px;color:var(--text3)">${(c.created_at||'').substring(0,16)}</td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="7" style="padding:14px;text-align:center;color:var(--text3)">Aucune connexion.</td></tr>';
+
+    // Alertes doublons
+    const dups = d.duplicates || [];
+    const dupBlock = dups.length
+      ? `<div style="background:#7f1d1d;border:2px solid #dc2626;border-radius:8px;padding:12px;margin-bottom:10px;color:#fecaca">
+           <div style="font-weight:700;margin-bottom:6px">🔴 ${dups.length} doublon(s) detecte(s) (meme tool + meme email)</div>
+           ${dups.map(x => `<div style="font-size:11px;margin:3px 0">• <code>${x.tool_type}</code> / <code>${x.email}</code> : ${x.count} connexions (IDs ${x.connection_ids.join(', ')}) — labels : ${x.labels.map(l=>`"${l}"`).join(', ')}</div>`).join('')}
+           <div style="font-size:10px;margin-top:6px;opacity:0.8">💡 Suggestion : garder la plus recente/active, supprimer les autres dans Connecteurs V2.</div>
+         </div>`
+      : `<div style="background:#065f46;border:1px solid #10b981;border-radius:8px;padding:10px;margin-bottom:10px;color:#d1fae5;font-size:11px">🟢 Aucun doublon strict detecte (meme tool_type + meme email).</div>`;
+
+    // Alertes cross-tool (meme email, tools differents) - informationnel
+    const crosses = d.cross_tool_emails || [];
+    const crossBlock = crosses.length
+      ? `<div style="background:#78350f;border:1px solid #f59e0b;border-radius:8px;padding:10px;margin-bottom:10px;color:#fef3c7">
+           <div style="font-weight:700;margin-bottom:6px;font-size:12px">🟡 ${crosses.length} email(s) utilise(s) sur plusieurs outils — a verifier visuellement</div>
+           ${crosses.map(x => `<div style="font-size:11px;margin:2px 0">• <code>${x.email}</code> utilise sur : ${x.tool_types.map(t=>`<span style="background:rgba(255,255,255,0.1);padding:1px 6px;border-radius:4px;margin:0 2px">${toolIcon(t)} ${t}</span>`).join(' ')}</div>`).join('')}
+           <div style="font-size:10px;margin-top:6px;opacity:0.8">💡 Si un meme email a plusieurs tool_type, c est souvent legitime (ex: Outlook + OneDrive + SharePoint = 1 seul compte Microsoft). A verifier visuellement.</div>
+         </div>`
+      : '';
+
+    // Tokens gmail legacy
+    const gmTokens = d.gmail_tokens_legacy || [];
+    const gmBlock = gmTokens.length
+      ? `<div style="background:#78350f;border:1px dashed #f59e0b;border-radius:8px;padding:10px;margin-bottom:10px;color:#fef3c7;font-size:11px">
+           <div style="font-weight:700;margin-bottom:4px">📦 ${gmTokens.length} token(s) gmail_tokens (ancienne architecture)</div>
+           ${gmTokens.map(t => `<div style="margin:2px 0">• user <code>${t.username}</code> — email <code>${t.email}</code> — maj ${(t.updated_at||'').substring(0,16)}</div>`).join('')}
+           <div style="font-size:10px;margin-top:4px;opacity:0.8">💡 Ces entrees viennent d une ancienne architecture. Si le user utilise deja tenant_connections, ces tokens sont potentiellement obsoletes.</div>
+         </div>`
+      : '';
+
+    // --- SECTION 2 : Arborescence Drive scannee (niveau 1 + 2)
+    const totals = d.drive_totals || {};
+    const tree = d.drive_tree || [];
+    const treeBlock = tree.length
+      ? tree.map(lvl1 => {
+          const subs = (lvl1.subfolders_level2 || []).map(sn => {
+            const exts = Object.entries(sn.extensions || {}).sort((a,b)=>b[1]-a[1]).slice(0,5)
+              .map(([e,c]) => `<code style="font-size:10px">${e}:${c}</code>`).join(' ');
+            return `<tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:6px 10px;padding-left:28px;font-size:11px">└ ${sn.name}</td>
+              <td style="padding:6px 10px;text-align:right;font-size:11px">${fmt(sn.file_count)}</td>
+              <td style="padding:6px 10px;text-align:right;font-size:11px">${fmt(sn.total_size_mb)} Mo</td>
+              <td style="padding:6px 10px;font-size:10px;color:var(--text3)">${exts || '-'}</td>
+            </tr>`;
+          }).join('');
+          const exts1 = Object.entries(lvl1.extensions || {}).sort((a,b)=>b[1]-a[1]).slice(0,5)
+            .map(([e,c]) => `<code style="font-size:10px">${e}:${c}</code>`).join(' ');
+          return `<tr style="border-bottom:2px solid var(--border);background:rgba(139,92,246,0.05)">
+            <td style="padding:8px 10px;font-weight:700;font-size:12px">📂 ${lvl1.level1_name}</td>
+            <td style="padding:8px 10px;text-align:right;font-weight:700">${fmt(lvl1.file_count)}</td>
+            <td style="padding:8px 10px;text-align:right;font-weight:700">${fmt(lvl1.total_size_mb)} Mo</td>
+            <td style="padding:8px 10px;font-size:10px;color:var(--text3)">${exts1}</td>
+          </tr>${subs}`;
+        }).join('')
+      : '<tr><td colspan="4" style="padding:14px;text-align:center;color:var(--text3)">Aucun fichier Drive scanne.</td></tr>';
+
+    const driveFoldersInfo = (d.drive_folders || []).map(f =>
+      `<div style="font-size:11px;margin:2px 0">📂 <strong>${f.folder_name}</strong> — chemin Drive : <code>${f.folder_path||'?'}</code> ${f.enabled?'<span style="color:#10b981">(actif)</span>':'<span style="color:#6b7280">(desactive)</span>'}</div>`
+    ).join('') || '<div style="color:var(--text3);font-size:11px">Aucun dossier configure.</div>';
+
+    // --- Construction de la modale
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9998;display:flex;align-items:center;justify-content:center';
+    const modal = document.createElement('div');
+    modal.style.cssText = 'background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:18px 22px;width:95vw;max-width:1200px;max-height:92vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,0.8)';
+
+    const connectionsSection = `
+      <h4 style="margin:0 0 10px 0;color:#a78bfa">🔌 Connexions du tenant (${d.connections.length})</h4>
+      ${dupBlock}
+      ${crossBlock}
+      ${gmBlock}
+      <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px;margin-bottom:18px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead style="background:var(--bg2)">
+            <tr style="border-bottom:2px solid var(--border)">
+              <th style="padding:10px;text-align:left;font-size:10px;color:var(--text3)">ID</th>
+              <th style="padding:10px;text-align:left;font-size:10px;color:var(--text3)">TYPE</th>
+              <th style="padding:10px;text-align:left;font-size:10px;color:var(--text3)">LABEL</th>
+              <th style="padding:10px;text-align:left;font-size:10px;color:var(--text3)">EMAIL CONNECTÉ</th>
+              <th style="padding:10px;text-align:left;font-size:10px;color:var(--text3)">AUTH</th>
+              <th style="padding:10px;text-align:left;font-size:10px;color:var(--text3)">STATUS</th>
+              <th style="padding:10px;text-align:left;font-size:10px;color:var(--text3)">CRÉÉ LE</th>
+            </tr>
+          </thead>
+          <tbody>${connRows}</tbody>
+        </table>
+      </div>
+    `;
+
+    const driveSection = `
+      <h4 style="margin:18px 0 10px 0;color:#a78bfa">🚀 Drive SharePoint — arborescence scannée (niveaux 1 & 2)</h4>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:10px">
+        <div style="font-size:11px;color:var(--text3);margin-bottom:4px">📦 Total : <strong style="color:#10b981">${fmt(totals.distinct_files)}</strong> fichiers distincts vectorisés · ${fmt(totals.total_size_mb)} Mo · ${totals.level1_folders_count} dossier(s) racine(s)</div>
+        <div style="font-size:11px;color:var(--text3);margin-bottom:6px">Dossiers configurés :</div>
+        ${driveFoldersInfo}
+      </div>
+      <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead style="background:var(--bg2)">
+            <tr style="border-bottom:2px solid var(--border)">
+              <th style="padding:10px;text-align:left;font-size:10px;color:var(--text3)">DOSSIER</th>
+              <th style="padding:10px;text-align:right;font-size:10px;color:var(--text3)">FICHIERS</th>
+              <th style="padding:10px;text-align:right;font-size:10px;color:var(--text3)">TAILLE</th>
+              <th style="padding:10px;text-align:left;font-size:10px;color:var(--text3)">TOP EXTENSIONS</th>
+            </tr>
+          </thead>
+          <tbody>${treeBlock}</tbody>
+        </table>
+      </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--text3)">💡 Les lignes en violet sont les dossiers racine. Les lignes indentées (└) sont les sous-dossiers niveau 2. Les extensions montrent le top 5 par nombre de fichiers.</div>
+    `;
+
+    modal.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div>
+          <h3 style="margin:0">🔎 Audit des connexions et du Drive scanné</h3>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px">Tenant : <code>${d.tenant_id}</code> · Lecture pure, aucune modification effectuée</div>
+        </div>
+        <button id="audit-close" style="background:#ef4444;color:white;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:700">✕ Fermer</button>
+      </div>
+      ${connectionsSection}
+      ${driveSection}
+    `;
+    backdrop.appendChild(modal);
+    document.body.appendChild(backdrop);
+    const close = () => backdrop.remove();
+    backdrop.addEventListener('click', e => { if(e.target === backdrop) close(); });
+    document.getElementById('audit-close').onclick = close;
+  }catch(e){
+    setAlert('companies-alert', '❌ Audit echoue : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+// Fin 🔎 AUDIT
+// ============================================================================
 
 
 // Tooltip [?] explicatif inline. Le texte apparait au survol.
