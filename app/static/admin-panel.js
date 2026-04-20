@@ -2012,53 +2012,87 @@ async function scanDriveStatus(btn){
     const d = await r.json();
     if(d.status !== 'ok') throw new Error(d.message || 'Erreur');
 
-    const runBadge = d.scan_running
-      ? '<span style="color:#10b981;font-weight:700">🟢 SCAN EN COURS</span>'
-      : '<span style="color:var(--text3)">⚪ Aucun scan en cours</span>';
-
+    const fmt = n => (n === null || n === undefined) ? '-' : n.toLocaleString('fr-FR');
     const folders = (d.folders || []);
+
+    // Agrégats pour les cartes métriques
+    const sum = (key) => folders.reduce((a, f) => a + ((f.stats||{})[key]||0), 0);
+    const totalFiles = sum("total_files");
+    const totalOk = sum("ok");
+    const totalSkip = sum("skipped");
+    const totalErr = sum("errors");
+    const totalN1 = sum("level1_chunks");
+    const totalN2 = sum("level2_chunks");
+    const errRate = totalFiles ? (totalErr / totalFiles * 100) : 0;
+
+    // Badge état pour chaque ligne du tableau
+    const stateBadge = st => ({
+      done: '<span style="background:#10b98120;color:#10b981;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700">✅ TERMINÉ</span>',
+      running: '<span style="background:#f59e0b20;color:#f59e0b;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700">⏳ EN COURS</span>',
+      partial: '<span style="background:#ea580c20;color:#ea580c;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700">🟠 INTERROMPU</span>',
+      never:   '<span style="background:#64748b20;color:#64748b;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700">⚪ JAMAIS</span>',
+    })[st] || '';
+
     const rows = folders.map(f => {
       const s = f.stats || {};
-      const pct = s.total_files ? Math.round((s.processed||0) * 100 / s.total_files) : 0;
       const lastScan = f.last_full_scan_at
         ? new Date(f.last_full_scan_at).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'})
         : '<span style="color:var(--text3)">Jamais</span>';
-      return `<tr style="border-bottom:1px solid var(--border)">
+      const rowBg = f.state === 'done' ? 'rgba(16,185,129,0.05)'
+                  : f.state === 'running' ? 'rgba(245,158,11,0.05)'
+                  : f.state === 'partial' ? 'rgba(234,88,12,0.05)' : '';
+      return `<tr style="border-bottom:1px solid var(--border);background:${rowBg}">
         <td style="padding:8px;font-weight:600">${f.folder_name}</td>
         <td style="padding:8px;font-size:11px;color:var(--text3)">${f.folder_path || ''}</td>
-        <td style="padding:8px;text-align:right">${s.total_files || 0}</td>
-        <td style="padding:8px;text-align:right;color:#10b981">${s.ok || 0}</td>
-        <td style="padding:8px;text-align:right;color:#f59e0b">${s.skipped || 0}</td>
-        <td style="padding:8px;text-align:right;color:#dc2626">${s.errors || 0}</td>
-        <td style="padding:8px;text-align:right;color:#0ea5e9">${s.level1_chunks || 0}</td>
-        <td style="padding:8px;text-align:right;color:#8b5cf6">${s.level2_chunks || 0}</td>
-        <td style="padding:8px;text-align:center">${pct}%</td>
+        <td style="padding:8px;text-align:center">${stateBadge(f.state)}</td>
+        <td style="padding:8px;text-align:right">${fmt(s.total_files || 0)}</td>
+        <td style="padding:8px;text-align:right;color:#10b981">${fmt(s.ok || 0)}</td>
+        <td style="padding:8px;text-align:right;color:#f59e0b">${fmt(s.skipped || 0)}</td>
+        <td style="padding:8px;text-align:right;color:${s.errors?'#dc2626':'var(--text3)'}">${fmt(s.errors || 0)}</td>
+        <td style="padding:8px;text-align:right;color:#0ea5e9">${fmt(s.level1_chunks || 0)}</td>
+        <td style="padding:8px;text-align:right;color:#8b5cf6">${fmt(s.level2_chunks || 0)}</td>
+        <td style="padding:8px;text-align:center;font-weight:700">${f.progress_pct}%</td>
         <td style="padding:8px;font-size:10px;color:var(--text3)">${lastScan}</td>
       </tr>`;
-    }).join('') || '<tr><td colspan="10" style="padding:14px;text-align:center;color:var(--text3)">Aucun dossier surveille. Lance un scan pour commencer.</td></tr>';
+    }).join('') || '<tr><td colspan="11" style="padding:14px;text-align:center;color:var(--text3)">Aucun dossier surveille. Lance un scan pour commencer.</td></tr>';
 
     const backdrop = document.createElement('div');
     backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9998;display:flex;align-items:center;justify-content:center';
     const modal = document.createElement('div');
-    modal.style.cssText = 'background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:18px 22px;width:95vw;max-width:1100px;max-height:85vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,0.8)';
+    modal.style.cssText = 'background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:18px 22px;width:95vw;max-width:1200px;max-height:90vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,0.8)';
     modal.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-        <h3 style="margin:0">🚀 État des scans Drive</h3>
+        <h3 style="margin:0">🚀 État des scans Drive SharePoint</h3>
         <button id="drive-close" style="background:#ef4444;color:white;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:700">✕ Fermer</button>
       </div>
-      <div style="margin-bottom:12px">${runBadge}</div>
+      ${renderVerdictBanner(d.verdict)}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">
+        ${renderMetricCard('📦','Fichiers total',fmt(totalFiles),'#64748b',
+          'Nombre total de fichiers detectes dans le(s) dossier(s) surveille(s).')}
+        ${renderMetricCard('✅','Vectorises',fmt(totalOk),'#10b981',
+          'Fichiers extraits et vectorises avec succes (PDF, DOCX, XLSX, images). Chacun a 1 ligne N1 meta + N chunks N2 detail.')}
+        ${renderMetricCard('⏭️','Ignores',fmt(totalSkip),'#f59e0b',
+          'Fichiers volontairement ignores : soit > 50 Mo, soit format non supporte (videos, archives, exe).')}
+        ${renderMetricCard('❌','Erreurs',fmt(totalErr),totalErr?'#dc2626':'#64748b',
+          'Fichiers qui ont echoue au download ou a l extraction. Au prochain scan incremental, ils seront re-tentes automatiquement.')}
+        ${renderMetricCard('🧠','N1 meta',fmt(totalN1),'#0ea5e9',
+          'Nombre de resumes meta stockes (1 par fichier OK). Permet a Raya de savoir que le fichier existe.')}
+        ${renderMetricCard('🔎','N2 detail',fmt(totalN2),'#8b5cf6',
+          'Nombre de chunks detailles vectorises. Permet la recherche semantique precise dans le contenu.')}
+      </div>
       <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px">
         <table style="width:100%;border-collapse:collapse">
           <thead style="background:var(--bg2)">
             <tr style="border-bottom:2px solid var(--border)">
               <th style="padding:10px;text-align:left;font-size:11px">Dossier</th>
               <th style="padding:10px;text-align:left;font-size:11px">Chemin</th>
+              <th style="padding:10px;text-align:center;font-size:11px">État</th>
               <th style="padding:10px;text-align:right;font-size:11px">Total</th>
               <th style="padding:10px;text-align:right;font-size:11px">✅ OK</th>
               <th style="padding:10px;text-align:right;font-size:11px">⏭️ Skip</th>
               <th style="padding:10px;text-align:right;font-size:11px">❌ Err</th>
-              <th style="padding:10px;text-align:right;font-size:11px">N1 méta</th>
-              <th style="padding:10px;text-align:right;font-size:11px">N2 détail</th>
+              <th style="padding:10px;text-align:right;font-size:11px">N1</th>
+              <th style="padding:10px;text-align:right;font-size:11px">N2</th>
               <th style="padding:10px;text-align:center;font-size:11px">%</th>
               <th style="padding:10px;text-align:left;font-size:11px">Dernier scan</th>
             </tr>
@@ -2067,7 +2101,7 @@ async function scanDriveStatus(btn){
         </table>
       </div>
       <div style="margin-top:10px;font-size:11px;color:var(--text3)">
-        Niveau 1 = résumé méta (toujours stocké) · Niveau 2 = chunks détaillés vectorisés · Re-cliquer sur 📊 pour rafraîchir
+        Taux d erreur global : <strong style="color:${errRate>20?'#dc2626':errRate>5?'#f59e0b':'#10b981'}">${errRate.toFixed(1)}%</strong> · N1 meta = Raya sait que le fichier existe · N2 detail = recherche semantique precise · Re-cliquer sur 📊 pour rafraichir
       </div>`;
     backdrop.appendChild(modal);
     document.body.appendChild(backdrop);

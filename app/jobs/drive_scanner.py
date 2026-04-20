@@ -580,7 +580,12 @@ def is_running() -> bool:
 
 
 def get_last_scan_stats(tenant_id: str) -> dict:
-    """Recupere les stats du dernier scan pour affichage UI."""
+    """Recupere les stats du dernier scan pour affichage UI.
+
+    Enrichi le 20/04 pour la refonte dashboards neophyte-friendly :
+    - Classification explicite de chaque dossier (en cours / termine / ko)
+    - Verdict global pour afficher une banniere claire en haut de modale
+    """
     from app.database import get_pg_conn
     try:
         with get_pg_conn() as conn:
@@ -594,12 +599,97 @@ def get_last_scan_stats(tenant_id: str) -> dict:
                 (tenant_id,),
             )
             rows = cur.fetchall()
-        return {"status": "ok", "folders": [
-            {"folder_name": r[0],
-             "last_full_scan_at": r[1].isoformat() if r[1] else None,
-             "stats": r[2] or {},
-             "enabled": r[3], "folder_path": r[4]}
-            for r in rows
-        ], "scan_running": is_running()}
+        running = is_running()
+        folders = []
+        for r in rows:
+            stats = r[2] or {}
+            total = stats.get("total_files", 0) or 0
+            processed = stats.get("processed", 0) or 0
+            pct = round(100 * processed / total, 1) if total else 0
+            # Classification du dossier
+            # - 'running'  : scan en cours actuellement sur ce dossier
+            # - 'done'     : last_full_scan_at set ET processed >= total
+            # - 'partial'  : jamais termine (interrompu, % < 100)
+            # - 'never'    : jamais scanne (total=0 et last_full_scan=null)
+            if running and not r[1]:
+                state = "running"
+            elif r[1] and total and processed >= total:
+                state = "done"
+            elif total and processed > 0:
+                state = "partial"
+            elif r[1]:
+                state = "done"  # ancien scan termine, manque les stats
+            else:
+                state = "never"
+            folders.append({
+                "folder_name": r[0],
+                "last_full_scan_at": r[1].isoformat() if r[1] else None,
+                "stats": stats,
+                "enabled": r[3],
+                "folder_path": r[4],
+                "state": state,
+                "progress_pct": pct,
+            })
+        verdict = _compute_drive_verdict(folders, running)
+        return {"status": "ok", "folders": folders,
+                "scan_running": running, "verdict": verdict}
     except Exception as e:
         return {"status": "error", "message": str(e)[:300]}
+
+
+def _compute_drive_verdict(folders: list, running: bool) -> dict:
+    """Verdict global pour le dashboard Drive. Meme grammaire que les
+    verdicts Webhooks et Integrite pour coherence visuelle."""
+    if running:
+        # Trouve le dossier en cours
+        active = next((f for f in folders if f["state"] == "running"), None)
+        if active:
+            s = active["stats"]
+            return {"level": "warning", "icon": "⏳",
+                    "title": f"Scan en cours sur {active['folder_name']}",
+                    "message": f"Progression : {active['progress_pct']}% ({s.get('processed',0)}/{s.get('total_files',0)} fichiers). Tu peux fermer la modale, le scan continue sur Railway.",
+                    "details": [
+                        f"✅ OK : {s.get('ok',0)}",
+                        f"⏭️ Skip : {s.get('skipped',0)} (taille > 50 Mo ou format non supporte)",
+                        f"❌ Erreurs : {s.get('errors',0)}",
+                        f"N1 meta : {s.get('level1_chunks',0)} | N2 detail : {s.get('level2_chunks',0)}",
+                    ]}
+        return {"level": "warning", "icon": "⏳",
+                "title": "Scan Drive en cours",
+                "message": "Un scan tourne actuellement.",
+                "details": []}
+    if not folders:
+        return {"level": "ok", "icon": "⚪",
+                "title": "Aucun dossier configure",
+                "message": "Configure un dossier SharePoint dans les settings du tenant puis lance un scan.",
+                "details": []}
+    done = [f for f in folders if f["state"] == "done"]
+    partial = [f for f in folders if f["state"] == "partial"]
+    if partial and not done:
+        f = partial[0]
+        s = f["stats"]
+        return {"level": "attention", "icon": "🟠",
+                "title": f"Scan interrompu sur {f['folder_name']}",
+                "message": f"Le dernier scan s est arrete a {f['progress_pct']}%. Relance un scan incremental pour finir.",
+                "details": [f"{s.get('ok',0)} OK / {s.get('errors',0)} erreurs sur {s.get('total_files',0)}"]}
+    if done:
+        f = done[0]
+        s = f["stats"]
+        ok, errs, skip = s.get("ok", 0), s.get("errors", 0), s.get("skipped", 0)
+        total = s.get("total_files", 0)
+        err_rate = (errs / total * 100) if total else 0
+        if err_rate > 20:
+            return {"level": "warning", "icon": "🟡",
+                    "title": f"Scan termine sur {f['folder_name']} (taux d erreur eleve)",
+                    "message": f"{err_rate:.0f}% d erreurs sur le dernier scan. A investiguer si ce taux ne baisse pas au prochain rescan.",
+                    "details": [f"{ok} OK, {skip} skip, {errs} erreurs sur {total} fichiers",
+                                f"N1 meta : {s.get('level1_chunks',0)} | N2 detail : {s.get('level2_chunks',0)}"]}
+        return {"level": "ok", "icon": "✅",
+                "title": f"Scan Drive termine ({f['folder_name']})",
+                "message": f"{ok} fichiers vectorises sur {total}. Dernier scan : {f['last_full_scan_at'][:16].replace('T',' ') if f['last_full_scan_at'] else '?'}.",
+                "details": [f"{ok} OK, {skip} skip (gros ou non supporte), {errs} erreurs",
+                            f"N1 meta : {s.get('level1_chunks',0)} | N2 detail : {s.get('level2_chunks',0)}"]}
+    return {"level": "ok", "icon": "⚪",
+            "title": "Jamais scanne",
+            "message": "Les dossiers sont configures mais jamais scannes. Lance un scan pour commencer.",
+            "details": []}
