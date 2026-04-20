@@ -996,6 +996,51 @@ def _compute_webhook_verdict(stats: dict) -> dict:
             "details": details}
 
 
+@router.post("/admin/webhooks/purge-phantoms")
+def admin_webhooks_purge_phantoms(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Purge les jobs en erreur (completed_at NOT NULL + last_error NOT NULL)
+    sur les modeles presents dans deactivated_models.
+
+    Ces erreurs 'fantomes' polluent les compteurs 24h sans correspondre a
+    un vrai probleme : le modele est officiellement desactive ou en
+    attente de droits. Les purger nettoie l affichage sans perte.
+
+    Retourne le nombre de lignes supprimees et la liste des modeles.
+    """
+    try:
+        from app.database import get_pg_conn
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            # Liste des modeles desactives pour le feedback
+            cur.execute(
+                "SELECT model_name FROM deactivated_models WHERE source='odoo'"
+            )
+            deact_models = [r[0] for r in cur.fetchall()]
+            if not deact_models:
+                return {"status": "ok", "deleted": 0,
+                        "message": "Aucun modele desactive configure - rien a purger."}
+            placeholders = ",".join(["%s"] * len(deact_models))
+            cur.execute(
+                f"""DELETE FROM vectorization_queue
+                   WHERE model_name IN ({placeholders})
+                     AND completed_at IS NOT NULL
+                     AND last_error IS NOT NULL""",
+                tuple(deact_models),
+            )
+            deleted = cur.rowcount
+            conn.commit()
+        return {"status": "ok", "deleted": deleted,
+                "models_purged": deact_models,
+                "message": f"{deleted} jobs fantomes supprimes."}
+    except Exception as e:
+        import traceback
+        return {"status": "error", "message": str(e)[:300],
+                "trace": traceback.format_exc()[:1500]}
+
+
 def _compute_integrity_verdict(overall: dict, models: list) -> dict:
     """Verdict global pour le dashboard Integrite.
     Applique la meme grammaire que _compute_webhook_verdict.

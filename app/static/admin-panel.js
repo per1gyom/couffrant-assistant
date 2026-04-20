@@ -821,6 +821,9 @@ async function showWebhookStatus(btn){
         <button class="btn" id="webhooks-close-btn" style="background:#ef4444;color:white;padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:700">✕ Fermer</button>
       </div>
       ${renderVerdictBanner(d.verdict)}
+      ${s.phantom_errors_24h > 0 ? `<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+        <button id="webhooks-purge-btn" style="background:#8b5cf6;color:white;padding:6px 14px;border:none;border-radius:6px;cursor:pointer;font-weight:600;font-size:12px" title="Supprime de la queue les ${fmt(s.phantom_errors_24h)} jobs en erreur sur les modeles officiellement desactives. Sans impact - ces erreurs sont des fantomes residuels.">🧹 Purger les ${fmt(s.phantom_errors_24h)} erreurs fantômes</button>
+      </div>` : ''}
       ${metricsHtml}
       ${renderAccordion('🎯 Erreurs 24h regroupées par modèle (cliquer pour comprendre les fantômes vs réelles)', errorsByModelTable, true)}
       ${renderAccordion('🌙 Dernières rondes de nuit (5h)', patrolTable, false)}
@@ -833,6 +836,34 @@ async function showWebhookStatus(btn){
     document.addEventListener('keydown', onEsc);
     backdrop.addEventListener('click', e => { if(e.target === backdrop) close(); });
     document.getElementById('webhooks-close-btn').onclick = close;
+    // Bouton purge fantomes (optionnel, visible seulement si phantom_errors_24h > 0)
+    const purgeBtn = document.getElementById('webhooks-purge-btn');
+    if(purgeBtn){
+      purgeBtn.onclick = async () => {
+        const ok = await confirmAction(
+          '🧹 Purger les erreurs fantômes ?',
+          'Cette opération va supprimer de la queue les jobs en erreur sur les modèles officiellement désactivés (of.survey.answers, mail.message, etc.).\n\n' +
+          'Aucun impact : ces erreurs sont des fantômes résiduels qui polluent simplement les compteurs 24h.\n\n' +
+          'Continuer ?',
+          'Oui, purger', 'Annuler'
+        );
+        if(!ok) return;
+        const originalPurge = purgeBtn.innerHTML;
+        purgeBtn.disabled = true;
+        purgeBtn.innerHTML = '⏳ Purge...';
+        try{
+          const res = await fetch('/admin/webhooks/purge-phantoms', {method:'POST'});
+          const pd = await res.json();
+          if(pd.status !== 'ok') throw new Error(pd.message || 'Purge echouee');
+          setAlert('companies-alert', '🧹 '+pd.message+' Re-clique sur 🔌 Webhooks pour rafraichir.', 'ok');
+          close();
+        }catch(e){
+          setAlert('companies-alert', '❌ Purge echouee : '+e.message, 'err');
+          purgeBtn.disabled = false;
+          purgeBtn.innerHTML = originalPurge;
+        }
+      };
+    }
   }catch(e){
     setAlert('companies-alert', '❌ Webhooks status échoué : '+e.message, 'err');
   }finally{
