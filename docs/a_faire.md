@@ -111,3 +111,22 @@ Upload d un fichier une fois, reference ensuite sans re-upload.
 
 Claude peut citer precisement ses sources tirees des documents fournis.
 - Aide contre les hallucinations en mode verifiable
+
+
+---
+
+## 🔧 Fix mémoire v2 — PRIORITÉ 1 demain matin (22/04)
+
+**Découvert en test réel ce soir sur dossier Coullet.**
+
+Raya v2 fonctionne excellent dans la qualité de réponse (plus d'hallucinations, auto-correction, apprentissage) mais bute sur le garde-fou tokens car l'historique in-prompt est trop lourd (10 échanges x 5k tokens = 50k tokens avant de travailler).
+
+**Voir `docs/fix_memoire_v2_22avril.md` pour le plan détaillé.**
+
+Résumé de ce qu'il faut faire :
+- Historique in-prompt : 10 → 3 échanges + troncature 3000 chars
+- Batch graph_indexer : 8 → 1 (indexation immédiate, supprime trou de mémoire)
+- Supprimer l'idée du résumé dans le prompt (redondant avec le graphe)
+- Vérifier en DB si la règle métier RFAC a bien été mémorisée par Raya ce soir
+
+Effort : ~20 min de code + test.
