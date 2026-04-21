@@ -67,6 +67,7 @@ def llm_complete(
     system: str = None,
     temperature: float = None,
     web_search: bool = False,
+    tools: list = None,
 ) -> dict:
     """
     Effectue un appel LLM unifié, indépendant du provider.
@@ -78,14 +79,19 @@ def llm_complete(
         system     : prompt système (optionnel)
         temperature: optionnel, défaut du provider sinon
         web_search : active la recherche web via l'outil natif Anthropic (défaut: False)
+        tools      : liste de tools custom au format API Anthropic (défaut: None)
+                     Si fourni, active le mode "tool use" de Claude.
+                     Combinable avec web_search.
 
     Returns:
         dict standardisé :
         {
-            "text":          str,   # texte de la réponse
-            "stop_reason":   str,   # 'end_turn', 'max_tokens', etc.
+            "text":          str,   # texte de la réponse (concaténation des blocs text)
+            "content":       list,  # blocs bruts (text, tool_use, tool_result, ...)
+            "stop_reason":   str,   # 'end_turn', 'tool_use', 'max_tokens', etc.
             "input_tokens":  int,
             "output_tokens": int,
+            "usage":         dict,  # {"input_tokens": N, "output_tokens": N}
             "model":         str,   # nom réel du modèle utilisé
             "provider":      str,   # 'anthropic', etc.
             "citations":     list,  # sources web si web_search=True
@@ -105,12 +111,12 @@ def llm_complete(
         raise RuntimeError(f"Tier '{model_tier}' non défini pour {LLM_PROVIDER}")
 
     if LLM_PROVIDER == "anthropic":
-        return _complete_anthropic(messages, model_name, max_tokens, system, temperature, web_search)
+        return _complete_anthropic(messages, model_name, max_tokens, system, temperature, web_search, tools)
 
     raise RuntimeError(f"Provider '{LLM_PROVIDER}' déclaré mais non implémenté")
 
 
-def _complete_anthropic(messages, model_name, max_tokens, system, temperature, web_search=False):
+def _complete_anthropic(messages, model_name, max_tokens, system, temperature, web_search=False, tools=None):
     client = _get_anthropic_client()
 
     kwargs = {
@@ -123,9 +129,14 @@ def _complete_anthropic(messages, model_name, max_tokens, system, temperature, w
     if temperature is not None:
         kwargs["temperature"] = temperature
 
-    # WEB-SEARCH : outil natif Anthropic
+    # Construction de la liste des tools (web_search natif + tools custom)
+    all_tools = []
     if web_search:
-        kwargs["tools"] = [{"type": "web_search_20250305", "name": "web_search"}]
+        all_tools.append({"type": "web_search_20250305", "name": "web_search"})
+    if tools:
+        all_tools.extend(tools)
+    if all_tools:
+        kwargs["tools"] = all_tools
 
     response = client.messages.create(**kwargs)
 
@@ -149,9 +160,14 @@ def _complete_anthropic(messages, model_name, max_tokens, system, temperature, w
 
     return {
         "text":          text,
+        "content":       response.content,  # blocs bruts pour mode agent (tool_use, text, ...)
         "stop_reason":   response.stop_reason,
         "input_tokens":  response.usage.input_tokens,
         "output_tokens": response.usage.output_tokens,
+        "usage": {
+            "input_tokens":  response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
+        },
         "model":         model_name,
         "provider":      "anthropic",
         "citations":     citations,
