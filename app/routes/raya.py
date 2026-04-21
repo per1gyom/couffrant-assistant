@@ -55,9 +55,16 @@ from app.routes.actions import execute_actions, _ASK_CHOICE_PREFIX
 from app.routes.deps import require_user
 from app.rate_limiter import check_rate_limit
 from app.routes.raya_helpers import _raya_core, _build_user_content, RayaQuery, FeedbackPayload  # noqa
+# v2 mode agent (active via RAYA_AGENT_MODE=true)
+from app.routes.raya_agent_core import _raya_core_agent
 
 logger = get_logger("raya.core")
 router = APIRouter(tags=["raya"])
+
+
+def _is_agent_mode() -> bool:
+    """Feature flag : true si RAYA_AGENT_MODE est active."""
+    return os.getenv("RAYA_AGENT_MODE", "false").lower() == "true"
 
 
 # --- ENDPOINTS ---
@@ -147,8 +154,14 @@ def raya_endpoint(
         }
     import concurrent.futures
     try:
+        # Feature flag : route vers la boucle agent v2 ou l inference single-shot v1
+        core_fn = _raya_core_agent if _is_agent_mode() else _raya_core
+        logger.info(
+            "[Raya] Dispatch vers %s pour user=%s",
+            core_fn.__name__, username,
+        )
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_raya_core, request, payload, username, tenant_id)
+            future = executor.submit(core_fn, request, payload, username, tenant_id)
             # Timeout 90s : Opus 4.7 avec max_tokens=8192 + synthèse auto (2e appel LLM)
             # peut légitimement prendre 45-75s sur requête complexe. 30s créait des bugs
             # fantômes (thread non tuable en Python) où la réponse arrivait après coup.
