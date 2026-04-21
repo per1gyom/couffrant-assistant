@@ -24,11 +24,9 @@ import re
 import threading
 from fastapi import APIRouter, Request, Response
 
-# Import du handler qui traite effectivement chaque mail. Sans cet import,
-# le thread lance dans webhook_notification() leve un NameError sur
-# _process_mail des qu un webhook Microsoft arrive (bug silencieux pour
-# l utilisateur mais visible dans les logs Railway).
-from app.routes.webhook_ms_handlers import _process_mail
+# Note : _process_mail est importe dans webhook_notification en lazy
+# (pas au top-level) pour eviter un import circulaire via
+# webhook_ms_handlers -> webhook_microsoft -> webhook_ms_handlers.
 
 router = APIRouter(tags=["webhook"])
 
@@ -106,6 +104,10 @@ async def webhook_notification(request: Request):
 
         if not message_id or mail_exists(message_id, username):
             continue
+
+        # Import lazy pour eviter un import circulaire au demarrage
+        # (webhook_ms_handlers <-> webhook_microsoft s importent mutuellement).
+        from app.routes.webhook_ms_handlers import _process_mail
 
         threading.Thread(
             target=_process_mail,
