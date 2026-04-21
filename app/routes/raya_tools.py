@@ -507,7 +507,7 @@ RAYA_TOOLS: list[dict[str, Any]] = [
     TOOL_READ_MAIL,
     TOOL_READ_DRIVE_FILE,
     TOOL_WEB_SEARCH,
-    TOOL_GET_WEATHER,
+    # TOOL_GET_WEATHER desactive en v2 initiale (pas de connecteur meteo)
     # Action mail
     TOOL_SEND_MAIL,
     TOOL_REPLY_TO_MAIL,

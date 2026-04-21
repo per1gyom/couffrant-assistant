@@ -93,7 +93,7 @@ def _execute_search_graph(inp: dict, username: str, tenant_id: str) -> dict:
         query=query,
         username=username,
         tenant_id=tenant_id,
-        top_k=max_results,
+        top_k_final=max_results,
     )
     formatted = format_unified_results(data, max_items=max_results)
     return {
@@ -111,29 +111,28 @@ def _execute_search_odoo(inp: dict, username: str, tenant_id: str) -> dict:
     query = inp.get("query", "")
     max_results = inp.get("max_results", 10)
 
-    results = hybrid_search(
+    data = hybrid_search(
         query=query,
-        username=username,
         tenant_id=tenant_id,
-        top_k=max_results,
+        top_k_final=max_results,
     )
-    formatted = format_search_results(results, max_items=max_results)
+    formatted = format_search_results(data, max_items=max_results)
     return {
         "query": query,
-        "count": len(results),
+        "count": len(data.get("results", [])) if isinstance(data, dict) else len(data),
         "formatted": formatted,
     }
 
 
 def _execute_get_client_360(inp: dict, username: str, tenant_id: str) -> dict:
     """Vue 360 consolide d un client via API Odoo directe."""
-    from app.connectors.odoo_enrich import get_client_360
+    from app.connectors.odoo_client_360 import get_client_360
 
     client = inp.get("client_name_or_id", "")
     return get_client_360(
-        client_name_or_id=client,
-        username=username,
-        tenant_id=tenant_id,
+        key_or_id=client,
+        include_mails=True,
+        mail_username=username,
     )
 
 
@@ -149,7 +148,7 @@ def _execute_search_drive(inp: dict, username: str, tenant_id: str) -> dict:
         query=query,
         username=username,
         tenant_id=tenant_id,
-        top_k=max_results,
+        top_k_final=max_results,
         sources=["drive"],
     )
     return {
@@ -170,7 +169,7 @@ def _execute_search_mail(inp: dict, username: str, tenant_id: str) -> dict:
         query=query,
         username=username,
         tenant_id=tenant_id,
-        top_k=max_results,
+        top_k_final=max_results,
         sources=["mail"],
     )
     return {
@@ -191,7 +190,7 @@ def _execute_search_conversations(inp: dict, username: str, tenant_id: str) -> d
         query=query,
         username=username,
         tenant_id=tenant_id,
-        top_k=max_results,
+        top_k_final=max_results,
         sources=["conversation"],
     )
     return {
@@ -279,17 +278,16 @@ def _execute_web_search(inp: dict, username: str, tenant_id: str) -> dict:
 
 
 def _execute_get_weather(inp: dict, username: str, tenant_id: str) -> dict:
-    """Meteo d une localisation."""
-    location = inp.get("location", "Romorantin-Lanthenay")
-    # Reutilise le connecteur meteo existant
-    try:
-        from app.connectors.weather import get_weather
-        return get_weather(location=location)
-    except ImportError:
-        return {
-            "error": "Connecteur meteo non disponible dans cette version",
-            "location": location,
-        }
+    """
+    Meteo d une localisation.
+    Non implemente en v2 initiale (pas de connecteur meteo dans le code
+    actuel). A brancher plus tard via OpenWeatherMap ou similaire si besoin.
+    """
+    return {
+        "error": "Connecteur meteo non disponible. Retire du registre v2 "
+                 "initiale. Voir docs/a_faire.md pour le brancher plus tard.",
+        "location": inp.get("location", "Romorantin-Lanthenay"),
+    }
 
 
 # ==========================================================================
@@ -297,47 +295,68 @@ def _execute_get_weather(inp: dict, username: str, tenant_id: str) -> dict:
 # ==========================================================================
 
 def _execute_create_file(inp: dict, username: str, tenant_id: str) -> dict:
-    """Cree un fichier telechargeable (markdown, txt, csv)."""
-    from app.routes.actions.file_actions import create_download_file
-
-    return create_download_file(
-        filename=inp.get("filename", "fichier"),
-        content=inp.get("content", ""),
-        file_format=inp.get("format", "md"),
-        username=username,
-    )
+    """
+    Cree un fichier telechargeable (markdown, txt, csv).
+    Note v2 : pas de connecteur dedie aux fichiers texte/markdown dans le code
+    actuel. On retourne le contenu tel quel pour l instant. A enrichir plus tard
+    avec un vrai generateur si besoin.
+    """
+    return {
+        "notice": "create_file (md/txt/csv) sans stockage persistant en v2 initiale. "
+                  "Utilise create_pdf ou create_excel pour un fichier reel.",
+        "filename": inp.get("filename", "fichier"),
+        "format": inp.get("format", "md"),
+        "content": inp.get("content", ""),
+    }
 
 
 def _execute_create_pdf(inp: dict, username: str, tenant_id: str) -> dict:
-    """Cree un PDF structure."""
-    from app.routes.actions.file_actions import create_pdf_from_markdown
+    """Cree un PDF structure via file_creator."""
+    from app.connectors.file_creator import create_pdf
 
-    return create_pdf_from_markdown(
+    return create_pdf(
         title=inp.get("title", "Document"),
-        markdown_content=inp.get("markdown_content", ""),
+        content=inp.get("markdown_content", ""),
         username=username,
     )
 
 
 def _execute_create_excel(inp: dict, username: str, tenant_id: str) -> dict:
-    """Cree un fichier Excel."""
-    from app.routes.actions.file_actions import create_excel_file
+    """
+    Cree un fichier Excel via file_creator.
+    Signature file_creator.create_excel : (title, data, headers, username)
+    On convertit sheets en data + headers (feuille principale seulement).
+    """
+    from app.connectors.file_creator import create_excel
 
-    return create_excel_file(
-        filename=inp.get("filename", "fichier.xlsx"),
-        sheets=inp.get("sheets", {}),
+    sheets = inp.get("sheets", {})
+    # Prendre la premiere feuille comme donnees principales
+    if not sheets:
+        return {"error": "Aucune donnee fournie dans sheets"}
+
+    first_sheet_name = list(sheets.keys())[0]
+    rows = sheets[first_sheet_name]
+    if not rows:
+        return {"error": "Feuille vide"}
+
+    headers = rows[0] if rows else []
+    data = rows[1:] if len(rows) > 1 else []
+
+    return create_excel(
+        title=inp.get("filename", "fichier").replace(".xlsx", ""),
+        data=data,
+        headers=headers,
         username=username,
     )
 
 
 def _execute_create_image(inp: dict, username: str, tenant_id: str) -> dict:
     """Genere une image via DALL-E."""
-    from app.routes.actions.image_actions import generate_dalle_image
+    from app.connectors.dalle_connector import generate_image
 
-    return generate_dalle_image(
+    return generate_image(
         prompt=inp.get("prompt", ""),
         size=inp.get("size", "1024x1024"),
-        username=username,
     )
 
 
@@ -354,9 +373,12 @@ def _execute_remember_preference(inp: dict, username: str, tenant_id: str) -> di
 
     rule_id = save_rule(
         category=category,
-        rule_text=preference,
+        rule=preference,
+        source="user_explicit",
+        confidence=1.0,
         username=username,
         tenant_id=tenant_id,
+        personal=False,
     )
     return {
         "status": "remembered",
@@ -371,7 +393,10 @@ def _execute_forget_preference(inp: dict, username: str, tenant_id: str) -> dict
     from app.memory_rules import delete_rule
 
     preference_id = inp.get("preference_id", "")
-    deleted = delete_rule(rule_id=preference_id, username=username, tenant_id=tenant_id)
+    try:
+        deleted = delete_rule(rule_id=int(preference_id), username=username)
+    except (ValueError, TypeError):
+        return {"status": "invalid_id", "preference_id": preference_id}
     return {
         "status": "forgotten" if deleted else "not_found",
         "preference_id": preference_id,
@@ -482,7 +507,7 @@ _EXECUTORS: dict[str, Any] = {
     "read_mail": _execute_read_mail,
     "read_drive_file": _execute_read_drive_file,
     "web_search": _execute_web_search,
-    "get_weather": _execute_get_weather,
+    # "get_weather": retire en v2 initiale (pas de connecteur meteo)
     # Creation de contenu (sans confirmation)
     "create_file": _execute_create_file,
     "create_pdf": _execute_create_pdf,
