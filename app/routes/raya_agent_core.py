@@ -29,9 +29,13 @@ logger = get_logger("raya.agent")
 # ==========================================================================
 # GARDE-FOUS DE LA BOUCLE
 # ==========================================================================
-MAX_ITERATIONS = 10
-MAX_DURATION_SECONDS = 30
-MAX_TOKENS_BUDGET = 30_000
+# Seuils revus a la hausse apres test reel du 22/04 sur dossier Coullet :
+# les questions metier complexes (croisement devis + factures + acomptes)
+# depassent legitimement 30k tokens / 30s. Garde-fous trop stricts creaient
+# des faux positifs d interruption.
+MAX_ITERATIONS = 15
+MAX_DURATION_SECONDS = 60
+MAX_TOKENS_BUDGET = 60_000
 
 
 def _build_agent_system_prompt(
