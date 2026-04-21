@@ -130,3 +130,22 @@ Résumé de ce qu'il faut faire :
 - Vérifier en DB si la règle métier RFAC a bien été mémorisée par Raya ce soir
 
 Effort : ~20 min de code + test.
+
+### Mise à jour 01h45 — Plan complet 5 points
+
+Le fix mémoire seul ne suffit pas. Guillaume a identifié un comportement
+critique : Raya doit **conclure explicitement les impasses de données**
+au lieu de s'acharner. Plan complet pour demain :
+
+1. Historique : 10 → 3 échanges + troncature 3000 chars
+2. **Règle n°5 dans le prompt** : s'arrêter après 2 tentatives infructueuses,
+   nommer la limite ("sale.order.line pas exposé"), donner ce qu'on a
+3. Batch graph_indexer : 8 → 1
+4. Détection de boucle tool calls (avertir Raya si elle refait le même tool)
+5. Budget tokens : 60k → 100k (filet de sécurité après leviers 1-4)
+
+Voir `docs/fix_memoire_v2_22avril.md` section "Comportement attendu face aux
+limites de données" pour les détails.
+
+**Point clé** : c'est un comportement transposable à tout trou de données,
+pas juste Coullet. Exactement l'inverse de la v1 qui inventait pour combler.

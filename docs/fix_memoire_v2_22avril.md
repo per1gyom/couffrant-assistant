@@ -157,3 +157,98 @@ dans la requête et :
 
 L'architecture est bonne. Les ajustements ci-dessus sont des **réglages fins**,
 pas des refontes.
+
+
+---
+
+## 🎯 Ajout 01h45 — Comportement attendu face aux limites de données
+
+**Retour Guillaume** :
+> *"Là par exemple pour ma question, j'aurais aimé qu'elle arrive à la conclusion
+> qu'elle ne peut pas me donner les chiffres car elle n'a pas accès aux devis,
+> aux tarifs des devis, au montant des devis. Et qu'elle me dise : je ne peux pas
+> voir le montant des devis correspondants, il faut libérer l'outil."*
+
+### Ce qu'il s'est passé vraiment sur la 3e question
+
+Raya a voulu calculer "montant devis vs reste à facturer". Elle a tenté plusieurs voies :
+- `search_odoo` avec divers termes → pas de montants de lignes
+- `get_client_360` → montants ligne par ligne pas exposés
+- `search_drive` → chercher le PDF du devis
+- `search_mail` → chercher un mail qui mentionne le montant
+- etc.
+
+Chaque tentative consomme 3-5k tokens. Au bout de 5-6 tentatives, elle explose le budget.
+
+### Le problème de fond (pas juste le budget)
+
+**Même avec 200k tokens de budget**, si Raya s'acharne à contourner une limite, elle finira par exploser. Le problème n'est pas la taille du budget, c'est le **comportement** :
+
+- ✅ Comportement voulu : *"Après 2 tentatives infructueuses pour obtenir les
+  montants des lignes de devis, je conclus que sale.order.line n'est pas exposé
+  par l'API. Je signale la limitation et je donne les infos dont je dispose."*
+- ❌ Comportement actuel : *"J'essaie une 3e voie, puis une 4e, puis une 5e..."*
+
+### Les 2 leviers à activer demain
+
+**Levier 1 — Instruction explicite dans le prompt système**
+
+Ajouter une règle claire dans `_build_agent_system_prompt()` :
+
+```
+5. Si après 2 tentatives avec des outils différents, tu ne trouves toujours pas
+   une donnée précise, ne persiste pas. Conclus que la donnée n'est pas
+   accessible, explique ce qui manque à l'utilisateur (quelle source, quelle
+   API, quelle permission), et donne ce que tu as pu assembler jusqu'ici.
+   Exemple de bonne formulation : "Je n'arrive pas à obtenir les montants
+   détaillés des devis — l'API Odoo actuelle n'expose pas sale.order.line.
+   Ce qu'il faudrait : demander à OpenFire d'ouvrir ce modèle. Voici ce que
+   je sais quand même : [contexte]."
+```
+
+**Levier 2 — Mécanisme de détection de boucle**
+
+Dans `raya_agent_core.py`, détecter si Raya refait le même tool avec des
+paramètres similaires. Si oui, lui signaler dans le tool_result :
+*"Tu as déjà appelé ce tool avec des paramètres proches 2 fois. Pense à
+conclure plutôt que chercher une 3e fois."*
+
+Pseudo-code :
+```python
+tool_call_history = []  # (tool_name, signature_hash) par iteration
+# ... dans la boucle
+sig = hash(json.dumps(tool_input, sort_keys=True))
+similar_calls = sum(1 for (n, s) in tool_call_history if n == tu["name"])
+if similar_calls >= 2:
+    # Avertir dans le tool_result
+    result_str += "\n\n[SYSTEME: tu as deja appele ce tool plusieurs fois, " \
+                  "pense a conclure avec ce que tu as si la donnee n existe pas.]"
+tool_call_history.append((tu["name"], sig))
+```
+
+### Plan ajusté pour le 22/04 matin
+
+Par ordre d'importance :
+
+1. **Historique 10 → 3 échanges + troncature** (le fix structurel memoire)
+2. **Règle n°5 dans le prompt** : s'arrêter après 2 tentatives infructueuses
+3. **Batch graph_indexer 8 → 1** (cohérence avec historique réduit)
+4. **Détection de boucle de tool calls** (levier 2 ci-dessus)
+5. **Budget tokens** : monter à 100k (filet de sécurité pour les questions vraiment complexes après activation des leviers 1 et 2)
+
+Avec ces 5 changements, l'architecture devient robuste :
+- Mémoire efficace (plus de saturation prompt)
+- Comportement intelligent face aux impasses (reconnaissance explicite des limites)
+- Budget large pour les cas où la réflexion est vraiment longue
+- Protection anti-boucle pour éviter les dérapages
+
+### Pourquoi c'est important au-delà de Coullet
+
+Ce comportement est **transposable à tous les cas** où Raya peut manquer de
+données : mails non indexés, clients absents du graphe, permissions Odoo
+limitées, documents SharePoint non crawlés, etc. Le pattern *"chercher →
+chercher encore → conclure honnêtement l'impasse"* est générique et précieux.
+
+C'est exactement l'inverse de la v1 qui, confrontée à un trou de données,
+**inventait** pour combler. Ici, confrontée à un trou de données, la v2 doit
+**nommer le trou** et le signaler.
