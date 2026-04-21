@@ -151,16 +151,20 @@ def _call_anthropic_with_tools(
     Retourne un dict avec :
       - stop_reason : "end_turn", "tool_use", "max_tokens", ...
       - content     : liste de blocs (text, tool_use, ...)
-      - usage       : dict input_tokens, output_tokens
+      - usage       : dict input_tokens, output_tokens, cache_*
     """
     # llm_complete est notre wrapper existant. On etend avec tools.
     # En v2 on utilise Opus 4.7 par defaut (model_tier="deep").
+    # cache_system=True : active le prompt caching Anthropic. Le prompt
+    # systeme (identique a chaque tour) est mis en cache pour 5 minutes.
+    # Gain : ~90% d economie sur les tokens system aux tours 2+.
     result = llm_complete(
         messages=messages,
         system=system,
         tools=tools,
         model_tier=model_tier,
         max_tokens=max_tokens,
+        cache_system=True,
     )
     return result
 

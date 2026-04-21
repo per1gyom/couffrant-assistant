@@ -68,20 +68,24 @@ def llm_complete(
     temperature: float = None,
     web_search: bool = False,
     tools: list = None,
+    cache_system: bool = False,
 ) -> dict:
     """
     Effectue un appel LLM unifié, indépendant du provider.
 
     Args:
-        messages   : liste {"role": "user|assistant", "content": "..."}
-        model_tier : "fast" | "smart" | "deep"
-        max_tokens : limite de tokens en sortie
-        system     : prompt système (optionnel)
-        temperature: optionnel, défaut du provider sinon
-        web_search : active la recherche web via l'outil natif Anthropic (défaut: False)
-        tools      : liste de tools custom au format API Anthropic (défaut: None)
-                     Si fourni, active le mode "tool use" de Claude.
-                     Combinable avec web_search.
+        messages    : liste {"role": "user|assistant", "content": "..."}
+        model_tier  : "fast" | "smart" | "deep"
+        max_tokens  : limite de tokens en sortie
+        system      : prompt système (optionnel)
+        temperature : optionnel, défaut du provider sinon
+        web_search  : active la recherche web via l'outil natif Anthropic
+        tools       : liste de tools custom au format API Anthropic
+        cache_system: active le prompt caching Anthropic sur le prompt système.
+                      A utiliser dans la boucle agent où le même system est
+                      renvoyé plusieurs fois de suite. Économie ~90% sur les
+                      appels suivants dans les 5 minutes. Minimum 1024 tokens
+                      de prompt pour que le caching soit effectif.
 
     Returns:
         dict standardisé :
@@ -91,11 +95,13 @@ def llm_complete(
             "stop_reason":   str,   # 'end_turn', 'tool_use', 'max_tokens', etc.
             "input_tokens":  int,
             "output_tokens": int,
-            "usage":         dict,  # {"input_tokens": N, "output_tokens": N}
-            "model":         str,   # nom réel du modèle utilisé
-            "provider":      str,   # 'anthropic', etc.
-            "citations":     list,  # sources web si web_search=True
-            "raw":           Any,   # objet brut du provider
+            "cache_creation_input_tokens": int,  # tokens qui ont été mis en cache
+            "cache_read_input_tokens":     int,  # tokens lus depuis le cache
+            "usage":         dict,
+            "model":         str,
+            "provider":      str,
+            "citations":     list,
+            "raw":           Any,
         }
 
     Lève RuntimeError si le provider est inconnu ou mal configuré.
@@ -111,12 +117,12 @@ def llm_complete(
         raise RuntimeError(f"Tier '{model_tier}' non défini pour {LLM_PROVIDER}")
 
     if LLM_PROVIDER == "anthropic":
-        return _complete_anthropic(messages, model_name, max_tokens, system, temperature, web_search, tools)
+        return _complete_anthropic(messages, model_name, max_tokens, system, temperature, web_search, tools, cache_system)
 
     raise RuntimeError(f"Provider '{LLM_PROVIDER}' déclaré mais non implémenté")
 
 
-def _complete_anthropic(messages, model_name, max_tokens, system, temperature, web_search=False, tools=None):
+def _complete_anthropic(messages, model_name, max_tokens, system, temperature, web_search=False, tools=None, cache_system=False):
     client = _get_anthropic_client()
 
     kwargs = {
@@ -125,7 +131,18 @@ def _complete_anthropic(messages, model_name, max_tokens, system, temperature, w
         "messages":   messages,
     }
     if system:
-        kwargs["system"] = system
+        # Prompt caching : on passe system comme liste de blocs avec cache_control
+        # Caching effectif uniquement si le prompt fait >=1024 tokens (environ 4000 chars).
+        if cache_system and len(system) > 3500:
+            kwargs["system"] = [
+                {
+                    "type": "text",
+                    "text": system,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        else:
+            kwargs["system"] = system
     if temperature is not None:
         kwargs["temperature"] = temperature
 
@@ -158,15 +175,23 @@ def _complete_anthropic(messages, model_name, max_tokens, system, temperature, w
                         })
     text = "".join(text_parts)
 
+    # Extraction des metrics de prompt caching (si actives)
+    cache_creation = getattr(response.usage, "cache_creation_input_tokens", 0) or 0
+    cache_read = getattr(response.usage, "cache_read_input_tokens", 0) or 0
+
     return {
         "text":          text,
         "content":       response.content,  # blocs bruts pour mode agent (tool_use, text, ...)
         "stop_reason":   response.stop_reason,
         "input_tokens":  response.usage.input_tokens,
         "output_tokens": response.usage.output_tokens,
+        "cache_creation_input_tokens": cache_creation,
+        "cache_read_input_tokens":     cache_read,
         "usage": {
             "input_tokens":  response.usage.input_tokens,
             "output_tokens": response.usage.output_tokens,
+            "cache_creation_input_tokens": cache_creation,
+            "cache_read_input_tokens":     cache_read,
         },
         "model":         model_name,
         "provider":      "anthropic",
