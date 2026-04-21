@@ -63,3 +63,51 @@ Créer compte Cohere + ajouter `COHERE_API_KEY` dans Railway.
 ## 📝 Historique
 
 - **21/04/2026** : création du document après une session de refonte architecturale majeure.
+
+---
+
+## 🔮 Pistes Anthropic à explorer plus tard
+
+Notees le 21/04 apres la session de conception v2. A tester quand la v2
+sera stable en production.
+
+### Extended thinking (thinking budget)
+
+Permet a Claude de reflechir en interne avant de repondre. Utile sur
+les questions metier complexes ou l analyse est lourde.
+- Compatible avec tool use
+- Gain : meilleure qualite de raisonnement
+- Parametre : `thinking: {type: "enabled", budget_tokens: N}`
+- Effort : ~20 min pour tester
+
+### Batch API (50 pourcent moins cher)
+
+Pour les jobs non-urgents : analyse nocturne des mails, indexation du
+graphe, synthese de sessions passees.
+- Anthropic traite sous 24h max
+- Facturation a 50 pourcent du prix normal
+- Candidats evidents : mail_analysis.py, graph_indexer.py
+- Gain : divise par 2 les couts des jobs asynchrones
+
+### PDF input natif
+
+Claude peut lire un PDF directement (jusqu a 32MB, 100 pages).
+- Pas besoin d OCR ou d extraction prealable
+- Utile des qu OpenFire ouvrira ir.attachment
+- Cas d usage : KBIS, devis PDF, cahier des charges, rapports SOCOTEC
+
+### Vision (image input)
+
+Claude analyse des images directement en input.
+- Deja utilisable sans rien changer
+- Cas d usage : photo de chantier, schema technique, capture Odoo
+
+### Files API (beta)
+
+Upload d un fichier une fois, reference ensuite sans re-upload.
+- Utile pour docs de reference permanents (catalogue produits)
+
+### Citations (beta)
+
+Claude peut citer precisement ses sources tirees des documents fournis.
+- Aide contre les hallucinations en mode verifiable
