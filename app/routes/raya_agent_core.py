@@ -264,7 +264,12 @@ def _call_anthropic_with_tools(
       - usage       : dict input_tokens, output_tokens, cache_*
     """
     # llm_complete est notre wrapper existant. On etend avec tools.
-    # En v2 on utilise Opus 4.7 par defaut (model_tier="deep").
+    # V2.4 (22/04 soir) : Sonnet 4.6 par defaut (tier smart).
+    # Opus 4.7 (tier deep) est declenche par :
+    #   - clic bouton "Approfondir avec Opus" (endpoint /raya/deepen)
+    #   - clic bouton "Etendre la reflexion" (endpoint /raya/continue)
+    # La valeur effective est dans model_tier_local calculee au debut
+    # de _raya_core_agent selon is_continuation.
     # cache_system=True : active le prompt caching Anthropic. Le prompt
     # systeme (identique a chaque tour) est mis en cache pour 5 minutes.
     # Gain : ~90% d economie sur les tokens system aux tours 2+.
@@ -388,12 +393,21 @@ def _raya_core_agent(
             current_palier, next_ext_count, prev_tokens,
             max_tokens_budget_local, max_iterations_local, max_duration_local,
         )
+        # V2.4 : toute extension = Opus obligatoire.
+        # Logique : si l utilisateur clique Etendre, c est qu il veut du serieux.
+        # Pas de demi-mesure.
+        model_tier_local = "deep"
     else:
         max_tokens_budget_local = MAX_TOKENS_BUDGET
         max_iterations_local = MAX_ITERATIONS
         max_duration_local = MAX_DURATION_SECONDS
         current_palier = "P1"
         next_ext_count = 0
+        # V2.4 : Sonnet 4.6 par defaut pour questions initiales.
+        # Opus sera declenche par :
+        #   - clic bouton "Approfondir avec Opus" (endpoint /raya/deepen)
+        #   - clic bouton "Etendre la reflexion" (endpoint /raya/continue)
+        model_tier_local = "smart"
 
     # ──── PREPARATION DU PROMPT ET DES MESSAGES ────
     # En mode continuation, c est deja fait plus haut (on reprend l existant)
@@ -467,7 +481,7 @@ def _raya_core_agent(
                 messages=messages,
                 system=system,
                 tools=tools,
-                model_tier="deep",  # Opus 4.7 par defaut en phase test
+                model_tier=model_tier_local,  # V2.4 : sonnet par defaut, opus en continuation
                 max_tokens=4096,
             )
         except Exception as e:
@@ -686,7 +700,7 @@ def _raya_core_agent(
         "actions": [],  # les actions v2 passent par pending_actions direct
         "pending_actions": updated_pending,
         "aria_memory_id": aria_memory_id,
-        "model_tier": "deep",
+        "model_tier": model_tier_local,  # V2.4 : tier effectivement utilise
         "ask_choice": None,
         "is_error": False,
         # Metadonnees debug v2
