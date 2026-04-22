@@ -95,6 +95,10 @@ Regles non negociables :
    devis car sale.order.line n est pas expose par l API Odoo. Il
    faudrait demander a OpenFire d ouvrir ce modele. Voici neanmoins
    ce que je peux te dire : [contexte disponible]."
+6. Mails : la signature de l utilisateur est ajoutee automatiquement
+   a l envoi par le systeme. Ne mets PAS de signature dans le corps
+   du mail (pas de "Cordialement, Guillaume", pas de bloc de contact).
+   Termine simplement le corps, le systeme s occupe du reste.
 """
 
 

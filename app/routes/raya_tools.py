@@ -227,14 +227,24 @@ TOOL_SEND_MAIL = {
     "description": (
         "Prepare l envoi d un mail (Outlook par defaut, Gmail si specifie). "
         "Le mail n est pas envoye directement : une carte de confirmation "
-        "s affiche pour validation manuelle par l utilisateur."
+        "s affiche pour validation manuelle par l utilisateur. "
+        "IMPORTANT : ne termine pas le corps du mail par une signature "
+        "(pas de 'Cordialement, Guillaume' ni bloc de contact). La signature "
+        "de l utilisateur est ajoutee automatiquement par le systeme. "
+        "Termine juste ton texte et c est bon."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "to": {"type": "string", "description": "Email du destinataire."},
             "subject": {"type": "string"},
-            "body": {"type": "string"},
+            "body": {
+                "type": "string",
+                "description": (
+                    "Corps du mail SANS signature finale (ajoutee auto "
+                    "par le systeme)."
+                ),
+            },
             "provider": {
                 "type": "string",
                 "enum": ["outlook", "gmail"],
@@ -249,13 +259,17 @@ TOOL_SEND_MAIL = {
 TOOL_REPLY_TO_MAIL = {
     "name": "reply_to_mail",
     "description": (
-        "Prepare une reponse a un mail existant. Carte de confirmation avant envoi."
+        "Prepare une reponse a un mail existant. Carte de confirmation avant envoi. "
+        "IMPORTANT : ne termine pas le corps par une signature (ajoutee auto)."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "mail_id": {"type": "string"},
-            "body": {"type": "string"},
+            "body": {
+                "type": "string",
+                "description": "Corps SANS signature finale (ajoutee auto).",
+            },
         },
         "required": ["mail_id", "body"],
     },
