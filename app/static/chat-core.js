@@ -1,6 +1,85 @@
 // Raya Chat — Core (globales, DOM refs, utilitaires)
 // Chargé dans raya_chat.html — après chat-shortcuts.js
 
+// --- INTERCEPTEUR SESSION EXPIREE (isolé au chat uniquement) ---
+// Detecte les reponses 401 du backend et redirige vers /login-app au lieu
+// de laisser le chat "orphelin" quand la session serveur a expire.
+// Garde-fous :
+//   - Try/catch partout : si le wrapper plante, comportement normal preserve
+//   - Exclusion des paths publics pour eviter toute boucle de redirection
+//   - Flag unique pour ne pas empiler les overlays
+//   - Heartbeat 60s pour detection proactive sans attendre un envoi utilisateur
+(function installSessionGuard() {
+  try {
+    const PUBLIC_PATHS = ['/login-app', '/webhook/', '/health', '/static/', '/sw.js'];
+    const originalFetch = window.fetch.bind(window);
+    let expiredShown = false;
+
+    function isPublicPath(url) {
+      try {
+        const path = (typeof url === 'string') ? url : (url.url || '');
+        return PUBLIC_PATHS.some(function(p) { return path.indexOf(p) !== -1; });
+      } catch (e) { return false; }
+    }
+
+    function showSessionExpiredOverlay() {
+      if (expiredShown) return;
+      expiredShown = true;
+      try {
+        const overlay = document.createElement('div');
+        overlay.id = 'raya-session-expired-overlay';
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:99999;display:flex;align-items:center;justify-content:center;font-family:system-ui,sans-serif;';
+        const box = document.createElement('div');
+        box.style.cssText = 'background:#1a1a2e;color:white;padding:28px 32px;border-radius:10px;max-width:420px;text-align:center;box-shadow:0 10px 40px rgba(0,0,0,0.5);';
+        box.innerHTML = '<div style="font-size:44px;margin-bottom:10px;">🔒</div><h2 style="margin:0 0 10px;font-size:19px;">Session expirée</h2><p style="margin:0 0 18px;opacity:0.85;line-height:1.5;">Votre session a expiré par inactivité. Redirection automatique dans <span id="rc">5</span>s vers la page de connexion.</p>';
+        const btn = document.createElement('button');
+        btn.textContent = 'Se reconnecter maintenant';
+        btn.style.cssText = 'background:#FFC107;color:#1a1a2e;border:0;padding:10px 22px;border-radius:4px;cursor:pointer;font-weight:600;font-size:14px;';
+        btn.onclick = function() { window.location.href = '/login-app'; };
+        box.appendChild(btn);
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+        // Countdown visuel
+        let n = 5;
+        const interval = setInterval(function() {
+          n -= 1;
+          const el = document.getElementById('rc');
+          if (el) el.textContent = n;
+          if (n <= 0) { clearInterval(interval); window.location.href = '/login-app'; }
+        }, 1000);
+      } catch (e) {
+        // Fallback si le DOM n'est pas pret : redirection directe
+        window.location.href = '/login-app';
+      }
+    }
+
+    // Wrapper fetch : intercepte les 401 sur paths proteges
+    window.fetch = async function(input, init) {
+      const response = await originalFetch(input, init);
+      try {
+        if (response && response.status === 401 && !isPublicPath(input)) {
+          showSessionExpiredOverlay();
+        }
+      } catch (e) { /* ne jamais casser l'appelant */ }
+      return response;
+    };
+
+    // Heartbeat leger : check la session toutes les 60s meme sans action user
+    // /profile est un endpoint protege qui existe deja (admin_tenants.py)
+    setInterval(function() {
+      if (expiredShown) return;
+      try {
+        fetch('/profile', { method: 'GET', credentials: 'same-origin' })
+          .catch(function() { /* ignore erreurs reseau */ });
+      } catch (e) { /* silencieux */ }
+    }, 60000);
+
+    console.log('[Raya] Session guard installe');
+  } catch (e) {
+    console.warn('[Raya] Session guard non installe:', e);
+  }
+})();
+
 // --- ETAT GLOBAL ---
 const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('input');
