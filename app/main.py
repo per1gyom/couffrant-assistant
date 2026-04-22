@@ -42,6 +42,7 @@ from app.topics import router as topics_router
 from app.shortcuts import router as shortcuts_router
 from app.routes.signatures import router as signatures_router
 from app.routes.admin_oauth import router as admin_oauth_router
+from app.routes.admin_rules import router as admin_rules_router
 
 SESSION_INACTIVITY_TIMEOUT = int(os.getenv("SESSION_INACTIVITY_TIMEOUT", "7200"))
 
@@ -117,6 +118,7 @@ app.include_router(topics_router)
 app.include_router(shortcuts_router)
 app.include_router(signatures_router)
 app.include_router(admin_oauth_router)
+app.include_router(admin_rules_router)
 
 
 @app.get("/")
