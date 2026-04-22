@@ -322,6 +322,7 @@ def _raya_core_agent(
     username: str,
     tenant_id: str,
     existing_continuation: dict = None,
+    deepen_mode: bool = False,
 ) -> dict:
     """
     Boucle agent Raya v2. Remplacement de _raya_core quand
@@ -340,6 +341,15 @@ def _raya_core_agent(
     V2.3 (22/04 aprem) : si existing_continuation est fourni, on reprend
     l etat precedent (messages, system_prompt, compteurs) avec des budgets
     etendus (P2 ou P3+).
+
+    V2.4 fix (22/04 soir) : si deepen_mode=True, l utilisateur vient de
+    cliquer "Approfondir avec Opus" apres une reponse Sonnet. On force
+    Opus (tier deep) ET on ajoute un bloc "MODE APPROFONDISSEMENT" au
+    system prompt. TOUS les autres mecanismes restent actifs : RAG
+    semantique des regles, historique des 3 derniers echanges (donc
+    Raya voit sa reponse Sonnet comme dernier message assistant),
+    tools, graphe, consignes globales. Opus a exactement les memes
+    moyens que Sonnet, en plus profond.
     """
     start_time = time.time()
 
@@ -406,8 +416,13 @@ def _raya_core_agent(
         # V2.4 : Sonnet 4.6 par defaut pour questions initiales.
         # Opus sera declenche par :
         #   - clic bouton "Approfondir avec Opus" (endpoint /raya/deepen)
+        #     -> deepen_mode=True passe ici, force tier deep
         #   - clic bouton "Etendre la reflexion" (endpoint /raya/continue)
-        model_tier_local = "smart"
+        #     -> existing_continuation!=None, tier deep force plus haut
+        if deepen_mode:
+            model_tier_local = "deep"
+        else:
+            model_tier_local = "smart"
 
     # ──── PREPARATION DU PROMPT ET DES MESSAGES ────
     # En mode continuation, c est deja fait plus haut (on reprend l existant)
@@ -425,6 +440,36 @@ def _raya_core_agent(
             system += "\n\n=== CONSIGNES GLOBALES ===\n"
             for instr in global_instructions:
                 system += f"- {instr}\n"
+
+        # V2.4 fix : mode approfondissement (clic "Approfondir avec Opus")
+        # L utilisateur a deja recu une reponse de Sonnet (visible dans
+        # l historique ci-dessous comme dernier message assistant). Il
+        # demande une version plus profonde. Opus herite de tout le contexte
+        # habituel (regles, graphe, tools) + cette consigne claire pour ne
+        # pas accuser Sonnet d hallucination sans preuve factuelle.
+        if deepen_mode:
+            system += (
+                "\n\n=== MODE APPROFONDISSEMENT ===\n"
+                "L utilisateur vient de recevoir une reponse de ta version "
+                "rapide (Sonnet 4.6, visible comme dernier message assistant "
+                "dans ton historique recent). Il a clique \"Approfondir avec "
+                "Opus\" pour obtenir une version plus profonde et reflechie.\n\n"
+                "Ta mission :\n"
+                "- Reprends le fil exactement la ou Sonnet s est arrete\n"
+                "- Enrichis l analyse : nuances, implications, points "
+                "d attention subtils, recommandations operationnelles\n"
+                "- Verifie les faits si tu as un doute legitime (tes tools "
+                "Odoo, mails, SharePoint sont disponibles) AVANT de conclure "
+                "que quelque chose est faux ou invente\n"
+                "- Si apres reflexion la reponse initiale etait deja tres "
+                "bonne, confirme-le honnetement plutot que d inventer du "
+                "contenu pour justifier ton appel\n\n"
+                "IMPORTANT - ne JAMAIS affirmer que Sonnet a hallucine ou "
+                "invente sans l avoir verifie avec tes tools. Sonnet a acces "
+                "aux memes sources que toi et a probablement travaille "
+                "correctement. En cas de doute sur une donnee precise "
+                "(reference produit, chiffre, nom), verifie avant d accuser."
+            )
 
         # 2. Historique (3 derniers echanges + troncature)
         # Au-dela, Raya utilise search_conversations qui interroge le graphe.
