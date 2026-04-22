@@ -27,15 +27,33 @@ from app.routes.raya_helpers import _strip_action_tags, _build_user_content
 logger = get_logger("raya.agent")
 
 # ==========================================================================
-# GARDE-FOUS DE LA BOUCLE
+# GARDE-FOUS DE LA BOUCLE — Architecture 3 paliers v2.1 (22/04)
 # ==========================================================================
-# Seuils revus a la hausse apres test reel du 22/04 sur dossier Coullet :
-# les questions metier complexes (croisement devis + factures + acomptes)
-# depassent legitimement 30k tokens / 30s. Garde-fous trop stricts creaient
-# des faux positifs d interruption.
-MAX_ITERATIONS = 15
-MAX_DURATION_SECONDS = 60
-MAX_TOKENS_BUDGET = 60_000
+# Palier 1 (Standard) : par defaut. Couvre 99% des questions.
+# Palier 2 (Etendu)   : clic utilisateur 'Etendre' apres P1 atteint.
+# Palier 3 (Profond)  : clic utilisateur 'Etendre encore' apres P2 atteint.
+#
+# Actuellement seul P1 est actif. Les paliers P2/P3 necessitent la table
+# agent_continuations + front bouton 'Etendre' (chantier suivant).
+# En attendant, le P1 ci-dessous remplace l ancien budget unique.
+BUDGET_P1_STANDARD = 150_000
+BUDGET_P2_EXTENDED = 300_000
+BUDGET_P3_DEEP     = 500_000
+
+ITER_P1 = 15
+ITER_P2 = 25
+ITER_P3 = 40
+
+DUR_P1 = 60   # 1 minute
+DUR_P2 = 150  # 2m30
+DUR_P3 = 300  # 5 minutes
+
+# Constantes effectives utilisees dans la boucle (palier 1 par defaut).
+# Quand la continuation sera implementee, ces constantes deviendront
+# dynamiques selon le palier demande.
+MAX_ITERATIONS = ITER_P1
+MAX_DURATION_SECONDS = DUR_P1
+MAX_TOKENS_BUDGET = BUDGET_P1_STANDARD
 
 
 def _build_agent_system_prompt(
@@ -69,6 +87,14 @@ Regles non negociables :
    si besoin) avant de repondre.
 4. Clarte avant volume. Pas d invention pour faire serieux. Si tu as
    3 infos, tu donnes 3 infos.
+5. Si apres 2 tentatives avec des outils differents tu ne trouves
+   toujours pas une donnee precise, ne persiste pas. Conclus que la
+   donnee n est pas accessible, explique ce qui manque (quelle source,
+   quelle API, quelle permission) et donne ce que tu as deja assemble.
+   Exemple : "Je n arrive pas a obtenir les montants detailles des
+   devis car sale.order.line n est pas expose par l API Odoo. Il
+   faudrait demander a OpenFire d ouvrir ce modele. Voici neanmoins
+   ce que je peux te dire : [contexte disponible]."
 """
 
 
@@ -102,13 +128,26 @@ def _load_user_preferences(username: str, tenant_id: str) -> str:
         conn.close()
 
 
-def _load_recent_history(username: str, limit: int = 10) -> list[dict]:
+def _load_recent_history(username: str, limit: int = 3) -> list[dict]:
     """
     Charge les `limit` derniers echanges (niveau 1 de la memoire : in-prompt).
 
-    En v2, on passe de 30 a 10 echanges. Le reste est accessible via
-    search_conversations (niveau 2, via le graphe).
+    Evolution v2.1 (22/04) : passe de 10 a 3 echanges + troncature des
+    reponses longues a 3000 chars. Avec l historique de 10 echanges
+    integralement charges, le prompt saturait a 40-50k tokens avant
+    meme que Raya commence a travailler, explosant le budget tokens
+    sur les questions complexes.
+
+    Desormais :
+      - 3 echanges maximum (contexte immediat)
+      - user_input tronque a 2000 chars (souvent les requetes courtes)
+      - aria_response tronquee a 3000 chars (responses tableaux limitees)
+      - Au-dela de 3 echanges : accessible via search_conversations
+        qui interroge le graphe semantique (niveau 2)
     """
+    MAX_USER_LEN = 2000
+    MAX_ASSISTANT_LEN = 3000
+
     conn = get_pg_conn()
     try:
         c = conn.cursor()
@@ -119,10 +158,25 @@ def _load_recent_history(username: str, limit: int = 10) -> list[dict]:
             (username, limit),
         )
         rows = list(reversed(c.fetchall()))
-        return [
-            {"user": r[0], "assistant": r[1]}
-            for r in rows if r[0] and r[1]
-        ]
+
+        history = []
+        for user_text, assistant_text in rows:
+            if not user_text or not assistant_text:
+                continue
+
+            # Troncature avec indication
+            if len(user_text) > MAX_USER_LEN:
+                user_text = user_text[:MAX_USER_LEN] + " ...(tronque)"
+            if len(assistant_text) > MAX_ASSISTANT_LEN:
+                assistant_text = assistant_text[:MAX_ASSISTANT_LEN] + \
+                                 " ...(tronque, voir historique complet si besoin)"
+
+            history.append({
+                "user": user_text,
+                "assistant": assistant_text,
+            })
+
+        return history
     finally:
         conn.close()
 
@@ -241,7 +295,9 @@ def _raya_core_agent(
             system += f"- {instr}\n"
 
     # 2. Historique (10 derniers echanges)
-    history = _load_recent_history(username, limit=10)
+    # 2. Historique (3 derniers echanges + troncature, voir _load_recent_history)
+    # Au-dela, Raya utilise search_conversations qui interroge le graphe.
+    history = _load_recent_history(username, limit=3)
 
     # 3. Messages initiaux
     user_content_parts = _build_user_content(payload)
@@ -256,6 +312,13 @@ def _raya_core_agent(
     total_output_tokens = 0
     final_text = ""
     stopped_by_guard = None  # si garde-fou depasse
+
+    # Tracking des tool calls pour detection de boucle :
+    # {(tool_name, params_hash): nb_appels}
+    # Si un meme tool est appele avec des params tres proches 3+ fois,
+    # on injecte un avertissement dans le tool_result pour aider Raya
+    # a conclure plutot que de boucler.
+    tool_call_counts: dict[tuple[str, str], int] = {}
 
 
     while iterations < MAX_ITERATIONS:
@@ -318,6 +381,22 @@ def _raya_core_agent(
             # Executer chaque tool et ajouter les resultats
             tool_results_content = []
             for tu in tool_uses:
+                # Detection de boucle : hash des parametres pour cle unique
+                import hashlib
+                import json as _json
+                params_str = _json.dumps(tu["input"], sort_keys=True)
+                params_hash = hashlib.md5(params_str.encode()).hexdigest()[:8]
+                call_key = (tu["name"], params_hash)
+                tool_call_counts[call_key] = tool_call_counts.get(call_key, 0) + 1
+                call_count = tool_call_counts[call_key]
+
+                # Compter aussi le nombre total d appels au meme tool
+                # (params differents mais meme outil)
+                same_tool_count = sum(
+                    n for (tname, _), n in tool_call_counts.items()
+                    if tname == tu["name"]
+                )
+
                 result_str = execute_tool(
                     tool_name=tu["name"],
                     tool_input=tu["input"],
@@ -325,6 +404,31 @@ def _raya_core_agent(
                     tenant_id=tenant_id,
                     conversation_id=None,  # pas encore cree
                 )
+
+                # Injection d avertissement si boucle detectee
+                warning = ""
+                if call_count >= 2:
+                    warning = (
+                        "\n\n[SYSTEME] Tu as deja appele ce tool avec des "
+                        "parametres identiques. Si tu n as pas trouve, c est "
+                        "probablement que cette donnee n est pas accessible. "
+                        "Conclus avec ce que tu as et signale la limite."
+                    )
+                elif same_tool_count >= 4:
+                    warning = (
+                        f"\n\n[SYSTEME] Tu as appele {tu['name']} "
+                        f"{same_tool_count} fois avec des parametres differents. "
+                        "Pense a utiliser un autre tool ou a conclure avec ce "
+                        "que tu as deja trouve."
+                    )
+
+                if warning:
+                    logger.info(
+                        "[Agent] iter %d : avertissement boucle sur %s",
+                        iterations, tu["name"],
+                    )
+                    result_str = result_str + warning
+
                 tool_results_content.append({
                     "type": "tool_result",
                     "tool_use_id": tu["id"],

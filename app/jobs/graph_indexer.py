@@ -30,8 +30,13 @@ logger = logging.getLogger("raya.graph_indexer")
 # ==========================================================================
 # SEUILS DE DECLENCHEMENT
 # ==========================================================================
-BATCH_SIZE = 8  # Nombre de conversations par batch
-INACTIVITY_MINUTES = 30  # Apres X min d inactivite, on indexe meme <8 convs
+# Ajustement v2.1 (22/04) : batch de 1 (quasi-synchrone) au lieu de 8.
+# Raison : avec l historique in-prompt reduit a 3 echanges, les echanges
+# plus anciens doivent etre dans le graphe sans delai. Sinon, trou de
+# memoire entre l echange n4 et son indexation (qui attendait n12).
+# Le cout est negligeable (INSERT + regex ~50-100ms, async, non bloquant).
+BATCH_SIZE = 1  # Indexation quasi-immediate
+INACTIVITY_MINUTES = 1  # Delai minimal pour le lot si batch=1 pas atteint
 
 
 # ==========================================================================
