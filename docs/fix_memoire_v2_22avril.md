@@ -252,3 +252,50 @@ chercher encore → conclure honnêtement l'impasse"* est générique et précie
 C'est exactement l'inverse de la v1 qui, confrontée à un trou de données,
 **inventait** pour combler. Ici, confrontée à un trou de données, la v2 doit
 **nommer le trou** et le signaler.
+
+
+---
+
+## 🔧 Ajout 02h10 — Dimensionnement final du budget
+
+**Question Guillaume** :
+> *"Je te pose parfois des questions complexes et te demande parfois des audits
+> profonds, 200k de réflexion est-ce suffisant ?"*
+
+### Analyse par cas d'usage
+
+| Cas d'usage | Tokens typiques | 200k ? | 300k ? |
+|---|---|---|---|
+| Question simple | 5-20k | ✅ | ✅ |
+| Topo client (Coullet) | 40-80k | ✅ | ✅ |
+| Calcul croisé (reste-à-facturer) | 60-100k | ✅ marge | ✅ large marge |
+| Audit profond (impayés + patterns) | 150-300k | ⚠️ juste | ✅ ok |
+| Audit très profond (multi-dimension) | 300-500k | ❌ | ⚠️ juste |
+
+### Décision : 300k
+
+Paramètres finaux pour le fix de demain :
+```python
+MAX_ITERATIONS = 20          # etait 15
+MAX_DURATION_SECONDS = 120   # etait 60
+MAX_TOKENS_BUDGET = 300_000  # etait 60_000
+```
+
+### Rationnel
+
+1. **Couvre 99% des cas** y compris les vrais audits profonds
+2. **Coût : ~1.50 € par question qui atteint 300k**
+3. **Budget = filet de sécurité, pas objectif**
+
+Avec les 4 autres fix (règle stop-après-2, détection boucle, historique
+tronqué, graphe synchrone), Raya atteindra rarement 300k. Quand elle
+l'atteindra quand même, ce sera le signal d'une question légitimement
+énorme OU d'un bug à identifier.
+
+### Philosophie retenue
+
+*"Ne pas empêcher la réflexion, juste avertir quand ça dérape."*
+
+Le garde-fou n'est plus là pour limiter l'ambition de Raya, mais pour
+détecter les anomalies (vraies ou de comportement). Le fait qu'il se
+déclenche devient une information, pas une contrainte.
