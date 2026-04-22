@@ -112,16 +112,53 @@ Regles non negociables :
 """
 
 
-def _load_user_preferences(username: str, tenant_id: str) -> str:
-    """Charge les preferences durables (niveau 3 de la memoire)."""
-    conn = get_pg_conn()
+def _load_user_preferences(username: str, tenant_id: str, query: str = "") -> str:
+    """
+    Charge les preferences durables (niveau 3 de la memoire).
+
+    V2.2 (22/04 aprem) : branchement sur le RAG semantique existant
+    (app.rag.retrieve_context + app.embedding.search_similar sur
+    aria_rules.embedding, pgvector).
+
+    Avant : SQL buggee (colonne rule_text n existait pas) + bulk 50 regles
+    Maintenant : top 10 regles par similarite cosine avec la query
+
+    Dégradation gracieuse :
+      - Si OpenAI indispo : fallback SQL avec la BONNE colonne (rule)
+      - Si erreur : retourne "" et Raya continue sans regles (comportement
+        equivalent a l ancien bug, mais propre au moins)
+
+    Filtres systematiques :
+      - username = l utilisateur courant
+      - tenant_id = tenant courant (evite pollution multi-tenant)
+      - active = true
+      - confidence >= 0.30 (deja filtre dans rag.retrieve_rules)
+    """
+    # Tentative 1 : retrieval semantique via RAG existant
     try:
+        from app.rag import retrieve_context
+        rag_ctx = retrieve_context(query or "", username, tenant_id)
+        rules_text = rag_ctx.get("rules_text", "")
+        if rules_text.strip():
+            return "\n\n=== PREFERENCES APPRISES (top 10 pertinentes) ===\n" + rules_text
+    except Exception as e:
+        logger.warning("[Agent] retrieve_context error, fallback SQL: %s", e)
+
+    # Tentative 2 : fallback SQL avec la BONNE colonne (rule, pas rule_text)
+    # Utilise uniquement si retrieve_context a echoue (ex : OpenAI down)
+    conn = None
+    try:
+        conn = get_pg_conn()
         c = conn.cursor()
         c.execute(
-            "SELECT category, rule_text FROM aria_rules "
-            "WHERE username = %s AND active = true "
-            "ORDER BY category, id LIMIT 50",
-            (username,),
+            "SELECT category, rule FROM aria_rules "
+            "WHERE username = %s "
+            "  AND (tenant_id = %s OR tenant_id IS NULL) "
+            "  AND active = true "
+            "  AND category != 'memoire' "
+            "ORDER BY confidence DESC, reinforcements DESC, id DESC "
+            "LIMIT 30",
+            (username, tenant_id),
         )
         rules = c.fetchall()
         if not rules:
@@ -129,17 +166,18 @@ def _load_user_preferences(username: str, tenant_id: str) -> str:
         by_cat = {}
         for cat, rule in rules:
             by_cat.setdefault(cat, []).append(rule)
-        lines = ["\n=== PREFERENCES APPRISES DE L UTILISATEUR ==="]
+        lines = ["\n\n=== PREFERENCES APPRISES (fallback top 30) ==="]
         for cat, items in by_cat.items():
             lines.append(f"\n[{cat}]")
             for r in items:
                 lines.append(f"  - {r}")
         return "\n".join(lines)
     except Exception as e:
-        logger.warning("[Agent] load_user_preferences error: %s", e)
+        logger.warning("[Agent] load_user_preferences fallback error: %s", e)
         return ""
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 def _load_recent_history(username: str, limit: int = 3) -> list[dict]:
@@ -298,7 +336,8 @@ def _raya_core_agent(
     # 1. Prompt systeme
     display_name = username.capitalize()
     base_system = _build_agent_system_prompt(username, tenant_id, display_name)
-    preferences = _load_user_preferences(username, tenant_id)
+    # V2.2 : passage de la query pour retrieval semantique cible (top 10 regles)
+    preferences = _load_user_preferences(username, tenant_id, query=payload.query or "")
     system = base_system + preferences
 
     # Consignes globales (tenant-wide)
