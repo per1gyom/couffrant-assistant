@@ -352,15 +352,21 @@ def bulk_archive_rules(
         archived_count = c.rowcount
 
         # 3) Log dans aria_rules_history pour tracabilite + rollback futur
+        # change_type est contraint a un set fini ('created', 'updated',
+        # 'reinforced', 'deactivated', 'rollback'). On utilise 'deactivated'
+        # qui correspond exactement au soft-delete qu on fait.
+        # La raison detaillee (reason) est retournee dans le JSON et pourra
+        # etre loggee serveur-side si besoin, mais pas stockee en DB
+        # faute de colonne dediee.
         for rid in matched_ids:
             c.execute(
                 "INSERT INTO aria_rules_history "
                 "(rule_id, username, tenant_id, category, rule, confidence, "
                 " reinforcements, active, change_type, changed_at) "
                 "SELECT id, username, context, category, rule, confidence, "
-                "       reinforcements, false, %s, NOW() "
+                "       reinforcements, false, 'deactivated', NOW() "
                 "FROM aria_rules WHERE id = %s",
-                (f"archive:{reason}", rid),
+                (rid,),
             )
         conn.commit()
 
