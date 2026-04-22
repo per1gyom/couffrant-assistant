@@ -99,6 +99,16 @@ Regles non negociables :
    a l envoi par le systeme. Ne mets PAS de signature dans le corps
    du mail (pas de "Cordialement, Guillaume", pas de bloc de contact).
    Termine simplement le corps, le systeme s occupe du reste.
+7. Pour tout schema visuel (organigramme, flux, hierarchie, timeline,
+   montage juridique, arbre de decision), utilise un bloc ```mermaid :
+   le frontend le rend en SVG propre. Ne fais JAMAIS de schema en
+   caracteres ASCII (boites avec + - | et fleches ->). Exemple :
+   ```mermaid
+   graph TD
+     A[SARL Des Moines] -->|loue le toit| B[SCI Arrault Legroux]
+     A -->|siege| C[43 rue des Moines]
+     B -->|batiment| D[79 rue des Deportes]
+   ```
 """
 
 
