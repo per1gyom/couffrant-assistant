@@ -572,4 +572,44 @@ MIGRATIONS = [
          'Droit Inventory/Administrator manquant. Pas utilise metier = pas de resolution prevue',
          'ignored', 'docs/raya_scanner_suspens.md')
        ON CONFLICT (source, model_name) DO NOTHING""",
+    # -- Phase Continuation P2/P3 (22/04/2026 aprem) --
+    # Permet a Raya de sauvegarder son etat (messages, tokens, iterations)
+    # quand un garde-fou saute (P1 atteint), pour reprise par clic 'Etendre'
+    # cote utilisateur. Pas de redemarrage : vraie continuation depuis
+    # l etat precedent. TTL 1h (pas d interet a reprendre plus tard).
+    #
+    # Paliers :
+    #   P1=150k (defaut) -> si garde-fou, on sauvegarde
+    #   P2=300k (+150k)  -> 1ere extension
+    #   P3+=+200k par clic (repetable a l infini, user decide)
+    #
+    # extension_count :
+    #   0 = reponse P1 sauvegardee, pas encore d extension
+    #   1 = 1ere extension faite (on est en P2)
+    #   2+ = extensions P3+ successives
+    #
+    # palier :
+    #   CHECK contrainte garde-fou : valeurs connues seulement.
+    """CREATE TABLE IF NOT EXISTS agent_continuations (
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        query TEXT NOT NULL,
+        system_prompt TEXT NOT NULL,
+        messages JSONB NOT NULL,
+        tools_snapshot JSONB,
+        tokens_used INTEGER NOT NULL DEFAULT 0,
+        iterations_used INTEGER NOT NULL DEFAULT 0,
+        duration_seconds REAL NOT NULL DEFAULT 0,
+        extension_count INTEGER NOT NULL DEFAULT 0,
+        palier TEXT NOT NULL DEFAULT 'P1',
+        stopped_by TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '1 hour'),
+        consumed BOOLEAN NOT NULL DEFAULT false,
+        CONSTRAINT agent_cont_palier_check CHECK (palier IN ('P1','P2','P3'))
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_agent_cont_user ON agent_continuations (username, tenant_id, expires_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_agent_cont_cleanup ON agent_continuations (expires_at) WHERE consumed = false",
 ]

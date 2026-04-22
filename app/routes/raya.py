@@ -186,6 +186,104 @@ def raya_endpoint(
         }
 
 
+@router.post("/raya/continue")
+def raya_continue_endpoint(
+    request: Request,
+    payload: dict,
+    user: dict = Depends(require_user),
+):
+    """
+    Reprise d une boucle agent interrompue par un garde-fou.
+
+    Appele par le bouton 'Etendre' cote front. Charge la continuation
+    sauvegardee via raya_continuation.load_continuation, verifie l
+    ownership, puis relance _raya_core_agent avec existing_continuation
+    -> reprise exacte avec budgets etendus (P2 ou P3+).
+
+    Body JSON attendu :
+      { "continuation_id": 42 }
+    """
+    username = user["username"]
+    tenant_id = user["tenant_id"]
+    if not check_rate_limit(username):
+        return {
+            "answer": "\u26a0\ufe0f Trop de messages en peu de temps. Attends un moment.",
+            "actions": [], "pending_actions": [],
+            "aria_memory_id": None, "model_tier": "deep",
+            "ask_choice": None,
+            "is_error": True, "error_type": "rate_limit",
+        }
+
+    continuation_id = payload.get("continuation_id")
+    if not continuation_id or not isinstance(continuation_id, int):
+        return {
+            "answer": "\u26a0\ufe0f Identifiant de continuation invalide.",
+            "actions": [], "pending_actions": [],
+            "aria_memory_id": None, "model_tier": "deep",
+            "ask_choice": None,
+            "is_error": True, "error_type": "bad_request",
+        }
+
+    # Chargement + verif ownership + verif non expire / non consomme
+    from app.routes.raya_continuation import load_continuation
+    existing = load_continuation(continuation_id, username, tenant_id)
+    if existing is None:
+        return {
+            "answer": (
+                "\u26a0\ufe0f Cette continuation n est plus disponible "
+                "(expiree au-dela de 1h ou deja utilisee). Reprends ta "
+                "question en la reformulant si besoin."
+            ),
+            "actions": [], "pending_actions": [],
+            "aria_memory_id": None, "model_tier": "deep",
+            "ask_choice": None,
+            "is_error": True, "error_type": "continuation_expired",
+        }
+
+    # Construction d un payload minimal pour _raya_core_agent :
+    # on reconstitue un RayaQuery avec la query originale (stockee dans
+    # la continuation), sans file ni audio (le contexte visuel etait deja
+    # dans les messages precedents, il n y a pas a le rejouer).
+    class _ReplayPayload:
+        def __init__(self, query):
+            self.query = query
+            self.file = None
+            self.audio = None
+            self.speak_speed = None
+    replay_payload = _ReplayPayload(existing["query"])
+
+    import concurrent.futures
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            # On appelle _raya_core_agent avec existing_continuation -> reprise
+            future = executor.submit(
+                _raya_core_agent,
+                request, replay_payload, username, tenant_id,
+                existing,  # existing_continuation
+            )
+            # Timeout global plus genereux pour les extensions (P3 peut
+            # aller jusqu a 300s de boucle + marges reseau).
+            return future.result(timeout=360)
+    except concurrent.futures.TimeoutError:
+        return {
+            "answer": "\u26a0\ufe0f L extension a depasse le timeout serveur. Retente avec une question plus ciblee.",
+            "actions": [], "pending_actions": [],
+            "aria_memory_id": None, "model_tier": "deep",
+            "ask_choice": None,
+            "is_error": True, "error_type": "timeout",
+        }
+    except Exception:
+        tb = traceback.format_exc()
+        logger.error("[Raya] ERREUR CONTINUE pour %s:\n%s", username, tb)
+        return {
+            "answer": "\u26a0\ufe0f Une erreur interne est survenue lors de l extension.",
+            "actions": [], "pending_actions": [],
+            "aria_memory_id": None, "model_tier": "deep",
+            "ask_choice": None,
+            "is_error": True, "error_type": "internal",
+        }
+
+
 @router.post("/raya/feedback")
 def raya_feedback(
     payload: FeedbackPayload,

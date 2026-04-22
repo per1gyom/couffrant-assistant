@@ -316,6 +316,7 @@ def _raya_core_agent(
     payload,
     username: str,
     tenant_id: str,
+    existing_continuation: dict = None,
 ) -> dict:
     """
     Boucle agent Raya v2. Remplacement de _raya_core quand
@@ -330,39 +331,106 @@ def _raya_core_agent(
          - si tool_use : execute tool, ajoute resultat a messages, continue
          - si end_turn : extrait texte, sauvegarde, retourne
          - si garde-fou depasse : resume partiel + demande de poursuite
+
+    V2.3 (22/04 aprem) : si existing_continuation est fourni, on reprend
+    l etat precedent (messages, system_prompt, compteurs) avec des budgets
+    etendus (P2 ou P3+).
     """
     start_time = time.time()
 
-    # 1. Prompt systeme
-    display_name = username.capitalize()
-    base_system = _build_agent_system_prompt(username, tenant_id, display_name)
-    # V2.2 : passage de la query pour retrieval semantique cible (top 10 regles)
-    preferences = _load_user_preferences(username, tenant_id, query=payload.query or "")
-    system = base_system + preferences
+    # ──── BRANCHEMENT CONTINUATION (P2/P3+) ────
+    # Si existing_continuation fourni, on reprend l etat precedent
+    # avec budgets etendus au lieu de repartir de zero.
+    is_continuation = existing_continuation is not None
 
-    # Consignes globales (tenant-wide)
-    global_instructions = get_global_instructions(tenant_id=tenant_id)
-    if global_instructions:
-        system += "\n\n=== CONSIGNES GLOBALES ===\n"
-        for instr in global_instructions:
-            system += f"- {instr}\n"
+    if is_continuation:
+        from app.routes.raya_continuation import (
+            compute_extended_budgets, build_reflection_prompt,
+        )
 
-    # 2. Historique (10 derniers echanges)
-    # 2. Historique (3 derniers echanges + troncature, voir _load_recent_history)
-    # Au-dela, Raya utilise search_conversations qui interroge le graphe.
-    history = _load_recent_history(username, limit=3)
+        prev_tokens = existing_continuation["tokens_used"]
+        prev_iters = existing_continuation["iterations_used"]
+        prev_duration = existing_continuation["duration_seconds"]
+        prev_ext_count = existing_continuation["extension_count"]
+        next_ext_count = prev_ext_count + 1
 
-    # 3. Messages initiaux
-    user_content_parts = _build_user_content(payload)
-    messages = _build_messages(payload.query or "", history, user_content_parts)
+        budgets = compute_extended_budgets(
+            prev_tokens, prev_iters, prev_duration, next_ext_count,
+        )
+
+        # Override des constantes pour cette execution
+        max_tokens_budget_local = budgets["max_tokens"]
+        max_iterations_local = budgets["max_iterations"]
+        max_duration_local = budgets["max_duration"]
+        current_palier = budgets["palier"]
+
+        # Injection du message de self-reflection dans la conversation
+        reflection = build_reflection_prompt(
+            next_ext_count, budgets["show_warning"],
+        )
+
+        # On reprend les messages precedents tels quels et on ajoute
+        # le message de reflexion comme un "tour utilisateur" fictif.
+        messages = existing_continuation["messages"] + [
+            {"role": "user", "content": reflection},
+        ]
+        system = existing_continuation["system_prompt"]
+
+        # Tokens/iter deja consommes sont reportes dans le compteur initial
+        total_input_tokens = 0  # On ne connait pas la repartition passee
+        total_output_tokens = prev_tokens  # On tout attribue a output pour le total
+        iterations = 0  # On compte depuis 0 pour cette extension, le plafond
+                        # absolu est max_iterations_local qui inclut les anciens
+
+        logger.info(
+            "[Agent] CONTINUATION palier=%s ext=%d prev_tokens=%d "
+            "new_max_tokens=%d new_max_iter=%d new_max_dur=%.0fs",
+            current_palier, next_ext_count, prev_tokens,
+            max_tokens_budget_local, max_iterations_local, max_duration_local,
+        )
+    else:
+        max_tokens_budget_local = MAX_TOKENS_BUDGET
+        max_iterations_local = MAX_ITERATIONS
+        max_duration_local = MAX_DURATION_SECONDS
+        current_palier = "P1"
+        next_ext_count = 0
+
+    # ──── PREPARATION DU PROMPT ET DES MESSAGES ────
+    # En mode continuation, c est deja fait plus haut (on reprend l existant)
+    if not is_continuation:
+        # 1. Prompt systeme
+        display_name = username.capitalize()
+        base_system = _build_agent_system_prompt(username, tenant_id, display_name)
+        # V2.2 : passage de la query pour retrieval semantique cible (top 10 regles)
+        preferences = _load_user_preferences(username, tenant_id, query=payload.query or "")
+        system = base_system + preferences
+
+        # Consignes globales (tenant-wide)
+        global_instructions = get_global_instructions(tenant_id=tenant_id)
+        if global_instructions:
+            system += "\n\n=== CONSIGNES GLOBALES ===\n"
+            for instr in global_instructions:
+                system += f"- {instr}\n"
+
+        # 2. Historique (3 derniers echanges + troncature)
+        # Au-dela, Raya utilise search_conversations qui interroge le graphe.
+        history = _load_recent_history(username, limit=3)
+
+        # 3. Messages initiaux
+        user_content_parts = _build_user_content(payload)
+        messages = _build_messages(payload.query or "", history, user_content_parts)
+
 
     # 4. Tools disponibles pour cet utilisateur
     tools = get_tools_for_user(username, tenant_id)
 
     # 5. Boucle agent
-    iterations = 0
-    total_input_tokens = 0
-    total_output_tokens = 0
+    # En mode continuation, iterations/total_*_tokens ont deja ete initialises
+    # plus haut avec les valeurs accumulees des tours precedents.
+    if not is_continuation:
+        iterations = 0
+        total_input_tokens = 0
+        total_output_tokens = 0
     final_text = ""
     stopped_by_guard = None  # si garde-fou depasse
 
@@ -374,22 +442,23 @@ def _raya_core_agent(
     tool_call_counts: dict[tuple[str, str], int] = {}
 
 
-    while iterations < MAX_ITERATIONS:
+    while iterations < max_iterations_local:
         iterations += 1
         elapsed = time.time() - start_time
 
         # Check garde-fous avant appel
-        if elapsed > MAX_DURATION_SECONDS:
+        if elapsed > max_duration_local:
             stopped_by_guard = "timeout"
             break
-        if total_input_tokens + total_output_tokens > MAX_TOKENS_BUDGET:
+        if total_input_tokens + total_output_tokens > max_tokens_budget_local:
             stopped_by_guard = "tokens"
             break
 
         logger.info(
-            "[Agent] iteration=%d elapsed=%.1fs tokens=%d/%d",
+            "[Agent] iteration=%d elapsed=%.1fs tokens=%d/%d palier=%s",
             iterations, elapsed,
-            total_input_tokens + total_output_tokens, MAX_TOKENS_BUDGET,
+            total_input_tokens + total_output_tokens, max_tokens_budget_local,
+            current_palier,
         )
 
         # Appel Anthropic avec tools
@@ -505,16 +574,16 @@ def _raya_core_agent(
         )
         break
     else:
-        # La boucle while s est terminee naturellement = MAX_ITERATIONS atteint
+        # La boucle while s est terminee naturellement = max_iterations atteint
         stopped_by_guard = "iterations"
 
 
     # Gestion garde-fou depasse
     if stopped_by_guard:
         guard_msg = {
-            "iterations": f"J ai atteint ma limite d exploration ({MAX_ITERATIONS} etapes).",
-            "timeout": f"J ai atteint ma limite de temps ({MAX_DURATION_SECONDS}s).",
-            "tokens": f"J ai atteint ma limite de reflexion ({MAX_TOKENS_BUDGET} tokens).",
+            "iterations": f"J ai atteint ma limite d exploration ({max_iterations_local} etapes).",
+            "timeout": f"J ai atteint ma limite de temps ({max_duration_local:.0f}s).",
+            "tokens": f"J ai atteint ma limite de reflexion ({max_tokens_budget_local} tokens).",
         }[stopped_by_guard]
 
         # Si Claude a produit du texte partiel avant de boucler, on le garde
@@ -562,6 +631,56 @@ def _raya_core_agent(
     from app.pending_actions import get_pending
     updated_pending = get_pending(username=username, tenant_id=tenant_id, limit=10)
 
+    # ──── SAUVEGARDE CONTINUATION (P2/P3+) ────
+    # Si un garde-fou a saute, on sauvegarde l etat pour permettre a
+    # l utilisateur de cliquer "Etendre" dans le front. Si la sauvegarde
+    # echoue, on retourne la reponse sans bouton (degradation gracieuse).
+    continuation_id = None
+    next_palier = None
+    next_delta = None
+
+    if stopped_by_guard:
+        try:
+            from app.routes.raya_continuation import (
+                save_continuation,
+                P2_DELTA_TOKENS, P3_DELTA_TOKENS,
+            )
+            # En mode continuation, on passe les ids du tour precedent pour
+            # incrementer extension_count et marquer l ancienne consumed=true
+            prev_cont_id = existing_continuation["id"] if is_continuation else None
+            prev_ext_count = existing_continuation["extension_count"] if is_continuation else 0
+
+            continuation_id = save_continuation(
+                username=username,
+                tenant_id=tenant_id,
+                query=payload.query or "",
+                system_prompt=system,
+                messages=messages,
+                tokens_used=total_input_tokens + total_output_tokens,
+                iterations_used=iterations,
+                duration_seconds=time.time() - start_time,
+                stopped_by=stopped_by_guard,
+                previous_continuation_id=prev_cont_id,
+                previous_extension_count=prev_ext_count,
+                previous_palier=current_palier,
+            )
+            # Calcul du prochain palier et du delta a afficher au user
+            # extension_count apres sauvegarde = prev_ext_count + 1 si reprise,
+            # 0 si premier arret. Le PROCHAIN clic correspond donc a :
+            #   - si on est a ext_count=0 : prochain = P2 (+150k)
+            #   - si on est a ext_count>=1 : prochain = P3+ (+200k)
+            current_ext_count = (prev_ext_count + 1) if is_continuation else 0
+            next_ext = current_ext_count + 1
+            if next_ext == 1:
+                next_palier = "P2"
+                next_delta = P2_DELTA_TOKENS
+            else:
+                next_palier = "P3"
+                next_delta = P3_DELTA_TOKENS
+        except Exception as e:
+            logger.exception("[Agent] echec save_continuation: %s", e)
+            # degradation gracieuse : pas de bouton cote front
+
     return {
         "answer": final_text,
         "actions": [],  # les actions v2 passent par pending_actions direct
@@ -575,6 +694,11 @@ def _raya_core_agent(
         "agent_duration_s": round(time.time() - start_time, 2),
         "agent_tokens": total_input_tokens + total_output_tokens,
         "agent_stopped_by": stopped_by_guard,
+        # Metadonnees continuation (v2.3) - None si pas de garde-fou
+        "continuation_id": continuation_id,
+        "continuation_palier_current": current_palier,
+        "continuation_palier_next": next_palier,
+        "continuation_delta_tokens": next_delta,
     }
 
 

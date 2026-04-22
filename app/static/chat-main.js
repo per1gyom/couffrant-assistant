@@ -237,6 +237,13 @@ async function sendMessage() {
       requestAnimationFrame(_anchorToQuestion);
       if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'), true);
       if (data.ask_choice) renderAskChoice(data.ask_choice);
+
+      // ──── CONTINUATION P2/P3+ : bouton "Etendre" si garde-fou ────
+      // Si le backend renvoie un continuation_id, afficher un bouton
+      // qui permet d etendre la reflexion sans redemarrer.
+      if (data.continuation_id && data.continuation_palier_next) {
+        renderContinuationButton(msgRow, data);
+      }
       if (data.actions && data.actions.length > 0) {
         // Résultats informatifs (Odoo, contacts, drive, etc.) → dans le chat
         const infoResults = [];
@@ -414,3 +421,105 @@ document.addEventListener('keydown', e => {
 });
 
 init();
+
+
+// ════════════════════════════════════════════════════════════════════
+// CONTINUATION P2/P3+ : bouton "Etendre la reflexion"
+// ════════════════════════════════════════════════════════════════════
+// Quand un garde-fou saute (tokens/iter/timeout), le backend renvoie
+// un continuation_id. On affiche un bouton qui POSTe vers /raya/continue
+// pour reprendre exactement la ou la reflexion s est arretee, avec un
+// budget etendu (P2 = +150k, P3+ = +200k par clic, repetable a l infini).
+//
+// L utilisateur decide de s arreter : il voit le compteur cumule et
+// peut refuser de continuer a tout moment. Un avertissement est injecte
+// par le backend dans la reponse de Raya quand on passe les 500k tokens
+// cumules (3e extension), via build_reflection_prompt cote Python.
+function renderContinuationButton(msgRow, data) {
+  if (!msgRow || !data || !data.continuation_id) return;
+
+  // Zone dediee sous le message
+  const wrap = document.createElement('div');
+  wrap.className = 'raya-continuation-wrap';
+  wrap.style.cssText = 'margin:10px 0 4px 0;display:flex;flex-direction:column;gap:6px;align-items:flex-start;';
+
+  // Info : tokens consommes jusqu ici + delta prochain palier
+  const info = document.createElement('div');
+  info.style.cssText = 'font-size:12px;color:#6c757d;';
+  const tokensUsed = data.agent_tokens || 0;
+  const delta = data.continuation_delta_tokens || 0;
+  const palierNext = data.continuation_palier_next || 'P2';
+  info.innerHTML = (
+    '\u23f1\ufe0f <b>' + tokensUsed.toLocaleString('fr-FR') + '</b> tokens utilises. ' +
+    'Palier suivant : <b>' + palierNext + '</b> (+' + delta.toLocaleString('fr-FR') + ' tokens)'
+  );
+  wrap.appendChild(info);
+
+  // Bouton
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'raya-continuation-btn';
+  btn.textContent = palierNext === 'P2'
+    ? 'Etendre la reflexion (+' + (delta/1000).toFixed(0) + 'k tokens)'
+    : 'Continuer l exploration (+' + (delta/1000).toFixed(0) + 'k tokens)';
+  btn.style.cssText = 'background:#FFC107;color:#1a1a2e;border:0;padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:600;font-size:13px;';
+  btn.onmouseenter = () => { btn.style.background = '#FFB300'; };
+  btn.onmouseleave = () => { btn.style.background = '#FFC107'; };
+
+  btn.onclick = async () => {
+    btn.disabled = true;
+    btn.textContent = 'Raya reprend sa reflexion...';
+    btn.style.background = '#888';
+    btn.style.cursor = 'not-allowed';
+
+    const loading = (typeof addLoading === 'function') ? addLoading() : null;
+    try {
+      const resp = await fetch('/raya/continue', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ continuation_id: data.continuation_id }),
+      });
+      const extData = await resp.json();
+      if (loading) loading.remove();
+
+      // Retire le bouton et l info maintenant que l extension a abouti
+      wrap.remove();
+
+      if (extData.is_error) {
+        addMessage(extData.answer || 'Erreur lors de l extension.', 'raya');
+      } else {
+        const newRow = addMessage(
+          extData.answer, 'raya', null, extData.aria_memory_id || null
+        );
+        if (typeof _anchorToQuestion === 'function') {
+          requestAnimationFrame(_anchorToQuestion);
+        }
+        if (typeof autoSpeak !== 'undefined' && autoSpeak) {
+          speak(extData.answer, newRow.querySelector('.speak-btn'), true);
+        }
+        // Si la reponse d extension contient ELLE AUSSI un continuation_id
+        // (ex : on a atteint P2 mais pas encore fini), on re-affiche le bouton
+        // pour permettre d aller en P3+ (repetable a l infini).
+        if (extData.continuation_id && extData.continuation_palier_next) {
+          renderContinuationButton(newRow, extData);
+        }
+        // Pending actions eventuelles
+        if (extData.pending_actions && extData.pending_actions.length > 0) {
+          extData.pending_actions.forEach(a => {
+            if (typeof appendPendingActionToChat === 'function') {
+              appendPendingActionToChat(a);
+            }
+          });
+        }
+      }
+    } catch (e) {
+      if (loading) loading.remove();
+      wrap.remove();
+      addMessage('Erreur reseau pendant l extension : ' + e.message, 'raya');
+    }
+  };
+
+  wrap.appendChild(btn);
+  msgRow.appendChild(wrap);
+}
