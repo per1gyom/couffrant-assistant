@@ -238,6 +238,17 @@ async function sendMessage() {
       if (autoSpeak) speak(data.answer, msgRow.querySelector('.speak-btn'), true);
       if (data.ask_choice) renderAskChoice(data.ask_choice);
 
+      // ──── V2.4 : PASTILLE MODELE (Sonnet/Opus) ────
+      // Petit badge dans la bulle pour indiquer quel modele a repondu.
+      // Aide lutilisateur a juger si la reponse merite un clic "Approfondir".
+      addModelBadge(msgRow, data.model_tier);
+
+      // ──── V2.4 : BOUTON "APPROFONDIR AVEC OPUS" ────
+      // Si Sonnet a repondu (tier smart), on propose lapprofondissement Opus.
+      // Conditions internes a renderDeepenButton : pas derreur, pas de
+      // continuation (sinon le bouton Etendre prime).
+      renderDeepenButton(msgRow, data);
+
       // ──── CONTINUATION P2/P3+ : bouton "Etendre" si garde-fou ────
       // Si le backend renvoie un continuation_id, afficher un bouton
       // qui permet d etendre la reflexion sans redemarrer.
@@ -492,6 +503,10 @@ function renderContinuationButton(msgRow, data) {
         const newRow = addMessage(
           extData.answer, 'raya', null, extData.aria_memory_id || null
         );
+        // V2.4 : pastille modele. Une continuation force toujours Opus.
+        if (typeof addModelBadge === 'function') {
+          addModelBadge(newRow, extData.model_tier || 'deep');
+        }
         if (typeof _anchorToQuestion === 'function') {
           requestAnimationFrame(_anchorToQuestion);
         }
@@ -521,5 +536,165 @@ function renderContinuationButton(msgRow, data) {
   };
 
   wrap.appendChild(btn);
+  msgRow.appendChild(wrap);
+}
+
+
+// ════════════════════════════════════════════════════════════════════
+// V2.4 : PASTILLE MODELE + BOUTON "APPROFONDIR AVEC OPUS"
+// ════════════════════════════════════════════════════════════════════
+//
+// Strategie de tiers :
+//   - Sonnet 4.6 par defaut (model_tier="smart") : rapide, moins cher
+//   - Opus 4.7 sur demande (model_tier="deep") : profondeur, analyse
+//
+// Affichage :
+//   - Pastille discrete "Sonnet" (gris) ou "Opus" (dore) dans la bulle
+//   - Si reponse Sonnet et pas erreur : bouton "Approfondir avec Opus"
+//     sous le message -> POST /raya/deepen avec aria_memory_id
+//   - La reponse Sonnet reste visible (historique preserve), la
+//     nouvelle reponse Opus s ajoute en dessous avec sa pastille doree
+
+function addModelBadge(msgRow, modelTier) {
+  // Ajoute un petit badge discret indiquant quel modele a repondu
+  // - 'smart' (Sonnet 4.6) : badge gris clair, texte "Sonnet"
+  // - 'deep'  (Opus 4.7)   : badge dore, texte "Opus"
+  // - autre                 : pas de badge (pas de pollution visuelle)
+  if (!msgRow || !modelTier) return;
+  if (modelTier !== 'smart' && modelTier !== 'deep') return;
+
+  const bubble = msgRow.querySelector('.bubble');
+  if (!bubble) return;
+
+  // Evite les doublons si la fonction est appelee 2 fois sur le meme msg
+  if (bubble.querySelector('.raya-model-badge')) return;
+
+  const badge = document.createElement('div');
+  badge.className = 'raya-model-badge raya-model-badge-' + modelTier;
+  badge.textContent = modelTier === 'smart' ? 'Sonnet' : 'Opus';
+  badge.style.cssText = (
+    'position:absolute;top:6px;right:8px;font-size:10px;' +
+    'padding:2px 7px;border-radius:10px;font-weight:600;' +
+    'letter-spacing:0.3px;opacity:0.85;user-select:none;'
+  );
+  if (modelTier === 'smart') {
+    // Sonnet : fond gris clair, texte discret
+    badge.style.background = '#e9ecef';
+    badge.style.color = '#6c757d';
+  } else {
+    // Opus : fond dore pastel, texte fonce (valorise linvestissement user)
+    badge.style.background = '#FFC107';
+    badge.style.color = '#1a1a2e';
+  }
+
+  // La bubble doit etre relative pour le positionnement absolu du badge
+  if (getComputedStyle(bubble).position === 'static') {
+    bubble.style.position = 'relative';
+  }
+  bubble.appendChild(badge);
+}
+
+function renderDeepenButton(msgRow, data) {
+  // Bouton "Approfondir avec Opus" sous une reponse Sonnet.
+  // N est affiche QUE si :
+  //   - La reponse provient de Sonnet (model_tier='smart')
+  //   - Il y a un aria_memory_id valide (permet le lookup backend)
+  //   - Pas derreur (is_error=false)
+  //   - Pas de continuation_id (sinon le bouton Etendre prime : deja
+  //     en garde-fou, autant continuer dans ce flow)
+  if (!msgRow || !data) return;
+  if (data.model_tier !== 'smart') return;
+  if (!data.aria_memory_id) return;
+  if (data.is_error) return;
+  if (data.continuation_id) return;  // bouton Etendre prend le relais
+
+  const wrap = document.createElement('div');
+  wrap.className = 'raya-deepen-wrap';
+  wrap.style.cssText = (
+    'margin:8px 0 4px 0;display:flex;gap:8px;align-items:center;'
+  );
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'raya-deepen-btn';
+  btn.textContent = 'Approfondir avec Opus';
+  btn.style.cssText = (
+    'background:transparent;color:#1a1a2e;border:1.5px solid #FFC107;' +
+    'padding:6px 14px;border-radius:4px;cursor:pointer;' +
+    'font-weight:600;font-size:12px;transition:all 0.15s;'
+  );
+  btn.onmouseenter = () => {
+    btn.style.background = '#FFC107';
+  };
+  btn.onmouseleave = () => {
+    btn.style.background = 'transparent';
+  };
+
+  btn.onclick = async () => {
+    btn.disabled = true;
+    btn.textContent = 'Opus reflechit...';
+    btn.style.background = '#888';
+    btn.style.color = 'white';
+    btn.style.borderColor = '#888';
+    btn.style.cursor = 'not-allowed';
+
+    const loading = (typeof addLoading === 'function') ? addLoading() : null;
+    try {
+      const resp = await fetch('/raya/deepen', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ aria_memory_id: data.aria_memory_id }),
+      });
+      const extData = await resp.json();
+      if (loading) loading.remove();
+
+      // On laisse le bouton disparaitre une fois lapprofondissement fait
+      // (la reponse Sonnet reste visible, mais le bouton est consomme)
+      wrap.remove();
+
+      if (extData.is_error) {
+        addMessage(
+          extData.answer || 'Erreur lors de lapprofondissement.',
+          'raya'
+        );
+        return;
+      }
+
+      // Nouvelle bulle pour la reponse Opus
+      const newRow = addMessage(
+        extData.answer, 'raya', null, extData.aria_memory_id || null
+      );
+      // Pastille Opus doree sur la nouvelle bulle
+      addModelBadge(newRow, 'deep');
+
+      if (typeof _anchorToQuestion === 'function') {
+        requestAnimationFrame(_anchorToQuestion);
+      }
+      if (typeof autoSpeak !== 'undefined' && autoSpeak) {
+        speak(extData.answer, newRow.querySelector('.speak-btn'), true);
+      }
+
+      // Si la reponse Opus declenche a son tour un garde-fou (rare vu
+      // quil n y a pas de boucle), le bouton Etendre sera gere via
+      // renderContinuationButton cote data.continuation_id.
+      if (extData.continuation_id && extData.continuation_palier_next) {
+        renderContinuationButton(newRow, extData);
+      }
+    } catch (e) {
+      if (loading) loading.remove();
+      wrap.remove();
+      addMessage('Erreur reseau pendant lapprofondissement : ' + e.message, 'raya');
+    }
+  };
+
+  wrap.appendChild(btn);
+
+  // Petit texte explicatif discret a cote du bouton
+  const hint = document.createElement('span');
+  hint.style.cssText = 'font-size:11px;color:#6c757d;';
+  hint.textContent = 'analyse plus profonde, enrichissements, nuances';
+  wrap.appendChild(hint);
+
   msgRow.appendChild(wrap);
 }
