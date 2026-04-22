@@ -1,52 +1,65 @@
 """
-Endpoint "Approfondir avec Opus" (V2.4).
+Endpoint "Approfondir avec Opus" (V2.4 fix - 22/04 soir).
 
-Permet a l utilisateur de demander une version plus profonde d une
-reponse qui a ete donnee par Sonnet 4.6 (tier smart). Declenche Opus
-4.7 (tier deep) avec le CONTEXTE COMPLET de l echange precedent,
-pas une nouvelle question isolee.
+Philosophie : approfondir une reponse n est PAS re-interroger Claude sur
+une nouvelle base. C est lui donner - sur les MEMES bases (regles RAG,
+historique, graphe, tools, preferences) - la possibilite de reflechir
+plus profondement avec un modele plus puissant (Opus 4.7 au lieu de
+Sonnet 4.6).
 
-Logique :
-  - L utilisateur pose une question -> Sonnet repond (tier smart)
-  - Si la reponse est un peu juste, il clique "Approfondir avec Opus"
-  - Opus recoit : question originale + reponse Sonnet
-  - Opus produit une reponse qui CONSTRUIT dessus :
-      - Complete les lacunes
-      - Corrige les imprecisions
-      - Explore des angles que Sonnet a rates
-      - Nuance les conclusions si besoin
+Implementation : on reutilise integralement _raya_core_agent avec le
+flag deepen_mode=True. Opus herite donc de :
+  - Regles apprises (RAG semantique top 10 pertinentes a la question)
+  - 3 derniers echanges (inclut la reponse Sonnet qu il voit comme son
+    propre message assistant precedent)
+  - Graphe des conversations (via tool search_conversations)
+  - Tools Odoo, mails, SharePoint, drive
+  - Preferences utilisateur + consignes globales du tenant
+  - Boucle agent complete avec tool_use iteratifs
 
-Avantages vs relancer from scratch :
-  - Opus ne refait pas le travail de Sonnet
-  - Moins cher (pas de nouveau retrieval, pas de tool calls redondants
-    dans la majorite des cas)
-  - Meilleure UX : Opus repart des memes donnees factuelles, se
-    concentre sur la profondeur
+Le seul ajout en mode approfondissement : un bloc system prompt qui
+explique a Opus qu il doit ENRICHIR / NUANCER / VERIFIER plutot que
+refaire ou accuser Sonnet sans preuve. Implemente cote
+raya_agent_core.py.
 
-Historique : la reponse Sonnet reste dans aria_memory. La reponse Opus
-est sauvegardee dans une nouvelle ligne aria_memory. On garde les 2
-pour comparer plus tard.
+Historique : la reponse Sonnet originale reste intacte dans aria_memory.
+La reponse Opus approfondie s ajoute comme nouvelle ligne (sauvegardee
+par _raya_core_agent lui-meme via _save_conversation standard). On
+garde les 2 pour comparer plus tard.
+
+Avant (v2.4 initiale) : ~280 lignes avec _DEEPEN_SYSTEM_PROMPT,
+_build_deepen_messages, _save_deepen_response, llm_complete en one-shot.
+Tout cela etait une MAUVAISE reimplementation qui aveuglait Opus.
+
+Apres (v2.4 fix) : ~90 lignes. Chargement de la question originale,
+delegation a la vraie boucle agent. Simplicite et correction.
 """
+
+import concurrent.futures
+import traceback
+
 from fastapi import APIRouter, Request, Body, Depends, HTTPException
-from fastapi.responses import JSONResponse
 
 from app.database import get_pg_conn
 from app.logging_config import get_logger
-from app.llm_client import llm_complete
 from app.routes.deps import require_user
-from app.routes.raya_helpers import _strip_action_tags
+from app.routes.raya_agent_core import _raya_core_agent
 
 logger = get_logger("raya.deepen")
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# LECTURE de la reponse source (Sonnet)
+# LECTURE de l echange source (Sonnet)
 # ═══════════════════════════════════════════════════════════════════════
 
 def _load_original_exchange(aria_memory_id: int, username: str, tenant_id: str):
     """
-    Charge l echange source depuis aria_memory, avec verif ownership.
-    Retourne (user_input, aria_response) ou None si pas trouve / pas a lui.
+    Charge l echange source depuis aria_memory, avec verif ownership
+    (username + tenant_id). Retourne (user_input, aria_response) ou
+    None si introuvable ou non accessible.
+
+    Securite : le filtre tenant_id empeche un user d un tenant A de
+    lire la reponse d un user du tenant B via /raya/deepen.
     """
     conn = None
     try:
@@ -72,92 +85,28 @@ def _load_original_exchange(aria_memory_id: int, username: str, tenant_id: str):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# PROMPT "deepen" - Opus construit sur la reponse Sonnet
+# PAYLOAD DE RELECTURE pour _raya_core_agent
 # ═══════════════════════════════════════════════════════════════════════
 
-_DEEPEN_SYSTEM_PROMPT = """Tu es Raya en mode "approfondissement".
-
-L utilisateur vient de recevoir une reponse a sa question (notee ci-apres
-"REPONSE INITIALE"). Cette reponse a ete produite par un modele rapide
-(Sonnet 4.6). L utilisateur estime qu elle merite d etre approfondie et
-demande une version plus complete, plus nuancee, avec plus d analyse.
-
-Ta mission :
-  1. Lis la question originale et la reponse initiale attentivement
-  2. Identifie ce qui manque : profondeur d analyse, contextes ignores,
-     nuances eludees, chiffres sans interpretation, recommendations
-     absentes, angles morts
-  3. Produis une reponse qui CONSTRUIT sur la reponse initiale :
-     - Ne refais pas tout le travail depuis zero
-     - Prends la reponse initiale comme socle factuel
-     - Ajoute ce qui manque : analyses croisees, implications,
-       recommandations pratiques, points d attention subtils
-     - Corrige si tu detectes une erreur ou approximation
-     - Nuance les conclusions trop tranchees si besoin
-
-Important :
-  - Commence directement par ta reponse approfondie (pas d introduction
-    "Voici ma version approfondie...", tu rentres dans le vif du sujet)
-  - Structure ta reponse pour qu elle soit lisible (titres, puces,
-    tableaux si pertinent, mais sans en abuser)
-  - Si apres reflexion la reponse initiale etait deja tres bonne, dis-le
-    honnetement et apporte juste les 1-2 nuances qui manquaient plutot
-    que d inventer du contenu pour faire volume
-
-Style : ton direct et professionnel, comme d habitude. Pas de flatterie,
-pas de "excellente question", on va a l essentiel.
-"""
-
-
-def _build_deepen_messages(user_input: str, aria_response: str) -> list:
+class _ReplayPayload:
     """
-    Construit les messages pour Opus : 1 seul tour user qui contient
-    la question originale + la reponse initiale a approfondir.
-    """
-    content = (
-        f"QUESTION ORIGINALE :\n{user_input}\n\n"
-        f"REPONSE INITIALE (Sonnet 4.6) :\n{aria_response}\n\n"
-        f"Approfondis cette reponse."
-    )
-    return [{"role": "user", "content": content}]
+    Mimique l objet payload attendu par _raya_core_agent (RayaQuery
+    pydantic). On ne peut pas instancier un RayaQuery directement car
+    ses contraintes de validation pourraient diverger ; une classe
+    ad-hoc suffit puisque _raya_core_agent n appelle que des attributs.
 
-
-# ═══════════════════════════════════════════════════════════════════════
-# SAUVEGARDE de la nouvelle reponse Opus dans aria_memory
-# ═══════════════════════════════════════════════════════════════════════
-
-def _save_deepen_response(username: str, tenant_id: str,
-                           original_id: int,
-                           user_input: str, aria_response: str) -> int | None:
+    Champs utilises par la boucle agent :
+      - query : la question utilisateur (texte)
+      - file : fichier eventuel (None ici, le fichier d origine a deja
+               ete traite lors du tour Sonnet et n a pas a etre rejoue)
+      - audio : audio eventuel (idem, None)
+      - speak_speed : vitesse TTS (non utilise en deepen)
     """
-    Sauvegarde la reponse approfondie dans aria_memory.
-    La question est prefixee pour marquer qu il s agit d un
-    approfondissement d une reponse precedente (tracabilite).
-    """
-    conn = None
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        # user_input avec prefixe trace : on garde la question originale
-        # mais on marque que c est un approfondissement pour ne pas polluer
-        # l historique normal avec des doublons
-        marked_input = f"[Approfondissement de #{original_id}] {user_input}"
-        c.execute(
-            "INSERT INTO aria_memory (username, tenant_id, user_input, aria_response) "
-            "VALUES (%s, %s, %s, %s) RETURNING id",
-            (username, tenant_id, marked_input, aria_response),
-        )
-        row = c.fetchone()
-        conn.commit()
-        return row[0] if row else None
-    except Exception as e:
-        if conn:
-            conn.rollback()
-        logger.exception("[Deepen] save_response error: %s", e)
-        return None
-    finally:
-        if conn:
-            conn.close()
+    def __init__(self, query: str):
+        self.query = query
+        self.file = None
+        self.audio = None
+        self.speak_speed = None
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -179,8 +128,16 @@ def raya_deepen_endpoint(
     Body JSON attendu :
       { "aria_memory_id": 123 }
 
-    Retour : memes champs que /raya, avec la nouvelle reponse Opus
-    et model_tier="deep" pour que le front affiche la pastille Opus.
+    Flow :
+      1. Charger la question originale via aria_memory_id (verif ownership)
+      2. Construire un _ReplayPayload avec cette query
+      3. Appeler _raya_core_agent(deepen_mode=True)
+         -> vraie boucle agent avec tous les moyens habituels
+         -> tier Opus force
+         -> bloc system prompt "MODE APPROFONDISSEMENT" injecte
+      4. Retourner le resultat (meme format que /raya/ask pour que le
+         front rende la bulle Opus avec pastille doree et eventuellement
+         bouton Etendre si garde-fou)
     """
     username = user["username"]
     tenant_id = user["tenant_id"]
@@ -199,79 +156,64 @@ def raya_deepen_endpoint(
             status_code=404,
             detail="Echange introuvable ou non accessible",
         )
-    user_input, aria_response = original
+    user_input, _aria_response = original
 
-    # 2. Construire les messages pour Opus
-    messages = _build_deepen_messages(user_input, aria_response)
+    # 2. Construire le payload de relecture
+    replay_payload = _ReplayPayload(query=user_input)
 
-    # 3. Appel Opus avec le prompt deepen
+    # 3. Appel de la vraie boucle agent avec deepen_mode=True
+    #    Opus va avoir : regles RAG, historique 3 derniers echanges (avec
+    #    reponse Sonnet comme dernier assistant), tools, graphe, etc.
     try:
-        result = llm_complete(
-            messages=messages,
-            system=_DEEPEN_SYSTEM_PROMPT,
-            model_tier="deep",  # Opus 4.7 force
-            max_tokens=8192,  # Reponse potentiellement longue (analyse profonde)
-        )
-    except Exception as e:
-        logger.exception("[Deepen] appel LLM echoue: %s", e)
-        return JSONResponse(
-            status_code=500,
-            content={
-                "answer": (
-                    "\u26a0\ufe0f Une erreur technique est survenue pendant "
-                    "l approfondissement. La reponse initiale reste valide, "
-                    "retente dans quelques secondes."
-                ),
-                "is_error": True,
-                "error_type": "llm_error",
-            },
-        )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(
+                _raya_core_agent,
+                request, replay_payload, username, tenant_id,
+                None,   # existing_continuation (pas une reprise P2/P3)
+                True,   # deepen_mode=True
+            )
+            # Timeout 120s : Opus avec boucle agent + RAG + tools peut
+            # legitimement prendre plus longtemps qu un tour Sonnet
+            # standard. 120s laisse la marge sans bloquer a vie.
+            result = future.result(timeout=120)
+    except concurrent.futures.TimeoutError:
+        return {
+            "answer": (
+                "\u26a0\ufe0f Opus a depasse le timeout serveur pour "
+                "l approfondissement. La reponse Sonnet initiale reste "
+                "valide. Retente si besoin avec une question plus ciblee."
+            ),
+            "actions": [], "pending_actions": [],
+            "aria_memory_id": None, "model_tier": "deep",
+            "ask_choice": None,
+            "is_error": True, "error_type": "timeout",
+        }
+    except Exception:
+        tb = traceback.format_exc()
+        logger.error("[Deepen] ERREUR pour %s:\n%s", username, tb)
+        return {
+            "answer": (
+                "\u26a0\ufe0f Une erreur interne est survenue lors de "
+                "l approfondissement. La reponse Sonnet initiale reste valide."
+            ),
+            "actions": [], "pending_actions": [],
+            "aria_memory_id": None, "model_tier": "deep",
+            "ask_choice": None,
+            "is_error": True, "error_type": "internal",
+        }
 
-    deepened_text = result.get("text", "").strip()
-    if not deepened_text:
-        return JSONResponse(
-            status_code=500,
-            content={
-                "answer": "\u26a0\ufe0f Opus n a pas produit de reponse. Retente.",
-                "is_error": True,
-                "error_type": "empty_response",
-            },
-        )
-
-    # 4. Sauvegarder la reponse approfondie dans aria_memory
-    cleaned = _strip_action_tags(deepened_text)
-    new_memory_id = _save_deepen_response(
-        username=username,
-        tenant_id=tenant_id,
-        original_id=aria_memory_id,
-        user_input=user_input,
-        aria_response=cleaned,
-    )
+    # 4. Enrichir la trace : ajouter source_memory_id pour que le front
+    #    sache que c est un approfondissement d un echange precedent
+    #    (utile pour d eventuelles evolutions UX futures).
+    if isinstance(result, dict):
+        result["source_memory_id"] = aria_memory_id
 
     logger.info(
-        "[Deepen] OK user=%s original=%d new=%s tokens_in=%d tokens_out=%d",
-        username, aria_memory_id, new_memory_id,
-        result.get("usage", {}).get("input_tokens", 0),
-        result.get("usage", {}).get("output_tokens", 0),
+        "[Deepen] OK user=%s source_id=%d new_id=%s iter=%d tokens=%d",
+        username, aria_memory_id,
+        result.get("aria_memory_id") if isinstance(result, dict) else None,
+        result.get("agent_iterations", 0) if isinstance(result, dict) else 0,
+        result.get("agent_tokens", 0) if isinstance(result, dict) else 0,
     )
 
-    # 5. Retour au format /raya pour compatibilite front
-    return {
-        "answer": cleaned,
-        "actions": [],
-        "pending_actions": [],
-        "aria_memory_id": new_memory_id,
-        "model_tier": "deep",  # Opus -> pastille doree front
-        "ask_choice": None,
-        "is_error": False,
-        # Metadatas pour continuation eventuelle
-        "agent_iterations": 1,  # deepen = 1 appel LLM pas de boucle
-        "agent_duration_s": None,
-        "agent_tokens": (
-            result.get("usage", {}).get("input_tokens", 0)
-            + result.get("usage", {}).get("output_tokens", 0)
-        ),
-        "agent_stopped_by": None,
-        "continuation_id": None,
-        "source_memory_id": aria_memory_id,  # trace de la reponse Sonnet source
-    }
+    return result
