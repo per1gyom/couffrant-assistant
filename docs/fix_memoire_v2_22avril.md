@@ -299,3 +299,111 @@ l'atteindra quand même, ce sera le signal d'une question légitimement
 Le garde-fou n'est plus là pour limiter l'ambition de Raya, mais pour
 détecter les anomalies (vraies ou de comportement). Le fait qu'il se
 déclenche devient une information, pas une contrainte.
+
+
+---
+
+## 💡 IDÉE MAJEURE 02h25 — Budget à 2 niveaux (Guillaume)
+
+**L'idée de Guillaume** (reformulée) :
+
+> Au lieu d'un budget unique (qui doit être gros pour couvrir les audits mais
+> coûte cher en cas de boucle sur question simple), avoir 2 niveaux :
+> - **Standard** (100-150k) : s'applique à toutes les questions par défaut
+> - **Étendu** (300-500k) : débloqué explicitement par l'utilisateur pour
+>   les questions qu'il sait complexes
+
+**Quand Raya atteint le budget standard**, au lieu du classique
+*"tu veux que je continue ?"*, elle rend **une synthèse partielle** de ce
+qu'elle a trouvé jusqu'ici + propose **un bouton de déblocage**.
+
+### Pourquoi cette approche est supérieure au budget unique
+
+1. **Protection par défaut** : 99% des questions sont simples, si Raya
+   boucle elle s'arrête vite (économie + sécurité financière)
+2. **Intention consciente** : pour les audits profonds, l'utilisateur
+   valide le surcoût en connaissance de cause
+3. **Diagnostic automatique** : le déclenchement du seuil standard est
+   en soi une information utile ("attention, cette question sort de
+   l'ordinaire")
+4. **Contrôle du coût** : pas de surprise de facture. Dérapage plafonné
+   au seuil standard tant que l'utilisateur n'autorise pas le déblocage
+
+### Architecture technique
+
+**Dans `raya_agent_core.py`** :
+```python
+MAX_TOKENS_STANDARD = 150_000   # budget par defaut
+MAX_TOKENS_EXTENDED = 500_000   # budget si l utilisateur debloque
+```
+
+**Dans la signature de `_raya_core_agent`** :
+```python
+def _raya_core_agent(request, payload, username, tenant_id):
+    # Lire un flag depuis payload :
+    extended_budget = getattr(payload, 'extended_budget', False)
+    max_tokens = MAX_TOKENS_EXTENDED if extended_budget else MAX_TOKENS_STANDARD
+```
+
+**Dans le flux** :
+1. Standard 150k atteint → Raya rend synthèse partielle + marqueur
+   spécial dans la réponse (ex: `{"needs_extended_budget": true}`)
+2. Le front détecte ce marqueur → affiche bouton "Continuer (jusqu'à 500k)"
+3. Si clic → nouvelle requête avec `extended_budget=true` ET contexte
+   de la boucle précédente passé en référence (via `continuation_id`)
+4. Si stop → on garde la synthèse partielle dans aria_memory
+
+### Variantes à considérer
+
+**Option A — Bouton dans la réponse** (RECOMMANDÉE)
+Raya atteint 150k → synthèse partielle + bouton *"Continuer 500k"*.
+Clic → relance avec budget étendu ET contexte préservé.
+
+**Option B — Préfixe explicite dans la question**
+`##audit Fais-moi un bilan complet des impayés du semestre`.
+Donne 500k dès le départ. Utile quand l'utilisateur sait d'avance.
+
+**Option C — Toggle "Mode audit" dans l'UI**
+Switch qui donne 500k à toutes les questions de la session.
+Risque d'oubli → surcoût. Déconseillé.
+
+**Reco** : **A en principal, B en secours**. Pas C.
+
+### Gain financier estimé
+
+Sur 1000 questions/mois :
+- Budget unique à 500k : ~1000€/mois (pessimiste)
+- Budget double-seuil 150k/500k : ~300-400€/mois (estimation)
+  - 90% × 0.50€ (standard 150k) + 10% × 2.50€ (étendu 500k)
+
+### Ajout au plan du 22/04
+
+Le plan initial à 300k de budget unique est **remplacé** par ce plan à
+2 niveaux :
+
+```python
+MAX_ITERATIONS_STANDARD = 15
+MAX_ITERATIONS_EXTENDED = 30
+
+MAX_DURATION_STANDARD = 60    # 1 minute
+MAX_DURATION_EXTENDED = 180   # 3 minutes
+
+MAX_TOKENS_STANDARD = 150_000
+MAX_TOKENS_EXTENDED = 500_000
+```
+
+### Travail nécessaire
+
+- ~15 min de code en backend (double seuil + flag)
+- ~20 min côté front (détecter marqueur + afficher bouton de déblocage)
+- Mécanisme de continuation propre (préserver contexte boucle précédente)
+
+### Remarque
+
+Cette idée résout simultanément :
+- Le problème du budget insuffisant sur audits (validé : 500k si débloqué)
+- Le problème des dérapages coûteux (contenu à 150k par défaut)
+- Le problème de "continue" qui repart de zéro (continuation propre)
+- Le problème de visibilité du coût (l'utilisateur voit qu'il débloque)
+
+**C'est l'idée la plus aboutie architecturalement de la session.**
