@@ -177,3 +177,105 @@ Donc pas de système de rollback automatique. Si l'utilisateur veut
 revenir sur un changement, il le dit à Raya en conversation : *"tu as
 supprimé la règle X, remets-la"*. Raya cherche dans `aria_rules_history`
 (table de log existante) et restaure.
+
+
+---
+
+## 🔐 Isolation multi-tenant des règles (priorité quand plusieurs Rayas)
+
+**Point soulevé par Guillaume le 22/04** : quand on déploiera une Raya par
+collaborateur Couffrant Solar (Pierre, Sabrina, Arlène, Benoît...) et à
+terme pour d'autres entreprises clientes, les règles **doivent être
+strictement cloisonnées par utilisateur**.
+
+### Ce qui a causé la pollution du 15/04
+
+Les 10 règles "Charlotte" (agence événementielle) ont contaminé la base
+de Guillaume parce que `save_rule()` dans `app/memory_rules.py`
+n'appliquait pas de filtre strict lors de l'insertion OU lors de la
+lecture selon `username`/`tenant_id`. À vérifier et corriger avant
+déploiement multi-user.
+
+### Audit à faire sur `memory_rules.py`
+
+1. **À l'écriture** (`save_rule`) :
+   - `username` OBLIGATOIRE (pas de défaut silencieux)
+   - `tenant_id` OBLIGATOIRE (sauf règles globales explicites)
+   - Rejet explicite si l'un des deux manque
+
+2. **À la lecture** (fonctions qui récupèrent les règles pour injection
+   dans le prompt) :
+   - WHERE username = :user AND tenant_id = :tenant OBLIGATOIRE
+   - Pas de fallback "tous les users du tenant" sauf cas explicites
+   - Règles globales (catégorie `global_system`) = tenant_id NULL et
+     injectées à tous
+
+3. **Test de non-régression** :
+   - Créer 2 users fictifs user_A (tenant_A) et user_B (tenant_B)
+   - Ajouter 5 règles à chacun
+   - Vérifier que user_A ne voit JAMAIS les règles de user_B
+
+### Règles partageables VS règles strictement personnelles
+
+Au sein d'un même tenant (ex: Couffrant Solar), certaines règles gagneraient
+à être partagées :
+
+- **Règles personnelles** (user_A ≠ user_B même si même tenant) :
+  style rédactionnel, préférences de concision, habitudes de tri mail
+- **Règles d'équipe** (tout user du tenant) : membres équipe, structures
+  juridiques, clients, procédures métier PV
+
+Solution : ajouter un champ `scope VARCHAR(20)` avec valeurs :
+- `personal` : visible uniquement par ce user
+- `team` : visible par tous les users du tenant
+- `global` : visible par tous (règles système)
+
+À définir quand ce sera le moment de déployer. Pour l'instant (avril 2026),
+un seul utilisateur actif (Guillaume), donc scope=personal par défaut pour
+tout.
+
+---
+
+## 🎚️ Clarification des "seuils d'auto-résolution"
+
+**Précision suite question Guillaume 22/04** : il ne s'agit PAS de seuils
+sur la confidence d'une règle individuelle, mais du **seuil de similarité
+cosine** au-delà duquel Raya considère que 2 règles sont "assez proches
+pour être fusionnées automatiquement".
+
+### Auto-calibrage plutôt que paliers fixes
+
+Au lieu de "semaine 1 : 0.95, semaine 2 : 0.92, régime normal : 0.90",
+**Raya apprend du comportement de Guillaume** :
+
+- Démarre à seuil 0.95 (très strict, seulement les doublons flagrants)
+- Si pendant 3 semaines consécutives Guillaume ne revient jamais sur une
+  fusion en chat (`rollback` implicite via instructions verbales) → Raya
+  descend le seuil d'elle-même à 0.93
+- Si Guillaume dit un jour *"tu as fusionné à tort les règles X et Y"* →
+  Raya remonte le seuil à 0.97 et reste prudente pendant 15 jours avant
+  de tenter à nouveau de descendre
+
+C'est cohérent avec la philosophie "Raya apprend de l'utilisateur, pas de
+config admin".
+
+### Implémentation
+
+Ajouter dans la table `aria_rules_system_config` (nouvelle) :
+```sql
+CREATE TABLE aria_rules_system_config (
+    key VARCHAR(50) PRIMARY KEY,
+    value FLOAT,
+    username TEXT,
+    tenant_id TEXT,
+    updated_at TIMESTAMP DEFAULT NOW(),
+    adjusted_by_feedback_count INTEGER DEFAULT 0
+);
+
+INSERT INTO aria_rules_system_config (key, value, username, tenant_id)
+VALUES ('auto_merge_threshold', 0.95, 'guillaume', 'couffrant_solar');
+```
+
+Le job nocturne lit cette valeur avant chaque passage. Une fois par mois,
+si aucun rollback n'a été demandé → descend de 0.02. Si rollback → remonte
+de 0.02 et reset le compteur.
