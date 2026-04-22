@@ -44,9 +44,6 @@ P3_DELTA_TOKENS = 200_000
 P3_DELTA_ITERATIONS = 15
 P3_DELTA_DURATION = 90
 
-# Seuil declenchant l avertissement (affiche avant la 3e extension)
-WARNING_THRESHOLD_TOKENS = 500_000
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # SERIALISATION / DESERIALISATION des messages Anthropic
@@ -297,16 +294,19 @@ def compute_extended_budgets(previous_tokens_used: int,
         delta_dur = P3_DELTA_DURATION
         palier = "P3"
 
+    # Avertissement "reformule plutot que creuser a l aveugle" declenche
+    # DES QU ON ENTRE EN P3 (2e extension, soit ~300k cumules qui vont
+    # devenir 500k). Logique : si P1 + P2 n ont pas suffi, c est le bon
+    # moment pour Raya de faire une pause introspective et de poser une
+    # question complementaire a l utilisateur plutot que de creuser sans
+    # fin. Pas au-dela car l utilisateur a deja vu l avertissement.
     return {
         "max_tokens": previous_tokens_used + delta_tokens,
         "max_iterations": previous_iterations_used + delta_iter,
         "max_duration": previous_duration_seconds + delta_dur,
         "palier": palier,
         "delta_tokens": delta_tokens,
-        "show_warning": (
-            previous_tokens_used >= WARNING_THRESHOLD_TOKENS
-            and next_extension_count >= 2
-        ),
+        "show_warning": next_extension_count == 2,  # entree en P3 uniquement
     }
 
 
@@ -319,25 +319,31 @@ def build_reflection_prompt(extension_count: int, show_warning: bool) -> str:
     Genere le message injecte au debut de l extension, selon le contexte.
 
     extension_count : 1 = P2 (1ere extension), 2+ = P3 successives
-    show_warning : True si on passe les 500k et qu il faut afficher l alerte
+    show_warning : True au moment du passage en P3 (2e extension)
 
     Principe :
       - En P2 : petit rappel pour prendre du recul
       - En P3+ : idem + encourage Raya a poser une question si elle peine
-      - Si show_warning : ajoute le message d alerte budget
+      - show_warning (actif uniquement a l entree en P3) : ajoute un
+        recadrage plus ferme pour eviter le creusage a l aveugle
     """
     parts = []
 
     if show_warning:
         parts.append(
-            "AVERTISSEMENT : c est ta {n}e extension de recherche et tu as "
-            "deja consomme plus de 500k tokens sur cette seule question. "
-            "Avant de repartir creuser, prends 10 secondes : est-ce que ta "
-            "recherche va vraiment dans la bonne direction ? Une question "
-            "mieux cadree peut trouver en 50k ce que 500k de recherche floue "
-            "ne trouveront pas. Si tu as un doute sur la piste, dis-le "
-            "honnetement a l utilisateur plutot que de continuer a explorer "
-            "a l aveugle.".format(n=extension_count)
+            "RECADRAGE IMPORTANT : l utilisateur a deja fait 2 tours "
+            "d extension sans que tu aies trouve de reponse claire a sa "
+            "question. C est le signal qu il ne faut PAS simplement "
+            "continuer a creuser dans la meme direction. Fais l une de "
+            "ces 2 choses : "
+            "(1) pose une question complementaire a l utilisateur pour "
+            "reformuler ou preciser son besoin (par exemple : 'J ai "
+            "explore X et Y sans trouver Z, peux-tu preciser [element] "
+            "ou reformuler ta question sous un autre angle ?'), "
+            "OU (2) explique clairement ce que tu as deja trouve et ce "
+            "qui te manque, en etant honnete sur les limites. Une "
+            "question mieux cadree trouve en peu de temps ce qu une "
+            "recherche floue ne trouvera jamais."
         )
 
     if extension_count == 1:
@@ -346,17 +352,16 @@ def build_reflection_prompt(extension_count: int, show_warning: bool) -> str:
             "Tu as plus de budget maintenant. Avant de repartir, prends une "
             "respiration mentale : ou en es-tu vraiment, qu est-ce qui te "
             "manque concretement, quelle nouvelle piste semble la plus "
-            "prometteuse ? Evite de creuser dans la meme direction si c etait "
-            "un cul-de-sac."
+            "prometteuse ? Evite de creuser dans la meme direction si "
+            "c etait un cul-de-sac."
         )
     else:
         parts.append(
-            "L utilisateur t a demande d etendre encore ta reflexion (extension "
-            "n°{n}). Prends du recul : si tu peines a trouver une reponse "
-            "claire, pose une question complementaire a l utilisateur plutot "
-            "que de continuer a chercher. Par exemple : 'J ai explore X et Y "
-            "sans trouver Z, peux-tu preciser [element] ?'. Il vaut mieux "
-            "demander une precision que tourner en rond.".format(n=extension_count)
+            "L utilisateur t a demande d etendre encore ta reflexion "
+            "(extension n°{n}). Prends du recul : si tu peines a trouver "
+            "une reponse claire, pose une question complementaire a "
+            "l utilisateur plutot que de continuer a chercher. Il vaut "
+            "mieux demander une precision que tourner en rond.".format(n=extension_count)
         )
 
     return "\n\n".join(parts)
