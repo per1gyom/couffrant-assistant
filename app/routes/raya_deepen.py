@@ -90,23 +90,25 @@ def _load_original_exchange(aria_memory_id: int, username: str, tenant_id: str):
 
 class _ReplayPayload:
     """
-    Mimique l objet payload attendu par _raya_core_agent (RayaQuery
-    pydantic). On ne peut pas instancier un RayaQuery directement car
-    ses contraintes de validation pourraient diverger ; une classe
-    ad-hoc suffit puisque _raya_core_agent n appelle que des attributs.
+    Mimique l objet RayaQuery (pydantic, defini dans raya_helpers.py)
+    pour passer a _raya_core_agent sans contraintes de validation.
 
-    Champs utilises par la boucle agent :
-      - query : la question utilisateur (texte)
-      - file : fichier eventuel (None ici, le fichier d origine a deja
-               ete traite lors du tour Sonnet et n a pas a etre rejoue)
-      - audio : audio eventuel (idem, None)
-      - speak_speed : vitesse TTS (non utilise en deepen)
+    RayaQuery a exactement 4 champs :
+      - query : str          (obligatoire)
+      - file_data : str|None (base64)
+      - file_type : str|None (MIME)
+      - file_name : str|None
+
+    En mode deepen, on ne rejoue QUE la query textuelle. Le fichier
+    d origine eventuel (image, PDF) a deja ete traite par Sonnet au
+    premier tour et sa synthese est dans l historique des 3 derniers
+    echanges que Opus verra nativement.
     """
     def __init__(self, query: str):
         self.query = query
-        self.file = None
-        self.audio = None
-        self.speak_speed = None
+        self.file_data = None
+        self.file_type = None
+        self.file_name = None
 
 
 # ═══════════════════════════════════════════════════════════════════════
