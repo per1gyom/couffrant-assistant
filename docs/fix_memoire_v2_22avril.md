@@ -407,3 +407,181 @@ Cette idée résout simultanément :
 - Le problème de visibilité du coût (l'utilisateur voit qu'il débloque)
 
 **C'est l'idée la plus aboutie architecturalement de la session.**
+
+
+---
+
+## 🎯 AFFINEMENT 02h40 — Budget progressif à 3 paliers + continuation
+
+**Guillaume affine l'idée du double-seuil** :
+
+> *"Je préfère l'option A. On met 150k dès le début. Si la réponse ne lui
+> permet pas d'être pertinente, on lui dit : étends ta réflexion, va jusqu'à
+> 300k. Si ce n'est encore pas suffisant, on peut étendre une 2e fois jusqu'à
+> 500k. Mais il faut que ce soit une extension, pas un redémarrage — qu'elle
+> continue sa réflexion en conservant ce qu'elle avait déjà fait, sinon ce
+> n'est pas utile."*
+
+### Architecture à 3 paliers
+
+| Palier | Budget cumulé | Déclencheur |
+|---|---|---|
+| **P1 — Standard** | 150k tokens | Par défaut, toute question |
+| **P2 — Étendu** | 300k tokens | Clic "Étendre la réflexion" si P1 atteint |
+| **P3 — Profond** | 500k tokens | Clic "Étendre encore" si P2 atteint |
+
+### Point critique : CONTINUATION, pas REDÉMARRAGE
+
+**Guillaume insiste (à juste titre) :**
+> *"Il faut que ce soit une extension de sa première réponse qu'elle continue
+> sa réflexion en conservant ce qu'elle avait déjà fait, sinon ça ne sera pas
+> utile."*
+
+C'est LE point architectural qui différencie cette approche du bricolage
+actuel ("continue" qui repart de zéro).
+
+### Mécanisme de continuation
+
+**Quand P1 est atteint** :
+1. Raya rend une synthèse partielle
+2. L'état complet de sa boucle est sauvegardé en DB :
+   - `messages[]` (tout l'historique de la boucle : user, assistant,
+     tool_use, tool_result)
+   - `tokens_used` (compteur actuel)
+   - `iterations_used` (compteur actuel)
+   - `system_prompt` (celui qui a servi)
+3. Cet état est associé à un `continuation_id` unique
+4. Le marqueur `{"continuation_id": "abc123", "current_palier": 1}` est
+   renvoyé avec la réponse partielle
+
+**Quand l'utilisateur clique "Étendre"** :
+1. Le front rappelle `/raya` avec `continuation_id=abc123`
+2. Le backend charge l'état complet depuis la DB
+3. La boucle **reprend exactement là où elle s'était arrêtée** :
+   - Même `messages[]`
+   - Nouveau budget étendu (300k ou 500k selon palier)
+   - Nouveau MAX_ITERATIONS étendu
+4. Raya continue sa réflexion avec tout le contexte déjà exploré
+5. Aucun token n'est gaspillé à re-explorer ce qui a déjà été fait
+
+### Structure DB
+
+Nouvelle table `agent_continuations` :
+
+```sql
+CREATE TABLE IF NOT EXISTS agent_continuations (
+    id SERIAL PRIMARY KEY,
+    continuation_id TEXT UNIQUE NOT NULL,
+    username TEXT NOT NULL,
+    tenant_id TEXT NOT NULL,
+    messages_json JSONB NOT NULL,
+    system_prompt TEXT NOT NULL,
+    tokens_used INTEGER NOT NULL,
+    iterations_used INTEGER NOT NULL,
+    current_palier INTEGER NOT NULL,
+    partial_answer TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    expires_at TIMESTAMP DEFAULT NOW() + INTERVAL '1 hour'
+);
+
+CREATE INDEX idx_agent_continuations_active
+    ON agent_continuations (continuation_id, expires_at)
+    WHERE expires_at > NOW();
+```
+
+TTL 1h : au-delà, la continuation expire (garde la DB propre).
+
+### Constantes v2
+
+```python
+# Paliers de budget
+BUDGET_P1_STANDARD = 150_000
+BUDGET_P2_EXTENDED = 300_000
+BUDGET_P3_DEEP     = 500_000
+
+# Itérations par palier
+ITER_P1 = 15
+ITER_P2 = 25
+ITER_P3 = 40
+
+# Durées par palier (secondes)
+DUR_P1 = 60
+DUR_P2 = 150
+DUR_P3 = 300
+```
+
+### Expérience utilisateur
+
+**Scénario typique pour une question simple** :
+- Question → Raya répond en ~30k tokens (P1 largement suffisant) → Done.
+
+**Scénario question moyenne** :
+- Question → Raya répond en ~120k tokens → Done dans P1.
+
+**Scénario question complexe** (cas Coullet de ce soir) :
+- Question → 150k atteint, synthèse partielle + bouton "Étendre"
+- Clic → reprise avec budget 300k → Raya conclut à ~250k → Done.
+
+**Scénario audit profond** :
+- Question → 150k atteint, synthèse partielle + bouton "Étendre"
+- Clic → reprise avec 300k → 300k atteint, synthèse enrichie + bouton "Étendre encore"
+- Clic → reprise avec 500k → Raya conclut à ~420k → Done.
+
+**Scénario dérapage (Raya boucle sur une question simple)** :
+- Question simple → 150k atteint sans conclusion utile
+- Synthèse partielle révèle l'impasse
+- L'utilisateur **ne clique pas** → pas de surcoût. Raya s'est arrêtée
+  avant d'exploser le budget.
+
+### Avantages de cette approche
+
+1. **Protection financière par défaut** : 150k = ~0,75€ max par question
+2. **Flexibilité progressive** : seulement quand c'est vraiment utile
+3. **Apprentissage utilisateur** : en voyant les synthèses partielles, on
+   sent si on a besoin d'étendre ou si la réponse est déjà bonne
+4. **Pas de gaspillage** : continuation vraie, zéro tokens reperdus
+5. **Diagnostic gratuit** : si une question simple tape P1, c'est que Raya
+   explore mal → log à analyser
+6. **Contrôle total** : pas de surprise de facture possible
+
+### Plan d'implémentation détaillé (22/04)
+
+**Backend** :
+1. Ajouter table `agent_continuations` (migration DB)
+2. Modifier `_raya_core_agent` pour accepter `continuation_id` optionnel
+3. Si continuation_id présent : charger l'état depuis la table, skip le
+   rebuild du prompt + historique
+4. Logique de palier : déterminer budget selon `current_palier` passé
+5. Quand budget atteint : sauvegarder état complet + générer continuation_id
+6. Retourner marqueur spécial `{"status": "partial", "continuation_id": X,
+   "next_palier": 2, "tokens_used": 150000}`
+
+**Front** :
+1. Détecter le marqueur `status: partial` dans la réponse
+2. Afficher le bouton "Étendre la réflexion (jusqu'à 300k tokens)"
+3. Sur clic : nouveau POST /raya avec `continuation_id`
+4. Afficher la progression : "Palier 2/3 — 300k tokens"
+5. Si nouveau partial : bouton "Étendre encore (jusqu'à 500k)"
+6. Si P3 atteint sans conclusion : afficher message clair
+   "Impossible de conclure même avec 500k, reformule ou contacte Guillaume"
+
+### Effort estimé
+
+- Backend : ~45 min (table DB, logique continuation, sérialisation état)
+- Front : ~30 min (détection marqueur, bouton, indicateur de palier)
+- Tests : ~15 min
+
+**Total : ~1h30.** À faire après les 4 autres fix plus simples
+(historique, règle n°5, batch graphe, détection boucle).
+
+### Pourquoi cette idée est remarquable
+
+Elle transforme une **limite technique** (tokens) en **UX de contrôle
+utilisateur** (bouton de déblocage conscient). L'utilisateur devient le
+gouverneur du coût en toute connaissance. Et la continuation vraie
+(pas redémarrage) garantit qu'aucune réflexion n'est gaspillée.
+
+**C'est le design produit d'un patron de SaaS sérieux, pas d'un
+prototype.**
+
+Guillaume, il est 02h40. Dors.
