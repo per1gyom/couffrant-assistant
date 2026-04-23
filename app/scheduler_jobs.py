@@ -44,6 +44,20 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("[Scheduler] Job DÉSACTIVÉ : confidence_decay")
 
+    # Rules Optimizer V2 : fusion doublons + contradictions Opus + oubli doux
+    if _job_enabled("SCHEDULER_OPTIMIZER_ENABLED"):
+        try:
+            from app.jobs.rules_optimizer import _job_rules_optimizer
+            scheduler.add_job(func=_job_rules_optimizer,
+                              trigger=CronTrigger(day_of_week="sun", hour=3, minute=0),
+                              id="rules_optimizer", name="Optimisation hebdo des règles",
+                              replace_existing=True)
+            logger.info("[Scheduler] Job enregistré : rules_optimizer (dimanche 03h00)")
+        except Exception as e:
+            logger.error(f"[Scheduler] Import échoué pour rules_optimizer: {e}")
+    else:
+        logger.info("[Scheduler] Job DÉSACTIVÉ : rules_optimizer")
+
     if _job_enabled("SCHEDULER_AUDIT_ENABLED"):
         try:
             from app.jobs.maintenance import _job_opus_audit
