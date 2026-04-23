@@ -93,16 +93,45 @@ def save_rule(category: str, rule: str, source: str = "auto",
     try:
         conn = get_pg_conn()
         c = conn.cursor()
+        # Passe 1 : normalisation accents + caracteres speciaux
+        # Remplace les accents par leur equivalent sans accent ET normalise les fleches
         c.execute("""
             SELECT id FROM aria_rules
             WHERE active = true
               AND username = %s
               AND (tenant_id = %s OR tenant_id IS NULL)
               AND category = %s
-              AND LOWER(TRIM(rule)) = LOWER(TRIM(%s))
+              AND LOWER(TRIM(REGEXP_REPLACE(
+                TRANSLATE(rule, 'àâäéèêëîïôöùûüÿçÀÂÄÉÈÊËÎÏÔÖÙÛÜŸÇ', 'aaaeeeeiioouuuycAAAEEEEIIOOUUUYC'),
+                '→|⇒', '->', 'g'
+              )))
+              = LOWER(TRIM(REGEXP_REPLACE(
+                TRANSLATE(%s, 'àâäéèêëîïôöùûüÿçÀÂÄÉÈÊËÎÏÔÖÙÛÜŸÇ', 'aaaeeeeiioouuuycAAAEEEEIIOOUUUYC'),
+                '→|⇒', '->', 'g'
+              )))
             LIMIT 1
         """, (username, effective_tenant, category, rule_clean))
         existing = c.fetchone()
+
+        # Passe 2 : si pas de match textuel, recherche semantique sur embedding
+        # Seuil strict 0.93 pour eviter les faux positifs (vraies regles proches mais distinctes)
+        if not existing:
+            vec_for_search = _embed_rule(rule_clean, category)
+            if vec_for_search:
+                c.execute("""
+                    SELECT id, (1 - (embedding <=> %s::vector)) AS similarity
+                    FROM aria_rules
+                    WHERE active = true
+                      AND username = %s
+                      AND (tenant_id = %s OR tenant_id IS NULL)
+                      AND category = %s
+                      AND embedding IS NOT NULL
+                    ORDER BY embedding <=> %s::vector ASC
+                    LIMIT 1
+                """, (vec_for_search, username, effective_tenant, category, vec_for_search))
+                row = c.fetchone()
+                if row and row[1] >= 0.93:
+                    existing = (row[0],)
 
         if existing:
             c.execute("""
