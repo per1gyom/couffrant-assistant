@@ -180,7 +180,8 @@ def _load_user_preferences(username: str, tenant_id: str, query: str = "") -> st
             conn.close()
 
 
-def _load_recent_history(username: str, limit: int = 3) -> list[dict]:
+def _load_recent_history(username: str, tenant_id: str | None = None,
+                         limit: int = 3) -> list[dict]:
     """
     Charge les `limit` derniers echanges (niveau 1 de la memoire : in-prompt).
 
@@ -205,9 +206,11 @@ def _load_recent_history(username: str, limit: int = 3) -> list[dict]:
         c = conn.cursor()
         c.execute(
             "SELECT user_input, aria_response FROM aria_memory "
-            "WHERE username = %s AND archived = false "
+            "WHERE username = %s "
+            "  AND (tenant_id = %s OR tenant_id IS NULL) "
+            "  AND archived = false "
             "ORDER BY id DESC LIMIT %s",
-            (username, limit),
+            (username, tenant_id, limit),
         )
         rows = list(reversed(c.fetchall()))
 
@@ -473,7 +476,7 @@ def _raya_core_agent(
 
         # 2. Historique (3 derniers echanges + troncature)
         # Au-dela, Raya utilise search_conversations qui interroge le graphe.
-        history = _load_recent_history(username, limit=3)
+        history = _load_recent_history(username, tenant_id, limit=3)
 
         # 3. Messages initiaux
         user_content_parts = _build_user_content(payload)

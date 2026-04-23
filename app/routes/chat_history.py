@@ -19,6 +19,15 @@ def get_chat_history(request: Request, limit: int = 20):
 
     limit = max(1, min(limit, 100))
 
+    # Tenant id : preferer session, fallback DB
+    tenant_id = request.session.get("tenant_id")
+    if not tenant_id:
+        try:
+            from app.app_security import get_tenant_id
+            tenant_id = get_tenant_id(username)
+        except Exception:
+            tenant_id = None
+
     try:
         from app.database import get_pg_conn
         conn = get_pg_conn()
@@ -29,9 +38,10 @@ def get_chat_history(request: Request, limit: int = 20):
             SELECT user_input, aria_response, created_at, id
             FROM aria_memory
             WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
             ORDER BY created_at DESC
             LIMIT %s
-        """, (username, limit))
+        """, (username, tenant_id, limit))
         rows = list(reversed(c.fetchall()))
 
         if not rows:
@@ -46,9 +56,11 @@ def get_chat_history(request: Request, limit: int = 20):
             c.execute(f"""
                 SELECT id, action_type, action_label, payload_json, status, conversation_id
                 FROM pending_actions
-                WHERE conversation_id IN ({placeholders}) AND username = %s
+                WHERE conversation_id IN ({placeholders})
+                  AND username = %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
                 ORDER BY created_at ASC
-            """, (*memory_ids, username))
+            """, (*memory_ids, username, tenant_id))
             for ar in c.fetchall():
                 aid, atype, alabel, apayload, astatus, aconv_id = ar
                 if aconv_id not in actions_by_conv:

@@ -78,6 +78,10 @@ def rebuild_contacts(tenant_id: str = DEFAULT_TENANT) -> int:
         rows = c.fetchall()
     except Exception:
         try:
+            # Fallback : filtre direct sur tenant_id de mail_memory
+            # (au lieu du JOIN users qui a echoue).
+            # IMPORTANT : JAMAIS de requete sans filtre, risque de fuite
+            # cross-tenant critique.
             c.execute("""
                 SELECT from_email,
                        array_agg(subject ORDER BY received_at DESC),
@@ -85,9 +89,10 @@ def rebuild_contacts(tenant_id: str = DEFAULT_TENANT) -> int:
                        MAX(received_at), COUNT(*)
                 FROM mail_memory
                 WHERE from_email IS NOT NULL AND from_email != ''
+                  AND tenant_id = %s
                 GROUP BY from_email HAVING COUNT(*) >= 2
                 ORDER BY MAX(received_at) DESC LIMIT 50
-            """)
+            """, (tenant_id,))
             rows = c.fetchall()
         except Exception:
             rows = []
