@@ -634,4 +634,61 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_user_tools_tenant_user          ON user_tools (tenant_id, username)",
     "CREATE INDEX IF NOT EXISTS idx_conn_assignments_tenant_user    ON connection_assignments (tenant_id, username)",
     "CREATE INDEX IF NOT EXISTS idx_webhook_subs_tenant_user        ON webhook_subscriptions (tenant_id, username)",
+    # -- SYSTEME DE REGLES V2 (25 avril 2026) : niveaux + nettoyage doublons --
+    # 1. Ajout du niveau de regle (immuable / moyenne / faible)
+    "ALTER TABLE aria_rules ADD COLUMN IF NOT EXISTS level TEXT DEFAULT 'moyenne'",
+    "UPDATE aria_rules SET level = 'moyenne' WHERE level IS NULL",
+    # 2. Journal des optimisations hebdo
+    """CREATE TABLE IF NOT EXISTS rules_optimization_log (
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        run_at TIMESTAMP DEFAULT NOW(),
+        run_type TEXT NOT NULL DEFAULT 'weekly',
+        rules_before INT NOT NULL DEFAULT 0,
+        rules_after INT NOT NULL DEFAULT 0,
+        merged_count INT NOT NULL DEFAULT 0,
+        contradictions_resolved INT NOT NULL DEFAULT 0,
+        contradictions_pending INT NOT NULL DEFAULT 0,
+        forgotten_count INT NOT NULL DEFAULT 0,
+        summary_text TEXT,
+        details_json JSONB DEFAULT '{}'::jsonb,
+        tokens_used INT DEFAULT 0,
+        duration_seconds REAL DEFAULT 0
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_rules_optim_user ON rules_optimization_log (username, tenant_id, run_at DESC)",
+    # 3. Table des contradictions en attente de decision utilisateur
+    """CREATE TABLE IF NOT EXISTS rules_pending_decisions (
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        decision_type TEXT NOT NULL,
+        rule_ids INT[] NOT NULL,
+        context_text TEXT,
+        question_text TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        resolved_at TIMESTAMP,
+        resolved_by TEXT,
+        resolution TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_rules_pending_user ON rules_pending_decisions (username, tenant_id, status, created_at DESC)",
+    # 4. Nettoyage one-shot des 11 doublons avec/sans accents
+    # Snapshot dans history avant archivage
+    """INSERT INTO aria_rules_history
+       (rule_id, username, tenant_id, category, rule, confidence, reinforcements, active, change_type)
+       SELECT id, username, tenant_id, category, rule, confidence, reinforcements, active,
+              'merged_duplicate_accents_24avril'
+       FROM aria_rules
+       WHERE id BETWEEN 43 AND 53
+         AND active = true
+         AND NOT EXISTS (
+           SELECT 1 FROM aria_rules_history h
+           WHERE h.rule_id = aria_rules.id
+             AND h.change_type = 'merged_duplicate_accents_24avril'
+         )""",
+    # Archivage des losers (43-53)
+    "UPDATE aria_rules SET active = false, source = 'merged_duplicate_accents', updated_at = NOW() WHERE id BETWEEN 43 AND 53 AND active = true",
+    # Bonus renforcement sur les winners (166-176)
+    "UPDATE aria_rules SET reinforcements = reinforcements + 1, updated_at = NOW() WHERE id BETWEEN 166 AND 176 AND active = true",
 ]
