@@ -39,7 +39,7 @@ ADAPTIVE_PARAMS = {
 }
 
 
-def compute_maturity_score(username: str) -> dict:
+def compute_maturity_score(username: str, tenant_id: str | None = None) -> dict:
     """
     Calcule le score de maturite (0-100) et la phase.
 
@@ -67,22 +67,31 @@ def compute_maturity_score(username: str) -> dict:
         conn = get_pg_conn()
         c = conn.cursor()
 
-        # Tout en une seule requete agregee pour la performance
+        # Tout en une seule requete agregee pour la performance.
+        # Isolation stricte : username + tenant_id partout (decision 24/04).
+        # Pattern (tenant_id = %s OR tenant_id IS NULL) pour compat historique.
         c.execute("""
             SELECT
                 (SELECT COUNT(*) FROM aria_rules
-                 WHERE username = %s AND active = true) AS rules_active,
+                 WHERE username = %s AND active = true
+                   AND (tenant_id = %s OR tenant_id IS NULL)) AS rules_active,
                 (SELECT COALESCE(SUM(reinforcements), 0) FROM aria_rules
-                 WHERE username = %s AND active = true) AS total_reinforcements,
+                 WHERE username = %s AND active = true
+                   AND (tenant_id = %s OR tenant_id IS NULL)) AS total_reinforcements,
                 (SELECT COUNT(*) FROM aria_memory
-                 WHERE username = %s) AS conversation_count,
+                 WHERE username = %s
+                   AND (tenant_id = %s OR tenant_id IS NULL)) AS conversation_count,
                 (SELECT EXTRACT(DAY FROM NOW() - MIN(created_at))
-                 FROM users WHERE username = %s) AS account_age_days,
+                 FROM users WHERE username = %s
+                   AND (tenant_id = %s OR tenant_id IS NULL)) AS account_age_days,
                 (SELECT COUNT(*) FROM aria_response_metadata
-                 WHERE username = %s AND feedback_type = 'positive') AS fb_positive,
+                 WHERE username = %s AND feedback_type = 'positive'
+                   AND (tenant_id = %s OR tenant_id IS NULL)) AS fb_positive,
                 (SELECT COUNT(*) FROM aria_response_metadata
-                 WHERE username = %s AND feedback_type = 'negative') AS fb_negative
-        """, (username, username, username, username, username, username))
+                 WHERE username = %s AND feedback_type = 'negative'
+                   AND (tenant_id = %s OR tenant_id IS NULL)) AS fb_negative
+        """, (username, tenant_id, username, tenant_id, username, tenant_id,
+              username, tenant_id, username, tenant_id, username, tenant_id))
 
         row = c.fetchone()
         rules         = row[0] or 0
@@ -128,13 +137,13 @@ def compute_maturity_score(username: str) -> dict:
             conn.close()
 
 
-def get_adaptive_params(username: str) -> dict:
+def get_adaptive_params(username: str, tenant_id: str | None = None) -> dict:
     """
     Retourne les parametres adaptatifs pour l'utilisateur,
     bases sur sa phase de maturite actuelle.
     Inclut aussi le score et la phase dans le retour.
     """
-    maturity = compute_maturity_score(username)
+    maturity = compute_maturity_score(username, tenant_id)
     phase = maturity["phase"]
     params = ADAPTIVE_PARAMS.get(phase, ADAPTIVE_PARAMS["discovery"]).copy()
     params["phase"] = phase

@@ -44,7 +44,8 @@ def save_response_metadata(
         print(f"[Feedback] save_response_metadata échoué (non bloquant) : {e}")
 
 
-def get_response_metadata(aria_memory_id: int, username: str) -> dict | None:
+def get_response_metadata(aria_memory_id: int, username: str,
+                          tenant_id: str | None = None) -> dict | None:
     """
     Retourne les métadonnées + détails des règles injectées pour le bouton "Pourquoi ?".
     """
@@ -56,8 +57,9 @@ def get_response_metadata(aria_memory_id: int, username: str) -> dict | None:
                    feedback_type, feedback_comment, corrective_rule_id, created_at
             FROM aria_response_metadata
             WHERE aria_memory_id = %s AND username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
             LIMIT 1
-        """, (aria_memory_id, username))
+        """, (aria_memory_id, username, tenant_id))
         row = c.fetchone()
         if not row:
             conn.close()
@@ -71,8 +73,10 @@ def get_response_metadata(aria_memory_id: int, username: str) -> dict | None:
         if rule_ids:
             c.execute("""
                 SELECT id, category, rule, confidence, reinforcements
-                FROM aria_rules WHERE id = ANY(%s) AND username = %s
-            """, (rule_ids, username))
+                FROM aria_rules
+                WHERE id = ANY(%s) AND username = %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
+            """, (rule_ids, username, tenant_id))
             rules_detail = [
                 {"id": r[0], "category": r[1], "rule": r[2],
                  "confidence": r[3], "reinforcements": r[4]}
@@ -114,8 +118,10 @@ def process_positive_feedback(
         # Récupère les rule_ids
         c.execute("""
             SELECT rule_ids_injected FROM aria_response_metadata
-            WHERE aria_memory_id = %s AND username = %s LIMIT 1
-        """, (aria_memory_id, username))
+            WHERE aria_memory_id = %s AND username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+            LIMIT 1
+        """, (aria_memory_id, username, tenant_id))
         row = c.fetchone()
         if not row:
             conn.close()
@@ -133,14 +139,16 @@ def process_positive_feedback(
                 reinforcements = reinforcements + 1,
                 updated_at     = NOW()
             WHERE id = ANY(%s) AND username = %s
-        """, (rule_ids, username))
+              AND (tenant_id = %s OR tenant_id IS NULL)
+        """, (rule_ids, username, tenant_id))
 
         # Met à jour le feedback dans les métadonnées
         c.execute("""
             UPDATE aria_response_metadata
             SET feedback_type = 'positive'
             WHERE aria_memory_id = %s AND username = %s
-        """, (aria_memory_id, username))
+              AND (tenant_id = %s OR tenant_id IS NULL)
+        """, (aria_memory_id, username, tenant_id))
 
         conn.commit()
         conn.close()
@@ -177,7 +185,8 @@ def process_negative_feedback(
         c.execute("""
             SELECT user_input, aria_response FROM aria_memory
             WHERE id = %s AND username = %s
-        """, (aria_memory_id, username))
+              AND (tenant_id = %s OR tenant_id IS NULL)
+        """, (aria_memory_id, username, tenant_id))
         conv = c.fetchone()
         if not conv:
             conn.close()
@@ -187,8 +196,10 @@ def process_negative_feedback(
         # Règles injectées
         c.execute("""
             SELECT rule_ids_injected FROM aria_response_metadata
-            WHERE aria_memory_id = %s AND username = %s LIMIT 1
-        """, (aria_memory_id, username))
+            WHERE aria_memory_id = %s AND username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+            LIMIT 1
+        """, (aria_memory_id, username, tenant_id))
         meta_row = c.fetchone()
         rule_ids = json.loads(meta_row[0]) if meta_row and meta_row[0] else []
 
@@ -197,7 +208,8 @@ def process_negative_feedback(
             c.execute("""
                 SELECT category, rule FROM aria_rules
                 WHERE id = ANY(%s) AND username = %s
-            """, (rule_ids, username))
+                  AND (tenant_id = %s OR tenant_id IS NULL)
+            """, (rule_ids, username, tenant_id))
             rules_rows = c.fetchall()
             if rules_rows:
                 rules_context = "\n".join([f"[{r[0]}] {r[1]}" for r in rules_rows])

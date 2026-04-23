@@ -211,8 +211,9 @@ def _execute_read_mail(inp: dict, username: str, tenant_id: str) -> dict:
         c.execute(
             "SELECT subject, from_email, raw_body_preview, short_summary, "
             "received_at, mailbox_source FROM mail_memory "
-            "WHERE id = %s AND username = %s",
-            (mail_id, username),
+            "WHERE id = %s AND username = %s "
+            "  AND (tenant_id = %s OR tenant_id IS NULL)",
+            (mail_id, username, tenant_id),
         )
         row = c.fetchone()
         if not row:

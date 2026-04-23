@@ -313,7 +313,8 @@ def raya_why(
     user: dict = Depends(require_user),
 ):
     username = user["username"]
-    meta = get_response_metadata(aria_memory_id, username)
+    tenant_id = user["tenant_id"]
+    meta = get_response_metadata(aria_memory_id, username, tenant_id)
     if not meta:
         return {"status": "not_found"}
     return {"status": "ok", **meta}

@@ -28,7 +28,12 @@ def _job_pattern_analysis():
         analyzed = 0
         for username in candidates:
             try:
-                maturity = compute_maturity_score(username)
+                from app.app_security import get_tenant_id as _git
+                try:
+                    _tid = _git(username)
+                except Exception:
+                    _tid = None
+                maturity = compute_maturity_score(username, _tid)
                 if maturity["phase"] == "discovery":
                     continue
                 _analyze_patterns(username)
