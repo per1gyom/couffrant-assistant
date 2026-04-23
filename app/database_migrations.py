@@ -612,4 +612,26 @@ MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_agent_cont_user ON agent_continuations (username, tenant_id, expires_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_agent_cont_cleanup ON agent_continuations (expires_at) WHERE consumed = false",
+    # -- AUDIT-ISOLATION-24AVRIL : ajout tenant_id aux 4 tables restantes --
+    # Ces tables n avaient pas de tenant_id alors qu elles contiennent des
+    # donnees utilisateur. Ajoute pour eviter toute fuite cross-tenant future.
+    "ALTER TABLE gmail_tokens           ADD COLUMN IF NOT EXISTS tenant_id TEXT",
+    "ALTER TABLE user_tools             ADD COLUMN IF NOT EXISTS tenant_id TEXT",
+    "ALTER TABLE connection_assignments ADD COLUMN IF NOT EXISTS tenant_id TEXT",
+    "ALTER TABLE webhook_subscriptions  ADD COLUMN IF NOT EXISTS tenant_id TEXT",
+    # Backfill depuis users.tenant_id via username
+    "UPDATE gmail_tokens           a SET tenant_id = u.tenant_id FROM users u WHERE a.username = u.username AND a.tenant_id IS NULL",
+    "UPDATE user_tools             a SET tenant_id = u.tenant_id FROM users u WHERE a.username = u.username AND a.tenant_id IS NULL",
+    "UPDATE connection_assignments a SET tenant_id = u.tenant_id FROM users u WHERE a.username = u.username AND a.tenant_id IS NULL",
+    "UPDATE webhook_subscriptions  a SET tenant_id = u.tenant_id FROM users u WHERE a.username = u.username AND a.tenant_id IS NULL",
+    # Fallback pour anciennes donnees orphelines
+    "UPDATE gmail_tokens           SET tenant_id = 'couffrant_solar' WHERE tenant_id IS NULL",
+    "UPDATE user_tools             SET tenant_id = 'couffrant_solar' WHERE tenant_id IS NULL",
+    "UPDATE connection_assignments SET tenant_id = 'couffrant_solar' WHERE tenant_id IS NULL",
+    "UPDATE webhook_subscriptions  SET tenant_id = 'couffrant_solar' WHERE tenant_id IS NULL",
+    # Index pour performances des filtres (username, tenant_id)
+    "CREATE INDEX IF NOT EXISTS idx_gmail_tokens_tenant_user        ON gmail_tokens (tenant_id, username)",
+    "CREATE INDEX IF NOT EXISTS idx_user_tools_tenant_user          ON user_tools (tenant_id, username)",
+    "CREATE INDEX IF NOT EXISTS idx_conn_assignments_tenant_user    ON connection_assignments (tenant_id, username)",
+    "CREATE INDEX IF NOT EXISTS idx_webhook_subs_tenant_user        ON webhook_subscriptions (tenant_id, username)",
 ]
