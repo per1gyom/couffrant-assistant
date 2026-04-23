@@ -60,9 +60,10 @@ Tu connais {display_name} en profondeur. Comportement attendu :
     return result
 
 
-def build_patterns_block(username: str, adaptive: dict, maturity_block: str) -> str:
+def build_patterns_block(username: str, adaptive: dict, maturity_block: str,
+                         tenant_id: str = None) -> str:
     """5G-5 : injection des patterns comportementaux (consolidation + maturity)."""
-    cache_key = f"patterns:{username}"
+    cache_key = f"patterns:{username}:{tenant_id or 'notenant'}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -78,10 +79,12 @@ def build_patterns_block(username: str, adaptive: dict, maturity_block: str) -> 
                 _c.execute("""
                     SELECT pattern_type, description, confidence, occurrences
                     FROM aria_patterns
-                    WHERE username = %s AND active = true AND confidence >= 0.4
+                    WHERE username = %s
+                      AND (tenant_id = %s OR tenant_id IS NULL)
+                      AND active = true AND confidence >= 0.4
                     ORDER BY confidence DESC, occurrences DESC
                     LIMIT 8
-                """, (username,))
+                """, (username, tenant_id))
                 pattern_rows = _c.fetchall()
             finally:
                 if _conn:

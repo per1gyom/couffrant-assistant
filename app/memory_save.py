@@ -25,9 +25,11 @@ def save_insight(topic: str, insight: str, source: str = "conversation",
         c = conn.cursor()
         c.execute("""
             SELECT id FROM aria_insights
-            WHERE username = %s AND LOWER(TRIM(topic)) = LOWER(TRIM(%s))
+            WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND LOWER(TRIM(topic)) = LOWER(TRIM(%s))
             LIMIT 1
-        """, (username, topic_clean))
+        """, (username, effective_tenant, topic_clean))
         existing = c.fetchone()
         if existing:
             if vec:

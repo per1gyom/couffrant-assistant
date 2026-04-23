@@ -51,7 +51,7 @@ def build_team_block(username: str, tenant_id: str) -> str:
     return team_block
 
 
-def build_topics_block(username: str) -> str:
+def build_topics_block(username: str, tenant_id: str = None) -> str:
     """TOPICS : injecter les sujets actifs de l'utilisateur."""
     topics_block = ""
     try:
@@ -60,9 +60,11 @@ def build_topics_block(username: str) -> str:
         _c_t = _conn_t.cursor()
         _c_t.execute("""
             SELECT title, status FROM user_topics
-            WHERE username = %s AND status != 'archived'
+            WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND status != 'archived'
             ORDER BY updated_at DESC LIMIT 10
-        """, (username,))
+        """, (username, tenant_id))
         _topic_rows = _c_t.fetchall()
         _conn_t.close()
         if _topic_rows:

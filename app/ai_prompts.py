@@ -55,14 +55,17 @@ def get_odoo_context(sender_email: str) -> dict:
 
 
 
-def get_style_profile(username: str = 'guillaume') -> str:
+def get_style_profile(username: str = 'guillaume', tenant_id: str = None) -> str:
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute(
-            "SELECT content FROM aria_profile WHERE username = %s AND profile_type = 'style' ORDER BY id DESC LIMIT 1",
-            (username,)
+            "SELECT content FROM aria_profile "
+            "WHERE username = %s AND profile_type = 'style' "
+            "  AND (tenant_id = %s OR tenant_id IS NULL) "
+            "ORDER BY id DESC LIMIT 1",
+            (username, tenant_id)
         )
         row = c.fetchone()
         return row[0] if row else ""

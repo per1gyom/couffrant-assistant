@@ -52,7 +52,8 @@ def _seed_default_categories(username: str):
 
 # ─── CONTEXTE ET PROFIL ───
 
-def get_learning_examples(category: str, username: str = 'guillaume', limit: int = 3) -> list[dict]:
+def get_learning_examples(category: str, username: str = 'guillaume', limit: int = 3,
+                          tenant_id: str = None) -> list[dict]:
     """Exemples de corrections passées pour le few-shot learning."""
     conn = None
     try:
@@ -62,8 +63,9 @@ def get_learning_examples(category: str, username: str = 'guillaume', limit: int
             SELECT mail_subject, mail_from, mail_body_preview, category, ai_reply, final_reply
             FROM reply_learning_memory
             WHERE category = %s AND username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
             ORDER BY id DESC LIMIT %s
-        """, (category, username, limit))
+        """, (category, username, tenant_id, limit))
         return [{"mail_subject": r[0], "mail_from": r[1], "mail_body_preview": r[2],
                  "category": r[3], "ai_reply": r[4], "final_reply": r[5]} for r in c.fetchall()]
     except Exception:

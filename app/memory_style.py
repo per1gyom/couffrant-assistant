@@ -5,7 +5,8 @@ from app.database import get_pg_conn
 from app.llm_client import llm_complete
 
 
-def get_style_examples(context: str = "", username: str = 'guillaume') -> str:
+def get_style_examples(context: str = "", username: str = 'guillaume',
+                       tenant_id: str = None) -> str:
     conn = None
     try:
         conn = get_pg_conn()
@@ -13,14 +14,18 @@ def get_style_examples(context: str = "", username: str = 'guillaume') -> str:
         if context:
             c.execute("""
                 SELECT situation, example_text FROM aria_style_examples
-                WHERE username = %s AND (situation ILIKE %s OR tags ILIKE %s)
+                WHERE username = %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
+                  AND (situation ILIKE %s OR tags ILIKE %s)
                 ORDER BY quality_score DESC, used_count DESC LIMIT 5
-            """, (username, f'%{context}%', f'%{context}%'))
+            """, (username, tenant_id, f'%{context}%', f'%{context}%'))
         else:
             c.execute("""
                 SELECT situation, example_text FROM aria_style_examples
-                WHERE username = %s ORDER BY quality_score DESC, used_count DESC LIMIT 8
-            """, (username,))
+                WHERE username = %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
+                ORDER BY quality_score DESC, used_count DESC LIMIT 8
+            """, (username, tenant_id))
         rows = c.fetchall()
         if not rows: return ""
         return "\n\n".join([f"[{r[0]}]\n{r[1]}" for r in rows])
@@ -78,16 +83,19 @@ def learn_from_correction(original: str, corrected: str,
                        tags=context, quality_score=1.5, username=username)
 
 
-def load_sent_mails_to_style(limit: int = 50, username: str = 'guillaume') -> int:
+def load_sent_mails_to_style(limit: int = 50, username: str = 'guillaume',
+                             tenant_id: str = None) -> int:
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
             SELECT subject, to_email, body_preview FROM sent_mail_memory
-            WHERE username = %s AND body_preview IS NOT NULL AND length(body_preview) > 30
+            WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND body_preview IS NOT NULL AND length(body_preview) > 30
             ORDER BY sent_at DESC LIMIT %s
-        """, (username, limit))
+        """, (username, tenant_id, limit))
         rows = c.fetchall()
     finally:
         if conn: conn.close()

@@ -224,12 +224,12 @@ def build_system_prompt(
 
     # Blocs de contexte — chacun dans prompt_blocks.py
     maturity_block, adaptive = build_maturity_block(username, display_name)
-    patterns_block  = build_patterns_block(username, adaptive, maturity_block)
+    patterns_block  = build_patterns_block(username, adaptive, maturity_block, tenant_id)
     narrative_block = build_narrative_block(query, username, tenant_id)
     alerts_block    = build_alerts_block(username)
     report_block    = build_report_block(username)
     team_block      = build_team_block(username, tenant_id)
-    topics_block    = build_topics_block(username)
+    topics_block    = build_topics_block(username, tenant_id)
     web_info        = build_web_info()
     ton_block       = build_ton_block(hot_summary, display_name)
 

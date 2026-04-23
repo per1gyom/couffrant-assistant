@@ -55,7 +55,7 @@ def score_mail_urgency(sender: str, subject: str, preview: str,
     reasons += contact_reasons
 
     # === ÉTAGE 3 : Patterns (gratuit) ===
-    pattern_score, pattern_reasons = _score_by_patterns(sender, subject, username)
+    pattern_score, pattern_reasons = _score_by_patterns(sender, subject, username, tenant_id)
     score += pattern_score
     reasons += pattern_reasons
 
@@ -118,10 +118,11 @@ def _score_by_rules(sender, subject, preview, username, tenant_id):
         c.execute("""
             SELECT rule, confidence FROM aria_rules
             WHERE username = %s AND active = true
+              AND (tenant_id = %s OR tenant_id IS NULL)
               AND category IN ('urgence', 'tri_mails', 'mail_filter')
               AND confidence >= 0.4
             ORDER BY confidence DESC LIMIT 20
-        """, (username,))
+        """, (username, tenant_id))
         rules = c.fetchall()
         conn.close()
 
@@ -175,7 +176,7 @@ def _score_by_contacts(sender, username, tenant_id):
     return score, reasons
 
 
-def _score_by_patterns(sender, subject, username):
+def _score_by_patterns(sender, subject, username, tenant_id=None):
     """Score basé sur les patterns détectés."""
     score = 0
     reasons = []
@@ -184,9 +185,11 @@ def _score_by_patterns(sender, subject, username):
         c = conn.cursor()
         c.execute("""
             SELECT pattern_type, description, confidence FROM aria_patterns
-            WHERE username = %s AND active = true AND confidence >= 0.5
+            WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND active = true AND confidence >= 0.5
             ORDER BY confidence DESC LIMIT 10
-        """, (username,))
+        """, (username, tenant_id))
         patterns = c.fetchall()
         conn.close()
 
