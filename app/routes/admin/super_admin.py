@@ -425,19 +425,6 @@ def admin_delete_connection(request: Request, connection_id: int,
     return {"status": "ok", "deleted_id": connection_id}
 
 
-# ─── PAGE /admin/connexions ─────────────────────────────────────────
-
-@router.get("/admin/connexions", response_class=HTMLResponse)
-def admin_connexions_page(request: Request):
-    """Page super-admin dediee pour gerer les connexions de tous les tenants."""
-    try:
-        require_admin(request)
-    except HTTPException:
-        return RedirectResponse("/login-app")
-    with open("app/templates/admin_connexions.html", "r", encoding="utf-8") as f:
-        return HTMLResponse(content=f.read())
-
-
 @router.get("/admin/connexions-data")
 def admin_connexions_data(request: Request, _: dict = Depends(require_admin)):
     """
