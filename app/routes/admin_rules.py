@@ -13,7 +13,8 @@ Pattern d usage :
 from fastapi import APIRouter, Request, Body, Depends, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
 from app.database import get_pg_conn
-from app.routes.deps import require_super_admin
+from app.routes.deps import require_super_admin, require_user
+from app.app_security import SCOPE_SUPER_ADMIN, SCOPE_ADMIN
 
 router = APIRouter(prefix="/admin/rules", tags=["admin", "rules"])
 
@@ -551,46 +552,89 @@ def preview_rules_by_ids(
 @router.post("/admin/rules/optimizer/run")
 async def run_optimizer(request: Request,
                         body: dict = Body(default={}),
-                        _: dict = Depends(require_super_admin)):
+                        user: dict = Depends(require_user)):
     """
-    Declenche manuellement l'optimisation des regles.
+    Declenche l'optimisation des regles.
+
+    Comportement par scope :
+      - USER / TENANT_ADMIN : optimise SES propres regles uniquement (ignore body.username)
+      - ADMIN / SUPER_ADMIN : peut cibler un autre user via body.username+tenant_id,
+        ou 'all_users' pour optimiser tout le monde
 
     Body JSON :
-      - username : user a traiter (default: tous)
-      - tenant_id : tenant a traiter (default: tous)
-      - dry_run : true pour preview sans ecriture (default: false)
-
-    Retourne les resultats detailles par couche (A=fusion, B=contradictions, C=oubli).
+      - username (optionnel, admin/super_admin seulement)
+      - tenant_id (optionnel, admin/super_admin seulement)
+      - dry_run (bool, default false)
+      - all_users (bool, default false, admin/super_admin seulement)
     """
     from app.jobs.rules_optimizer import run_for_user, run_all
-    username = body.get("username")
-    tenant_id = body.get("tenant_id")
     dry_run = bool(body.get("dry_run", False))
+    is_privileged = user["scope"] in (SCOPE_SUPER_ADMIN, SCOPE_ADMIN)
 
-    if username and tenant_id:
-        result = run_for_user(username, tenant_id, dry_run=dry_run)
-        return {"status": "ok", "mode": "single_user", "result": result}
-    else:
+    if is_privileged and body.get("all_users"):
         results = run_all(dry_run=dry_run)
         return {"status": "ok", "mode": "all_users", "count": len(results), "results": results}
+
+    # Par defaut : optimisation sur soi-meme
+    target_username = user["username"]
+    target_tenant = user["tenant_id"]
+
+    # Privilegies peuvent cibler un autre user
+    if is_privileged:
+        if body.get("username"):
+            target_username = body["username"]
+        if body.get("tenant_id"):
+            target_tenant = body["tenant_id"]
+
+    result = run_for_user(target_username, target_tenant, dry_run=dry_run)
+    return {"status": "ok", "mode": "single_user", "result": result}
 
 
 @router.get("/admin/rules/optimizer/history")
 def optimizer_history(request: Request, limit: int = 20,
-                      _: dict = Depends(require_super_admin)):
-    """Derniers runs enregistres dans le journal."""
+                      user: dict = Depends(require_user)):
+    """Derniers runs du journal.
+
+    USER / TENANT_ADMIN : voit uniquement SES propres runs.
+    ADMIN / SUPER_ADMIN : voit tous les runs (peut filtrer via ?username=).
+    """
+    is_privileged = user["scope"] in (SCOPE_SUPER_ADMIN, SCOPE_ADMIN)
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("""
-            SELECT id, username, tenant_id, run_at, run_type,
-                   rules_before, rules_after, merged_count,
-                   contradictions_resolved, contradictions_pending,
-                   forgotten_count, summary_text, tokens_used, duration_seconds
-            FROM rules_optimization_log
-            ORDER BY run_at DESC LIMIT %s
-        """, (limit,))
+        if is_privileged:
+            target_username = request.query_params.get("username")
+            if target_username:
+                c.execute("""
+                    SELECT id, username, tenant_id, run_at, run_type,
+                           rules_before, rules_after, merged_count,
+                           contradictions_resolved, contradictions_pending,
+                           forgotten_count, summary_text, tokens_used, duration_seconds
+                    FROM rules_optimization_log
+                    WHERE username = %s
+                    ORDER BY run_at DESC LIMIT %s
+                """, (target_username, limit))
+            else:
+                c.execute("""
+                    SELECT id, username, tenant_id, run_at, run_type,
+                           rules_before, rules_after, merged_count,
+                           contradictions_resolved, contradictions_pending,
+                           forgotten_count, summary_text, tokens_used, duration_seconds
+                    FROM rules_optimization_log
+                    ORDER BY run_at DESC LIMIT %s
+                """, (limit,))
+        else:
+            # Isolation : l'user ne voit que ses propres runs
+            c.execute("""
+                SELECT id, username, tenant_id, run_at, run_type,
+                       rules_before, rules_after, merged_count,
+                       contradictions_resolved, contradictions_pending,
+                       forgotten_count, summary_text, tokens_used, duration_seconds
+                FROM rules_optimization_log
+                WHERE username = %s AND tenant_id = %s
+                ORDER BY run_at DESC LIMIT %s
+            """, (user["username"], user["tenant_id"], limit))
         cols = [d[0] for d in c.description]
         rows = [dict(zip(cols, r)) for r in c.fetchall()]
         for r in rows:
@@ -601,19 +645,34 @@ def optimizer_history(request: Request, limit: int = 20,
 
 
 @router.get("/admin/rules/pending-decisions")
-def pending_decisions(request: Request, _: dict = Depends(require_super_admin)):
-    """Questions en attente suite aux optimisations Opus."""
+def pending_decisions(request: Request, user: dict = Depends(require_user)):
+    """Questions en attente suite aux optimisations Opus.
+
+    USER / TENANT_ADMIN : voit uniquement SES propres questions.
+    ADMIN / SUPER_ADMIN : voit toutes les questions (toutes les users).
+    """
+    is_privileged = user["scope"] in (SCOPE_SUPER_ADMIN, SCOPE_ADMIN)
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("""
-            SELECT id, username, tenant_id, created_at, decision_type,
-                   rule_ids, context_text, question_text, status
-            FROM rules_pending_decisions
-            WHERE status = 'pending'
-            ORDER BY created_at DESC LIMIT 50
-        """)
+        if is_privileged:
+            c.execute("""
+                SELECT id, username, tenant_id, created_at, decision_type,
+                       rule_ids, context_text, question_text, status
+                FROM rules_pending_decisions
+                WHERE status = 'pending'
+                ORDER BY created_at DESC LIMIT 50
+            """)
+        else:
+            c.execute("""
+                SELECT id, username, tenant_id, created_at, decision_type,
+                       rule_ids, context_text, question_text, status
+                FROM rules_pending_decisions
+                WHERE status = 'pending'
+                  AND username = %s AND tenant_id = %s
+                ORDER BY created_at DESC LIMIT 50
+            """, (user["username"], user["tenant_id"]))
         cols = [d[0] for d in c.description]
         rows = [dict(zip(cols, r)) for r in c.fetchall()]
         for r in rows:
