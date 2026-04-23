@@ -126,16 +126,19 @@ async function loadUserInfo() {
     // Nom dans le logo en haut (remplace "Raya")
     const logoEl = document.getElementById('logoUserName');
     if (logoEl) logoEl.textContent = name;
-    if (scope === 'admin' || scope === 'super_admin' || scope === 'couffrant_solar') {
+    // Rôles cumulatifs : super_admin inclut admin qui inclut tenant_admin qui inclut user.
+    // Le lien "Ma société" s'affiche pour tenant_admin et au-dessus.
+    // Le lien "Super Admin" s'affiche uniquement pour super_admin (et admin collaborateurs Raya).
+    const isTenantAdminOrAbove = ['tenant_admin', 'admin', 'super_admin'].includes(scope);
+    const isAdminOrAbove = ['admin', 'super_admin'].includes(scope);
+    if (isTenantAdminOrAbove) {
       isAdmin = true;
+      const ap = document.getElementById('adminPanelBtn');
+      if (ap) ap.style.display = 'inline-flex';
+    }
+    if (isAdminOrAbove) {
       const sa = document.getElementById('superAdminBtn');
-      const ap = document.getElementById('adminPanelBtn');
       if (sa) sa.style.display = 'inline-flex';
-      if (ap) ap.style.display = 'inline-flex';
-    } else if (scope === 'tenant_admin') {
-      isAdmin = true;
-      const ap = document.getElementById('adminPanelBtn');
-      if (ap) ap.style.display = 'inline-flex';
     }
     if (scope === 'tenant_admin') {
       document.querySelectorAll('.d-group').forEach(g => {
