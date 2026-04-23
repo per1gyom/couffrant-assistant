@@ -542,3 +542,82 @@ def preview_rules_by_ids(
     finally:
         if conn:
             conn.close()
+
+
+# ============================================================================
+# RULES OPTIMIZER V2 : endpoints de test manuel et consultation du journal
+# ============================================================================
+
+@router.post("/admin/rules/optimizer/run")
+async def run_optimizer(request: Request,
+                        body: dict = Body(default={}),
+                        _: dict = Depends(require_admin)):
+    """
+    Declenche manuellement l'optimisation des regles.
+
+    Body JSON :
+      - username : user a traiter (default: tous)
+      - tenant_id : tenant a traiter (default: tous)
+      - dry_run : true pour preview sans ecriture (default: false)
+
+    Retourne les resultats detailles par couche (A=fusion, B=contradictions, C=oubli).
+    """
+    from app.jobs.rules_optimizer import run_for_user, run_all
+    username = body.get("username")
+    tenant_id = body.get("tenant_id")
+    dry_run = bool(body.get("dry_run", False))
+
+    if username and tenant_id:
+        result = run_for_user(username, tenant_id, dry_run=dry_run)
+        return {"status": "ok", "mode": "single_user", "result": result}
+    else:
+        results = run_all(dry_run=dry_run)
+        return {"status": "ok", "mode": "all_users", "count": len(results), "results": results}
+
+
+@router.get("/admin/rules/optimizer/history")
+def optimizer_history(request: Request, limit: int = 20,
+                      _: dict = Depends(require_admin)):
+    """Derniers runs enregistres dans le journal."""
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id, username, tenant_id, run_at, run_type,
+                   rules_before, rules_after, merged_count,
+                   contradictions_resolved, contradictions_pending,
+                   forgotten_count, summary_text, tokens_used, duration_seconds
+            FROM rules_optimization_log
+            ORDER BY run_at DESC LIMIT %s
+        """, (limit,))
+        cols = [d[0] for d in c.description]
+        rows = [dict(zip(cols, r)) for r in c.fetchall()]
+        for r in rows:
+            r["run_at"] = str(r["run_at"])
+        return {"status": "ok", "history": rows}
+    finally:
+        if conn: conn.close()
+
+
+@router.get("/admin/rules/pending-decisions")
+def pending_decisions(request: Request, _: dict = Depends(require_admin)):
+    """Questions en attente suite aux optimisations Opus."""
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id, username, tenant_id, created_at, decision_type,
+                   rule_ids, context_text, question_text, status
+            FROM rules_pending_decisions
+            WHERE status = 'pending'
+            ORDER BY created_at DESC LIMIT 50
+        """)
+        cols = [d[0] for d in c.description]
+        rows = [dict(zip(cols, r)) for r in c.fetchall()]
+        for r in rows:
+            r["created_at"] = str(r["created_at"])
+        return {"status": "ok", "pending": rows}
+    finally:
+        if conn: conn.close()
