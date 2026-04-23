@@ -783,4 +783,97 @@ MIGRATIONS = [
          '{"applied": ["suppressions:83,31,10,28", "simplifications:67,11", "new_rules:5", "pending:17/15/124"], "skipped_fusions": 7}'::jsonb,
          4253, 79
        WHERE NOT EXISTS (SELECT 1 FROM rules_optimization_log WHERE run_type = 'manual_run2_agent' AND username = 'guillaume')""",
+    # -- FUSIONS SUPPLEMENTAIRES RUN #2 (25 avril 2026) --
+    # Re-analyse apres remarque Guillaume : on etait trop prudents.
+    # 5 fusions sures (aucune regle critique conf>=0.9 + user_explicit).
+    # 2 fusions gardees en pending (touchent regles 163 user_explicit et 104 seed conf=1.0).
+    #
+    # FUSION 1 : Archiver/corbeille (IDs 69, 74, 2 -> nouvelle regle)
+    """INSERT INTO aria_rules_history
+         (rule_id, username, tenant_id, category, rule, confidence, reinforcements, active, change_type)
+       SELECT id, username, tenant_id, category, rule, confidence, reinforcements, active,
+              'merged_run2_fusion_archiver'
+       FROM aria_rules
+       WHERE id IN (69, 74, 2) AND active = true
+         AND NOT EXISTS (SELECT 1 FROM aria_rules_history h WHERE h.rule_id = aria_rules.id AND h.change_type = 'merged_run2_fusion_archiver')""",
+    """INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence, level, reinforcements)
+       SELECT 'guillaume', 'couffrant_solar', 'tri-mails',
+         'Gestion suppression mails : archiver = déplacer vers dossier Archives. Corbeille = uniquement sur demande explicite ou bruit identifié avec Guillaume. Suppression définitive = jamais.',
+         'merged_from_69_74_2', 0.9, 'moyenne', 10
+       WHERE NOT EXISTS (SELECT 1 FROM aria_rules WHERE source = 'merged_from_69_74_2' AND username='guillaume' AND tenant_id='couffrant_solar')""",
+    "UPDATE aria_rules SET active = false, source = 'merged_into_fusion_archiver', updated_at = NOW() WHERE id IN (69, 74, 2) AND active = true",
+    # FUSION 2 : Tagger memoire (IDs 9, 18 -> nouvelle regle)
+    """INSERT INTO aria_rules_history
+         (rule_id, username, tenant_id, category, rule, confidence, reinforcements, active, change_type)
+       SELECT id, username, tenant_id, category, rule, confidence, reinforcements, active, 'merged_run2_fusion_tagger'
+       FROM aria_rules WHERE id IN (9, 18) AND active = true
+         AND NOT EXISTS (SELECT 1 FROM aria_rules_history h WHERE h.rule_id = aria_rules.id AND h.change_type = 'merged_run2_fusion_tagger')""",
+    """INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence, level, reinforcements)
+       SELECT 'guillaume', 'couffrant_solar', 'memoire',
+         'Tagger mémoire et apprentissage par entité : [couffrant-solar], [sci-gaucherie], [sci-romagui], [sas-gplh], [holding].',
+         'merged_from_9_18', 0.8, 'moyenne', 4
+       WHERE NOT EXISTS (SELECT 1 FROM aria_rules WHERE source = 'merged_from_9_18' AND username='guillaume' AND tenant_id='couffrant_solar')""",
+    "UPDATE aria_rules SET active = false, source = 'merged_into_fusion_tagger', updated_at = NOW() WHERE id IN (9, 18) AND active = true",
+    # FUSION 3 : Attestation Consuel (IDs 24, 27, 29 -> nouvelle regle)
+    """INSERT INTO aria_rules_history
+         (rule_id, username, tenant_id, category, rule, confidence, reinforcements, active, change_type)
+       SELECT id, username, tenant_id, category, rule, confidence, reinforcements, active, 'merged_run2_fusion_consuel'
+       FROM aria_rules WHERE id IN (24, 27, 29) AND active = true
+         AND NOT EXISTS (SELECT 1 FROM aria_rules_history h WHERE h.rule_id = aria_rules.id AND h.change_type = 'merged_run2_fusion_consuel')""",
+    """INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence, level, reinforcements)
+       SELECT 'guillaume', 'couffrant_solar', 'drive_pv',
+         'Attestation Consuel : variantes acceptées = attestation visée, attestation Consuel, Consuel visé. Document délivré par le Consuel après examen du dossier technique SC-144A.',
+         'merged_from_24_27_29', 0.8, 'moyenne', 6
+       WHERE NOT EXISTS (SELECT 1 FROM aria_rules WHERE source = 'merged_from_24_27_29' AND username='guillaume' AND tenant_id='couffrant_solar')""",
+    "UPDATE aria_rules SET active = false, source = 'merged_into_fusion_consuel', updated_at = NOW() WHERE id IN (24, 27, 29) AND active = true",
+    # FUSION 4 : Transparence limites API (IDs 20, 22, 30 -> nouvelle regle)
+    """INSERT INTO aria_rules_history
+         (rule_id, username, tenant_id, category, rule, confidence, reinforcements, active, change_type)
+       SELECT id, username, tenant_id, category, rule, confidence, reinforcements, active, 'merged_run2_fusion_transparence'
+       FROM aria_rules WHERE id IN (20, 22, 30) AND active = true
+         AND NOT EXISTS (SELECT 1 FROM aria_rules_history h WHERE h.rule_id = aria_rules.id AND h.change_type = 'merged_run2_fusion_transparence')""",
+    """INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence, level, reinforcements)
+       SELECT 'guillaume', 'couffrant_solar', 'comportement',
+         'Transparence totale sur les limites techniques : jamais prétendre à un accès sans confirmation technique explicite (API, permissions, génération liens).',
+         'merged_from_20_22_30', 0.85, 'moyenne', 6
+       WHERE NOT EXISTS (SELECT 1 FROM aria_rules WHERE source = 'merged_from_20_22_30' AND username='guillaume' AND tenant_id='couffrant_solar')""",
+    "UPDATE aria_rules SET active = false, source = 'merged_into_fusion_transparence', updated_at = NOW() WHERE id IN (20, 22, 30) AND active = true",
+    # FUSION 5 : Tri mails priorite (IDs 12, 13, 14, 19 -> nouvelle regle)
+    """INSERT INTO aria_rules_history
+         (rule_id, username, tenant_id, category, rule, confidence, reinforcements, active, change_type)
+       SELECT id, username, tenant_id, category, rule, confidence, reinforcements, active, 'merged_run2_fusion_priorite'
+       FROM aria_rules WHERE id IN (12, 13, 14, 19) AND active = true
+         AND NOT EXISTS (SELECT 1 FROM aria_rules_history h WHERE h.rule_id = aria_rules.id AND h.change_type = 'merged_run2_fusion_priorite')""",
+    """INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence, level, reinforcements)
+       SELECT 'guillaume', 'couffrant_solar', 'tri-mails',
+         'Tri mails priorité : rouge immédiat = Microsoft 365/infra expirée, contrats à signer, alertes sécurité comptes. Orange = rapports SOCOTEC/vérif électrique. Jaune = mails transférés par Arlène. Archiver direct = newsletters Studeria, LinkedIn notifs, pubs.',
+         'merged_from_12_13_14_19', 0.85, 'moyenne', 8
+       WHERE NOT EXISTS (SELECT 1 FROM aria_rules WHERE source = 'merged_from_12_13_14_19' AND username='guillaume' AND tenant_id='couffrant_solar')""",
+    "UPDATE aria_rules SET active = false, source = 'merged_into_fusion_priorite', updated_at = NOW() WHERE id IN (12, 13, 14, 19) AND active = true",
+    # 2 FUSIONS GARDEES EN PENDING (touchent regles critiques)
+    """INSERT INTO rules_pending_decisions
+         (username, tenant_id, decision_type, rule_ids, question_text, status)
+       SELECT 'guillaume', 'couffrant_solar', 'fusion_proposal',
+         ARRAY[71, 76, 104],
+         'Raya propose de fusionner 3 règles sur les actions récupérables (71, 76, 104). Mais la règle 104 est un seed à confidence=1.0 et reinforcements=15 (très critique). Validation nécessaire avant fusion. Nouveau texte proposé : Actions récupérables (corbeille mail) = exécution directe sans confirmation, regrouper si plusieurs items. Confirmation uniquement pour actions irréversibles (envoi mail/Teams, création événement, déplacement/copie Drive).',
+         'pending'
+       WHERE NOT EXISTS (SELECT 1 FROM rules_pending_decisions WHERE rule_ids @> ARRAY[71, 76, 104] AND status='pending')""",
+    """INSERT INTO rules_pending_decisions
+         (username, tenant_id, decision_type, rule_ids, question_text, status)
+       SELECT 'guillaume', 'couffrant_solar', 'fusion_proposal',
+         ARRAY[70, 73, 102, 103, 163],
+         'Raya propose de fusionner 5 règles sur les boîtes mail (70, 73, 102, 103, 163). Mais la règle 163 est source user_explicit + confidence=1.0 (critique, ne pas diluer). De plus, la règle perd le provider=outlook important pour le code. Validation nécessaire avant fusion.',
+         'pending'
+       WHERE NOT EXISTS (SELECT 1 FROM rules_pending_decisions WHERE rule_ids @> ARRAY[70, 73, 102, 103, 163] AND status='pending')""",
+    # Log dans rules_optimization_log
+    """INSERT INTO rules_optimization_log
+         (username, tenant_id, run_type, rules_before, rules_after,
+          merged_count, contradictions_resolved, contradictions_pending,
+          forgotten_count, summary_text, details_json, tokens_used, duration_seconds)
+       SELECT 'guillaume', 'couffrant_solar', 'manual_run2_fusions', 144, 134,
+         5, 0, 2, 0,
+         'Run #2 fusions sures : 15 regles fusionnees en 5 nouvelles. 2 fusions en pending (critiques).',
+         '{"fusions": [[69,74,2],[9,18],[24,27,29],[20,22,30],[12,13,14,19]], "pending": [[71,76,104],[70,73,102,103,163]]}'::jsonb,
+         0, 0
+       WHERE NOT EXISTS (SELECT 1 FROM rules_optimization_log WHERE run_type = 'manual_run2_fusions' AND username = 'guillaume')""",
 ]
