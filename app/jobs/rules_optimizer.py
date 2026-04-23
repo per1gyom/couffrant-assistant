@@ -280,6 +280,13 @@ Analyse ces {len(rows)} règles actives et identifie UNIQUEMENT les CONTRADICTIO
 RÈGLES :
 {rules_text}
 
+GARDE-FOUS IMPORTANTS :
+- NE JAMAIS proposer de fusion/suppression/modification pour une règle dont
+  confidence >= 0.9 OU dont source = 'user_explicit'. Ces règles sont critiques,
+  elles doivent rester intactes.
+- Si tu penses qu'une telle règle mérite d'évoluer, mets-la en AMBIGUË
+  avec une question pour Guillaume, jamais en CLAIRE.
+
 Retourne un JSON strict (sans markdown) :
 {{
   "clear": [

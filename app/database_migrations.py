@@ -709,4 +709,78 @@ MIGRATIONS = [
     "UPDATE aria_rules SET confidence = LEAST(1.0, 0.73), reinforcements = reinforcements + 1, updated_at = NOW() WHERE id = 130 AND active = true AND confidence < 0.73",
     # Loser 134 : active=false avec tracabilite
     "UPDATE aria_rules SET active = false, source = 'merged_into_130', updated_at = NOW() WHERE id = 134 AND active = true",
+    # -- APPLICATION RUN #2 AGENT (25 avril 2026) : Option B validee par Guillaume --
+    # Issue du preview Raya auto-reflexive mode agent :
+    #   4 suppressions + 2 simplifications + 5 nouvelles regles + 1 pending
+    # Faux positifs ignores : 7 fusions (trop risquees) + 2 contradictions (redondantes)
+    #
+    # Snapshot des regles supprimees/modifiees avant changement (idempotent)
+    """INSERT INTO aria_rules_history
+       (rule_id, username, tenant_id, category, rule, confidence, reinforcements, active, change_type)
+       SELECT id, username, tenant_id, category, rule, confidence, reinforcements, active, 'run2_agent_applied'
+       FROM aria_rules
+       WHERE id IN (10, 28, 31, 83, 11, 67) AND active = true
+         AND NOT EXISTS (
+           SELECT 1 FROM aria_rules_history h
+           WHERE h.rule_id = aria_rules.id AND h.change_type = 'run2_agent_applied'
+         )""",
+    # 4 SUPPRESSIONS (active=false, tracabilite)
+    "UPDATE aria_rules SET active = false, source = 'deprecated_run2_agent', updated_at = NOW() WHERE id = 83 AND active = true",
+    "UPDATE aria_rules SET active = false, source = 'redundant_with_57', updated_at = NOW() WHERE id = 31 AND active = true",
+    "UPDATE aria_rules SET active = false, source = 'redundant_with_71_76', updated_at = NOW() WHERE id = 10 AND active = true",
+    "UPDATE aria_rules SET active = false, source = 'redundant_with_68', updated_at = NOW() WHERE id = 28 AND active = true",
+    # 2 SIMPLIFICATIONS (reecriture du texte)
+    """UPDATE aria_rules SET
+         rule = 'Entités dirigées par Guillaume : SARL Couffrant Solar (activité PV/électricité/couverture), SAS GPLH, SCI Gaucherie, SCI Romagui, + holding en cours de création. Attention orthographe : Couffrant Solar (pas Coupfranc).',
+         updated_at = NOW()
+       WHERE id = 67 AND rule NOT LIKE '%SARL Couffrant Solar%'""",
+    """UPDATE aria_rules SET
+         rule = 'Mails envoyés : courts (1 à 3 phrases), directs, sans fioritures. Formule ouverture Bonjour, clôture Merci ou Cordialement selon formalité.',
+         updated_at = NOW()
+       WHERE id = 11 AND rule NOT LIKE '%ouverture Bonjour%'""",
+    # 5 NOUVELLES REGLES (INSERT avec ON CONFLICT DO NOTHING pour idempotence)
+    """INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence, level, reinforcements)
+       SELECT 'guillaume', 'couffrant_solar', 'structures',
+         'Orthographe Couffrant Solar : vigilance sur transcription vocale — le nom peut être mal retranscrit en Coupfranc Solar ou variantes phonétiques. Toujours écrire Couffrant Solar.',
+         'run2_agent', 0.9, 'moyenne', 1
+       WHERE NOT EXISTS (SELECT 1 FROM aria_rules WHERE rule LIKE '%vigilance sur transcription vocale%' AND username='guillaume' AND tenant_id='couffrant_solar')""",
+    """INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence, level, reinforcements)
+       SELECT 'guillaume', 'couffrant_solar', 'ux',
+         'Format de présentation standard validé : 🟢 **texte** en gras pour faire ressortir les résultats clés (fichiers, statuts, confirmations).',
+         'run2_agent', 0.8, 'moyenne', 1
+       WHERE NOT EXISTS (SELECT 1 FROM aria_rules WHERE rule LIKE '%Format de présentation standard validé%' AND username='guillaume' AND tenant_id='couffrant_solar')""",
+    """INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence, level, reinforcements)
+       SELECT 'guillaume', 'couffrant_solar', 'comportement',
+         'Guillaume a double casquette (dirigeant utilisateur + super-admin/dev Raya). Identifier la casquette active avant de répondre : contexte métier = ton concis opérationnel ; contexte dev/audit = ton technique transparent sur les limites.',
+         'run2_agent', 0.8, 'moyenne', 1
+       WHERE NOT EXISTS (SELECT 1 FROM aria_rules WHERE rule LIKE '%double casquette%' AND username='guillaume' AND tenant_id='couffrant_solar')""",
+    """INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence, level, reinforcements)
+       SELECT 'guillaume', 'couffrant_solar', 'limites',
+         'Ne jamais générer de liens cliquables vers Drive/SharePoint : limite technique actuelle. Afficher uniquement 🟢 **nom_fichier.ext**.',
+         'run2_agent', 0.8, 'moyenne', 1
+       WHERE NOT EXISTS (SELECT 1 FROM aria_rules WHERE rule LIKE '%liens cliquables vers Drive%' AND username='guillaume' AND tenant_id='couffrant_solar')""",
+    """INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence, level, reinforcements)
+       SELECT 'guillaume', 'couffrant_solar', 'ux',
+         'Raccourcis oui/non acceptés : Guillaume préfère répondre oui/non/ok aux propositions. Ne pas exiger de formulation complète.',
+         'run2_agent', 0.7, 'moyenne', 1
+       WHERE NOT EXISTS (SELECT 1 FROM aria_rules WHERE rule LIKE '%Raccourcis oui/non%' AND username='guillaume' AND tenant_id='couffrant_solar')""",
+    # 1 QUESTION EN PENDING (Arlene/contact@couffrant-solar.fr)
+    """INSERT INTO rules_pending_decisions
+         (username, tenant_id, decision_type, rule_ids, question_text, status)
+       SELECT 'guillaume', 'couffrant_solar', 'ambiguous_rule',
+         ARRAY[17, 15, 124],
+         'Règle 17 dit qu''Arlène transfère les mails à Guillaume. Vérification mails : Arlène envoie depuis contact@couffrant-solar.fr (boîte non encore connectée selon règle 124). Une fois contact@ connecté, les règles de tri devront peut-être évoluer. À trancher : garder tel quel, ou adapter la règle 17 ?',
+         'pending'
+       WHERE NOT EXISTS (SELECT 1 FROM rules_pending_decisions WHERE rule_ids @> ARRAY[17, 15, 124] AND status='pending')""",
+    # Log dans rules_optimization_log pour tracabilite
+    """INSERT INTO rules_optimization_log
+         (username, tenant_id, run_type, rules_before, rules_after,
+          merged_count, contradictions_resolved, contradictions_pending,
+          forgotten_count, summary_text, details_json, tokens_used, duration_seconds)
+       SELECT 'guillaume', 'couffrant_solar', 'manual_run2_agent', 100, 101,
+         0, 0, 1, 0,
+         'Run #2 agent applied (Option B): 4 supp + 2 simpl + 5 new + 1 pending. 7 fusions skipped (too risky).',
+         '{"applied": ["suppressions:83,31,10,28", "simplifications:67,11", "new_rules:5", "pending:17/15/124"], "skipped_fusions": 7}'::jsonb,
+         4253, 79
+       WHERE NOT EXISTS (SELECT 1 FROM rules_optimization_log WHERE run_type = 'manual_run2_agent' AND username = 'guillaume')""",
 ]
