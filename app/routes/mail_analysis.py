@@ -18,6 +18,7 @@ router = APIRouter(tags=["mail"])
 @router.get("/learn-sent-mails")
 def learn_sent_mails(request: Request, user: dict = Depends(require_user), top: int = 50):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     token = get_valid_microsoft_token(username)
     if not token:
         return {"error": "Token Microsoft manquant"}
@@ -37,8 +38,9 @@ def learn_sent_mails(request: Request, user: dict = Depends(require_user), top: 
         for msg in data.get("value", []):
             message_id = msg["id"]
             c.execute(
-                "SELECT 1 FROM sent_mail_memory WHERE message_id=%s AND username=%s",
-                (message_id, username)
+                "SELECT 1 FROM sent_mail_memory WHERE message_id=%s AND username=%s "
+                "AND (tenant_id = %s OR tenant_id IS NULL)",
+                (message_id, username, tenant_id)
             )
             if c.fetchone():
                 continue
@@ -50,10 +52,10 @@ def learn_sent_mails(request: Request, user: dict = Depends(require_user), top: 
             try:
                 c.execute(
                     "INSERT INTO sent_mail_memory "
-                    "(username,message_id,sent_at,to_email,subject,body_preview) "
-                    "VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                    (username, message_id, msg.get("receivedDateTime"), to_email,
-                     msg.get("subject"), msg.get("bodyPreview"))
+                    "(username,tenant_id,message_id,sent_at,to_email,subject,body_preview) "
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                    (username, tenant_id, message_id, msg.get("receivedDateTime"),
+                     to_email, msg.get("subject"), msg.get("bodyPreview"))
                 )
                 inserted += 1
             except Exception:
@@ -72,6 +74,7 @@ def learn_inbox_mails(
     skip: int = 0,
 ):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     token = get_valid_microsoft_token(username)
     if not token:
         return {"error": "Token Microsoft manquant"}
@@ -92,8 +95,9 @@ def learn_inbox_mails(
         for msg in data.get("value", []):
             message_id = msg["id"]
             c.execute(
-                "SELECT 1 FROM mail_memory WHERE message_id=%s AND username=%s",
-                (message_id, username)
+                "SELECT 1 FROM mail_memory WHERE message_id=%s AND username=%s "
+                "AND (tenant_id = %s OR tenant_id IS NULL)",
+                (message_id, username, tenant_id)
             )
             if c.fetchone():
                 continue
@@ -106,10 +110,10 @@ def learn_inbox_mails(
             try:
                 c.execute(
                     "INSERT INTO mail_memory "
-                    "(username,message_id,received_at,from_email,subject,"
+                    "(username,tenant_id,message_id,received_at,from_email,subject,"
                     "raw_body_preview,analysis_status,created_at) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                    (username, message_id, msg.get("receivedDateTime"),
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                    (username, tenant_id, message_id, msg.get("receivedDateTime"),
                      msg.get("from", {}).get("emailAddress", {}).get("address", ""),
                      msg.get("subject"), msg.get("bodyPreview"),
                      "inbox_raw", datetime.now(timezone.utc).isoformat())
@@ -139,9 +143,10 @@ def analyze_raw_mails(
         c.execute("""
             SELECT id, message_id, from_email, subject, raw_body_preview, received_at
             FROM mail_memory WHERE username=%s
+              AND (tenant_id = %s OR tenant_id IS NULL)
               AND analysis_status IN ('inbox_raw','archive_raw','gmail_raw')
             ORDER BY received_at DESC NULLS LAST LIMIT %s
-        """, (username, limit))
+        """, (username, tenant_id, limit))
         rows = c.fetchall()
     finally:
         if conn: conn.close()
@@ -172,6 +177,7 @@ def analyze_raw_mails(
                       suggested_reply_subject=%s, suggested_reply=%s,
                       analysis_status='done_ai'
                     WHERE id=%s AND username=%s
+                      AND (tenant_id = %s OR tenant_id IS NULL)
                 """, (
                     item.get("display_title"), item.get("category"), item.get("priority"),
                     item.get("reason"), item.get("suggested_action"), item.get("short_summary"),
@@ -179,7 +185,7 @@ def analyze_raw_mails(
                     int(item.get("needs_review", False)), int(item.get("needs_reply", False)),
                     item.get("reply_urgency"), item.get("reply_reason"),
                     item.get("response_type"), item.get("suggested_reply_subject"),
-                    item.get("suggested_reply"), db_id, username,
+                    item.get("suggested_reply"), db_id, username, tenant_id,
                 ))
                 conn.commit()
             finally:
@@ -194,8 +200,9 @@ def analyze_raw_mails(
         c = conn.cursor()
         c.execute(
             "SELECT COUNT(*) FROM mail_memory WHERE username=%s "
+            "AND (tenant_id = %s OR tenant_id IS NULL) "
             "AND analysis_status IN ('inbox_raw','archive_raw','gmail_raw')",
-            (username,)
+            (username, tenant_id)
         )
         remaining = c.fetchone()[0]
     finally:

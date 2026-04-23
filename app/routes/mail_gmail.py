@@ -19,6 +19,7 @@ router = APIRouter(tags=["mail"])
 @router.get("/ingest-gmail")
 def ingest_gmail(request: Request, user: dict = Depends(require_user)):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     from app.connectors.gmail_connector import gmail_get_messages, gmail_get_message
     access_token = get_valid_google_token(username)
     if not access_token:
@@ -36,8 +37,9 @@ def ingest_gmail(request: Request, user: dict = Depends(require_user)):
         for msg in messages:
             message_id = msg["id"]
             c.execute(
-                "SELECT 1 FROM mail_memory WHERE message_id=%s AND username=%s",
-                (message_id, username)
+                "SELECT 1 FROM mail_memory WHERE message_id=%s AND username=%s "
+                "AND (tenant_id = %s OR tenant_id IS NULL)",
+                (message_id, username, tenant_id)
             )
             if c.fetchone():
                 continue
@@ -53,10 +55,10 @@ def ingest_gmail(request: Request, user: dict = Depends(require_user)):
                     continue
                 c.execute(
                     "INSERT INTO mail_memory "
-                    "(username,message_id,received_at,from_email,subject,"
+                    "(username,tenant_id,message_id,received_at,from_email,subject,"
                     "raw_body_preview,analysis_status,mailbox_source,created_at) "
-                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
-                    (username, message_id, date, from_email, subject, snippet,
+                    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                    (username, tenant_id, message_id, date, from_email, subject, snippet,
                      "gmail_raw", "gmail_perso", datetime.now(timezone.utc).isoformat())
                 )
                 inserted += 1
