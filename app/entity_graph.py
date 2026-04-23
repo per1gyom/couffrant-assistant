@@ -546,7 +546,7 @@ def populate_from_mail_memory(tenant_id: str) -> int:
         c.execute("""
             SELECT DISTINCT sender, subject, id
             FROM mail_memory
-            WHERE username IN (SELECT username FROM users WHERE tenant_id = %s)
+            WHERE tenant_id = %s
             ORDER BY received_at DESC LIMIT 500
         """, (tenant_id,))
         for sender, subject, mid in c.fetchall():
@@ -702,12 +702,13 @@ def populate_from_contacts(tenant_id: str, username: str) -> dict:
                    COUNT(*) AS mail_count, MAX(received_at) AS last_seen
             FROM mail_memory
             WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
               AND from_email IS NOT NULL AND from_email != ''
             GROUP BY from_email
             HAVING COUNT(*) >= 2
             ORDER BY MAX(received_at) DESC
             LIMIT 200
-        """, (username,))
+        """, (username, tenant_id))
         rows = c.fetchall()
     except Exception as e:
         return {"contacts": 0, "errors": [f"query mail_memory: {str(e)[:200]}"]}

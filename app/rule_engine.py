@@ -41,9 +41,12 @@ def get_rules_by_category(username: str, category: str,
                 ORDER BY confidence DESC, reinforcements DESC, created_at ASC
             """, (username, category, tenant_id))
         else:
+            # Pas de tenant_id fourni : on limite aux regles sans tenant
+            # (historiques) pour eviter toute fuite cross-tenant
             c.execute("""
                 SELECT rule FROM aria_rules
                 WHERE active = true AND username = %s AND category = %s
+                  AND tenant_id IS NULL
                 ORDER BY confidence DESC, reinforcements DESC, created_at ASC
             """, (username, category))
         return [r[0] for r in c.fetchall()]

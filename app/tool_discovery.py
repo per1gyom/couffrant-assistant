@@ -387,12 +387,13 @@ def discover_contacts(tenant_id: str, username: str, connection_id: int = None) 
                    (array_agg(subject ORDER BY received_at DESC))[1] AS last_subject
             FROM mail_memory
             WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
               AND from_email IS NOT NULL AND from_email != ''
             GROUP BY from_email
             HAVING COUNT(*) >= 2
             ORDER BY MAX(received_at) DESC
             LIMIT 100
-        """, (username,))
+        """, (username, tenant_id))
         rows = c.fetchall()
     except Exception as e:
         return {"discovered": 0, "errors": [f"mail_memory query échouée : {str(e)[:200]}"]}

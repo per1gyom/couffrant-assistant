@@ -10,7 +10,8 @@ from app.dashboard_service import (
 )
 
 
-def get_dashboard(days: int = 2, username: str = 'guillaume') -> dict:
+def get_dashboard(days: int = 2, username: str = 'guillaume',
+                  tenant_id: str = None) -> dict:
     conn = get_pg_conn()
     c = conn.cursor()
     start_date = (datetime.utcnow() - timedelta(days=days)).isoformat()
@@ -20,9 +21,11 @@ def get_dashboard(days: int = 2, username: str = 'guillaume') -> dict:
                suggested_reply, response_type, missing_fields, confidence_level,
                raw_body_preview
         FROM mail_memory
-        WHERE username = %s AND received_at >= %s
+        WHERE username = %s
+          AND (tenant_id = %s OR tenant_id IS NULL)
+          AND received_at >= %s
         ORDER BY received_at DESC
-    """, (username, start_date))
+    """, (username, tenant_id, start_date))
     columns = [desc[0] for desc in c.description]
     rows = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()

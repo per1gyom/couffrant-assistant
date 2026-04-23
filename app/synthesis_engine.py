@@ -38,9 +38,10 @@ def rebuild_hot_summary(username: str = 'guillaume',
         c.execute("""
             SELECT from_email, display_title, category, priority, short_summary,
                    received_at, mailbox_source
-            FROM mail_memory WHERE username = %s
+            FROM mail_memory
+            WHERE username = %s AND (tenant_id = %s OR tenant_id IS NULL)
             ORDER BY received_at DESC NULLS LAST LIMIT 30
-        """, (username,))
+        """, (username, tenant_id))
         cols = [d[0] for d in c.description]
         mails = [dict(zip(cols, row)) for row in c.fetchall()]
         c.execute("""
@@ -50,8 +51,9 @@ def rebuild_hot_summary(username: str = 'guillaume',
         contacts = [{'name': r[0], 'summary': r[1]} for r in c.fetchall()]
         c.execute("""
             SELECT user_input, aria_response FROM aria_memory
-            WHERE username = %s ORDER BY id DESC LIMIT 8
-        """, (username,))
+            WHERE username = %s AND (tenant_id = %s OR tenant_id IS NULL)
+            ORDER BY id DESC LIMIT 8
+        """, (username, tenant_id))
         history = [{'q': r[0][:150], 'a': r[1][:200]} for r in c.fetchall()]
     finally:
         if conn: conn.close()

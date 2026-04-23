@@ -8,10 +8,14 @@ def init_mail_db():
     init_postgres()
 
 
-def mail_exists(message_id: str, username: str = 'guillaume') -> bool:
+def mail_exists(message_id: str, username: str = 'guillaume',
+                tenant_id: str = None) -> bool:
     conn = get_pg_conn()
     c = conn.cursor()
-    c.execute("SELECT 1 FROM mail_memory WHERE message_id = %s AND username = %s", (message_id, username))
+    c.execute(
+        "SELECT 1 FROM mail_memory WHERE message_id = %s AND username = %s "
+        "AND (tenant_id = %s OR tenant_id IS NULL)",
+        (message_id, username, tenant_id))
     result = c.fetchone()
     conn.close()
     return result is not None

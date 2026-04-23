@@ -256,7 +256,7 @@ def seed_tenant(tenant_id: str, admin_username: str,
     return counts
 
 
-def is_tenant_seeded(username: str) -> bool:
+def is_tenant_seeded(username: str, tenant_id: str = None) -> bool:
     """Retourne True si le user a deja au moins une regle avec source='seed'."""
     from app.database import get_pg_conn
     conn = None
@@ -264,8 +264,10 @@ def is_tenant_seeded(username: str) -> bool:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute(
-            "SELECT COUNT(*) FROM aria_rules WHERE username = %s AND source = 'seed'",
-            (username,)
+            "SELECT COUNT(*) FROM aria_rules "
+            "WHERE username = %s AND source = 'seed' "
+            "AND (tenant_id = %s OR tenant_id IS NULL)",
+            (username, tenant_id)
         )
         return c.fetchone()[0] > 0
     finally:
