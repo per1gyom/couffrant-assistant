@@ -74,9 +74,11 @@ def _prepare_briefings(username: str):
         placeholders = ",".join(["%s"] * len(attendee_emails))
         c.execute(
             f"SELECT from_email, subject, short_summary, received_at FROM mail_memory "
-            f"WHERE username = %s AND from_email IN ({placeholders}) "
+            f"WHERE username = %s "
+            f"  AND (tenant_id = %s OR tenant_id IS NULL) "
+            f"  AND from_email IN ({placeholders}) "
             f"ORDER BY received_at DESC LIMIT 5",
-            [username] + attendee_emails,
+            [username, tenant_id] + attendee_emails,
         )
         recent_mails = c.fetchall()
         conn.close()

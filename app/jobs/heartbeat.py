@@ -57,8 +57,10 @@ def _prepare_daily_report(username: str):
           COUNT(*) FILTER (WHERE priority = 'moyenne') as moyen,
           COUNT(*) FILTER (WHERE needs_reply = 1 AND reply_status = 'pending') as a_repondre
         FROM mail_memory
-        WHERE username = %s AND created_at > NOW() - INTERVAL '12 hours'
-    """, (username,))
+        WHERE username = %s
+          AND (tenant_id = %s OR tenant_id IS NULL)
+          AND created_at > NOW() - INTERVAL '12 hours'
+    """, (username, tenant_id))
     stats = c.fetchone()
     total = stats[0] or 0
     urgent = stats[1] or 0
@@ -80,9 +82,11 @@ def _prepare_daily_report(username: str):
 
     c.execute("""
         SELECT COUNT(*) FROM proactive_alerts
-        WHERE username = %s AND seen = false AND dismissed = false
+        WHERE username = %s
+          AND (tenant_id = %s OR tenant_id IS NULL)
+          AND seen = false AND dismissed = false
           AND (expires_at IS NULL OR expires_at > NOW())
-    """, (username,))
+    """, (username, tenant_id))
     alerts_count = c.fetchone()[0]
     if alerts_count > 0:
         sections.append({

@@ -81,10 +81,11 @@ def _observe_mail_changes(username: str, token: str):
         c.execute("""
             SELECT message_id FROM mail_memory
             WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
               AND created_at > NOW() - INTERVAL '7 days'
               AND mailbox_source = 'outlook'
             LIMIT 200
-        """, (username,))
+        """, (username, tenant_id))
         known_ids = {r[0] for r in c.fetchall()}
         conn.close()
 
@@ -224,10 +225,11 @@ def _observe_calendar_changes(username: str, token: str):
             c.execute("""
                 SELECT COUNT(*) FROM activity_log
                 WHERE username = %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
                   AND action_type IN ('create_event', 'CREATEEVENT')
                   AND action_target LIKE %s
                   AND created_at > NOW() - INTERVAL '1 hour'
-            """, (username, f"%{event.get('subject', '')}%"))
+            """, (username, tenant_id, f"%{event.get('subject', '')}%"))
             if c.fetchone()[0] == 0:
                 external_events.append(event)
         conn.close()

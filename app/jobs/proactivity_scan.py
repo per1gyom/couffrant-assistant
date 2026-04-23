@@ -44,15 +44,19 @@ def _scan_user(username: str):
     # Mails urgents non traités
     c.execute("""
         SELECT id, subject, from_email, priority, received_at FROM mail_memory
-        WHERE username = %s AND priority = 'haute'
+        WHERE username = %s
+          AND (tenant_id = %s OR tenant_id IS NULL)
+          AND priority = 'haute'
           AND created_at > NOW() - INTERVAL '48 hours'
           AND created_at < NOW() - INTERVAL '2 hours'
           AND id NOT IN (
               SELECT CAST(source_id AS INTEGER) FROM proactive_alerts
-              WHERE username = %s AND source_type = 'mail'
+              WHERE username = %s
+                AND (tenant_id = %s OR tenant_id IS NULL)
+                AND source_type = 'mail'
                 AND created_at > NOW() - INTERVAL '24 hours'
           ) LIMIT 5
-    """, (username, username))
+    """, (username, tenant_id, username, tenant_id))
     for row in c.fetchall():
         create_alert(
             username=username, tenant_id=tenant_id,
@@ -65,15 +69,19 @@ def _scan_user(username: str):
     # Réponses en attente
     c.execute("""
         SELECT id, subject, from_email, reply_urgency FROM mail_memory
-        WHERE username = %s AND needs_reply = 1 AND reply_status = 'pending'
+        WHERE username = %s
+          AND (tenant_id = %s OR tenant_id IS NULL)
+          AND needs_reply = 1 AND reply_status = 'pending'
           AND created_at < NOW() - INTERVAL '24 hours'
           AND created_at > NOW() - INTERVAL '7 days'
           AND id NOT IN (
               SELECT CAST(source_id AS INTEGER) FROM proactive_alerts
-              WHERE username = %s AND source_type = 'mail_reply'
+              WHERE username = %s
+                AND (tenant_id = %s OR tenant_id IS NULL)
+                AND source_type = 'mail_reply'
                 AND created_at > NOW() - INTERVAL '24 hours'
           ) LIMIT 5
-    """, (username, username))
+    """, (username, tenant_id, username, tenant_id))
     for row in c.fetchall():
         prio = "high" if row[3] == "haute" else "normal"
         create_alert(
@@ -89,18 +97,22 @@ def _scan_user(username: str):
         now = datetime.now()
         c.execute("""
             SELECT id, description, evidence FROM aria_patterns
-            WHERE username = %s AND active = true AND pattern_type = 'temporal'
+            WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND active = true AND pattern_type = 'temporal'
               AND confidence >= 0.5
-        """, (username,))
+        """, (username, tenant_id))
         for pat_id, desc, evidence in c.fetchall():
             alert_msg = _check_cyclic_alert(now, desc or "", evidence or "")
             if alert_msg:
                 c.execute("""
                     SELECT COUNT(*) FROM proactive_alerts
-                    WHERE username = %s AND source_type = 'cyclic_pattern'
+                    WHERE username = %s
+                      AND (tenant_id = %s OR tenant_id IS NULL)
+                      AND source_type = 'cyclic_pattern'
                       AND source_id = %s
                       AND created_at > NOW() - INTERVAL '6 days'
-                """, (username, str(pat_id)))
+                """, (username, tenant_id, str(pat_id)))
                 if c.fetchone()[0] == 0:
                     create_alert(
                         username=username, tenant_id=tenant_id,

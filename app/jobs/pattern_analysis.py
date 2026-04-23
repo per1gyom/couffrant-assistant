@@ -58,15 +58,19 @@ def _analyze_patterns(username: str):
 
     c.execute("""
         SELECT user_input, aria_response, created_at FROM aria_memory
-        WHERE username = %s ORDER BY created_at DESC LIMIT 50
-    """, (username,))
+        WHERE username = %s
+          AND (tenant_id = %s OR tenant_id IS NULL)
+        ORDER BY created_at DESC LIMIT 50
+    """, (username, tenant_id))
     convs = [{"q": r[0][:150], "r": r[1][:100], "date": str(r[2])} for r in c.fetchall()]
 
     c.execute("""
         SELECT from_email, subject, category, priority, created_at FROM mail_memory
-        WHERE username = %s AND created_at > NOW() - INTERVAL '30 days'
+        WHERE username = %s
+          AND (tenant_id = %s OR tenant_id IS NULL)
+          AND created_at > NOW() - INTERVAL '30 days'
         ORDER BY created_at DESC LIMIT 100
-    """, (username,))
+    """, (username, tenant_id))
     mails = [
         {"from": r[0], "subject": r[1][:60], "cat": r[2], "prio": r[3], "date": str(r[4])}
         for r in c.fetchall()
@@ -78,9 +82,11 @@ def _analyze_patterns(username: str):
             SELECT action_type, action_target, action_detail, tenant_id,
                    created_at::text as ts
             FROM activity_log
-            WHERE username = %s AND created_at > NOW() - INTERVAL '30 days'
+            WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND created_at > NOW() - INTERVAL '30 days'
             ORDER BY created_at DESC LIMIT 150
-        """, (username,))
+        """, (username, tenant_id))
         activities = [
             {"type": r[0], "target": r[1][:50] if r[1] else "",
              "detail": r[2][:60] if r[2] else "", "date": r[4]}
@@ -91,8 +97,10 @@ def _analyze_patterns(username: str):
 
     c.execute("""
         SELECT pattern_type, description FROM aria_patterns
-        WHERE username = %s AND active = true ORDER BY confidence DESC LIMIT 20
-    """, (username,))
+        WHERE username = %s
+          AND (tenant_id = %s OR tenant_id IS NULL)
+          AND active = true ORDER BY confidence DESC LIMIT 20
+    """, (username, tenant_id))
     existing = [{"type": r[0], "desc": r[1]} for r in c.fetchall()]
     conn.close()
 

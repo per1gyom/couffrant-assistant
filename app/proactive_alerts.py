@@ -27,10 +27,12 @@ def create_alert(
         if source_id:
             c.execute("""
                 SELECT id FROM proactive_alerts
-                WHERE username = %s AND source_id = %s
+                WHERE username = %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
+                  AND source_id = %s
                   AND created_at > NOW() - INTERVAL '24 hours'
                 LIMIT 1
-            """, (username, source_id))
+            """, (username, tenant_id, source_id))
             if c.fetchone():
                 return 0
         c.execute("""
@@ -109,7 +111,8 @@ def _notify_external(username, tenant_id, alert_type, priority, title, body):
         send_whatsapp(phone, message)
 
 
-def get_active_alerts(username: str, limit: int = 10) -> list:
+def get_active_alerts(username: str, limit: int = 10,
+                      tenant_id: str = None) -> list:
     """
     Retourne les alertes non vues, non dismissed, non expirees,
     triees par priority DESC puis created_at DESC.
@@ -122,6 +125,7 @@ def get_active_alerts(username: str, limit: int = 10) -> list:
             SELECT id, alert_type, priority, title, body, source_type, source_id, created_at
             FROM proactive_alerts
             WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
               AND seen = false
               AND dismissed = false
               AND expires_at > NOW()
@@ -135,7 +139,7 @@ def get_active_alerts(username: str, limit: int = 10) -> list:
                 END ASC,
                 created_at DESC
             LIMIT %s
-        """, (username, limit))
+        """, (username, tenant_id, limit))
         cols = ["id", "alert_type", "priority", "title", "body",
                 "source_type", "source_id", "created_at"]
         return [dict(zip(cols, row)) for row in c.fetchall()]

@@ -79,6 +79,7 @@ def _check_user_anomalies(username: str):
         SELECT id, from_email, subject, short_summary, raw_body_preview, received_at
         FROM mail_memory
         WHERE username = %s
+          AND (tenant_id = %s OR tenant_id IS NULL)
           AND created_at > NOW() - INTERVAL '30 days'
           AND (raw_body_preview ILIKE '%€%'
             OR raw_body_preview ILIKE '%EUR%'
@@ -90,7 +91,7 @@ def _check_user_anomalies(username: str):
             OR subject ILIKE '%facture%')
         ORDER BY received_at DESC
         LIMIT 50
-    """, (username,))
+    """, (username, tenant_id))
     mail_rows = c.fetchall()
     conn.close()
 
@@ -112,10 +113,12 @@ def _check_user_anomalies(username: str):
             # Dédupliquer : pas d'alerte pour la même anomalie en moins de 7 jours
             c.execute("""
                 SELECT COUNT(*) FROM proactive_alerts
-                WHERE username = %s AND source_type = 'anomaly'
+                WHERE username = %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
+                  AND source_type = 'anomaly'
                   AND source_id = %s
                   AND created_at > NOW() - INTERVAL '7 days'
-            """, (username, anomaly['source_id']))
+            """, (username, tenant_id, anomaly['source_id']))
             if c.fetchone()[0] > 0:
                 continue
 
