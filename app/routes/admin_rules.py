@@ -551,7 +551,7 @@ def preview_rules_by_ids(
 @router.post("/admin/rules/optimizer/run")
 async def run_optimizer(request: Request,
                         body: dict = Body(default={}),
-                        _: dict = Depends(require_admin)):
+                        _: dict = Depends(require_super_admin)):
     """
     Declenche manuellement l'optimisation des regles.
 
@@ -577,7 +577,7 @@ async def run_optimizer(request: Request,
 
 @router.get("/admin/rules/optimizer/history")
 def optimizer_history(request: Request, limit: int = 20,
-                      _: dict = Depends(require_admin)):
+                      _: dict = Depends(require_super_admin)):
     """Derniers runs enregistres dans le journal."""
     conn = None
     try:
@@ -601,7 +601,7 @@ def optimizer_history(request: Request, limit: int = 20,
 
 
 @router.get("/admin/rules/pending-decisions")
-def pending_decisions(request: Request, _: dict = Depends(require_admin)):
+def pending_decisions(request: Request, _: dict = Depends(require_super_admin)):
     """Questions en attente suite aux optimisations Opus."""
     conn = None
     try:
