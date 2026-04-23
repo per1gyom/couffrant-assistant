@@ -691,4 +691,22 @@ MIGRATIONS = [
     "UPDATE aria_rules SET active = false, source = 'merged_duplicate_accents', updated_at = NOW() WHERE id BETWEEN 43 AND 53 AND active = true",
     # Bonus renforcement sur les winners (166-176)
     "UPDATE aria_rules SET reinforcements = reinforcements + 1, updated_at = NOW() WHERE id BETWEEN 166 AND 176 AND active = true",
+    # -- FUSION MANUELLE PAIRE COSINE 130/134 (25 avril 2026) --
+    # Detectee par le preview du rules_optimizer : similarite 0.9622
+    # Meme contenu (Pierre Couffrant associe/chef equipe), la 134 a juste un prefixe [equipe]
+    # Winner = 130 (conf 0.7 > 0.5), loser = 134 (conf 0.5)
+    # Snapshot avant fusion (idempotent via NOT EXISTS)
+    """INSERT INTO aria_rules_history
+       (rule_id, username, tenant_id, category, rule, confidence, reinforcements, active, change_type)
+       SELECT id, username, tenant_id, category, rule, confidence, reinforcements, active, 'merged_preview_pierre'
+       FROM aria_rules
+       WHERE id IN (130, 134) AND active = true
+         AND NOT EXISTS (
+           SELECT 1 FROM aria_rules_history h
+           WHERE h.rule_id = aria_rules.id AND h.change_type = 'merged_preview_pierre'
+         )""",
+    # Winner 130 : confidence = max(0.7, 0.5) + 0.03 = 0.73, reinforcements += 1 (du loser), updated_at
+    "UPDATE aria_rules SET confidence = LEAST(1.0, 0.73), reinforcements = reinforcements + 1, updated_at = NOW() WHERE id = 130 AND active = true AND confidence < 0.73",
+    # Loser 134 : active=false avec tracabilite
+    "UPDATE aria_rules SET active = false, source = 'merged_into_130', updated_at = NOW() WHERE id = 134 AND active = true",
 ]
