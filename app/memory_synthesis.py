@@ -27,12 +27,15 @@ from app.memory_rules import save_rule
 DEFAULT_TENANT = 'couffrant_solar'
 
 
-def get_hot_summary(username: str = 'guillaume') -> str:
+def get_hot_summary(username: str = 'guillaume', tenant_id: str = None) -> str:
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT content FROM aria_hot_summary WHERE username = %s", (username,))
+        c.execute(
+            "SELECT content FROM aria_hot_summary "
+            "WHERE username = %s AND (tenant_id = %s OR tenant_id IS NULL)",
+            (username, tenant_id))
         row = c.fetchone()
         return row[0] if row else ""
     finally:
@@ -73,10 +76,15 @@ def synthesize_session(n_conversations: int = 15, username: str = 'guillaume',
         c = conn.cursor()
         c.execute("""
             SELECT id, user_input, aria_response, created_at FROM aria_memory
-            WHERE username = %s ORDER BY id DESC LIMIT %s
-        """, (username, n_conversations))
+            WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+            ORDER BY id DESC LIMIT %s
+        """, (username, effective_tenant, n_conversations))
         conversations = c.fetchall()
-        c.execute("SELECT COUNT(*) FROM aria_memory WHERE username = %s", (username,))
+        c.execute(
+            "SELECT COUNT(*) FROM aria_memory "
+            "WHERE username = %s AND (tenant_id = %s OR tenant_id IS NULL)",
+            (username, effective_tenant))
         total = c.fetchone()[0]
     finally:
         if conn: conn.close()
@@ -166,11 +174,15 @@ Pour rules_learned : ne propose que des regles NOUVELLES. Prefere la qualite a l
         # Les conversations restent récupérables en cas d'erreur de synthèse.
         c.execute("""
             UPDATE aria_memory SET archived = true
-            WHERE username = %s AND id NOT IN (
-                SELECT id FROM aria_memory WHERE username = %s
+            WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND id NOT IN (
+                SELECT id FROM aria_memory
+                WHERE username = %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
                 ORDER BY id DESC LIMIT %s
             ) AND (archived IS NULL OR archived = false)
-        """, (username, username, keep_recent))
+        """, (username, effective_tenant, username, effective_tenant, keep_recent))
         purged = c.rowcount
         conn.commit()
     except Exception:
@@ -178,10 +190,14 @@ Pour rules_learned : ne propose que des regles NOUVELLES. Prefere la qualite a l
         try:
             if conn: conn.rollback()
             c.execute("""
-                DELETE FROM aria_memory WHERE username = %s AND id NOT IN (
-                    SELECT id FROM aria_memory WHERE username = %s ORDER BY id DESC LIMIT %s
+                DELETE FROM aria_memory WHERE username = %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
+                  AND id NOT IN (
+                    SELECT id FROM aria_memory WHERE username = %s
+                      AND (tenant_id = %s OR tenant_id IS NULL)
+                    ORDER BY id DESC LIMIT %s
                 )
-            """, (username, username, keep_recent))
+            """, (username, effective_tenant, username, effective_tenant, keep_recent))
             purged = c.rowcount
             conn.commit()
         except Exception:
@@ -198,7 +214,8 @@ Pour rules_learned : ne propose que des regles NOUVELLES. Prefere la qualite a l
     }
 
 
-def purge_old_mails(days: int = None, username: str = 'guillaume') -> int:
+def purge_old_mails(days: int = None, username: str = 'guillaume',
+                    tenant_id: str = None) -> int:
     if days is None:
         days = get_memoire_param(username, 'purge_days', 90)
     conn = None
@@ -207,9 +224,11 @@ def purge_old_mails(days: int = None, username: str = 'guillaume') -> int:
         c = conn.cursor()
         c.execute("""
             DELETE FROM mail_memory
-            WHERE username = %s AND created_at < NOW() - (%s || ' days')::INTERVAL
-            AND mailbox_source IN ('outlook', 'gmail_perso')
-        """, (username, str(days)))
+            WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND created_at < NOW() - (%s || ' days')::INTERVAL
+              AND mailbox_source IN ('outlook', 'gmail_perso')
+        """, (username, tenant_id, str(days)))
         deleted = c.rowcount
         conn.commit()
         return deleted

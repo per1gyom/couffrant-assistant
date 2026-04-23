@@ -84,7 +84,8 @@ def log_activity(
             logger.error(f"[Activity] shared publish_event: {e}")
 
 
-def get_recent_activity(username: str, hours: int = 24, limit: int = 50) -> list:
+def get_recent_activity(username: str, hours: int = 24, limit: int = 50,
+                        tenant_id: str = None) -> list:
     """Retourne les dernieres activites d'un utilisateur."""
     conn = None
     try:
@@ -93,9 +94,11 @@ def get_recent_activity(username: str, hours: int = 24, limit: int = 50) -> list
         c.execute("""
             SELECT action_type, action_target, action_detail, tenant_id, created_at
             FROM activity_log
-            WHERE username = %s AND created_at > NOW() - (%s || ' hours')::INTERVAL
+            WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND created_at > NOW() - (%s || ' hours')::INTERVAL
             ORDER BY created_at DESC LIMIT %s
-        """, (username, str(hours), limit))
+        """, (username, tenant_id, str(hours), limit))
         cols = [d[0] for d in c.description]
         return [dict(zip(cols, r)) for r in c.fetchall()]
     except Exception:
@@ -104,7 +107,8 @@ def get_recent_activity(username: str, hours: int = 24, limit: int = 50) -> list
         if conn: conn.close()
 
 
-def get_activity_sequences(username: str, days: int = 30, limit: int = 200) -> list:
+def get_activity_sequences(username: str, days: int = 30, limit: int = 200,
+                           tenant_id: str = None) -> list:
     """Retourne les activites recentes pour l'analyse de sequences."""
     conn = None
     try:
@@ -115,9 +119,11 @@ def get_activity_sequences(username: str, days: int = 30, limit: int = 200) -> l
                    created_at,
                    created_at - LAG(created_at) OVER (ORDER BY created_at) AS gap
             FROM activity_log
-            WHERE username = %s AND created_at > NOW() - (%s || ' days')::INTERVAL
+            WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND created_at > NOW() - (%s || ' days')::INTERVAL
             ORDER BY created_at DESC LIMIT %s
-        """, (username, str(days), limit))
+        """, (username, tenant_id, str(days), limit))
         cols = [d[0] for d in c.description]
         return [dict(zip(cols, r)) for r in c.fetchall()]
     except Exception:

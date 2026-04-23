@@ -161,7 +161,8 @@ def list_contacts_endpoint(request: Request, user: dict = Depends(require_user))
 
 @router.get("/purge-memory")
 def purge_memory(request: Request, user: dict = Depends(require_user), days: int = 90):
-    return {"status": "ok", "deleted": purge_old_mails(days=days, username=user["username"])}
+    return {"status": "ok", "deleted": purge_old_mails(
+        days=days, username=user["username"], tenant_id=user["tenant_id"])}
 
 
 @router.post("/learn-style")
