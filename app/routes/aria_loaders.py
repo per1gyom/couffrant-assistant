@@ -28,7 +28,7 @@ def load_user_tools(username: str) -> dict:
     }
 
 
-def load_db_context(username: str) -> dict:
+def load_db_context(username: str, tenant_id: str | None = None) -> dict:
     conn = None
     try:
         conn = get_pg_conn()
@@ -36,21 +36,31 @@ def load_db_context(username: str) -> dict:
         c.execute("""
             SELECT id as db_id, message_id, from_email, subject, display_title, category, priority,
                    short_summary, suggested_reply, raw_body_preview, received_at, mailbox_source
-            FROM mail_memory WHERE username = %s
+            FROM mail_memory
+            WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
             ORDER BY received_at DESC NULLS LAST LIMIT 10
-        """, (username,))
+        """, (username, tenant_id))
         columns = [desc[0] for desc in c.description]
         mails_from_db = [dict(zip(columns, row)) for row in c.fetchall()]
 
-        c.execute("SELECT user_input, aria_response FROM aria_memory WHERE username = %s AND archived = false ORDER BY id DESC LIMIT 30",
-                  (username,))
+        c.execute(
+            "SELECT user_input, aria_response FROM aria_memory "
+            "WHERE username = %s "
+            "  AND (tenant_id = %s OR tenant_id IS NULL) "
+            "  AND archived = false "
+            "ORDER BY id DESC LIMIT 30",
+            (username, tenant_id))
         columns = [desc[0] for desc in c.description]
         history = [dict(zip(columns, row)) for row in c.fetchall()]
         history.reverse()
         from app.logging_config import get_logger as _gl
         _gl("raya.loaders").info("[Loaders] Historique pour %s: %d échanges non-archivés", username, len(history))
 
-        c.execute("SELECT COUNT(*) FROM aria_memory WHERE username = %s", (username,))
+        c.execute(
+            "SELECT COUNT(*) FROM aria_memory "
+            "WHERE username = %s AND (tenant_id = %s OR tenant_id IS NULL)",
+            (username, tenant_id))
         conv_count = c.fetchone()[0]
         return {"mails_from_db": mails_from_db, "history": history, "conv_count": conv_count}
     finally:
@@ -107,8 +117,8 @@ def load_agenda(outlook_token: str, username: str = "") -> list:
         return []
 
 
-def load_teams_context(username: str) -> str:
-    cache_key = f"teams_ctx:{username}"
+def load_teams_context(username: str, tenant_id: str | None = None) -> str:
+    cache_key = f"teams_ctx:{username}:{tenant_id or 'notenant'}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -124,9 +134,11 @@ def load_teams_context(username: str) -> str:
         c = conn.cursor()
         c.execute("""
             SELECT topic, insight FROM aria_insights
-            WHERE username = %s AND source = 'teams'
+            WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND source = 'teams'
             ORDER BY updated_at DESC LIMIT 5
-        """, (username,))
+        """, (username, tenant_id))
         rows = c.fetchall()
         if rows:
             lines = [f"  [{r[0]}] {r[1]}" for r in rows]

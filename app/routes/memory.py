@@ -47,7 +47,10 @@ def memory_status(request: Request, user: dict = Depends(require_user)):
         conn = get_pg_conn()
         c = conn.cursor()
         try:
-            c.execute("SELECT content FROM aria_hot_summary WHERE username = %s", (username,))
+            c.execute(
+                "SELECT content FROM aria_hot_summary "
+                "WHERE username = %s AND (tenant_id = %s OR tenant_id IS NULL)",
+                (username, tenant_id))
             row = c.fetchone()
         except Exception:
             row = None
@@ -66,9 +69,16 @@ def memory_status(request: Request, user: dict = Depends(require_user)):
                 if table == "aria_contacts":
                     c.execute("SELECT COUNT(*) FROM aria_contacts WHERE tenant_id = %s", (tenant_id,))
                 elif table == "aria_rules":
-                    c.execute("SELECT COUNT(*) FROM aria_rules WHERE active=true AND username=%s", (username,))
+                    c.execute(
+                        "SELECT COUNT(*) FROM aria_rules "
+                        "WHERE active=true AND username=%s "
+                        "  AND (tenant_id = %s OR tenant_id IS NULL)",
+                        (username, tenant_id))
                 else:
-                    c.execute(f"SELECT COUNT(*) FROM {table} WHERE username=%s", (username,))
+                    c.execute(
+                        f"SELECT COUNT(*) FROM {table} "
+                        "WHERE username=%s AND (tenant_id = %s OR tenant_id IS NULL)",
+                        (username, tenant_id))
                 counts[key] = c.fetchone()[0]
             except Exception:
                 counts[key] = 0
@@ -106,14 +116,17 @@ def trigger_synth(request: Request, user: dict = Depends(require_user), n: int =
 @router.get("/rules")
 def list_rules(request: Request, user: dict = Depends(require_user)):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute(
             "SELECT id,category,rule,source,confidence,reinforcements,active,created_at "
-            "FROM aria_rules WHERE username=%s ORDER BY active DESC,confidence DESC,created_at DESC",
-            (username,)
+            "FROM aria_rules "
+            "WHERE username=%s AND (tenant_id = %s OR tenant_id IS NULL) "
+            "ORDER BY active DESC,confidence DESC,created_at DESC",
+            (username, tenant_id)
         )
         columns = [d[0] for d in c.description]
         return [dict(zip(columns, row)) for row in c.fetchall()]
@@ -124,14 +137,16 @@ def list_rules(request: Request, user: dict = Depends(require_user)):
 @router.get("/insights")
 def list_insights(request: Request, user: dict = Depends(require_user)):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute(
             "SELECT id,topic,insight,reinforcements,created_at FROM aria_insights "
-            "WHERE username=%s ORDER BY reinforcements DESC,updated_at DESC",
-            (username,)
+            "WHERE username=%s AND (tenant_id = %s OR tenant_id IS NULL) "
+            "ORDER BY reinforcements DESC,updated_at DESC",
+            (username, tenant_id)
         )
         columns = [d[0] for d in c.description]
         return [dict(zip(columns, row)) for row in c.fetchall()]
@@ -167,6 +182,7 @@ def learn_style(request: Request, payload: dict = Body(...), user: dict = Depend
 @router.get("/memory")
 def memory_list(request: Request, user: dict = Depends(require_user)):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     conn = None
     try:
         conn = get_pg_conn()
@@ -174,8 +190,9 @@ def memory_list(request: Request, user: dict = Depends(require_user)):
         c.execute(
             "SELECT message_id,received_at,from_email,subject,display_title,"
             "category,priority,analysis_status FROM mail_memory "
-            "WHERE username=%s ORDER BY id DESC LIMIT 20",
-            (username,)
+            "WHERE username=%s AND (tenant_id = %s OR tenant_id IS NULL) "
+            "ORDER BY id DESC LIMIT 20",
+            (username, tenant_id)
         )
         columns = [desc[0] for desc in c.description]
         return [dict(zip(columns, row)) for row in c.fetchall()]
@@ -186,11 +203,16 @@ def memory_list(request: Request, user: dict = Depends(require_user)):
 @router.get("/rebuild-memory")
 def rebuild_memory_mails(request: Request, user: dict = Depends(require_user)):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("DELETE FROM mail_memory WHERE username=%s", (username,))
+        c.execute(
+            "DELETE FROM mail_memory "
+            "WHERE username=%s AND (tenant_id = %s OR tenant_id IS NULL)",
+            (username, tenant_id)
+        )
         conn.commit()
     finally:
         if conn: conn.close()
@@ -200,14 +222,16 @@ def rebuild_memory_mails(request: Request, user: dict = Depends(require_user)):
 @router.get("/build-style-profile")
 def build_style_profile(request: Request, user: dict = Depends(require_user)):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute(
             "SELECT subject,to_email,body_preview FROM sent_mail_memory "
-            "WHERE username=%s ORDER BY sent_at DESC LIMIT 100",
-            (username,)
+            "WHERE username=%s AND (tenant_id = %s OR tenant_id IS NULL) "
+            "ORDER BY sent_at DESC LIMIT 100",
+            (username, tenant_id)
         )
         columns = [desc[0] for desc in c.description]
         rows = [dict(zip(columns, row)) for row in c.fetchall()]
@@ -233,10 +257,15 @@ def build_style_profile(request: Request, user: dict = Depends(require_user)):
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("DELETE FROM aria_profile WHERE username=%s AND profile_type='style'", (username,))
         c.execute(
-            "INSERT INTO aria_profile (username,profile_type,content) VALUES (%s,%s,%s)",
-            (username, 'style', profile_text)
+            "DELETE FROM aria_profile "
+            "WHERE username=%s AND profile_type='style' "
+            "  AND (tenant_id = %s OR tenant_id IS NULL)",
+            (username, tenant_id))
+        c.execute(
+            "INSERT INTO aria_profile (username,tenant_id,profile_type,content) "
+            "VALUES (%s,%s,%s,%s)",
+            (username, tenant_id, 'style', profile_text)
         )
         conn.commit()
     finally:

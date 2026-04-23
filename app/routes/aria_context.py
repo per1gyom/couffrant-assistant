@@ -319,7 +319,7 @@ def build_system_prompt(
             pass
 
     if not teams_context:
-        teams_context = load_teams_context(username)
+        teams_context = load_teams_context(username, tenant_id)
     if not mail_filter_summary:
         mail_filter_summary = load_mail_filter_summary(username)
 

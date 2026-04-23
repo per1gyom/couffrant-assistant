@@ -80,7 +80,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
 
     # 1. Contexte DB + tokens
     tools = load_user_tools(username)
-    db_ctx = load_db_context(username)
+    db_ctx = load_db_context(username, tenant_id)
     instructions = get_global_instructions(tenant_id=tenant_id)
     outlook_token = _get_microsoft_token(username)
 
