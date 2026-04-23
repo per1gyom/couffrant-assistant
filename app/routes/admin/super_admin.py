@@ -351,6 +351,141 @@ def admin_panel(request: Request):
 
 
 # ─── PAGE /admin/connexions ─────────────────────────────────────────
+@router.get("/admin/connexions", response_class=HTMLResponse)
+def admin_connexions_page(request: Request):
+    try:
+        require_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login-app")
+    with open("app/templates/admin_connexions.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+@router.get("/admin/connexions-data")
+def admin_connexions_data(request: Request, _: dict = Depends(require_admin)):
+    """Retourne tous les tenants avec leurs connexions pour rendu UI."""
+    from app.database import get_pg_conn
+    with get_pg_conn() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT DISTINCT tenant_id FROM tenant_connections ORDER BY tenant_id"
+        )
+        tenant_ids = [r[0] for r in cur.fetchall()]
+        # Ajoute aussi les tenants qui n'ont aucune connexion (users seuls)
+        cur.execute(
+            "SELECT DISTINCT tenant_id FROM users "
+            "WHERE tenant_id IS NOT NULL AND tenant_id != '' "
+            "ORDER BY tenant_id"
+        )
+        for r in cur.fetchall():
+            if r[0] not in tenant_ids:
+                tenant_ids.append(r[0])
+        tenants = []
+        for tid in tenant_ids:
+            cur.execute(
+                """SELECT id, tool_type, label, status, connected_email,
+                          super_admin_permission_level, tenant_admin_permission_level,
+                          config
+                   FROM tenant_connections
+                   WHERE tenant_id = %s
+                   ORDER BY tool_type, id""",
+                (tid,)
+            )
+            conns = []
+            for row in cur.fetchall():
+                config = row[7] or {}
+                config_summary = ""
+                if row[1] == "sharepoint" and config.get("site_name"):
+                    config_summary = config.get("site_name")
+                elif row[1] == "drive" and config.get("folder_name"):
+                    config_summary = config.get("folder_name")
+                conns.append({
+                    "id": row[0], "tool_type": row[1], "label": row[2],
+                    "status": row[3], "connected_email": row[4],
+                    "super_admin_permission_level": row[5],
+                    "tenant_admin_permission_level": row[6],
+                    "config_summary": config_summary,
+                })
+            tenants.append({"tenant_id": tid, "connections": conns})
+        return {"status": "ok", "tenants": tenants}
+
+
+@router.delete("/admin/connections/{connection_id}")
+def admin_delete_connection(request: Request, connection_id: int,
+                             _: dict = Depends(require_admin)):
+    """Supprime une connexion tenant (tokens inclus dans credentials jsonb)."""
+    from app.database import get_pg_conn
+    with get_pg_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM connection_assignments WHERE connection_id = %s",
+                    (connection_id,))
+        cur.execute("DELETE FROM tenant_connections WHERE id = %s",
+                    (connection_id,))
+        conn.commit()
+    return {"status": "ok", "deleted_id": connection_id}
+
+
+# ─── PAGE /admin/connexions ─────────────────────────────────────────
+
+@router.get("/admin/connexions", response_class=HTMLResponse)
+def admin_connexions_page(request: Request):
+    """Page super-admin dediee pour gerer les connexions de tous les tenants."""
+    try:
+        require_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login-app")
+    with open("app/templates/admin_connexions.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+@router.get("/admin/connexions-data")
+def admin_connexions_data(request: Request, _: dict = Depends(require_admin)):
+    """
+    Retourne la liste de tous les tenants avec leurs connexions,
+    pour le rendu de la page /admin/connexions.
+    Format : {"tenants": [{"tenant_id": "...", "connections": [...]}]}
+    """
+    from app.database import get_pg_conn
+    tenants = {}
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        # 1. Tous les tenants connus via users
+        c.execute("SELECT DISTINCT tenant_id FROM users WHERE tenant_id IS NOT NULL ORDER BY tenant_id")
+        for (tid,) in c.fetchall():
+            tenants[tid] = {"tenant_id": tid, "connections": []}
+        # 2. Connexions par tenant
+        c.execute("""
+            SELECT id, tenant_id, tool_type, label, status, connected_email,
+                   auth_type, config,
+                   super_admin_permission_level, tenant_admin_permission_level
+            FROM tenant_connections
+            ORDER BY tenant_id, tool_type, id
+        """)
+        for row in c.fetchall():
+            (cid, tid, tool, label, status, email, auth_type,
+             config, sa_perm, ta_perm) = row
+            if tid not in tenants:
+                tenants[tid] = {"tenant_id": tid, "connections": []}
+            cfg_summary = ""
+            if config and isinstance(config, dict):
+                cfg_summary = config.get("site_name") or config.get("folder_name") or ""
+            tenants[tid]["connections"].append({
+                "id": cid, "tool_type": tool, "label": label,
+                "status": status, "connected_email": email,
+                "auth_type": auth_type, "config_summary": cfg_summary,
+                "super_admin_permission_level": sa_perm,
+                "tenant_admin_permission_level": ta_perm,
+            })
+        return {"tenants": list(tenants.values())}
+    except Exception as e:
+        return {"tenants": [], "error": str(e)[:200]}
+    finally:
+        if conn: conn.close()
+
+
+# ─── PAGE /admin/connexions ─────────────────────────────────────────
 
 @router.get("/admin/connexions", response_class=HTMLResponse)
 def admin_connexions_page(request: Request):
