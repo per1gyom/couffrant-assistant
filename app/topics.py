@@ -32,14 +32,16 @@ class SectionTitleUpdate(BaseModel):
 @router.get("/topics")
 def list_topics(user: dict = Depends(require_user)):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         # Section title from users.settings
         c.execute(
-            "SELECT settings FROM users WHERE username = %s",
-            (username,)
+            "SELECT settings FROM users WHERE username = %s "
+            "AND (tenant_id = %s OR tenant_id IS NULL)",
+            (username, tenant_id)
         )
         row = c.fetchone()
         settings = {}
@@ -51,10 +53,11 @@ def list_topics(user: dict = Depends(require_user)):
             SELECT id, title, status, created_at, updated_at
             FROM user_topics
             WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
             ORDER BY
                 CASE status WHEN 'active' THEN 0 WHEN 'paused' THEN 1 ELSE 2 END,
                 updated_at DESC
-        """, (username,))
+        """, (username, tenant_id))
         topics = []
         for r in c.fetchall():
             topics.append({
@@ -103,14 +106,16 @@ def create_topic(payload: TopicCreate, user: dict = Depends(require_user)):
 @router.patch("/topics/{topic_id}")
 def update_topic(topic_id: int, payload: TopicUpdate, user: dict = Depends(require_user)):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         # Verify ownership
         c.execute(
-            "SELECT id FROM user_topics WHERE id = %s AND username = %s",
-            (topic_id, username)
+            "SELECT id FROM user_topics WHERE id = %s AND username = %s "
+            "AND (tenant_id = %s OR tenant_id IS NULL)",
+            (topic_id, username, tenant_id)
         )
         if not c.fetchone():
             return {"error": "Sujet introuvable"}
@@ -127,9 +132,11 @@ def update_topic(topic_id: int, payload: TopicUpdate, user: dict = Depends(requi
         if not updates:
             return {"error": "Rien a modifier"}
         updates.append("updated_at = NOW()")
-        params.extend([topic_id, username])
+        params.extend([topic_id, username, tenant_id])
         c.execute(
-            f"UPDATE user_topics SET {', '.join(updates)} WHERE id = %s AND username = %s RETURNING id, title, status, updated_at",
+            f"UPDATE user_topics SET {', '.join(updates)} WHERE id = %s AND username = %s "
+            "AND (tenant_id = %s OR tenant_id IS NULL) "
+            "RETURNING id, title, status, updated_at",
             params
         )
         r = c.fetchone()
@@ -150,13 +157,15 @@ def update_topic(topic_id: int, payload: TopicUpdate, user: dict = Depends(requi
 @router.delete("/topics/{topic_id}")
 def delete_topic(topic_id: int, user: dict = Depends(require_user)):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute(
-            "DELETE FROM user_topics WHERE id = %s AND username = %s",
-            (topic_id, username)
+            "DELETE FROM user_topics WHERE id = %s AND username = %s "
+            "AND (tenant_id = %s OR tenant_id IS NULL)",
+            (topic_id, username, tenant_id)
         )
         if c.rowcount == 0:
             return {"ok": False, "error": "Sujet introuvable"}

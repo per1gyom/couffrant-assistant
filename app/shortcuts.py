@@ -37,7 +37,10 @@ class ShortcutUpdate(BaseModel):
 
 def _seed_defaults(username: str, tenant_id: str, conn):
     c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM user_shortcuts WHERE username = %s", (username,))
+    c.execute(
+        "SELECT COUNT(*) FROM user_shortcuts "
+        "WHERE username = %s AND (tenant_id = %s OR tenant_id IS NULL)",
+        (username, tenant_id))
     if c.fetchone()[0] == 0:
         for s in DEFAULT_SHORTCUTS:
             c.execute(
@@ -59,9 +62,10 @@ def list_shortcuts(user: dict = Depends(require_user)):
         c = conn.cursor()
         c.execute("""
             SELECT id, label, prompt, color, position
-            FROM user_shortcuts WHERE username = %s
+            FROM user_shortcuts
+            WHERE username = %s AND (tenant_id = %s OR tenant_id IS NULL)
             ORDER BY position, id
-        """, (username,))
+        """, (username, tenant_id))
         return [{"id": r[0], "label": r[1], "prompt": r[2], "color": r[3], "position": r[4]}
                 for r in c.fetchall()]
     except Exception as e:
@@ -79,7 +83,10 @@ def create_shortcut(payload: ShortcutCreate, user: dict = Depends(require_user))
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT COALESCE(MAX(position)+1, 0) FROM user_shortcuts WHERE username = %s", (username,))
+        c.execute(
+            "SELECT COALESCE(MAX(position)+1, 0) FROM user_shortcuts "
+            "WHERE username = %s AND (tenant_id = %s OR tenant_id IS NULL)",
+            (username, tenant_id))
         pos = c.fetchone()[0]
         c.execute(
             "INSERT INTO user_shortcuts (username, tenant_id, label, prompt, color, position) "
@@ -100,11 +107,15 @@ def create_shortcut(payload: ShortcutCreate, user: dict = Depends(require_user))
 @router.patch("/shortcuts/{shortcut_id}")
 def update_shortcut(shortcut_id: int, payload: ShortcutUpdate, user: dict = Depends(require_user)):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT id FROM user_shortcuts WHERE id = %s AND username = %s", (shortcut_id, username))
+        c.execute(
+            "SELECT id FROM user_shortcuts WHERE id = %s AND username = %s "
+            "AND (tenant_id = %s OR tenant_id IS NULL)",
+            (shortcut_id, username, tenant_id))
         if not c.fetchone():
             return {"error": "Raccourci introuvable"}
         updates, params = [], []
@@ -119,10 +130,12 @@ def update_shortcut(shortcut_id: int, payload: ShortcutUpdate, user: dict = Depe
         if not updates:
             return {"error": "Rien a modifier"}
         updates.append("updated_at = NOW()")
-        params.extend([shortcut_id, username])
+        params.extend([shortcut_id, username, tenant_id])
         c.execute(
             f"UPDATE user_shortcuts SET {', '.join(updates)} "
-            "WHERE id = %s AND username = %s RETURNING id, label, prompt, color, position",
+            "WHERE id = %s AND username = %s "
+            "  AND (tenant_id = %s OR tenant_id IS NULL) "
+            "RETURNING id, label, prompt, color, position",
             params
         )
         r = c.fetchone()
@@ -138,11 +151,15 @@ def update_shortcut(shortcut_id: int, payload: ShortcutUpdate, user: dict = Depe
 @router.delete("/shortcuts/{shortcut_id}")
 def delete_shortcut(shortcut_id: int, user: dict = Depends(require_user)):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("DELETE FROM user_shortcuts WHERE id = %s AND username = %s", (shortcut_id, username))
+        c.execute(
+            "DELETE FROM user_shortcuts WHERE id = %s AND username = %s "
+            "  AND (tenant_id = %s OR tenant_id IS NULL)",
+            (shortcut_id, username, tenant_id))
         if c.rowcount == 0:
             return {"ok": False, "error": "Raccourci introuvable"}
         conn.commit()

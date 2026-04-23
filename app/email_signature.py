@@ -40,7 +40,8 @@ def _static_signature(username: str) -> str:
 
 # ─── LOOKUP DB ───
 
-def get_email_signature(username: str, from_address: str = None) -> str:
+def get_email_signature(username: str, from_address: str = None,
+                        tenant_id: str = None) -> str:
     """
     Retourne la signature HTML pour un utilisateur.
 
@@ -60,18 +61,22 @@ def get_email_signature(username: str, from_address: str = None) -> str:
             # Nouvelle logique : array apply_to_emails
             c.execute("""
                 SELECT signature_html FROM email_signatures
-                WHERE username = %s AND %s = ANY(apply_to_emails)
+                WHERE username = %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
+                  AND %s = ANY(apply_to_emails)
                 ORDER BY updated_at DESC LIMIT 1
-            """, (username, from_address))
+            """, (username, tenant_id, from_address))
             row = c.fetchone()
             if row:
                 return row[0]
             # Ancienne logique : colonne email_address
             c.execute("""
                 SELECT signature_html FROM email_signatures
-                WHERE username = %s AND email_address = %s
+                WHERE username = %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
+                  AND email_address = %s
                 LIMIT 1
-            """, (username, from_address))
+            """, (username, tenant_id, from_address))
             row = c.fetchone()
             if row:
                 return row[0]
@@ -79,9 +84,11 @@ def get_email_signature(username: str, from_address: str = None) -> str:
         # Signature par défaut
         c.execute("""
             SELECT signature_html FROM email_signatures
-            WHERE username = %s AND is_default = true
+            WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND is_default = true
             ORDER BY updated_at DESC LIMIT 1
-        """, (username,))
+        """, (username, tenant_id))
         row = c.fetchone()
         if row:
             return row[0]
@@ -89,9 +96,11 @@ def get_email_signature(username: str, from_address: str = None) -> str:
         # Signature générique (ancienne logique)
         c.execute("""
             SELECT signature_html FROM email_signatures
-            WHERE username = %s AND email_address IS NULL
+            WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND email_address IS NULL
             LIMIT 1
-        """, (username,))
+        """, (username, tenant_id))
         row = c.fetchone()
         if row:
             return row[0]

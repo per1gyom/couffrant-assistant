@@ -23,13 +23,16 @@ def _get_conn():
 @router.get("/signatures")
 def list_signatures(user: dict = Depends(require_user)):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     conn = None
     try:
         conn = _get_conn(); c = conn.cursor()
         c.execute("""
             SELECT id, name, signature_html, apply_to_emails, is_default, updated_at
-            FROM email_signatures WHERE username = %s ORDER BY is_default DESC, updated_at DESC
-        """, (username,))
+            FROM email_signatures WHERE username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+            ORDER BY is_default DESC, updated_at DESC
+        """, (username, tenant_id))
         rows = c.fetchall()
         return [{"id": r[0], "name": r[1] or f"Signature {r[0]}",
                  "signature_html": r[2], "apply_to_emails": r[3] or [],
@@ -56,7 +59,10 @@ async def create_signature(request: Request, user: dict = Depends(require_user))
     try:
         conn = _get_conn(); c = conn.cursor()
         if is_default:
-            c.execute("UPDATE email_signatures SET is_default=false WHERE username=%s", (username,))
+            c.execute(
+                "UPDATE email_signatures SET is_default=false "
+                "WHERE username=%s AND (tenant_id = %s OR tenant_id IS NULL)",
+                (username, tenant_id))
         c.execute("""
             INSERT INTO email_signatures
               (username, tenant_id, name, signature_html, apply_to_emails, is_default, updated_at)
@@ -74,11 +80,15 @@ async def create_signature(request: Request, user: dict = Depends(require_user))
 @router.patch("/signatures/{sig_id}")
 async def update_signature(sig_id: int, request: Request, user: dict = Depends(require_user)):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     data = await request.json()
     conn = None
     try:
         conn = _get_conn(); c = conn.cursor()
-        c.execute("SELECT id FROM email_signatures WHERE id=%s AND username=%s", (sig_id, username))
+        c.execute(
+            "SELECT id FROM email_signatures WHERE id=%s AND username=%s "
+            "AND (tenant_id = %s OR tenant_id IS NULL)",
+            (sig_id, username, tenant_id))
         if not c.fetchone():
             return JSONResponse({"error": "Introuvable"}, status_code=404)
         fields, vals = [], []
@@ -89,11 +99,14 @@ async def update_signature(sig_id: int, request: Request, user: dict = Depends(r
         if not fields:
             return {"ok": True}
         if "is_default" in data and data["is_default"]:
-            c.execute("UPDATE email_signatures SET is_default=false WHERE username=%s AND id!=%s",
-                      (username, sig_id))
-        vals += [sig_id, username]
+            c.execute(
+                "UPDATE email_signatures SET is_default=false "
+                "WHERE username=%s AND id!=%s AND (tenant_id = %s OR tenant_id IS NULL)",
+                (username, sig_id, tenant_id))
+        vals += [sig_id, username, tenant_id]
         c.execute(f"UPDATE email_signatures SET {','.join(fields)},updated_at=NOW() "
-                  f"WHERE id=%s AND username=%s", vals)
+                  f"WHERE id=%s AND username=%s "
+                  f"AND (tenant_id = %s OR tenant_id IS NULL)", vals)
         conn.commit()
         return {"ok": True}
     except Exception as e:
@@ -105,10 +118,14 @@ async def update_signature(sig_id: int, request: Request, user: dict = Depends(r
 @router.delete("/signatures/{sig_id}")
 def delete_signature(sig_id: int, user: dict = Depends(require_user)):
     username = user["username"]
+    tenant_id = user["tenant_id"]
     conn = None
     try:
         conn = _get_conn(); c = conn.cursor()
-        c.execute("DELETE FROM email_signatures WHERE id=%s AND username=%s", (sig_id, username))
+        c.execute(
+            "DELETE FROM email_signatures WHERE id=%s AND username=%s "
+            "AND (tenant_id = %s OR tenant_id IS NULL)",
+            (sig_id, username, tenant_id))
         conn.commit()
         return {"ok": True}
     except Exception as e:
