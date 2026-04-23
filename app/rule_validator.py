@@ -203,8 +203,9 @@ def apply_validation_result(result: dict, username: str, tenant_id: str) -> list
             conn = get_pg_conn()
             c = conn.cursor()
             c.execute(
-                "UPDATE aria_rules SET rule = %s WHERE id = %s AND username = %s",
-                (item["rule"], item["id"], username),
+                "UPDATE aria_rules SET rule = %s WHERE id = %s AND username = %s "
+                "AND (tenant_id = %s OR tenant_id IS NULL)",
+                (item["rule"], item["id"], username, tenant_id),
             )
             conn.commit()
             messages.append(f"~ regle #{item['id']} mise a jour")

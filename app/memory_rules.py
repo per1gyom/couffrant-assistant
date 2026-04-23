@@ -97,10 +97,11 @@ def save_rule(category: str, rule: str, source: str = "auto",
             SELECT id FROM aria_rules
             WHERE active = true
               AND username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
               AND category = %s
               AND LOWER(TRIM(rule)) = LOWER(TRIM(%s))
             LIMIT 1
-        """, (username, category, rule_clean))
+        """, (username, effective_tenant, category, rule_clean))
         existing = c.fetchone()
 
         if existing:
@@ -151,7 +152,8 @@ def save_rule(category: str, rule: str, source: str = "auto",
             conn.close()
 
 
-def delete_rule(rule_id: int, username: str = 'guillaume') -> bool:
+def delete_rule(rule_id: int, username: str = 'guillaume',
+                tenant_id: str = None) -> bool:
     """
     Desactive une regle (active=false).
     5F-2 : snapshot 'deactivated' dans l'historique.
@@ -161,8 +163,10 @@ def delete_rule(rule_id: int, username: str = 'guillaume') -> bool:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute(
-            "UPDATE aria_rules SET active = false, updated_at = NOW() WHERE id = %s AND username = %s",
-            (rule_id, username)
+            "UPDATE aria_rules SET active = false, updated_at = NOW() "
+            "WHERE id = %s AND username = %s "
+            "AND (tenant_id = %s OR tenant_id IS NULL)",
+            (rule_id, username, tenant_id)
         )
         if c.rowcount > 0:
             # 5F-2 : snapshot desactivation
@@ -181,7 +185,7 @@ def delete_rule(rule_id: int, username: str = 'guillaume') -> bool:
             conn.close()
 
 
-def rollback_rule(rule_id: int, username: str) -> dict:
+def rollback_rule(rule_id: int, username: str, tenant_id: str = None) -> dict:
     """
     5F-2 : Restaure une regle a sa version precedente depuis l'historique.
     Retourne {"status": "ok", "restored_version": ...} ou {"status": "error", ...}.
@@ -196,9 +200,10 @@ def rollback_rule(rule_id: int, username: str) -> dict:
             SELECT category, rule, confidence, reinforcements, active
             FROM aria_rules_history
             WHERE rule_id = %s AND username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
             ORDER BY changed_at DESC
             OFFSET 1 LIMIT 1
-        """, (rule_id, username))
+        """, (rule_id, username, tenant_id))
         prev = c.fetchone()
         if not prev:
             return {"status": "error", "message": "Aucune version precedente disponible."}
@@ -211,7 +216,8 @@ def rollback_rule(rule_id: int, username: str) -> dict:
             SET category = %s, rule = %s, confidence = %s,
                 reinforcements = %s, active = %s, updated_at = NOW()
             WHERE id = %s AND username = %s
-        """, (category, rule, confidence, reinforcements, active, rule_id, username))
+              AND (tenant_id = %s OR tenant_id IS NULL)
+        """, (category, rule, confidence, reinforcements, active, rule_id, username, tenant_id))
 
         if c.rowcount == 0:
             return {"status": "error", "message": f"Regle {rule_id} introuvable pour {username}."}

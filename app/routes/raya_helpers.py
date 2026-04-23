@@ -289,8 +289,11 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
                 try:
                     conn2 = get_pg_conn()
                     c2 = conn2.cursor()
-                    c2.execute("UPDATE aria_memory SET aria_response = %s WHERE id = %s",
-                               (clean_response, aria_memory_id))
+                    c2.execute(
+                        "UPDATE aria_memory SET aria_response = %s "
+                        "WHERE id = %s AND username = %s "
+                        "  AND (tenant_id = %s OR tenant_id IS NULL)",
+                        (clean_response, aria_memory_id, username, tenant_id))
                     conn2.commit(); conn2.close()
                 except Exception:
                     pass
