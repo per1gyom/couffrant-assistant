@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raya - Connexions tenants</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/admin-panel.css?v=24">
+<style>
+  .tenant-block { margin-bottom:36px; padding:20px; border:1px solid var(--border); border-radius:14px; background:var(--bg2) }
+  .tenant-title { font-family:var(--mono); font-weight:600; font-size:15px; color:var(--text1); margin-bottom:6px }
+  .tenant-sub { font-size:12px; color:var(--text3); margin-bottom:16px }
+  .conn-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px }
+  .conn-card { border:1px solid var(--border); border-radius:10px; padding:14px; background:var(--bg1); display:flex; flex-direction:column; gap:8px }
+  .conn-icon { font-size:22px }
+  .conn-label { font-weight:600; color:var(--text1) }
+  .conn-meta { font-size:11px; color:var(--text3); font-family:var(--mono) }
+  .conn-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:8px }
+  .btn-sm { padding:5px 10px; font-size:11px; border-radius:6px }
+  .pastille { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle }
+  .p-green { background:#14b866 } .p-red { background:#e14747 } .p-gray { background:#8a8a8a }
+  .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:100 }
+  .modal-bg.open { display:flex }
+  .modal-body { background:var(--bg2); border:1px solid var(--border); border-radius:14px; padding:24px; width:90%; max-width:600px; max-height:85vh; overflow-y:auto }
+  .modal-title { font-family:var(--mono); font-weight:600; font-size:14px; margin-bottom:14px }
+  .pick-list { display:flex; flex-direction:column; gap:8px; margin-top:12px }
+  .pick-item { padding:10px 12px; border:1px solid var(--border); border-radius:8px; cursor:pointer; transition:background .15s }
+  .pick-item:hover { background:var(--bg1) }
+  .pick-item.selected { background:#183922; border-color:#14b866 }
+  .pick-name { font-weight:600; color:var(--text1) }
+  .pick-url { font-size:11px; color:var(--text3); font-family:var(--mono); word-break:break-all }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="header-left">
+    <div class="logo">Raya <span>//</span> Connexions</div>
+    <span class="badge-admin">SUPER-ADMIN</span>
+  </div>
+  <div class="header-right">
+    <a href="/admin" class="btn-nav">Panel admin</a>
+    <a href="/chat" class="btn-nav">Chat</a>
+    <a href="/logout" class="btn-nav">Deconnexion</a>
+  </div>
+</header>
+
+<main class="main">
+<div class="section active">
+  <div class="section-title">Connexions par tenant</div>
+  <div style="font-size:12px;color:var(--text3);margin-bottom:18px">
+    Ajoute facilement des boites mail, dossiers Drive ou sites SharePoint pour chaque tenant.
+    Les connexions Gmail/Outlook lancent un flux OAuth. Les Drive/SharePoint reutilisent le token
+    Gmail/Microsoft deja connecte (pas besoin d'une nouvelle authentification).
+  </div>
+  <div id="tenants-root"><div class="loading-row"><span class="loader"></span> Chargement...</div></div>
+</div>
+</main>
+
+<!-- MODALE PICKER -->
+<div class="modal-bg" id="modal-picker">
+  <div class="modal-body">
+    <div class="modal-title" id="picker-title">Selectionner</div>
+    <div style="font-size:11px;color:var(--text3)" id="picker-crumb"></div>
+    <div class="pick-list" id="picker-list"><div class="loading-row"><span class="loader"></span> Chargement...</div></div>
+    <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px">
+      <button class="btn btn-ghost" onclick="closePicker()">Annuler</button>
+      <button class="btn btn-primary" id="picker-confirm" onclick="confirmPicker()" disabled>Confirmer</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const TOOL_META = {
+  gmail:      { icon: '@', label: 'Gmail', kind: 'oauth' },
+  microsoft:  { icon: 'M', label: 'Microsoft (Outlook/Teams)', kind: 'oauth' },
+  outlook:    { icon: 'M', label: 'Outlook', kind: 'oauth' },
+  drive:      { icon: 'D', label: 'Google Drive', kind: 'picker_drive' },
+  sharepoint: { icon: 'S', label: 'SharePoint', kind: 'picker_sharepoint' },
+  odoo:       { icon: 'O', label: 'Odoo ERP', kind: 'manual' },
+};
+let _pickerCtx = null; // { tenant_id, tool_type, selected }
+
+async function loadTenants() {
+  const root = document.getElementById('tenants-root');
+  try {
+    const r = await fetch('/admin/connexions-data');
+    const data = await r.json();
+    if (!data || !data.tenants) {
+      root.innerHTML = '<div class="alert alert-err">Impossible de charger les tenants.</div>';
+      return;
+    }
+    root.innerHTML = '';
+    data.tenants.forEach(t => root.appendChild(renderTenantBlock(t)));
+  } catch (e) {
+    root.innerHTML = '<div class="alert alert-err">Erreur : ' + e.message + '</div>';
+  }
+}
+
+function renderTenantBlock(t) {
+  const block = document.createElement('div');
+  block.className = 'tenant-block';
+  const connsById = {};
+  (t.connections || []).forEach(c => { (connsById[c.tool_type] = connsById[c.tool_type] || []).push(c); });
+
+  block.innerHTML = `
+    <div class="tenant-title">${t.tenant_id}</div>
+    <div class="tenant-sub">${(t.connections||[]).length} connexion(s) actives</div>
+    <div class="conn-grid" id="grid-${t.tenant_id}"></div>
+  `;
+  const grid = block.querySelector('.conn-grid');
+
+  ['gmail','microsoft','drive','sharepoint'].forEach(tool => {
+    const existing = connsById[tool] || [];
+    if (existing.length === 0) {
+      grid.appendChild(renderEmptyCard(t.tenant_id, tool));
+    } else {
+      existing.forEach(c => grid.appendChild(renderConnCard(t.tenant_id, tool, c)));
+      // Bouton + pour ajouter une 2e connexion du meme type
+      grid.appendChild(renderEmptyCard(t.tenant_id, tool, true));
+    }
+  });
+  return block;
+}
+
+function renderEmptyCard(tenant_id, tool, isAdditional) {
+  const meta = TOOL_META[tool];
+  const div = document.createElement('div');
+  div.className = 'conn-card';
+  div.style.borderStyle = 'dashed';
+  div.innerHTML = `
+    <div class="conn-icon">${meta.icon}</div>
+    <div class="conn-label">${isAdditional ? 'Ajouter ' : 'Connecter '}${meta.label}</div>
+    <div class="conn-meta">Aucune connexion${isAdditional ? ' supplementaire' : ''}</div>
+    <div class="conn-actions">
+      <button class="btn btn-primary btn-sm" onclick="launchConnect('${tenant_id}','${tool}')">
+        + Connecter
+      </button>
+    </div>
+  `;
+  return div;
+}
+
+function renderConnCard(tenant_id, tool, conn) {
+  const meta = TOOL_META[tool];
+  const div = document.createElement('div');
+  div.className = 'conn-card';
+  const statusCls = conn.status === 'connected' ? 'p-green' : (conn.status === 'error' ? 'p-red' : 'p-gray');
+  div.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:flex-start">
+      <div class="conn-icon">${meta.icon}</div>
+      <span class="pastille ${statusCls}" title="${conn.status}"></span>
+    </div>
+    <div class="conn-label">${conn.label || meta.label}</div>
+    <div class="conn-meta">${conn.connected_email || conn.config_summary || '-'}</div>
+    <div class="conn-meta">Perm : ${conn.super_admin_permission_level || 'read'}</div>
+    <div class="conn-actions">
+      <button class="btn btn-ghost btn-sm" onclick="launchConnect('${tenant_id}','${tool}',${conn.id})">Reconnecter</button>
+      <button class="btn btn-danger btn-sm" onclick="deleteConn(${conn.id})">Retirer</button>
+    </div>
+  `;
+  return div;
+}
+
+function launchConnect(tenant_id, tool, connection_id) {
+  const meta = TOOL_META[tool];
+  if (meta.kind === 'oauth') {
+    // Flux OAuth : redirection vers admin_oauth.py
+    const qs = connection_id ? `?connection_id=${connection_id}` : '';
+    window.location.href = `/admin/connections/${tenant_id}/oauth/${tool}/start${qs}`;
+    return;
+  }
+  if (meta.kind === 'picker_sharepoint') { openSharePointPicker(tenant_id); return; }
+  if (meta.kind === 'picker_drive')      { openDrivePicker(tenant_id);      return; }
+  alert('Connexion manuelle : a ajouter via panel admin classique.');
+}
+
+// ---- SHAREPOINT PICKER ------------------------------------------------
+async function openSharePointPicker(tenant_id) {
+  _pickerCtx = { tenant_id, tool_type: 'sharepoint', selected: null };
+  document.getElementById('picker-title').textContent = 'Choisir un site SharePoint';
+  document.getElementById('picker-crumb').textContent = `Tenant : ${tenant_id}`;
+  document.getElementById('picker-list').innerHTML = '<div class="loading-row"><span class="loader"></span> Recherche des sites...</div>';
+  document.getElementById('picker-confirm').disabled = true;
+  document.getElementById('modal-picker').classList.add('open');
+  try {
+    const r = await fetch(`/admin/sharepoint/sites/${tenant_id}`);
+    const data = await r.json();
+    if (data.status !== 'ok') {
+      document.getElementById('picker-list').innerHTML = `<div class="alert alert-err">${data.message || 'Erreur'}</div>`;
+      return;
+    }
+    const list = document.getElementById('picker-list');
+    list.innerHTML = '';
+    (data.sites || []).forEach(s => {
+      const item = document.createElement('div');
+      item.className = 'pick-item';
+      item.innerHTML = `<div class="pick-name">${s.name}</div><div class="pick-url">${s.webUrl}</div>`;
+      item.onclick = () => selectPick(item, { id: s.id, name: s.name, url: s.webUrl });
+      list.appendChild(item);
+    });
+    if ((data.sites || []).length === 0) {
+      list.innerHTML = '<div style="color:var(--text3); font-size:12px">Aucun site SharePoint trouve.</div>';
+    }
+  } catch (e) {
+    document.getElementById('picker-list').innerHTML = `<div class="alert alert-err">${e.message}</div>`;
+  }
+}
+
+// ---- DRIVE PICKER -----------------------------------------------------
+async function openDrivePicker(tenant_id, parent_id) {
+  parent_id = parent_id || 'root';
+  _pickerCtx = { tenant_id, tool_type: 'drive', selected: null };
+  document.getElementById('picker-title').textContent = 'Choisir un dossier Google Drive';
+  document.getElementById('picker-crumb').textContent = `Tenant : ${tenant_id} - Parent : ${parent_id}`;
+  document.getElementById('picker-list').innerHTML = '<div class="loading-row"><span class="loader"></span> Recherche des dossiers...</div>';
+  document.getElementById('picker-confirm').disabled = true;
+  document.getElementById('modal-picker').classList.add('open');
+  try {
+    const r = await fetch(`/admin/drive/folders/${tenant_id}?parent_id=${parent_id}`);
+    const data = await r.json();
+    if (data.status !== 'ok') {
+      document.getElementById('picker-list').innerHTML = `<div class="alert alert-err">${data.message || 'Erreur'}</div>`;
+      return;
+    }
+    const list = document.getElementById('picker-list');
+    list.innerHTML = '';
+    (data.folders || []).forEach(f => {
+      const item = document.createElement('div');
+      item.className = 'pick-item';
+      item.innerHTML = `<div class="pick-name">${f.name}</div><div class="pick-url">${f.webViewLink || f.id}</div>
+        <div style="margin-top:6px"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); openDrivePicker('${tenant_id}','${f.id}')">Ouvrir &gt;</button></div>`;
+      item.onclick = () => selectPick(item, { id: f.id, name: f.name, url: f.webViewLink });
+      list.appendChild(item);
+    });
+    if ((data.folders || []).length === 0) {
+      list.innerHTML = '<div style="color:var(--text3); font-size:12px">Aucun sous-dossier.</div>';
+    }
+  } catch (e) {
+    document.getElementById('picker-list').innerHTML = `<div class="alert alert-err">${e.message}</div>`;
+  }
+}
+
+function selectPick(item, data) {
+  document.querySelectorAll('.pick-item.selected').forEach(i => i.classList.remove('selected'));
+  item.classList.add('selected');
+  _pickerCtx.selected = data;
+  document.getElementById('picker-confirm').disabled = false;
+}
+
+function closePicker() {
+  document.getElementById('modal-picker').classList.remove('open');
+  _pickerCtx = null;
+}
+
+async function confirmPicker() {
+  if (!_pickerCtx || !_pickerCtx.selected) return;
+  const { tenant_id, tool_type, selected } = _pickerCtx;
+  const btn = document.getElementById('picker-confirm');
+  btn.disabled = true; btn.textContent = 'Enregistrement...';
+  try {
+    const body = tool_type === 'sharepoint'
+      ? { tenant_id, site_id: selected.id, site_name: selected.name, site_url: selected.url }
+      : { tenant_id, folder_id: selected.id, folder_name: selected.name, folder_url: selected.url };
+    const url = tool_type === 'sharepoint' ? '/admin/sharepoint/select' : '/admin/drive/select';
+    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await r.json();
+    if (data.status !== 'ok') {
+      alert('Erreur : ' + (data.message || 'inconnue'));
+      btn.disabled = false; btn.textContent = 'Confirmer';
+      return;
+    }
+    closePicker();
+    loadTenants();
+  } catch (e) {
+    alert('Erreur : ' + e.message);
+    btn.disabled = false; btn.textContent = 'Confirmer';
+  }
+}
+
+async function deleteConn(connection_id) {
+  if (!confirm('Retirer cette connexion ?')) return;
+  try {
+    const r = await fetch(`/admin/connexions-delete/${connection_id}`, { method: 'POST' });
+    const data = await r.json();
+    if (data.status !== 'ok') {
+      alert('Erreur : ' + (data.message || 'inconnue'));
+      return;
+    }
+    loadTenants();
+  } catch (e) {
+    alert('Erreur : ' + e.message);
+  }
+}
+
+// Fermer la modale au clic sur le fond
+document.getElementById('modal-picker').addEventListener('click', (e) => {
+  if (e.target.id === 'modal-picker') closePicker();
+});
+
+// Init au chargement de la page
+loadTenants();
+</script>
+</body>
+</html>

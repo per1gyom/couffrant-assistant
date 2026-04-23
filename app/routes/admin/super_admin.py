@@ -350,6 +350,62 @@ def admin_panel(request: Request):
         return HTMLResponse(content=f.read())
 
 
+# ─── PAGE /admin/connexions ─────────────────────────────────────────
+
+@router.get("/admin/connexions", response_class=HTMLResponse)
+def admin_connexions_page(request: Request):
+    """Page UI dediee pour gerer les connexions mail/Drive/SharePoint par tenant."""
+    try:
+        require_admin(request)
+    except HTTPException:
+        return RedirectResponse("/login-app")
+    with open("app/templates/admin_connexions.html", "r", encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+@router.get("/admin/connexions-data")
+def admin_connexions_data(request: Request, _: dict = Depends(require_admin)):
+    """Retourne la liste des tenants avec leurs connexions actives."""
+    from app.database import get_pg_conn
+    with get_pg_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT tenant_id FROM users WHERE tenant_id IS NOT NULL ORDER BY tenant_id")
+        tenants = [r[0] for r in cur.fetchall()]
+        out = []
+        for tid in tenants:
+            cur.execute("""
+                SELECT id, tool_type, label, status, connected_email,
+                       super_admin_permission_level, config
+                FROM tenant_connections
+                WHERE tenant_id = %s
+                ORDER BY tool_type, id
+            """, (tid,))
+            rows = cur.fetchall()
+            conns = []
+            for r in rows:
+                cfg = r[6] if isinstance(r[6], dict) else {}
+                summary = cfg.get("site_name") or cfg.get("folder_name") or ""
+                conns.append({
+                    "id": r[0], "tool_type": r[1], "label": r[2], "status": r[3],
+                    "connected_email": r[4], "super_admin_permission_level": r[5],
+                    "config_summary": summary,
+                })
+            out.append({"tenant_id": tid, "connections": conns})
+    return {"tenants": out}
+
+
+@router.post("/admin/connexions-delete/{connection_id}")
+def admin_connexions_delete(request: Request, connection_id: int, _: dict = Depends(require_admin)):
+    """Retire une connexion (DELETE + CASCADE sur connection_assignments)."""
+    from app.database import get_pg_conn
+    with get_pg_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM connection_assignments WHERE connection_id = %s", (connection_id,))
+        cur.execute("DELETE FROM tenant_connections WHERE id = %s", (connection_id,))
+        conn.commit()
+    return {"status": "ok"}
+
+
 @router.post("/admin/auth")
 async def admin_auth(request: Request):
     """Re-authentification admin — protège l'accès au panel."""
