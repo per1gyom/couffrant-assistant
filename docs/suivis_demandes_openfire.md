@@ -109,12 +109,72 @@ Aucune modification de code Raya nécessaire : l'endpoint `/webhooks/odoo/record
 
 ---
 
+## 📨 Demande #3 — Complément : child_ids + ir.attachment + rappel webhooks
+
+**Date d'envoi** : 22 avril 2026 (soir)
+**Contenu du mail envoyé** : voir `docs/mail_openfire_complement_22avril_soir.md`
+**Statut actuel** : ⏳ **envoyé, en attente de retour**
+**Destinataire nommé** : Dorian (référent technique OpenFire)
+
+### Contexte
+
+La Demande #1 envoyée aujourd'hui par Guillaume couvrait 6 modèles (sale.order.line, product.*, account.move.line, account.payment.line, mail.message) mais avait omis deux éléments identifiés dans nos échanges internes des 20-21/04 : les relations parent/enfant sur `res.partner` et la lecture des `ir.attachment`. Ce mail complémentaire reprend ces 2 manques + rappelle l'attente sur les webhooks.
+
+### Ce qui a été demandé
+
+| # | Élément | Raison |
+|---|---|---|
+| 1 | `res.partner.child_ids` + `parent_id` (lecture) | Remonter les contacts rattachés à une société : gérant, comptable, chargé d'affaire. Sans ça, les fiches personnes sont orphelines. |
+| 2 | `ir.attachment` (lecture) — métadonnées + `datas` + `res_model` + `res_id` | Lire les pièces jointes (KBIS, mandats ENEDIS signés, devis PDF, fiches techniques Yomatec). Avec option de fallback sur périmètre restreint (uniquement PJ de `sale.order`, `account.move`, `res.partner`) si volume pose problème. |
+| 3 | Rappel webhooks temps-réel | Simple mention que la Demande #2 reste en attente. Non bloquant. |
+
+### Impact métier si débloqué
+
+Raya pourra enfin :
+- *"Qui est le comptable de la SARL Des Moines ?"* → remonter les `child_ids` de la fiche société
+- *"Montre-moi le KBIS du partner #3169"* → extraire le PDF attaché à la fiche Les Amis du Glandier
+- *"Le mandat ENEDIS de Francine est-il signé ?"* → lire le PDF `ir.attachment` et confirmer la date
+- *"Quels sont les documents liés au devis D2500086 ?"* → requête sur `ir.attachment.res_model='sale.order' AND res_id=XXX`
+- Analyser le contenu des fiches techniques produits Yomatec (T20B300-2-Y et autres) pour décoder les refs automatiquement
+
+### Récap consolidé pour OpenFire (8 éléments total)
+
+Inclus dans ce mail pour donner à Dorian la vue d'ensemble :
+
+1. `sale.order.line` ✅ *(déjà ouvert aujourd'hui)*
+2. `product.product` + `product.template` 🟡
+3. `account.move.line` 🟡
+4. `account.payment.line` (avec Extra Rights) 🟡
+5. `mail.message` (approche à caler) 🟡
+6. `res.partner.child_ids` + `parent_id` 🟡 **(nouveau #3)**
+7. `ir.attachment` (métadonnées + `datas` + `res_model`/`res_id`) 🟡 **(nouveau #3)**
+8. Webhooks temps-réel 🟡 (rappel Demande #2)
+
+### Journal
+
+| Date | Événement |
+|---|---|
+| 20/04/2026 | Identification du besoin child_ids dans les échanges clients |
+| 21/04/2026 | Identification du besoin ir.attachment (KBIS Glandier invisible dans Raya) |
+| 22/04/2026 soir | Mail complémentaire envoyé à Dorian |
+| — | _En attente de son retour..._ |
+
+### Actions après débloquage
+
+1. Retirer `ir.attachment` et `res.partner.child_ids` de `deactivated_models` si présents
+2. Ajouter un loader dédié dans les tools Raya pour `ir.attachment` (avec extraction PDF via PyPDF2 ou similaire)
+3. Enrichir `search_partners` pour remonter les `child_ids` liés automatiquement
+4. Tester un cas concret : interroger Raya sur "Qui gère Les Amis du Glandier ?" et vérifier qu'elle cite Jacques Coullet (président) et Francine (interlocutrice principale)
+
+
+---
+
 ## 📇 Contact OpenFire
 
-À compléter :
-- Email : ?
-- Téléphone : ?
-- Référent dossier Couffrant : ?
+- Référent technique : **Dorian** (tutoiement d'usage entre Guillaume et lui)
+- Email : _à compléter_
+- Téléphone : _à compléter_
+- Instance : `entreprisecouffrant.openfire.fr`
 
 ## 🧭 Bonnes pratiques pour une prochaine demande
 
