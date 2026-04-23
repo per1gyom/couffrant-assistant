@@ -213,22 +213,25 @@ def tenant_unassign_connection(request: Request, connection_id: int, username: s
 
 @router.get("/tenant/rules")
 def tenant_rules(request: Request, user: dict = Depends(require_tenant_admin)):
-    conn = None
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("""
-            SELECT ar.id, ar.username, ar.category, ar.rule,
-                   ar.confidence, ar.reinforcements, ar.active
-            FROM aria_rules ar
-            JOIN users u ON u.username = ar.username
-            WHERE u.tenant_id = %s
-            ORDER BY ar.username, ar.active DESC, ar.confidence DESC
-        """, (user["tenant_id"],))
-        cols = [d[0] for d in c.description]
-        return [dict(zip(cols, row)) for row in c.fetchall()]
-    finally:
-        if conn: conn.close()
+    """ENDPOINT DESACTIVE (25 avril 2026) — decision Guillaume :
+
+    Les regles apprises par Raya appartiennent a CHAQUE UTILISATEUR
+    personnellement, pas au tenant. Un admin tenant n'a aucune
+    legitimite a voir le contenu des regles perso de ses collaborateurs
+    (contexte metier confidentiel, apprentissages prives, preferences
+    personnelles).
+
+    Seul l'utilisateur lui-meme (via /memory/rules) ou le super_admin
+    (via /admin/rules) peut voir le contenu des regles.
+
+    L'admin tenant a acces a des STATS AGREGEES sur la consommation
+    (nombre d'interactions, tokens) via /tenant/usage (endpoint a venir),
+    mais JAMAIS au contenu des regles.
+    """
+    raise HTTPException(
+        status_code=403,
+        detail="Les règles Raya sont personnelles à chaque utilisateur. L'admin tenant n'y a pas accès. Consultez /tenant/usage pour les statistiques de consommation.",
+    )
 
 
 # ─── PANEL TENANT ───

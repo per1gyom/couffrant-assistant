@@ -39,7 +39,7 @@ from app.app_security import (
     SCOPE_USER, DEFAULT_TENANT,
 )
 from app.security_auth import unlock_account
-from app.routes.deps import require_admin, require_tenant_admin, assert_same_tenant
+from app.routes.deps import require_admin, require_tenant_admin, require_super_admin, assert_same_tenant
 from app.admin_audit import log_admin_action
 from app.dashboard_service import get_costs_dashboard
 
@@ -147,7 +147,12 @@ def admin_users_reset_password(
 # ─── MÉMOIRE & RÈGLES ───
 
 @router.get("/admin/rules")
-def admin_rules(request: Request, user: str = "", _: dict = Depends(require_admin)):
+def admin_rules(request: Request, user: str = "", _: dict = Depends(require_super_admin)):
+    # ACCESS RESTREINT AU SUPER_ADMIN UNIQUEMENT (25 avril 2026)
+    # Les regles perso des utilisateurs ne doivent etre visibles que par
+    # le developpeur Raya (Guillaume). Le jour ou il y aura des
+    # collaborateurs Raya, prevoir un systeme d'impersonation explicite
+    # avec audit log.
     conn = None
     try:
         conn = get_pg_conn()
@@ -170,7 +175,10 @@ def admin_rules(request: Request, user: str = "", _: dict = Depends(require_admi
 
 
 @router.get("/admin/insights")
-def admin_insights(request: Request, user: str = "", _: dict = Depends(require_admin)):
+def admin_insights(request: Request, user: str = "", _: dict = Depends(require_super_admin)):
+    # ACCESS RESTREINT AU SUPER_ADMIN UNIQUEMENT (25 avril 2026)
+    # Meme raisonnement que /admin/rules : les insights personnels
+    # d'un utilisateur sont confidentiels.
     conn = None
     try:
         conn = get_pg_conn()
