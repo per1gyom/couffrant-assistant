@@ -42,6 +42,8 @@ from app.topics import router as topics_router
 from app.shortcuts import router as shortcuts_router
 from app.routes.signatures import router as signatures_router
 from app.routes.admin_oauth import router as admin_oauth_router
+from app.routes.admin_sharepoint import router as admin_sharepoint_router
+from app.routes.admin_drive import router as admin_drive_router
 from app.routes.admin_rules import router as admin_rules_router
 from app.routes.raya_deepen import router as raya_deepen_router
 
@@ -119,6 +121,8 @@ app.include_router(topics_router)
 app.include_router(shortcuts_router)
 app.include_router(signatures_router)
 app.include_router(admin_oauth_router)
+app.include_router(admin_sharepoint_router)
+app.include_router(admin_drive_router)
 app.include_router(admin_rules_router)
 app.include_router(raya_deepen_router)
 
