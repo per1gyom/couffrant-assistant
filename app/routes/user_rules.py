@@ -50,12 +50,15 @@ def rules_stats(request: Request, user: dict = Depends(require_user)):
         )
         by_cat = {row[0] or 'Autres': row[1] for row in c.fetchall()}
         total = sum(by_cat.values())
-        # Regles a revoir : recentes ET peu sures
+        # Regles a revoir : recentes (7j) ET peu sures (conf<0.8 ET peu renforcees)
+        # Le ET logique remplace le OU precedent pour eviter d'inclure
+        # 92 regles sur 134 — on se concentre sur celles vraiment incertaines
         c.execute(
             "SELECT COUNT(*) FROM aria_rules "
             "WHERE username=%s AND (tenant_id=%s OR tenant_id IS NULL) AND active=true "
-            "AND created_at > NOW() - INTERVAL '14 days' "
-            "AND (COALESCE(confidence, 0) < 0.8 OR COALESCE(reinforcements, 0) <= 3)",
+            "AND created_at > NOW() - INTERVAL '7 days' "
+            "AND COALESCE(confidence, 0) < 0.8 "
+            "AND COALESCE(reinforcements, 0) <= 2",
             (username, tenant_id)
         )
         review_count = c.fetchone()[0] or 0

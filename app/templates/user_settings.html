@@ -1881,15 +1881,17 @@ const DIVERS_THRESHOLD = 2;  // catégories avec <=2 règles -> "Divers"
 // Limite par session "Faisons le point"
 const REVIEW_SESSION_SIZE = 5;
 
-// Critère "règle à revoir" : récente ET peu sûre
+// Critère "règle à revoir" : récente (7j) ET vraiment incertaine
+// On combine confidence<0.8 ET reinforcements<=2 (ET logique, pas OU)
+// pour ne remonter que les règles qui méritent vraiment une validation.
 function needsReview(rule) {
   if (!rule.created_at) return false;
   const ageMs = Date.now() - new Date(rule.created_at).getTime();
   const ageDays = ageMs / 86400000;
-  if (ageDays > 14) return false;
+  if (ageDays > 7) return false;
   const conf = rule.confidence || 0;
   const reinf = rule.reinforcements || 0;
-  return conf < 0.8 || reinf <= 3;
+  return conf < 0.8 && reinf <= 2;
 }
 
 // Icônes SVG par catégorie (map vers classes de couleur dot-*)
