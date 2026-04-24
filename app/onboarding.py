@@ -156,7 +156,7 @@ def _generate_profile(username: str, tenant_id: str):
         f"{conv_text}\n\n"
         "Genere en JSON strict (sans backticks) :\n"
         "{\"profile_summary\": \"resume ~100 mots\","
-        "\"rules\": [{\"category\": \"comportement\", \"rule\": \"regle concrete\"}],"
+        "\"rules\": [{\"category\": \"Comportement\", \"rule\": \"regle concrete\"}],"
         "\"insights\": [{\"topic\": \"sujet\", \"text\": \"observation\"}]}\n\n"
         "rules : 5-10 regles concretes sur style, priorites, outils, metier.\n"
         "insights : 3-5 observations cles.\n"
@@ -199,7 +199,10 @@ def _generate_profile(username: str, tenant_id: str):
     for item in parsed.get("rules", []):
         try:
             if item.get("rule") and len(item["rule"]) > 5:
-                save_rule(item.get("category", "comportement"), item["rule"],
+                # Phase 3 : default "Comportement" (forme canonique) au lieu de
+                # "comportement" minuscule qui creait un doublon avec la version
+                # majuscule au fil du temps.
+                save_rule(item.get("category", "Comportement"), item["rule"],
                           "onboarding", 0.8, username, tenant_id)
                 rules_ok += 1
         except Exception:

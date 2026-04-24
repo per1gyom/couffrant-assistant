@@ -154,7 +154,22 @@ Pour rules_learned : ne propose que des regles NOUVELLES. Prefere la qualite a l
     base_confidence = 0.5
     for rule_text in rules_learned:
         if rule_text and len(rule_text) > 10:
-            save_rule("auto", rule_text, "synthesis", base_confidence, username, tenant_id=effective_tenant)
+            # Phase 3 : on passe par le validateur Sonnet pour categoriser
+            # proprement au lieu de forcer category="auto" en dur.
+            # Si le validateur crashe (pas d'embedding, pas de LLM), fallback
+            # sur comportement historique pour ne rien perdre.
+            try:
+                from app.rule_validator import validate_rule_before_save, apply_validation_result
+                result = validate_rule_before_save(
+                    username, effective_tenant, "auto", rule_text
+                )
+                if result.get("decision") != "CONFLICT":
+                    apply_validation_result(result, username, effective_tenant)
+                # CONFLICT : on ignore silencieusement en synthese (pas d'utilisateur
+                # en face pour trancher). Le dimanche soir Opus fera le menage.
+            except Exception as e:
+                print(f"[memory_synthesis] validator error, fallback auto: {e}")
+                save_rule("auto", rule_text, "synthesis", base_confidence, username, tenant_id=effective_tenant)
 
     for item in parsed.get("insights", []):
         if isinstance(item, dict):

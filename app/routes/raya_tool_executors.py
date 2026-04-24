@@ -366,27 +366,69 @@ def _execute_create_image(inp: dict, username: str, tenant_id: str) -> dict:
 # ==========================================================================
 
 def _execute_remember_preference(inp: dict, username: str, tenant_id: str) -> dict:
-    """Enregistre une preference durable dans aria_rules."""
+    """Enregistre une preference durable dans aria_rules.
+
+    Phase 3 : passe par le validateur Sonnet pour categoriser proprement
+    (detection doublons, categorie canonique, extraction tags [xxx]).
+    Fallback sur save_rule direct si le validateur crashe.
+    """
     from app.memory_rules import save_rule
 
-    category = inp.get("category", "general")
+    # Default "Comportement" (forme canonique) au lieu de "general"
+    category = inp.get("category") or "Comportement"
     preference = inp.get("preference", "")
 
-    rule_id = save_rule(
-        category=category,
-        rule=preference,
-        source="user_explicit",
-        confidence=1.0,
-        username=username,
-        tenant_id=tenant_id,
-        personal=False,
-    )
-    return {
-        "status": "remembered",
-        "rule_id": rule_id,
-        "category": category,
-        "preference": preference,
-    }
+    if not preference or not preference.strip():
+        return {"status": "empty_preference"}
+
+    # Passage par le validateur
+    try:
+        from app.rule_validator import validate_rule_before_save, apply_validation_result
+        result = validate_rule_before_save(
+            username, tenant_id, category, preference
+        )
+        decision = result.get("decision", "NEW")
+        if decision == "CONFLICT":
+            return {
+                "status": "conflict",
+                "message": result.get("conflict_message",
+                                       "Conflit avec une regle existante.")
+            }
+        if decision == "DUPLICATE":
+            skipped = result.get("rules_to_skip", [])
+            return {
+                "status": "duplicate",
+                "rule_id": skipped[0] if skipped else None,
+                "category": category,
+                "preference": preference,
+            }
+        # NEW, REFINE, SPLIT, RECATEGORIZE : on applique
+        apply_validation_result(result, username, tenant_id)
+        added = result.get("rules_to_add", [])
+        final_category = added[0].get("category", category) if added else category
+        return {
+            "status": "remembered",
+            "decision": decision,
+            "category": final_category,
+            "preference": preference,
+        }
+    except Exception as e:
+        print(f"[remember_preference] validator error, fallback direct: {e}")
+        rule_id = save_rule(
+            category=category,
+            rule=preference,
+            source="user_explicit",
+            confidence=1.0,
+            username=username,
+            tenant_id=tenant_id,
+            personal=False,
+        )
+        return {
+            "status": "remembered",
+            "rule_id": rule_id,
+            "category": category,
+            "preference": preference,
+        }
 
 
 def _execute_forget_preference(inp: dict, username: str, tenant_id: str) -> dict:

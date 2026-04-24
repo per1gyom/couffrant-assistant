@@ -28,11 +28,15 @@ from app.ai_prompts import (
 
 def get_mail_categories(username: str) -> list[str]:
     """
-    Charge les catégories de mail depuis aria_rules (catégorie 'categories_mail').
-    Raya les fait évoluer via [ACTION:LEARN:categories_mail|nouvelle_categorie].
+    Charge les catégories de mail depuis aria_rules (catégorie 'Tri mails').
+    Raya les fait évoluer via [ACTION:LEARN:Tri mails|nouvelle_categorie].
     Si vide, retourne les catégories par défaut et les seed en base.
     """
-    rules = get_rules_by_category(username, 'categories_mail')
+    # Phase 3 : lecture dans la categorie canonique 'Tri mails' en priorite,
+    # fallback sur l'ancienne 'categories_mail' pour retro-compat.
+    rules = get_rules_by_category(username, 'Tri mails')
+    if not rules:
+        rules = get_rules_by_category(username, 'categories_mail')
     if rules:
         return [r.strip().lower() for r in rules if r.strip()]
     # Première utilisation : seed en base pour que Raya puisse les modifier
@@ -45,7 +49,8 @@ def _seed_default_categories(username: str):
     try:
         from app.memory_rules import save_rule
         for cat in _DEFAULT_CATEGORIES:
-            save_rule('categories_mail', cat, 'seed', 0.9, username)
+            # Phase 3 : 'Tri mails' (forme canonique) au lieu de 'categories_mail'
+            save_rule('Tri mails', cat, 'seed', 0.9, username)
     except Exception:
         pass
 
