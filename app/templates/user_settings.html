@@ -665,68 +665,13 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
           <span>Mes comptes connectés</span>
         </div>
 
-        <!-- Connexion 1 : Outlook/Microsoft 365 (OK) -->
-        <div class="conn-card">
-          <div class="conn-logo">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path fill="#0078d4" d="M7 3h14v18H7z"/><path fill="#0078d4" d="M3 6l11-2v16l-11-2z"/><circle cx="8.5" cy="12" r="2.5" fill="#fff"/></svg>
-          </div>
-          <div class="conn-body">
-            <div class="conn-title">Microsoft 365</div>
-            <div class="conn-email">guillaume@couffrant-solar.fr</div>
-            <div class="conn-meta">
-              Mails · Agenda · Contacts
-              <span>·</span>
-              <span>Connecté depuis le 12 mars 2026</span>
+        <!-- Liste des connexions (générée dynamiquement) -->
+        <div id="connectionsContainer">
+          <div style="text-align:center;padding:30px 20px;color:var(--text-muted);font-size:13.5px">
+            <div style="display:inline-block;animation:spin 1s linear infinite;margin-bottom:8px">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
             </div>
-          </div>
-          <div class="conn-actions">
-            <span class="conn-status status-ok"><span class="dot"></span> Actif</span>
-          </div>
-        </div>
-
-        <!-- Connexion 2 : Gmail (expire bientôt) -->
-        <div class="conn-card warn">
-          <div class="conn-logo">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path fill="#EA4335" d="M2 6l10 7 10-7v12a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/><path fill="#FBBC04" d="M2 6l10 7L22 6"/></svg>
-          </div>
-          <div class="conn-body">
-            <div class="conn-title">Gmail (secondaire)</div>
-            <div class="conn-email">guillaume.perrin.pro@gmail.com</div>
-            <div class="conn-meta">
-              Mails uniquement
-              <span>·</span>
-              <span style="color:var(--yellow);font-weight:600">Token expire dans 4 jours</span>
-            </div>
-          </div>
-          <div class="conn-actions">
-            <span class="conn-status status-warn"><span class="dot"></span> Expire bientôt</span>
-            <button class="btn btn-primary" style="font-size:12.5px">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
-              Prolonger
-            </button>
-          </div>
-        </div>
-
-        <!-- Connexion 3 : SharePoint (connexion perdue) -->
-        <div class="conn-card off">
-          <div class="conn-logo">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path fill="#0072C6" d="M3 4h18v16H3z"/><path fill="#fff" d="M6 8h5v8H6zM13 10h5v6h-5z"/></svg>
-          </div>
-          <div class="conn-body">
-            <div class="conn-title">SharePoint Couffrant Solar</div>
-            <div class="conn-email">couffrantsolar.sharepoint.com</div>
-            <div class="conn-meta">
-              Documents, dossiers clients
-              <span>·</span>
-              <span style="color:var(--danger);font-weight:600">Connexion perdue depuis 2 jours</span>
-            </div>
-          </div>
-          <div class="conn-actions">
-            <span class="conn-status status-off"><span class="dot"></span> Déconnecté</span>
-            <button class="btn btn-primary" style="font-size:12.5px">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
-              Reconnecter
-            </button>
+            <div>Chargement de tes connexions…</div>
           </div>
         </div>
 
@@ -743,7 +688,7 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
               <div class="toggle-title">Récupérer mes signatures d'email</div>
               <div class="toggle-desc">Raya analyse tes derniers mails envoyés pour extraire ta signature automatiquement. Utile si tu changes de signature ou si tu en as plusieurs selon le contexte.</div>
             </div>
-            <button class="btn">
+            <button class="btn" id="fetchSignaturesBtn" onclick="fetchMySignatures()">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V6M5 12l7-7 7 7"/></svg>
               Lancer
             </button>
@@ -1769,12 +1714,14 @@ if (document.readyState === 'loading') {
     loadDataStats();
     checkDeletionStatus();
     loadRules();
+    loadConnections();
   });
 } else {
   loadProfile();
   loadDataStats();
   checkDeletionStatus();
   loadRules();
+  loadConnections();
 }
 
 // ===========================================================================
@@ -2157,6 +2104,121 @@ async function loadRules() {
       container.innerHTML = `<div style="text-align:center;padding:40px 20px;color:var(--danger);font-size:13.5px">Erreur lors du chargement des règles.</div>`;
     }
   }
+}
+
+// ===========================================================================
+// PHASE 5 — Onglet Mes connexions branché sur /profile/connections
+// ===========================================================================
+
+// Meta pour chaque provider (logo SVG, nom humain, services)
+const PROVIDER_META = {
+  'microsoft': {
+    title: 'Microsoft 365',
+    services: 'Mails · Agenda · Contacts',
+    logo: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path fill="#0078d4" d="M7 3h14v18H7z"/><path fill="#0078d4" d="M3 6l11-2v16l-11-2z"/><circle cx="8.5" cy="12" r="2.5" fill="#fff"/></svg>',
+  },
+  'google': {
+    title: 'Gmail / Google',
+    services: 'Mails · Drive · Agenda',
+    logo: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path fill="#EA4335" d="M2 6l10 7 10-7v12a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/><path fill="#FBBC04" d="M2 6l10 7L22 6"/></svg>',
+  },
+};
+
+// Rend une card de connexion
+function renderConnectionCard(conn) {
+  const meta = PROVIDER_META[conn.provider] || {title: conn.provider, services: '', logo: ''};
+  let cardClass = 'conn-card';
+  let statusClass = 'status-ok';
+  let statusLabel = 'Actif';
+  let metaNote = '';
+  let actionBtn = '';
+  const updated = conn.updated_at ? formatRelativeShort(conn.updated_at) : '';
+
+  if (conn.status === 'ok' || conn.status === 'no_expiry') {
+    statusClass = 'status-ok'; statusLabel = 'Actif';
+    metaNote = updated ? `Rafraîchi ${updated}` : '';
+  } else if (conn.status === 'refreshable') {
+    // Token expiré côté API mais refresh_token dispo — tout va bien, auto-refresh
+    statusClass = 'status-ok'; statusLabel = 'Actif';
+    metaNote = 'Rafraîchi automatiquement';
+  } else if (conn.status === 'expiring_soon') {
+    cardClass += ' warn';
+    statusClass = 'status-warn'; statusLabel = 'Expire bientôt';
+    metaNote = '<span style="color:var(--yellow);font-weight:600">Token expire sous 3 jours</span>';
+  } else if (conn.status === 'expired') {
+    cardClass += ' off';
+    statusClass = 'status-off'; statusLabel = 'Déconnecté';
+    metaNote = '<span style="color:var(--danger);font-weight:600">Connexion perdue — demande à ton administrateur</span>';
+    actionBtn = `<button class="btn btn-primary" style="font-size:12.5px" onclick="alert('Contacte ton administrateur pour relancer la connexion ${meta.title}.')">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg>
+      Contacter l'admin
+    </button>`;
+  } else if (conn.status === 'missing') {
+    cardClass += ' off';
+    statusClass = 'status-off'; statusLabel = 'Non configuré';
+    metaNote = '<span style="color:var(--text-muted)">Connexion non configurée pour ton compte</span>';
+  }
+
+  return `
+    <div class="${cardClass}">
+      <div class="conn-logo">${meta.logo}</div>
+      <div class="conn-body">
+        <div class="conn-title">${meta.title}</div>
+        ${meta.services ? `<div class="conn-email">${meta.services}</div>` : ''}
+        <div class="conn-meta">${metaNote}</div>
+      </div>
+      <div class="conn-actions">
+        <span class="conn-status ${statusClass}"><span class="dot"></span> ${statusLabel}</span>
+        ${actionBtn}
+      </div>
+    </div>`;
+}
+
+// Charge et affiche les connexions de l'utilisateur
+async function loadConnections() {
+  const container = document.getElementById('connectionsContainer');
+  if (!container) return;
+  try {
+    const r = await fetch('/profile/connections');
+    const d = await r.json();
+    const connections = d.connections || [];
+    if (connections.length === 0) {
+      container.innerHTML = `<div style="text-align:center;padding:30px 20px;color:var(--text-muted);font-size:13.5px">Aucune connexion configurée. Contacte ton administrateur.</div>`;
+      return;
+    }
+    container.innerHTML = connections.map(renderConnectionCard).join('');
+  } catch (e) {
+    console.error('Failed to load connections:', e);
+    container.innerHTML = `<div style="text-align:center;padding:30px 20px;color:var(--danger);font-size:13.5px">Erreur de chargement des connexions.</div>`;
+  }
+}
+
+// Bouton "Récupérer mes signatures d'email"
+async function fetchMySignatures() {
+  const btn = document.getElementById('fetchSignaturesBtn');
+  if (!btn) return;
+  const originalHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 1s linear infinite"><path d="M21 12a9 9 0 11-6.219-8.56"/></svg> Récupération...';
+  try {
+    const r = await fetch('/profile/extract-signatures', {method: 'POST'});
+    const d = await r.json();
+    const toast = document.getElementById('toast');
+    if (r.ok && (d.status === 'ok' || d.count !== undefined)) {
+      const n = d.count ?? d.signatures_found ?? 0;
+      toast.lastChild.textContent = ` ${n} signature${n > 1 ? 's' : ''} récupérée${n > 1 ? 's' : ''}`;
+      toast.style.background = 'var(--success)';
+    } else {
+      toast.lastChild.textContent = ' ' + (d.message || d.error || 'Erreur');
+      toast.style.background = 'var(--danger)';
+    }
+    toast.classList.add('open');
+    setTimeout(() => { toast.classList.remove('open'); toast.style.background = ''; }, 3000);
+  } catch (e) {
+    alert('Erreur réseau : ' + e.message);
+  }
+  btn.disabled = false;
+  btn.innerHTML = originalHTML;
 }
 
 // Animation spin pour le spinner du bouton Enregistrer

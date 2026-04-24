@@ -288,3 +288,98 @@ def get_data_stats(request: Request, user: dict = Depends(require_user)):
         return {"error": str(e)[:100], **stats}
     finally:
         if conn: conn.close()
+
+
+@router.get("/profile/connections")
+def get_connections(request: Request, user: dict = Depends(require_user)):
+    """Phase 5 /settings — statut des connexions OAuth de l'utilisateur.
+
+    Retourne la liste des providers connectes pour l'utilisateur,
+    leur statut (ok / expiring_soon / expired / missing), et la derniere
+    mise a jour du token. Le refresh_token permet le rafraichissement
+    automatique tant qu'il n'est pas revoque cote fournisseur.
+    """
+    username = user["username"]
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT provider, expires_at, updated_at,
+                   (refresh_token IS NOT NULL) AS has_refresh_token
+            FROM oauth_tokens
+            WHERE username = %s
+            ORDER BY provider
+            """,
+            (username,)
+        )
+        rows = c.fetchall()
+        from datetime import datetime, timedelta
+        now = datetime.utcnow()
+        connections = []
+        for row in rows:
+            provider, expires_at, updated_at, has_refresh = row
+            if expires_at is None:
+                status = "no_expiry"
+            elif expires_at < now:
+                # Expire cote API mais refresh_token dispo => auto-refreshable
+                status = "refreshable" if has_refresh else "expired"
+            elif expires_at < now + timedelta(days=3):
+                status = "expiring_soon"
+            else:
+                status = "ok"
+            connections.append({
+                "provider": provider,
+                "status": status,
+                "expires_at": expires_at.isoformat() if expires_at else None,
+                "updated_at": updated_at.isoformat() if updated_at else None,
+                "has_refresh_token": bool(has_refresh),
+            })
+        # Enrichir avec les providers supportes mais non connectes
+        known_providers = {row["provider"] for row in [dict(zip(["provider"], [c[0]])) for c in rows]}
+        known_providers = {r[0] for r in rows}
+        for provider in ("google", "microsoft"):
+            if provider not in known_providers:
+                connections.append({
+                    "provider": provider,
+                    "status": "missing",
+                    "expires_at": None,
+                    "updated_at": None,
+                    "has_refresh_token": False,
+                })
+        return {"connections": connections}
+    except Exception as e:
+        return {"error": str(e)[:150], "connections": []}
+    finally:
+        if conn: conn.close()
+
+
+@router.post("/profile/extract-signatures")
+def extract_my_signatures(request: Request, user: dict = Depends(require_user)):
+    """Phase 5 /settings — l'utilisateur declenche lui-meme l'extraction de
+    ses signatures depuis ses derniers mails Microsoft envoyes.
+    Wrapper de /admin/extract-signatures avec require_user.
+    """
+    username = user["username"]
+    tenant_id = user.get("tenant_id") or "couffrant_solar"
+    try:
+        from app.token_manager import get_valid_microsoft_token
+        token = get_valid_microsoft_token(username)
+    except Exception as e:
+        return {"ok": False, "status": "error",
+                "message": f"Token Microsoft indisponible : {str(e)[:100]}"}
+    try:
+        from app.email_signature import extract_and_save_signature
+        result = extract_and_save_signature(username, tenant_id, token)
+        if not isinstance(result, dict):
+            return {"status": "ok", "ok": True, "result": str(result)}
+        # Harmonisation du format de retour pour le toast
+        if result.get("ok", True) and "count" not in result:
+            # extract_and_save_signature peut renvoyer "signatures_found" ou similaires
+            count = result.get("signatures_found") or result.get("count") or 1
+            result["count"] = count
+        result.setdefault("status", "ok" if result.get("ok", True) else "error")
+        return result
+    except Exception as e:
+        return {"ok": False, "status": "error", "message": str(e)[:150]}
