@@ -22,25 +22,44 @@ def get_profile(request: Request, user: dict = Depends(require_user)):
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        # Essai avec display_name
+        # Essai avec tous les champs (enrichi en Phase 2 pour /settings)
         try:
             c.execute(
-                "SELECT username, email, scope, tenant_id, display_name, deletion_requested_at FROM users WHERE username=%s",
+                """
+                SELECT u.username, u.email, u.scope, u.tenant_id, u.display_name,
+                       u.deletion_requested_at, u.phone, u.last_login, u.created_at,
+                       u.settings, t.name AS tenant_name
+                FROM users u
+                LEFT JOIN tenants t ON t.id = u.tenant_id
+                WHERE u.username = %s
+                """,
                 (username,)
             )
             row = c.fetchone()
             if not row:
                 return {"error": "Utilisateur introuvable."}
+            scope = row[2] or ""
+            # Rôles cumulatifs (cohérent avec docs/architecture_roles_cumulatifs.md)
+            is_tenant_admin = scope in ("tenant_admin", "admin", "super_admin")
+            is_super_admin = scope in ("admin", "super_admin")
             return {
                 "username": row[0],
                 "email": row[1] or "",
-                "scope": row[2] or "",
+                "scope": scope,
                 "tenant_id": row[3] or "",
                 "display_name": row[4] or "",
                 "deletion_requested_at": str(row[5]) if row[5] else None,
+                "phone": row[6] or "",
+                "last_login": row[7].isoformat() if row[7] else None,
+                "created_at": row[8].isoformat() if row[8] else None,
+                "settings": row[9] or {},
+                "tenant_name": row[10] or row[3] or "",
+                "is_user": True,
+                "is_tenant_admin": is_tenant_admin,
+                "is_super_admin": is_super_admin,
             }
         except Exception:
-            # Fallback sans colonnes optionnelles
+            # Fallback sans colonnes optionnelles (rétrocompatibilité)
             c.execute("SELECT username, email, scope, tenant_id FROM users WHERE username=%s", (username,))
             row = c.fetchone()
             if not row:
@@ -124,6 +143,80 @@ def update_profile_password(
         )
         conn.commit()
         return {"status": "ok", "message": "Mot de passe mis à jour."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:100]}
+    finally:
+        if conn: conn.close()
+
+
+@router.put("/profile/phone")
+def update_profile_phone(
+    request: Request,
+    payload: dict = Body(...),
+    user: dict = Depends(require_user),
+):
+    """Phase 2 /settings — numero de telephone (optionnel, alertes urgentes)."""
+    username = user["username"]
+    phone = (payload.get("phone") or "").strip()
+    # Validation simple : on laisse l'utilisateur libre sur le format
+    # mais on limite la longueur pour eviter les abus
+    if len(phone) > 30:
+        return {"status": "error", "message": "Numero trop long (max 30 caracteres)."}
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            "UPDATE users SET phone=%s WHERE username=%s",
+            (phone or None, username)
+        )
+        conn.commit()
+        return {"status": "ok", "message": "Telephone mis a jour.", "phone": phone or ""}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:100]}
+    finally:
+        if conn: conn.close()
+
+
+@router.put("/profile/settings")
+def update_profile_settings(
+    request: Request,
+    payload: dict = Body(...),
+    user: dict = Depends(require_user),
+):
+    """Phase 2 /settings — preferences d'affichage (toggles).
+
+    Attendu : {settings: {email_notifications: bool, show_response_time: bool, compact_mode: bool}}
+    Stocke en JSONB dans users.settings pour extensibilite future.
+    """
+    username = user["username"]
+    new_settings = payload.get("settings", {})
+    if not isinstance(new_settings, dict):
+        return {"status": "error", "message": "Format invalide."}
+    # Whitelist des cles autorisees (securite)
+    allowed_keys = {
+        "email_notifications",
+        "show_response_time",
+        "compact_mode",
+        "auto_speak",
+    }
+    filtered = {k: v for k, v in new_settings.items() if k in allowed_keys}
+    import json
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        # Merge avec les settings existants (on ne remplace pas tout)
+        c.execute("SELECT settings FROM users WHERE username=%s", (username,))
+        row = c.fetchone()
+        current = (row[0] if row else {}) or {}
+        merged = {**current, **filtered}
+        c.execute(
+            "UPDATE users SET settings=%s WHERE username=%s",
+            (json.dumps(merged), username)
+        )
+        conn.commit()
+        return {"status": "ok", "message": "Preferences mises a jour.", "settings": merged}
     except Exception as e:
         return {"status": "error", "message": str(e)[:100]}
     finally:
