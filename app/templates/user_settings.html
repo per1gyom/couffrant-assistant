@@ -338,16 +338,16 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
         <div class="period-head">
           <div>
             <div class="period-label">Aujourd'hui</div>
-            <div class="period-value">12 450<span class="unit">tokens</span></div>
-            <div class="period-cost">≈ 0,38 € · principalement Sonnet</div>
+            <div class="period-value"><span id="usageTodayTokens">—</span><span class="unit">tokens</span></div>
+            <div class="period-cost" id="usageTodayCost">—</div>
           </div>
-          <div class="period-pct">
+          <div class="period-pct" id="usageTodayPctBlock">
             <span class="pct-label">du plafond journalier</span>
-            24 %
+            <span id="usageTodayPct">—</span> %
           </div>
         </div>
-        <div class="bar"><div class="bar-fill" style="width:24%"></div></div>
-        <div class="bar-meta"><span>12 450 / 52 000</span><span>reset à minuit</span></div>
+        <div class="bar"><div class="bar-fill" id="usageTodayBar" style="width:0%"></div></div>
+        <div class="bar-meta"><span id="usageTodayMeta">—</span><span>reset à minuit</span></div>
       </div>
 
       <!-- BLOC 2 : CETTE SEMAINE -->
@@ -355,16 +355,16 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
         <div class="period-head">
           <div>
             <div class="period-label">Cette semaine</div>
-            <div class="period-value">87 300<span class="unit">tokens</span></div>
-            <div class="period-cost">≈ 2,64 € · 6 conversations · 2 analyses Opus</div>
+            <div class="period-value"><span id="usageWeekTokens">—</span><span class="unit">tokens</span></div>
+            <div class="period-cost" id="usageWeekCost">—</div>
           </div>
-          <div class="period-pct" style="color:var(--yellow)">
+          <div class="period-pct" id="usageWeekPctBlock">
             <span class="pct-label">du plafond hebdo</span>
-            42 %
+            <span id="usageWeekPct">—</span> %
           </div>
         </div>
-        <div class="bar"><div class="bar-fill" style="width:42%"></div></div>
-        <div class="bar-meta"><span>87 300 / 210 000</span><span>reset lundi 00h</span></div>
+        <div class="bar"><div class="bar-fill" id="usageWeekBar" style="width:0%"></div></div>
+        <div class="bar-meta"><span id="usageWeekMeta">—</span><span>reset lundi 00h</span></div>
       </div>
       <!-- BOUTONS D'ACTION -->
       <div class="actions">
@@ -392,33 +392,33 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
           <div class="period-head">
             <div>
               <div class="period-label">Ce mois-ci</div>
-              <div class="period-value">385 200<span class="unit">tokens</span></div>
-              <div class="period-cost">≈ 11,56 € · depuis le 1er avril</div>
+              <div class="period-value"><span id="usageMonthTokens">—</span><span class="unit">tokens</span></div>
+              <div class="period-cost" id="usageMonthCost">—</div>
             </div>
-            <div class="period-pct" style="color:var(--yellow)">
+            <div class="period-pct" id="usageMonthPctBlock">
               <span class="pct-label">du plafond mensuel</span>
-              72 %
+              <span id="usageMonthPct">—</span> %
             </div>
           </div>
-          <div class="bar warn"><div class="bar-fill" style="width:72%"></div></div>
-          <div class="bar-meta"><span>385 200 / 540 000</span><span>reset le 1er mai</span></div>
+          <div class="bar" id="usageMonthBarWrap"><div class="bar-fill" id="usageMonthBar" style="width:0%"></div></div>
+          <div class="bar-meta"><span id="usageMonthMeta">—</span><span>30 derniers jours</span></div>
         </div>
 
         <!-- BLOC : CETTE ANNEE -->
         <div class="period">
           <div class="period-head">
             <div>
-              <div class="period-label">Cette année (2026)</div>
-              <div class="period-value">1,24 M<span class="unit">tokens</span></div>
-              <div class="period-cost">≈ 38,20 € · projection ~115 € sur l'année</div>
+              <div class="period-label">Cette année</div>
+              <div class="period-value"><span id="usageYearTokens">—</span><span class="unit">tokens</span></div>
+              <div class="period-cost" id="usageYearCost">—</div>
             </div>
             <div class="period-pct">
-              <span class="pct-label">depuis janvier</span>
-              ~18 %
+              <span class="pct-label">sur 365 jours</span>
+              <span id="usageYearCalls">—</span>
             </div>
           </div>
-          <div class="bar"><div class="bar-fill" style="width:18%"></div></div>
-          <div class="bar-meta"><span>4 mois écoulés sur 12</span><span>reset le 1er janvier</span></div>
+          <div class="bar"><div class="bar-fill" id="usageYearBar" style="width:0%"></div></div>
+          <div class="bar-meta"><span id="usageYearMeta">—</span><span>365 derniers jours</span></div>
         </div>
         <div class="section-head" style="margin-top:22px">
           <span class="dot-icon dot-violet">
@@ -426,45 +426,18 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
           </span>
           <span>Répartition par modèle (ce mois)</span>
         </div>
-        <div class="details-card">
-          <div class="row">
-            <div>
-              <div class="row-label">Claude Sonnet 4.6</div>
-              <div class="row-label-sub">Conversations quotidiennes</div>
-            </div>
-            <div class="row-value">248 500 tokens · 7,88 €</div>
-          </div>
-          <div class="row">
-            <div>
-              <div class="row-label">Claude Opus 4.7</div>
-              <div class="row-label-sub">Analyses profondes (Approfondir / Étendre)</div>
-            </div>
-            <div class="row-value">118 700 tokens · 3,52 €</div>
-          </div>
-          <div class="row">
-            <div>
-              <div class="row-label">Claude Haiku 4.5</div>
-              <div class="row-label-sub">Filtrage, classifications rapides</div>
-            </div>
-            <div class="row-value">18 000 tokens · 0,16 €</div>
-          </div>
+        <div class="details-card" id="usageByModelCard">
+          <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12.5px">Chargement…</div>
         </div>
 
         <div class="section-head" style="margin-top:18px">
           <span class="dot-icon dot-green">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
           </span>
-          <span>Origine des appels</span>
+          <span>Origine des appels (ce mois)</span>
         </div>
-        <div class="details-card">
-          <div class="row">
-            <div class="row-label">Mes conversations avec Raya</div>
-            <div class="row-value">312 000 tokens (81 %)</div>
-          </div>
-          <div class="row">
-            <div class="row-label">Jobs automatiques (analyse mails, optimisation règles)</div>
-            <div class="row-value">73 200 tokens (19 %)</div>
-          </div>
+        <div class="details-card" id="usageByPurposeCard">
+          <div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12.5px">Chargement…</div>
         </div>
       </div>
       </div><!-- fin panel conso -->
@@ -858,24 +831,12 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
       </div>
       <div>
         <div class="modal-title">Demander un ajustement de mon plafond</div>
-        <div class="modal-subtitle">Ce message sera envoyé à Pierre Couffrant (admin de ta société)</div>
+        <div class="modal-subtitle" id="requestModalSubtitle">Ce message sera envoyé à l'administrateur de ta société</div>
       </div>
     </div>
     <div class="modal-body">
       <p>Voici le message qui sera envoyé. Tu peux l'envoyer tel quel, ou fermer cette fenêtre et reparler à Raya si tu veux ajuster quelque chose.</p>
-      <div class="msg-preview">Bonjour Pierre,
-
-Raya m'indique que ma consommation approche le plafond fixé pour cette période. Si cet usage correspond bien à mon activité actuelle, pourrais-tu envisager d'ajuster ma limite ?
-
-<strong>Récap de ma consommation :</strong>
-• Aujourd'hui : 12 450 tokens — 24 % du plafond journalier
-• Cette semaine : 87 300 tokens — 42 % du plafond hebdomadaire
-• Ce mois-ci : 385 200 tokens — 72 % du plafond mensuel
-
-Je reste disponible pour en discuter quand tu veux.
-
-Merci,
-Guillaume</div>
+      <div class="msg-preview" id="requestMessagePreview">Chargement du récap…</div>
     </div>
     <div class="modal-foot">
       <button class="btn" onclick="closeRequestModal()">Annuler</button>
@@ -1508,16 +1469,68 @@ function toggleDetails(){
   icon.style.transform = isOpen ? 'rotate(180deg)' : 'rotate(0deg)';
 }
 function openRequestModal(){
+  // Pré-remplir le récap à partir des données chargées par loadUsage()
+  const preview = document.getElementById('requestMessagePreview');
+  if (preview && _usageData) {
+    const firstName = _profileState?.display_name?.split(/\s+/)[0] || _profileState?.username || '';
+    const periods = _usageData.periods || {};
+    const fmt = (n) => formatNumber(n || 0);
+    const pctLine = (p, label) => {
+      const plafond = QUOTAS[label] || 1;
+      const pct = Math.round((p.tokens_total / plafond) * 100);
+      return `${fmt(p.tokens_total)} tokens — ${pct} % du plafond ${label}`;
+    };
+    const lines = [
+      `Bonjour,`,
+      ``,
+      `Raya m'indique que ma consommation approche le plafond fixé pour cette période. Si cet usage correspond bien à mon activité actuelle, pourrais-tu envisager d'ajuster ma limite ?`,
+      ``,
+      `Récap de ma consommation :`,
+      `• Aujourd'hui : ${pctLine(periods.today || {}, 'today')}`,
+      `• Cette semaine (7 derniers jours) : ${pctLine(periods.week || {}, 'week')}`,
+      `• Ce mois-ci (30 derniers jours) : ${pctLine(periods.month || {}, 'month')}`,
+      ``,
+      `Je reste disponible pour en discuter quand tu veux.`,
+      ``,
+      `Merci,`,
+      firstName,
+    ];
+    preview.textContent = lines.join('\n');
+  }
+  // Mettre à jour le subtitle avec le nom du tenant
+  const sub = document.getElementById('requestModalSubtitle');
+  if (sub && _profileState?.tenant_name) {
+    sub.textContent = `Ce message sera envoyé à l'administrateur de ${_profileState.tenant_name}`;
+  }
   document.getElementById('requestModal').classList.add('open');
 }
 function closeRequestModal(){
   document.getElementById('requestModal').classList.remove('open');
 }
-function sendRequest(){
-  closeRequestModal();
-  const toast = document.getElementById('toast');
-  toast.classList.add('open');
-  setTimeout(()=>toast.classList.remove('open'), 2800);
+async function sendRequest(){
+  const preview = document.getElementById('requestMessagePreview');
+  const message = preview ? preview.textContent : '';
+  try {
+    const r = await fetch('/profile/request-quota-adjustment', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message}),
+    });
+    const d = await r.json();
+    closeRequestModal();
+    const toast = document.getElementById('toast');
+    if (d.status === 'ok') {
+      toast.lastChild.textContent = ' Ta demande a été enregistrée — ton admin sera notifié.';
+      toast.style.background = 'var(--success)';
+    } else {
+      toast.lastChild.textContent = ' ' + (d.message || 'Erreur');
+      toast.style.background = 'var(--danger)';
+    }
+    toast.classList.add('open');
+    setTimeout(() => { toast.classList.remove('open'); toast.style.background = ''; }, 3400);
+  } catch (e) {
+    alert('Erreur réseau : ' + e.message);
+  }
 }
 // Fermer la modal avec Escape
 document.addEventListener('keydown', e => {
@@ -1715,6 +1728,7 @@ if (document.readyState === 'loading') {
     checkDeletionStatus();
     loadRules();
     loadConnections();
+    loadUsage();
   });
 } else {
   loadProfile();
@@ -1722,6 +1736,7 @@ if (document.readyState === 'loading') {
   checkDeletionStatus();
   loadRules();
   loadConnections();
+  loadUsage();
 }
 
 // ===========================================================================
@@ -2219,6 +2234,197 @@ async function fetchMySignatures() {
   }
   btn.disabled = false;
   btn.innerHTML = originalHTML;
+}
+
+// ===========================================================================
+// PHASE 6 — Onglet Ma consommation branché sur /usage/me
+// ===========================================================================
+
+// État global
+let _usageData = null;
+
+// Quotas par défaut pour l'affichage des % du plafond
+// NOTE : en attendant la table `token_quotas` paramétrable par admin
+//        (cf. roadmap Tokens), on utilise des valeurs par défaut raisonnables.
+const QUOTAS = {
+  today:  500000,    // 500k tokens/jour (~0.25 $ à prix moyen Sonnet)
+  week:   3000000,   // 3M/semaine
+  month:  10000000,  // 10M/mois
+  year:   100000000, // 100M/an (objectif indicatif)
+};
+
+// Taux de conversion USD -> EUR (approximatif, à rendre dynamique plus tard)
+const USD_TO_EUR = 0.93;
+
+// Formate un coût USD en EUR avec 2 décimales (0.375 USD -> "0,35 €")
+function formatCostEUR(usd) {
+  if (usd == null || usd === 0) return '0,00 €';
+  const eur = usd * USD_TO_EUR;
+  if (eur < 0.01) return '< 0,01 €';
+  return eur.toFixed(2).replace('.', ',') + ' €';
+}
+
+// Tronque un nom de modèle pour un affichage plus court
+function shortModelName(m) {
+  if (!m || m === 'unknown') return 'Autres modèles';
+  return m
+    .replace(/^claude-/, 'Claude ')
+    .replace(/-(\d+)-(\d+)$/, ' $1.$2')
+    .replace(/-(\d{8,})$/, '')
+    .replace(/opus/i, 'Opus')
+    .replace(/sonnet/i, 'Sonnet')
+    .replace(/haiku/i, 'Haiku');
+}
+
+// Description courte d'un modèle selon son usage principal
+function modelPurposeHint(m) {
+  if (!m) return '';
+  if (/opus/i.test(m)) return 'Analyses profondes (Approfondir / Étendre)';
+  if (/sonnet/i.test(m)) return 'Conversations et tâches quotidiennes';
+  if (/haiku/i.test(m)) return 'Filtrage, classifications rapides';
+  return '';
+}
+
+// Humanise un "purpose" technique en label lisible
+function humanPurpose(p) {
+  if (!p || p === 'autre') return 'Autres appels';
+  const map = {
+    'chat': 'Mes conversations avec Raya',
+    'conversation': 'Mes conversations avec Raya',
+    'main_chat': 'Mes conversations avec Raya',
+    'deepen': 'Approfondir / Étendre (Opus)',
+    'etendre': 'Approfondir / Étendre (Opus)',
+    'triage': 'Triage automatique des mails',
+    'mail_triage': 'Triage automatique des mails',
+    'mail_analysis': 'Analyse de mails',
+    'rules_optimizer': 'Optimisation des règles (cron)',
+    'rules_agent': 'Moteur de règles (agent)',
+    'signature_extraction': 'Extraction de signatures',
+    'memory_build': 'Construction de la mémoire',
+    'session_digest': 'Résumés de sessions',
+    'style_learning': 'Apprentissage du style',
+  };
+  return map[p] || p;
+}
+
+// Applique couleur sur la barre selon le %
+function colorBarByPct(barEl, pctEl, pct) {
+  if (!barEl) return;
+  barEl.classList.remove('warn', 'danger');
+  if (pctEl) pctEl.style.color = '';
+  if (pct >= 90) {
+    barEl.classList.add('danger');
+    if (pctEl) pctEl.style.color = 'var(--danger)';
+  } else if (pct >= 70) {
+    barEl.classList.add('warn');
+    if (pctEl) pctEl.style.color = 'var(--yellow)';
+  }
+}
+
+// Remplit un bloc période (today/week/month/year)
+function fillPeriodBlock(prefix, periodData, quotaKey, showPct = true) {
+  const p = periodData || {tokens_total: 0, cost_usd: 0, calls: 0};
+  const tokensTotal = p.tokens_total || 0;
+  const tokensEl = document.getElementById(`usage${prefix}Tokens`);
+  const costEl = document.getElementById(`usage${prefix}Cost`);
+  const pctEl = document.getElementById(`usage${prefix}Pct`);
+  const barEl = document.getElementById(`usage${prefix}Bar`);
+  const metaEl = document.getElementById(`usage${prefix}Meta`);
+  if (tokensEl) tokensEl.textContent = formatNumber(tokensTotal);
+  if (costEl) costEl.textContent = `≈ ${formatCostEUR(p.cost_usd)} · ${p.calls} appel${p.calls > 1 ? 's' : ''}`;
+  if (showPct && quotaKey) {
+    const quota = QUOTAS[quotaKey] || 1;
+    const pct = Math.min(100, Math.round((tokensTotal / quota) * 100));
+    if (pctEl) pctEl.textContent = pct;
+    if (barEl) barEl.style.width = pct + '%';
+    if (metaEl) metaEl.textContent = `${formatNumber(tokensTotal)} / ${formatNumber(quota)}`;
+    // Colorer en jaune/rouge selon dépassement
+    const pctBlock = document.getElementById(`usage${prefix}PctBlock`);
+    colorBarByPct(barEl, pctBlock, pct);
+  } else if (metaEl) {
+    metaEl.textContent = `${formatNumber(tokensTotal)} tokens cumulés`;
+  }
+}
+
+// Rend la répartition par modèle (card avec rows)
+function fillByModelCard(byModel) {
+  const card = document.getElementById('usageByModelCard');
+  if (!card) return;
+  const entries = Object.entries(byModel || {});
+  if (entries.length === 0) {
+    card.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12.5px">Aucun appel ce mois-ci.</div>`;
+    return;
+  }
+  // Trier par coût décroissant
+  entries.sort((a, b) => (b[1].cost_usd || 0) - (a[1].cost_usd || 0));
+  card.innerHTML = entries.map(([model, data]) => {
+    const label = shortModelName(model);
+    const hint = modelPurposeHint(model);
+    return `
+      <div class="row">
+        <div>
+          <div class="row-label">${label}</div>
+          ${hint ? `<div class="row-label-sub">${hint}</div>` : ''}
+        </div>
+        <div class="row-value">${formatNumber(data.tokens_total || 0)} tokens · ${formatCostEUR(data.cost_usd || 0)}</div>
+      </div>`;
+  }).join('');
+}
+
+// Rend la répartition par origine (purpose)
+function fillByPurposeCard(byPurpose, monthTotal) {
+  const card = document.getElementById('usageByPurposeCard');
+  if (!card) return;
+  const entries = Object.entries(byPurpose || {});
+  if (entries.length === 0) {
+    card.innerHTML = `<div style="padding:16px;text-align:center;color:var(--text-muted);font-size:12.5px">Aucun appel ce mois-ci.</div>`;
+    return;
+  }
+  // Trier par tokens décroissants
+  entries.sort((a, b) => (b[1].tokens_total || 0) - (a[1].tokens_total || 0));
+  const total = monthTotal || entries.reduce((s, [_, d]) => s + (d.tokens_total || 0), 0);
+  card.innerHTML = entries.map(([purpose, data]) => {
+    const label = humanPurpose(purpose);
+    const tokens = data.tokens_total || 0;
+    const pct = total > 0 ? Math.round((tokens / total) * 100) : 0;
+    return `
+      <div class="row">
+        <div class="row-label">${label}</div>
+        <div class="row-value">${formatNumber(tokens)} tokens (${pct} %)</div>
+      </div>`;
+  }).join('');
+}
+
+// Charge et affiche la consommation
+async function loadUsage() {
+  try {
+    const r = await fetch('/usage/me');
+    const d = await r.json();
+    if (d.error) {
+      console.error('Usage error:', d.error);
+      return;
+    }
+    _usageData = d;
+    const periods = d.periods || {};
+    fillPeriodBlock('Today', periods.today, 'today');
+    fillPeriodBlock('Week', periods.week, 'week');
+    fillPeriodBlock('Month', periods.month, 'month');
+    // L'année : pas de plafond fixe, on affiche juste les appels dans .period-pct
+    fillPeriodBlock('Year', periods.year, null, false);
+    const callsEl = document.getElementById('usageYearCalls');
+    if (callsEl) callsEl.textContent = `${(periods.year?.calls || 0)} appels`;
+    // Barre année : en % du quota annuel (indicatif)
+    const yearBar = document.getElementById('usageYearBar');
+    if (yearBar) {
+      const pct = Math.min(100, Math.round(((periods.year?.tokens_total || 0) / QUOTAS.year) * 100));
+      yearBar.style.width = pct + '%';
+    }
+    // Répartitions
+    fillByModelCard(d.by_model || {});
+    fillByPurposeCard(d.by_purpose || {}, periods.month?.tokens_total);
+  } catch (e) {
+    console.error('Failed to load usage:', e);
+  }
 }
 
 // Animation spin pour le spinner du bouton Enregistrer

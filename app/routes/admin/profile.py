@@ -383,3 +383,168 @@ def extract_my_signatures(request: Request, user: dict = Depends(require_user)):
         return result
     except Exception as e:
         return {"ok": False, "status": "error", "message": str(e)[:150]}
+
+
+# Tarifs Anthropic (USD par 1M tokens) — sources docs Anthropic
+LLM_PRICES = {
+    "claude-opus-4-7":      {"in": 15.00, "out": 75.00},
+    "claude-opus-4-6":      {"in": 15.00, "out": 75.00},
+    "claude-opus-4-5":      {"in": 15.00, "out": 75.00},
+    "claude-sonnet-4-6":    {"in":  3.00, "out": 15.00},
+    "claude-sonnet-4-5":    {"in":  3.00, "out": 15.00},
+    "claude-haiku-4-5":     {"in":  1.00, "out":  5.00},
+    "claude-haiku-4-5-20251001": {"in": 1.00, "out": 5.00},
+    # Fallback : mid-tier
+    "unknown":              {"in":  3.00, "out": 15.00},
+}
+
+
+def _calc_cost_usd(model, in_tok, out_tok):
+    """Calcule le cout en USD d'un appel LLM."""
+    prices = LLM_PRICES.get(model or "unknown", LLM_PRICES["unknown"])
+    cost = (in_tok or 0) * prices["in"] / 1_000_000
+    cost += (out_tok or 0) * prices["out"] / 1_000_000
+    return round(cost, 4)
+
+
+@router.get("/usage/me")
+def get_usage_me(request: Request, user: dict = Depends(require_user)):
+    """Phase 6 /settings — stats de consommation tokens de l'utilisateur.
+
+    Retourne : today / week / month / year avec tokens + cost_usd
+               + repartition par modele + par origine (purpose)
+    """
+    username = user["username"]
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        # Agregat par periode : utilise NOW() puis delta en JS/server
+        # On recupere tous les appels des 365 derniers jours et on aggrege en Python
+        c.execute(
+            """
+            SELECT created_at, model, input_tokens, output_tokens, purpose
+            FROM llm_usage
+            WHERE username = %s AND created_at > NOW() - INTERVAL '365 days'
+            ORDER BY created_at DESC
+            """,
+            (username,)
+        )
+        rows = c.fetchall()
+        from datetime import datetime, timedelta
+        now = datetime.utcnow()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        week_start = today_start - timedelta(days=6)      # 7 derniers jours glissants
+        month_start = today_start - timedelta(days=29)    # 30 derniers jours glissants
+        year_start = today_start - timedelta(days=364)    # 365 derniers jours glissants
+
+        # Initialisation des agregats
+        periods = {
+            "today": {"tokens_in": 0, "tokens_out": 0, "cost_usd": 0.0, "calls": 0},
+            "week":  {"tokens_in": 0, "tokens_out": 0, "cost_usd": 0.0, "calls": 0},
+            "month": {"tokens_in": 0, "tokens_out": 0, "cost_usd": 0.0, "calls": 0},
+            "year":  {"tokens_in": 0, "tokens_out": 0, "cost_usd": 0.0, "calls": 0},
+        }
+        by_model = {}    # model -> {tokens_in, tokens_out, cost_usd, calls}
+        by_purpose = {}  # purpose -> {tokens_in, tokens_out, cost_usd, calls}
+
+        for created_at, model, in_tok, out_tok, purpose in rows:
+            in_tok = in_tok or 0
+            out_tok = out_tok or 0
+            cost = _calc_cost_usd(model, in_tok, out_tok)
+            # Periode
+            if created_at >= today_start:
+                p = periods["today"]
+                p["tokens_in"] += in_tok; p["tokens_out"] += out_tok
+                p["cost_usd"] += cost; p["calls"] += 1
+            if created_at >= week_start:
+                p = periods["week"]
+                p["tokens_in"] += in_tok; p["tokens_out"] += out_tok
+                p["cost_usd"] += cost; p["calls"] += 1
+            if created_at >= month_start:
+                p = periods["month"]
+                p["tokens_in"] += in_tok; p["tokens_out"] += out_tok
+                p["cost_usd"] += cost; p["calls"] += 1
+            if created_at >= year_start:
+                p = periods["year"]
+                p["tokens_in"] += in_tok; p["tokens_out"] += out_tok
+                p["cost_usd"] += cost; p["calls"] += 1
+            # Par modele (sur les 30 derniers jours pour pertinence)
+            if created_at >= month_start:
+                m = model or "unknown"
+                if m not in by_model:
+                    by_model[m] = {"tokens_in": 0, "tokens_out": 0, "cost_usd": 0.0, "calls": 0}
+                by_model[m]["tokens_in"] += in_tok
+                by_model[m]["tokens_out"] += out_tok
+                by_model[m]["cost_usd"] += cost
+                by_model[m]["calls"] += 1
+                # Par origine (sur les 30 derniers jours)
+                pur = purpose or "autre"
+                if pur not in by_purpose:
+                    by_purpose[pur] = {"tokens_in": 0, "tokens_out": 0, "cost_usd": 0.0, "calls": 0}
+                by_purpose[pur]["tokens_in"] += in_tok
+                by_purpose[pur]["tokens_out"] += out_tok
+                by_purpose[pur]["cost_usd"] += cost
+                by_purpose[pur]["calls"] += 1
+
+        # Arrondi des couts pour l'affichage
+        for p in periods.values():
+            p["cost_usd"] = round(p["cost_usd"], 2)
+            p["tokens_total"] = p["tokens_in"] + p["tokens_out"]
+        for m in by_model.values():
+            m["cost_usd"] = round(m["cost_usd"], 2)
+            m["tokens_total"] = m["tokens_in"] + m["tokens_out"]
+        for pur in by_purpose.values():
+            pur["cost_usd"] = round(pur["cost_usd"], 2)
+            pur["tokens_total"] = pur["tokens_in"] + pur["tokens_out"]
+
+        return {
+            "username": username,
+            "periods": periods,
+            "by_model": by_model,
+            "by_purpose": by_purpose,
+        }
+    except Exception as e:
+        return {"error": str(e)[:150]}
+    finally:
+        if conn: conn.close()
+
+
+@router.post("/profile/request-quota-adjustment")
+def request_quota_adjustment(
+    request: Request,
+    payload: dict = Body(...),
+    user: dict = Depends(require_user),
+):
+    """Phase 6 /settings — l'utilisateur demande a son admin d'ajuster
+    ses quotas de tokens. Logge la demande dans activity_log (pour
+    l'admin puisse la voir) et, plus tard, envoi d'un mail.
+    """
+    import json as _json
+    from app.logging_config import get_logger
+    _logger = get_logger("raya.quota_request")
+    username = user["username"]
+    tenant_id = user.get("tenant_id", "")
+    message = (payload.get("message") or "").strip()
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        detail = _json.dumps({"message": message, "timestamp": str(request.headers.get("x-date", ""))})
+        c.execute(
+            """
+            INSERT INTO activity_log (username, tenant_id, action_type, action_target, action_detail, source)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (username, tenant_id, "quota_adjustment_request", "admin", detail, "user_settings")
+        )
+        conn.commit()
+        _logger.info("[quota] Demande ajustement quota : %s (%s)", username, message[:80])
+        return {
+            "status": "ok",
+            "message": "Ta demande a ete enregistree. Ton admin sera notifie."
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:150]}
+    finally:
+        if conn: conn.close()
