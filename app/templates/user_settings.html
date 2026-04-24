@@ -1146,75 +1146,8 @@ function stopDictation(){
   }
 }
 
-// ==== Thread conversationnel Raya (détection modif + questions enchaînées) ====
-// ORIGINAL_RULE est muté à chaque ouverture de la modale (voir openEditModal)
-let ORIGINAL_RULE = {
-  text: "",
-  category: "",
-  conf: "0.5"
-};
-let rayaQuestionStep = 0;
-// Banque de questions que Raya peut poser (simulées pour la démo, générées côté Sonnet en prod)
-const RAYA_QUESTIONS = [
-  "J'avais compris que tu préférais <strong>des réponses directes</strong>. En reformulant, qu'est-ce qui ne te convenait pas dans ma version ?",
-  "Merci pour ce retour. Est-ce que tu veux que j'applique cette nouvelle formulation <strong>seulement aux mails</strong>, ou aussi à nos conversations ici ?",
-  "Dernière question si tu veux bien — est-ce une règle que tu penses <strong>valable pour tous tes échanges</strong>, ou plutôt pour un contexte précis (type de client, sujet, moment de la semaine) ?"
-];
-function hasChangesVsOriginal(){
-  const txt = document.getElementById('ruleText').value.trim();
-  const cat = document.getElementById('categoryInput').value.trim();
-  const confEl = document.querySelector('.conf-level.active');
-  const conf = confEl ? confEl.dataset.conf : "0.9";
-  return txt !== ORIGINAL_RULE.text || cat !== ORIGINAL_RULE.category || conf !== ORIGINAL_RULE.conf;
-}
-function renderRayaBubble(html){
-  return `<div class="raya-chat"><div class="raya-avatar-sm">R</div><div class="raya-bubble"><span class="bubble-tag">Raya</span><div>${html}</div></div></div>`;
-}
-function renderUserBubble(html){
-  return `<div class="user-chat"><div class="user-bubble">${html}</div><div class="user-avatar-sm">GP</div></div>`;
-}
-function renderTyping(){
-  return `<div class="raya-chat" id="typingIndicator"><div class="raya-avatar-sm">R</div><div class="raya-bubble"><div class="raya-typing"><span></span><span></span><span></span></div></div></div>`;
-}
-function maybeOpenRayaDialog(){
-  if(!hasChangesVsOriginal()) return;
-  const field = document.getElementById('rayaDialogField');
-  if(field.style.display === 'none' || !field.style.display){
-    field.style.display = '';
-    const thread = document.getElementById('chatThread');
-    thread.innerHTML = renderRayaBubble(RAYA_QUESTIONS[0]);
-    rayaQuestionStep = 1;
-  }
-}
-function sendReply(){
-  const ta = document.getElementById('feedbackText');
-  const val = ta.value.trim();
-  if(!val) return;
-  const thread = document.getElementById('chatThread');
-  thread.insertAdjacentHTML('beforeend', renderUserBubble(val));
-  ta.value = '';
-  thread.scrollTop = thread.scrollHeight;
-  // Si Raya a encore une question en réserve, elle la pose (avec typing indicator pour réalisme)
-  if(rayaQuestionStep < RAYA_QUESTIONS.length){
-    thread.insertAdjacentHTML('beforeend', renderTyping());
-    thread.scrollTop = thread.scrollHeight;
-    setTimeout(() => {
-      const typing = document.getElementById('typingIndicator');
-      if(typing) typing.remove();
-      thread.insertAdjacentHTML('beforeend', renderRayaBubble(RAYA_QUESTIONS[rayaQuestionStep]));
-      rayaQuestionStep++;
-      thread.scrollTop = thread.scrollHeight;
-    }, 1200);
-  }
-}
-// Détecter les modifications pour déclencher le dialogue
-['input','change'].forEach(evt => {
-  document.getElementById('ruleText').addEventListener(evt, maybeOpenRayaDialog);
-  document.getElementById('categoryInput').addEventListener(evt, maybeOpenRayaDialog);
-});
-document.querySelectorAll('.conf-level').forEach(l => {
-  l.addEventListener('click', () => setTimeout(maybeOpenRayaDialog, 50));
-});
+// (bloc thread conversationnel legacy supprimé — modale unifiée prend le relais)
+
 
 function toggleDetails(){
   const sec = document.getElementById('detailsSection');
