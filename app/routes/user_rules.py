@@ -21,14 +21,27 @@ router = APIRouter(tags=["user_rules"])
 
 @router.get("/rules/stats")
 def rules_stats(request: Request, user: dict = Depends(require_user)):
-    """Compteurs pour l'onglet 'Mes regles Raya' : par categorie + nouvelles."""
+    """Compteurs pour l'onglet 'Mes regles Raya'.
+
+    Retourne :
+    - total : nombre total de regles actives
+    - review_needed : regles qui beneficieraient d'une revue (voir criteres)
+    - by_category : compteurs par categorie
+
+    Le compteur 'review_needed' remplace l'ancien 'new' (qui comptait 69 regles
+    dont certaines deja super-renforcees, donc inutile de les revoir).
+
+    Criteres 'a revoir' :
+      - creee il y a moins de 14 jours
+      - ET (confidence < 0.8 OU reinforcements <= 3)
+    Autrement dit : les regles recentes dont Raya n'est pas encore sure.
+    """
     username = user["username"]
     tenant_id = user["tenant_id"]
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        # Compteur total + par categorie
         c.execute(
             "SELECT category, COUNT(*) FROM aria_rules "
             "WHERE username=%s AND (tenant_id=%s OR tenant_id IS NULL) AND active=true "
@@ -37,7 +50,16 @@ def rules_stats(request: Request, user: dict = Depends(require_user)):
         )
         by_cat = {row[0] or 'Autres': row[1] for row in c.fetchall()}
         total = sum(by_cat.values())
-        # Nouvelles regles : creees dans les 7 derniers jours
+        # Regles a revoir : recentes ET peu sures
+        c.execute(
+            "SELECT COUNT(*) FROM aria_rules "
+            "WHERE username=%s AND (tenant_id=%s OR tenant_id IS NULL) AND active=true "
+            "AND created_at > NOW() - INTERVAL '14 days' "
+            "AND (COALESCE(confidence, 0) < 0.8 OR COALESCE(reinforcements, 0) <= 3)",
+            (username, tenant_id)
+        )
+        review_count = c.fetchone()[0] or 0
+        # Nouvelles (simple recence, pour l'info) — compat retro
         c.execute(
             "SELECT COUNT(*) FROM aria_rules "
             "WHERE username=%s AND (tenant_id=%s OR tenant_id IS NULL) AND active=true "
@@ -48,6 +70,7 @@ def rules_stats(request: Request, user: dict = Depends(require_user)):
         return {
             "total": total,
             "new": new_count,
+            "review_needed": review_count,
             "by_category": by_cat,
         }
     except Exception as e:

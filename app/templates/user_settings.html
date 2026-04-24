@@ -1872,8 +1872,25 @@ document.getElementById('deleteAccountModal')?.addEventListener('click', e => {
 
 // État global
 let _allRules = [];         // toutes les règles actives (depuis GET /memory/rules)
-let _activeFilter = 'new';  // 'new' | 'all' | 'Comportement' | 'Style' | ...
+let _activeFilter = 'review';  // 'review' | 'all' | 'Comportement' | 'Divers' | ...
 let _searchQuery = '';      // filtre texte en cours
+let _reviewSessionStart = 0; // index de départ pour la session guidée
+
+// Seuil pour regrouper les petites catégories dans "Divers"
+const DIVERS_THRESHOLD = 2;  // catégories avec <=2 règles -> "Divers"
+// Limite par session "Faisons le point"
+const REVIEW_SESSION_SIZE = 5;
+
+// Critère "règle à revoir" : récente ET peu sûre
+function needsReview(rule) {
+  if (!rule.created_at) return false;
+  const ageMs = Date.now() - new Date(rule.created_at).getTime();
+  const ageDays = ageMs / 86400000;
+  if (ageDays > 14) return false;
+  const conf = rule.confidence || 0;
+  const reinf = rule.reinforcements || 0;
+  return conf < 0.8 || reinf <= 3;
+}
 
 // Icônes SVG par catégorie (map vers classes de couleur dot-*)
 const CATEGORY_STYLE = {
@@ -1962,13 +1979,13 @@ function renderRuleGroup(category, rules, totalInCat) {
 // Calcule les règles à afficher selon le filtre actif + recherche texte
 function getFilteredRules() {
   let rules = _allRules.slice();
+  // Liste des catégories "Divers" (celles avec très peu de règles)
+  const diversCategories = getDiversCategories();
   // Filtre chip
-  if (_activeFilter === 'new') {
-    const sevenDaysAgo = Date.now() - 7 * 24 * 3600 * 1000;
-    rules = rules.filter(r => {
-      if (!r.created_at) return false;
-      return new Date(r.created_at).getTime() > sevenDaysAgo;
-    });
+  if (_activeFilter === 'review') {
+    rules = rules.filter(needsReview);
+  } else if (_activeFilter === 'Divers') {
+    rules = rules.filter(r => diversCategories.includes(r.category || 'Autres'));
   } else if (_activeFilter !== 'all') {
     rules = rules.filter(r => (r.category || 'Autres') === _activeFilter);
   }
@@ -1980,9 +1997,31 @@ function getFilteredRules() {
       return txt.includes(q);
     });
   }
-  // Tri par importance décroissante (plus importantes d'abord)
-  rules.sort((a, b) => ruleImportance(b) - ruleImportance(a));
+  // Tri : pour "review" → prioriser les + à risque (faible conf + peu renforcées)
+  //       sinon tri par importance décroissante
+  if (_activeFilter === 'review') {
+    rules.sort((a, b) => {
+      const aConf = a.confidence || 0, bConf = b.confidence || 0;
+      const aReinf = a.reinforcements || 0, bReinf = b.reinforcements || 0;
+      // Les "peu sûres" d'abord : score = conf + reinforcement normalisé
+      const aScore = aConf + Math.min(aReinf, 10) / 30;
+      const bScore = bConf + Math.min(bReinf, 10) / 30;
+      return aScore - bScore; // croissant (les moins sûres en premier)
+    });
+  } else {
+    rules.sort((a, b) => ruleImportance(b) - ruleImportance(a));
+  }
   return rules;
+}
+
+// Retourne la liste des catégories considérées comme "Divers" (≤ seuil)
+function getDiversCategories() {
+  const counts = {};
+  _allRules.forEach(r => {
+    const c = r.category || 'Autres';
+    counts[c] = (counts[c] || 0) + 1;
+  });
+  return Object.keys(counts).filter(c => counts[c] <= DIVERS_THRESHOLD);
 }
 
 // Rend le contenu principal (groupes de règles)
@@ -1991,79 +2030,147 @@ function renderRulesContent() {
   if (!container) return;
   const filtered = getFilteredRules();
   if (filtered.length === 0) {
+    let emptyMsg;
+    if (_searchQuery) {
+      emptyMsg = 'Aucune règle ne correspond à ta recherche.';
+    } else if (_activeFilter === 'review') {
+      emptyMsg = '🎉 Rien à revoir ! Toutes tes règles récentes sont bien confirmées.';
+    } else {
+      emptyMsg = 'Pas de règle dans cette catégorie.';
+    }
     container.innerHTML = `
       <div style="text-align:center;padding:40px 20px;color:var(--text-muted);font-size:13.5px">
-        ${_searchQuery ? 'Aucune règle ne correspond à ta recherche.' : (_activeFilter === 'new' ? 'Aucune nouvelle règle ces 7 derniers jours.' : 'Pas de règle dans cette catégorie pour l\'instant.')}
+        ${emptyMsg}
       </div>`;
     return;
   }
-  // Pour "Nouvelles" ou une catégorie spécifique : un seul groupe "À plat" trié par importance
-  if (_activeFilter === 'new' || (_activeFilter !== 'all')) {
-    // Un seul groupe "À plat"
-    const titleMap = {'new': '✨ Nouvelles règles (7 derniers jours)'};
-    const title = titleMap[_activeFilter] || _activeFilter;
-    const cards = filtered.slice(0, _activeFilter === 'new' ? 20 : 50).map(renderRuleCard).join('');
+  // Mode "À revoir" : affichage en session de 5 (digeste)
+  if (_activeFilter === 'review') {
+    const sessionEnd = Math.min(_reviewSessionStart + REVIEW_SESSION_SIZE, filtered.length);
+    const sessionRules = filtered.slice(_reviewSessionStart, sessionEnd);
+    const remaining = filtered.length - sessionEnd;
+    const cards = sessionRules.map(renderRuleCard).join('');
+    const nextBtn = remaining > 0
+      ? `<div style="text-align:center;margin-top:14px"><button class="btn btn-primary" onclick="nextReviewBatch()"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg> Suivantes (${Math.min(REVIEW_SESSION_SIZE, remaining)}/${remaining} restantes)</button></div>`
+      : (_reviewSessionStart > 0
+          ? `<div style="text-align:center;margin-top:14px;padding:16px;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;color:#065f46;font-size:13.5px">🎉 Session terminée — tu as parcouru les ${filtered.length} règles à revoir. Merci !</div>`
+          : '');
     container.innerHTML = `
       <div class="rules-group">
         <div class="rules-group-head">
-          <span class="rules-group-title">${title}</span>
+          <span class="rules-group-title">Session de 5 règles à valider</span>
+          <span class="rules-group-count">${_reviewSessionStart + 1}–${sessionEnd} sur ${filtered.length}</span>
+        </div>
+        ${cards}
+        ${nextBtn}
+      </div>`;
+    return;
+  }
+  // Mode catégorie spécifique : un seul groupe "à plat"
+  if (_activeFilter !== 'all') {
+    const cards = filtered.slice(0, 50).map(renderRuleCard).join('');
+    container.innerHTML = `
+      <div class="rules-group">
+        <div class="rules-group-head">
+          <span class="rules-group-title">${_activeFilter}</span>
           <span class="rules-group-count">${filtered.length} règle${filtered.length > 1 ? 's' : ''}</span>
         </div>
         ${cards}
       </div>`;
     return;
   }
-  // Mode "Toutes" : grouper par catégorie, trier par importance dans chaque groupe
+  // Mode "Toutes" : grouper par catégorie, petites catégories → "Divers"
+  const diversCategories = getDiversCategories();
   const byCategory = {};
   filtered.forEach(r => {
-    const cat = r.category || 'Autres';
+    let cat = r.category || 'Autres';
+    if (diversCategories.includes(cat)) cat = 'Divers';
     if (!byCategory[cat]) byCategory[cat] = [];
     byCategory[cat].push(r);
   });
-  // Ordre des catégories : tailles décroissantes
-  const categories = Object.keys(byCategory).sort((a, b) => byCategory[b].length - byCategory[a].length);
+  // Ordre : catégories principales triées par taille, "Divers" à la fin
+  const categories = Object.keys(byCategory)
+    .filter(c => c !== 'Divers')
+    .sort((a, b) => byCategory[b].length - byCategory[a].length);
+  if (byCategory['Divers']) categories.push('Divers');
   container.innerHTML = categories.map(cat => renderRuleGroup(cat, byCategory[cat], byCategory[cat].length)).join('');
+}
+
+// Bouton "Suivantes" dans le mode session de revue
+function nextReviewBatch() {
+  _reviewSessionStart += REVIEW_SESSION_SIZE;
+  renderRulesContent();
+  // Scroll en haut de la liste
+  const container = document.getElementById('rulesContainer');
+  if (container) container.scrollIntoView({behavior: 'smooth', block: 'start'});
 }
 
 // Rend les chips de filtre (dynamiques selon les catégories présentes)
 function renderRuleChips(stats) {
   const chips = document.getElementById('rulesFilterChips');
   if (!chips) return;
-  const newCount = stats.new || 0;
-  const total = stats.total || 0;
+  // Calcul côté client du nombre de règles "à revoir" (utilise _allRules + critère needsReview)
+  const reviewCount = _allRules.filter(needsReview).length;
+  const total = stats.total || _allRules.length || 0;
   const byCat = stats.by_category || {};
-  // Ordre : Nouvelles (toujours), Toutes, puis catégories par taille décroissante
-  const catOrder = Object.keys(byCat).sort((a, b) => byCat[b] - byCat[a]);
+  // Identifier les catégories "Divers" (celles avec peu de règles)
+  const diversCategories = getDiversCategories();
+  const diversCount = diversCategories.reduce((s, c) => s + (byCat[c] || 0), 0);
+  // Grandes catégories (hors Divers), triées par taille décroissante
+  const bigCats = Object.keys(byCat)
+    .filter(c => !diversCategories.includes(c))
+    .sort((a, b) => byCat[b] - byCat[a]);
+
   let html = '';
-  html += `<button class="chip chip-new ${_activeFilter==='new'?'active':''}" onclick="filterByChip('new')">Nouvelles <span class="chip-count">${newCount}</span></button>`;
+  // Chip "À revoir" (remplace l'ancien "Nouvelles") — affichée uniquement s'il y a des règles à revoir
+  if (reviewCount > 0) {
+    html += `<button class="chip chip-new ${_activeFilter==='review'?'active':''}" onclick="filterByChip('review')">À revoir <span class="chip-count">${reviewCount}</span></button>`;
+  }
   html += `<button class="chip ${_activeFilter==='all'?'active':''}" onclick="filterByChip('all')">Toutes <span class="chip-count">${total}</span></button>`;
-  catOrder.forEach(cat => {
+  bigCats.forEach(cat => {
     html += `<button class="chip ${_activeFilter===cat?'active':''}" onclick="filterByChip('${cat.replace(/'/g, "\\'")}')">${cat} <span class="chip-count">${byCat[cat]}</span></button>`;
   });
+  if (diversCount > 0) {
+    html += `<button class="chip ${_activeFilter==='Divers'?'active':''}" onclick="filterByChip('Divers')" title="Regroupe les catégories avec peu de règles (${diversCategories.length} catégories)">Divers <span class="chip-count">${diversCount}</span></button>`;
+  }
   chips.innerHTML = html;
-  // Bannière review : afficher si newCount > 0
+
+  // Bannière "À revoir avec Raya" : affichage + message adaptatif
   const banner = document.getElementById('rulesReviewBanner');
   if (banner) {
-    if (newCount > 0) {
+    if (reviewCount > 0) {
       banner.style.display = 'flex';
-      document.getElementById('rulesReviewCount').textContent = newCount;
-      const plural = newCount > 1 ? 's' : '';
-      document.getElementById('rulesReviewPlural').textContent = plural;
-      document.getElementById('rulesReviewPlural2').textContent = plural;
-      document.getElementById('rulesReviewPlural3').textContent = plural;
+      const countEl = document.getElementById('rulesReviewCount');
+      if (countEl) countEl.textContent = reviewCount;
+      const plural = reviewCount > 1 ? 's' : '';
+      ['rulesReviewPlural','rulesReviewPlural2','rulesReviewPlural3'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = plural;
+      });
+      // Message adaptatif : plus doux si beaucoup de règles (on les fait par petites sessions)
+      const desc = banner.querySelector('.review-banner-desc');
+      if (desc) {
+        if (reviewCount <= REVIEW_SESSION_SIZE) {
+          desc.innerHTML = `Raya aimerait confirmer sa compréhension avec toi — 2 minutes suffisent.`;
+        } else {
+          desc.innerHTML = `Raya te propose d'y aller par petites sessions de <strong>${REVIEW_SESSION_SIZE} règles</strong>, à ton rythme — une session ≈ 2 minutes.`;
+        }
+      }
     } else {
       banner.style.display = 'none';
     }
   }
+
   // Mettre à jour le content-desc
-  const desc = document.querySelector('[data-panel="regles"] .content-desc');
-  if (desc) {
-    desc.innerHTML = `Raya a appris <strong style="color:var(--accent)">${total} chose${total > 1 ? 's' : ''}</strong> sur ta façon de travailler. Voici ce qui a évolué récemment.`;
+  const descEl = document.querySelector('[data-panel="regles"] .content-desc');
+  if (descEl) {
+    descEl.innerHTML = `Raya a appris <strong style="color:var(--accent)">${total} chose${total > 1 ? 's' : ''}</strong> sur ta façon de travailler. Voici ce qui a évolué récemment.`;
   }
-  // Synchroniser EXISTING_CATEGORIES (pour la combobox catégorie en modale)
-  const userCategories = catOrder.filter(c => c !== 'Autres');
+
+  // Synchroniser EXISTING_CATEGORIES (pour la combobox en modale d'édition)
+  // On n'expose que les grandes catégories pour éviter la prolifération des variantes
+  const userCategories = bigCats.filter(c => c !== 'Autres');
   if (userCategories.length) {
-    // Réaffecter sans réassigner (comme c'est une const ailleurs)
     EXISTING_CATEGORIES.length = 0;
     userCategories.forEach(c => EXISTING_CATEGORIES.push(c));
   }
@@ -2072,12 +2179,12 @@ function renderRuleChips(stats) {
 // Change le filtre actif et re-render
 function filterByChip(filterName) {
   _activeFilter = filterName;
+  _reviewSessionStart = 0;  // reset la session guidée au changement de filtre
   // Mettre à jour l'état visuel des chips
   document.querySelectorAll('#rulesFilterChips .chip').forEach(c => c.classList.remove('active'));
-  // Trouver la chip qui correspond
   document.querySelectorAll('#rulesFilterChips .chip').forEach(c => {
     const txt = c.firstChild?.textContent?.trim();
-    if ((filterName === 'new' && c.classList.contains('chip-new')) ||
+    if ((filterName === 'review' && c.classList.contains('chip-new')) ||
         (filterName === 'all' && txt === 'Toutes') ||
         (txt === filterName)) {
       c.classList.add('active');
