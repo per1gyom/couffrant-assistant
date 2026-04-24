@@ -19,7 +19,7 @@ logger = get_logger("raya.user_rules")
 router = APIRouter(tags=["user_rules"])
 
 
-@router.get("/memory/rules/stats")
+@router.get("/rules/stats")
 def rules_stats(request: Request, user: dict = Depends(require_user)):
     """Compteurs pour l'onglet 'Mes regles Raya' : par categorie + nouvelles."""
     username = user["username"]
@@ -56,7 +56,7 @@ def rules_stats(request: Request, user: dict = Depends(require_user)):
         if conn: conn.close()
 
 
-@router.put("/memory/rules/{rule_id}")
+@router.put("/rules/{rule_id}")
 def update_rule(
     request: Request,
     rule_id: int = Path(...),
@@ -142,7 +142,7 @@ def update_rule(
         if conn: conn.close()
 
 
-@router.delete("/memory/rules/{rule_id}")
+@router.delete("/rules/{rule_id}")
 def delete_rule(
     request: Request,
     rule_id: int = Path(...),

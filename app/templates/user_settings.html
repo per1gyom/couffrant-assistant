@@ -1283,7 +1283,7 @@ async function saveEditRule(){
   if(pendingReply) dialogueTurns.push({role: 'user', text: pendingReply});
 
   try {
-    const r = await fetch(`/memory/rules/${_editingRule.id}`, {
+    const r = await fetch(`/rules/${_editingRule.id}`, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -1354,7 +1354,7 @@ async function confirmDeleteRule(){
     return;
   }
   try {
-    const r = await fetch(`/memory/rules/${_deletingRule.id}`, {
+    const r = await fetch(`/rules/${_deletingRule.id}`, {
       method: 'DELETE',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({feedback_text: feedback, dialogue_turns: []}),
@@ -2138,8 +2138,8 @@ function filterRules() {
 async function loadRules() {
   try {
     const [r1, r2] = await Promise.all([
-      fetch('/memory/rules'),
-      fetch('/memory/rules/stats'),
+      fetch('/rules'),
+      fetch('/rules/stats'),
     ]);
     const rules = await r1.json();
     const stats = await r2.json();
