@@ -32,6 +32,7 @@
   <div class="tab" onclick="switchTab('actions')">Actions</div>
   <div class="tab" onclick="switchTab('companies')">Sociétés</div>
   <div class="tab" onclick="switchTab('profile')">Mon profil</div>
+  <div class="tab" onclick="switchTab('maintenance')">Maintenance</div>
 </nav>
 
 <main class="main">
@@ -218,6 +219,29 @@
     <div class="form-group"><label>Nouveau mot de passe</label><input type="password" id="new-password" placeholder="12 caract. min + maj + chiffre + spécial" autocomplete="new-password"></div>
     <div class="form-group"><label>Confirmer</label><input type="password" id="confirm-password" placeholder="Répéter" autocomplete="new-password"></div>
     <button class="btn btn-warn" onclick="changePassword()">🔒 Mettre à jour le mot de passe</button>
+  </div>
+</section>
+
+<!-- MAINTENANCE -->
+<section id="tab-maintenance" class="section">
+  <div class="profile-card" style="max-width:720px">
+    <div class="profile-section-title">🧹 Nettoyer les catégories « auto »</div>
+    <p style="color:#6b7280;font-size:13px;line-height:1.55;margin:8px 0 14px 0">
+      Reclasse les règles qui ont un tag <code style="background:#f3f4f6;padding:1px 5px;border-radius:4px">[xxx]</code>
+      implicite au début du texte (<code>[équipe]</code>, <code>[odoo]</code>, <code>[patrimoine]</code>…) vers
+      une catégorie propre. Applique aussi les fusions de doublons
+      (<code>[équipe]</code> + <code>[collaborateur]</code> → <strong>Équipe</strong>, etc.).
+      Idempotent — tu peux le relancer sans risque.
+    </p>
+    <div class="form-group">
+      <label>Utilisateur cible</label>
+      <input type="text" id="maint-target-username" placeholder="ex: guillaume" autocomplete="off" value="guillaume">
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+      <button class="btn" onclick="runMigrationAutoTags(true)">👀 Prévisualiser (dry-run)</button>
+      <button class="btn btn-warn" onclick="runMigrationAutoTags(false)">⚙️ Exécuter la migration</button>
+    </div>
+    <div id="maint-result" style="margin-top:16px"></div>
   </div>
 </section>
 
@@ -424,6 +448,56 @@
     setTimeout(()=>{document.getElementById('profile-alert').className='alert';},5000);
   };
 })();
+
+// ==== Maintenance : migration categories auto ====
+async function runMigrationAutoTags(dryRun){
+  const target = document.getElementById('maint-target-username').value.trim();
+  const resultDiv = document.getElementById('maint-result');
+  if(!target){
+    resultDiv.innerHTML = '<div class="alert err" style="display:block">❌ Utilisateur cible obligatoire</div>';
+    return;
+  }
+  if(!dryRun && !confirm(`Lancer la migration RÉELLE pour "${target}" ? Cette action écrit en base.`)){
+    return;
+  }
+  resultDiv.innerHTML = '<div style="color:#6b7280;font-size:13px"><span class="loader"></span> '+(dryRun?'Prévisualisation...':'Migration en cours...')+'</div>';
+  try{
+    const r = await fetch('/admin/maintenance/migrate-auto-tags', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({target_username: target, dry_run: dryRun}),
+    });
+    const d = await r.json();
+    if(d.status !== 'ok'){
+      resultDiv.innerHTML = '<div class="alert err" style="display:block">❌ '+(d.message||'Erreur inconnue')+'</div>';
+      return;
+    }
+    const s = d.stats || {};
+    const byCat = s.by_new_category || {};
+    const catRows = Object.entries(byCat)
+      .sort((a,b)=>b[1]-a[1])
+      .map(([cat,n])=>`<tr><td style="padding:4px 10px">${cat}</td><td style="padding:4px 10px;text-align:right;font-variant-numeric:tabular-nums">${n}</td></tr>`)
+      .join('');
+    const skippedHtml = (s.skipped_examples && s.skipped_examples.length)
+      ? '<div style="margin-top:14px;padding:10px;background:#fef3c7;border:1px solid #fde68a;border-radius:6px;font-size:12.5px">⚠️ <strong>'+s.no_mapping+' tag(s) sans mapping</strong> — exemples :<ul style="margin:6px 0 0 18px;padding:0">'+s.skipped_examples.map(e=>`<li><code>[${e.tag}]</code> — ${e.preview}…</li>`).join('')+'</ul></div>'
+      : '';
+    const banner = dryRun
+      ? '<div class="alert ok" style="display:block">👀 <strong>Prévisualisation</strong> — aucune modification enregistrée</div>'
+      : '<div class="alert ok" style="display:block">✅ <strong>Migration effectuée</strong> — '+s.migrated+' règle(s) reclassée(s)</div>';
+    resultDiv.innerHTML = banner + `
+      <div style="margin-top:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+        <div style="padding:10px;background:#f9fafb;border-radius:6px"><div style="font-size:11px;color:#6b7280;text-transform:uppercase">Total 'auto'</div><div style="font-size:20px;font-weight:600">${s.total_auto||0}</div></div>
+        <div style="padding:10px;background:#f9fafb;border-radius:6px"><div style="font-size:11px;color:#6b7280;text-transform:uppercase">Avec tag</div><div style="font-size:20px;font-weight:600">${s.with_tag||0}</div></div>
+        <div style="padding:10px;background:#eef2ff;border-radius:6px"><div style="font-size:11px;color:#4f46e5;text-transform:uppercase">Migrées</div><div style="font-size:20px;font-weight:600;color:#4f46e5">${s.migrated||0}</div></div>
+        <div style="padding:10px;background:#fef3c7;border-radius:6px"><div style="font-size:11px;color:#92400e;text-transform:uppercase">Sans mapping</div><div style="font-size:20px;font-weight:600;color:#92400e">${s.no_mapping||0}</div></div>
+      </div>
+      ${catRows ? '<div style="margin-top:14px"><div style="font-size:13px;font-weight:600;margin-bottom:6px">Répartition par nouvelle catégorie :</div><table style="width:100%;border-collapse:collapse;font-size:13px;border:1px solid #e5e7eb;border-radius:6px;overflow:hidden"><thead><tr style="background:#f9fafb"><th style="padding:6px 10px;text-align:left">Catégorie</th><th style="padding:6px 10px;text-align:right">Règles</th></tr></thead><tbody>'+catRows+'</tbody></table></div>' : ''}
+      ${skippedHtml}
+    `;
+  }catch(e){
+    resultDiv.innerHTML = '<div class="alert err" style="display:block">❌ Erreur réseau : '+e.message+'</div>';
+  }
+}
 </script>
 </body>
 </html>
