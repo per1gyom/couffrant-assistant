@@ -1047,57 +1047,8 @@ document.querySelectorAll('.chip').forEach(c => {
 
 // ==== Combobox catégorie (liste libre + création à la volée) ====
 const EXISTING_CATEGORIES = ['Comportement','Style','Métier','Filtre mail','Regroupement'];
-function showCategories(){
-  document.getElementById('categoryCombo').classList.add('active');
-  filterCategories();
-}
-function filterCategories(){
-  const input = document.getElementById('categoryInput');
-  const val = input.value.trim();
-  const valLower = val.toLowerCase();
-  const newItem = document.getElementById('newCategoryItem');
-  const newText = document.getElementById('newCategoryText');
-  // Toutes les catégories existantes restent visibles (liste complète, pas filtrée à la volée)
-  // On met juste en surbrillance celles qui matchent
-  document.querySelectorAll('#categoryList .combo-item:not(.new)').forEach(item => {
-    const txt = item.firstChild.textContent.trim().toLowerCase();
-    if(val && txt.startsWith(valLower)){
-      item.classList.add('highlight');
-    } else {
-      item.classList.remove('highlight');
-    }
-    item.style.display = '';
-  });
-  // Gestion du bouton "+ Créer la catégorie"
-  const isValidNew = val && !EXISTING_CATEGORIES.some(c => c.toLowerCase() === valLower);
-  if(isValidNew){
-    newItem.classList.remove('disabled');
-    newText.innerHTML = 'Créer la catégorie <strong>"' + val + '"</strong>';
-    newItem.onclick = () => selectCategory(val, true);
-  } else {
-    newItem.classList.add('disabled');
-    newText.textContent = 'Tape un nom pour créer une nouvelle catégorie';
-    newItem.onclick = null;
-  }
-}
-function selectCategory(name, isNew=false){
-  document.getElementById('categoryInput').value = name;
-  document.getElementById('categoryCombo').classList.remove('active');
-  if(isNew){
-    // Pour la démo, on affiche juste un toast. En prod, on enregistrera la nouvelle catégorie côté backend.
-    const toast = document.getElementById('toast');
-    toast.lastChild.textContent = ' Nouvelle catégorie "' + name + '" créée';
-    toast.classList.add('open');
-    setTimeout(()=>toast.classList.remove('open'), 2200);
-  }
-}
-// Fermer la combo si clic dehors
-document.addEventListener('click', e => {
-  if(!e.target.closest('#categoryCombo')){
-    const c = document.getElementById('categoryCombo');
-    if(c) c.classList.remove('active');
-  }
-});
+// (fonctions combobox legacy supprimees — la modale unifiee utilise un <select> natif)
+
 
 // ==== Dictée vocale (Web Speech API) ====
 let currentRecognition = null;
