@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Aperçu — Modale parcours unifiée v2</title>
+<style>
+:root{
+  --bg:#f2f5fa;--surface:#fff;--text:#1a1d23;--text-muted:#6b7482;
+  --border:#e6eaf0;--accent:#0057b8;--accent-light:#e8f0fc;
+  --success:#059669;--danger:#dc2626;--yellow:#d97706;--radius:12px;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--text);padding:40px 20px;font-feature-settings:"tnum"}
+.page-intro{max-width:720px;margin:0 auto 30px;background:var(--surface);border-radius:var(--radius);padding:24px;border:1px solid var(--border)}
+.page-intro h1{margin:0 0 8px;font-size:18px}
+.page-intro p{margin:4px 0;font-size:13.5px;color:var(--text-muted);line-height:1.55}
+.demo-triggers{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:10px 16px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:13.5px;font-weight:500;cursor:pointer;font-family:inherit;transition:.15s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-primary:hover{background:#003f85;color:#fff}
+.btn-warn{background:var(--yellow);color:#fff;border-color:var(--yellow)}
+.btn-warn:hover{background:#a8590a;color:#fff}
+.btn-danger{background:var(--danger);color:#fff;border-color:var(--danger)}
+.btn-danger:hover{background:#991b1b;color:#fff}
+.btn svg{width:14px;height:14px}
+
+/* === MODALE UNIFIEE === */
+.modal-overlay{position:fixed;inset:0;background:rgba(26,29,35,.55);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:1000;padding:16px;animation:fadeIn .25s ease}
+.modal-overlay.open{display:flex}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes popIn{from{opacity:0;transform:scale(.96) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
+
+.review-shell{width:100%;max-width:900px;height:720px;max-height:92vh;background:var(--surface);border-radius:18px;display:flex;flex-direction:column;box-shadow:0 30px 80px rgba(0,0,0,.35);overflow:hidden;animation:popIn .35s cubic-bezier(.16,1,.3,1)}
+
+/* HEADER */
+.review-head{padding:20px 28px 18px;background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%);border-bottom:1px solid #bfdbfe}
+.review-head.edit-mode{background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%)}
+.review-head.delete-mode{background:linear-gradient(135deg,#fef2f2 0%,#fecaca 100%);border-bottom-color:#fca5a5}
+.review-head-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.review-head-title{font-size:15px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}
+.review-head-title .icon{width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,#3b82f6,#0057b8);color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 8px rgba(0,87,184,.25)}
+.review-head.delete-mode .review-head-title .icon{background:linear-gradient(135deg,#ef4444,#b91c1c);box-shadow:0 3px 8px rgba(185,28,28,.25)}
+.review-head-title .icon svg{width:16px;height:16px}
+.review-close{background:transparent;border:none;cursor:pointer;color:var(--text-muted);padding:6px;border-radius:6px;display:flex;align-items:center;justify-content:center;transition:.15s}
+.review-close:hover{background:rgba(0,0,0,.06);color:var(--text)}
+.review-progress{display:flex;align-items:center;gap:12px}
+.review-progress-bar{flex:1;height:6px;background:rgba(59,130,246,.15);border-radius:3px;overflow:hidden}
+.review-progress-fill{height:100%;background:linear-gradient(90deg,#3b82f6,#0057b8);border-radius:3px;transition:width .35s ease}
+.review-progress-text{font-size:12.5px;color:var(--text-muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+
+/* BODY — prend tout l'espace restant, scrolle si besoin, hauteur constante */
+.review-body{padding:28px;overflow-y:auto;flex:1 1 auto;scrollbar-gutter:stable}
+
+/* BREADCRUMB (affiche le mode courant quand != 'review') */
+.review-breadcrumb{display:flex;align-items:center;gap:8px;margin-bottom:16px;font-size:12.5px;color:var(--text-muted)}
+.review-breadcrumb button{background:transparent;border:none;padding:0;color:var(--accent);font-size:12.5px;cursor:pointer;text-decoration:underline;font-family:inherit}
+.review-breadcrumb button:hover{color:#003f85}
+.review-breadcrumb .sep{opacity:.5}
+
+/* CARTE DE REGLE (mode 'review') */
+.review-card{background:#fafcff;border:1px solid var(--border);border-radius:14px;padding:22px 24px;transition:.3s}
+.review-card-meta{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px;font-size:12px;color:var(--text-muted)}
+.category-pill{display:inline-flex;align-items:center;padding:3px 10px;background:var(--accent-light);color:var(--accent);border-radius:999px;font-weight:600;font-size:11.5px}
+.meta-dot{width:3px;height:3px;border-radius:50%;background:var(--text-muted);opacity:.5}
+.review-card-text{font-size:15.5px;color:var(--text);line-height:1.55;margin-bottom:14px;word-wrap:break-word}
+.review-card-context{background:#fff;border:1px dashed var(--border);border-radius:10px;padding:12px 14px;font-size:12.5px;color:var(--text-muted);line-height:1.5;display:flex;gap:10px;align-items:flex-start}
+.review-card-context svg{flex-shrink:0;margin-top:2px;opacity:.6}
+
+/* FORMULAIRES (modes 'edit' et 'delete') */
+.field{margin-bottom:16px}
+.field-label{display:block;font-size:12.5px;font-weight:600;color:var(--text);margin-bottom:6px}
+.field-hint{font-size:12px;color:var(--text-muted);margin-top:4px;line-height:1.45}
+.field-input,.field-textarea{width:100%;padding:10px 12px;background:#fafcff;border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:13.5px;color:var(--text);transition:.15s}
+.field-input:focus,.field-textarea:focus{outline:none;border-color:var(--accent);background:#fff;box-shadow:0 0 0 3px var(--accent-light)}
+.field-textarea{min-height:80px;resize:vertical;line-height:1.55}
+.conf-levels{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:4px}
+.conf-level{padding:10px 8px;background:#fff;border:1.5px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer;text-align:center;transition:.15s}
+.conf-level:hover{border-color:var(--accent)}
+.conf-level.active{background:var(--accent-light);border-color:var(--accent);color:var(--accent);font-weight:600}
+
+/* RAPPEL REGLE (mode delete) */
+.delete-rule-preview{background:#fff;border:1px solid var(--border);border-radius:10px;padding:14px 16px;font-size:13px;color:var(--text);line-height:1.55;margin-bottom:14px}
+.delete-warning{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:12.5px;color:#991b1b;line-height:1.5}
+
+/* FOOTER ACTIONS */
+.review-actions{padding:18px 28px 22px;border-top:1px solid var(--border);background:#fafcff}
+.review-actions.mode-review{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+@media(min-width:600px){.review-actions.mode-review{grid-template-columns:repeat(4,1fr)}}
+.review-actions.mode-edit,.review-actions.mode-delete{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+
+.review-action{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 10px;background:#fff;border:1.5px solid var(--border);border-radius:12px;cursor:pointer;transition:.15s;font-size:12.5px;font-weight:500;color:var(--text);font-family:inherit}
+.review-action .icon-wrap{width:34px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px}
+.review-action.keep .icon-wrap{background:#d1fae5;color:#065f46}
+.review-action.keep:hover{border-color:#10b981;background:#ecfdf5;color:#065f46;transform:translateY(-1px)}
+.review-action.edit .icon-wrap{background:#dbeafe;color:#1e40af}
+.review-action.edit:hover{border-color:#3b82f6;background:#eff6ff;color:#1e40af;transform:translateY(-1px)}
+.review-action.delete .icon-wrap{background:#fee2e2;color:#991b1b}
+.review-action.delete:hover{border-color:var(--danger);background:#fef2f2;color:#991b1b;transform:translateY(-1px)}
+.review-action.skip .icon-wrap{background:#f3f4f6;color:#374151}
+.review-action.skip:hover{border-color:#6b7280;background:#f9fafb;color:#374151;transform:translateY(-1px)}
+
+/* ANIMATION DE TRANSITION ENTRE LES MODES */
+.review-body-content{animation:fadeInUp .3s ease}
+@keyframes fadeInUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+/* ECRAN FINAL */
+.review-empty{text-align:center;padding:40px 20px}
+.review-empty-icon{width:64px;height:64px;border-radius:18px;background:linear-gradient(135deg,#10b981,#059669);color:#fff;display:inline-flex;align-items:center;justify-content:center;margin-bottom:16px;box-shadow:0 6px 16px rgba(16,185,129,.3)}
+.review-empty h3{font-size:17px;color:var(--text);margin:0 0 6px}
+.review-empty p{font-size:13.5px;color:var(--text-muted);margin:0;line-height:1.55}
+</style>
+</head>
+<body>
+
+<div class="page-intro">
+  <h1>🧪 Aperçu — Modale "Faisons le point" unifiée (v2)</h1>
+  <p><strong>Principe :</strong> une seule fenêtre qui change d'état. On reste dans le même contexte visuel quand on passe de « vue de la règle » à « édition » ou « suppression ».</p>
+  <p><strong>Tu peux tester :</strong></p>
+  <ul style="margin:8px 0;padding-left:20px;font-size:13.5px;color:var(--text-muted);line-height:1.7">
+    <li>Ouvrir le parcours, puis cliquer sur « ✎ Corrige-la » → la carte devient un formulaire d'édition <em>dans la même fenêtre</em></li>
+    <li>Enregistrer → retour automatique à la règle suivante du parcours</li>
+    <li>« 🗑 Supprime-la » → formulaire de suppression avec feedback dans la même fenêtre</li>
+    <li>« Retour » dans le breadcrumb → revient à la vue de la règle</li>
+    <li>Fermer la modale → comportement inchangé (Escape ou clic hors)</li>
+  </ul>
+  <div class="demo-triggers">
+    <button class="btn btn-primary" onclick="openReview()">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+      Ouvrir le parcours (aperçu)
+    </button>
+  </div>
+</div>
+
+<!-- ============ MODALE UNIFIEE ============ -->
+<div class="modal-overlay" id="reviewModal">
+  <div class="review-shell" role="dialog">
+    <!-- HEADER ADAPTATIF -->
+    <div class="review-head" id="reviewHead">
+      <div class="review-head-top">
+        <div class="review-head-title">
+          <span class="icon" id="reviewHeadIcon">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 00-3 3v2a3 3 0 00-3 3v2a3 3 0 003 3v5a3 3 0 006 0v-5a3 3 0 003-3v-2a3 3 0 00-3-3V5a3 3 0 00-3-3z"/></svg>
+          </span>
+          <span id="reviewHeadTitle">Faisons le point avec Raya</span>
+        </div>
+        <button class="review-close" onclick="closeReview()" title="Fermer">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+      <div class="review-progress">
+        <div class="review-progress-bar"><div class="review-progress-fill" id="reviewProgressFill" style="width:20%"></div></div>
+        <div class="review-progress-text" id="reviewProgressText">1 sur 5</div>
+      </div>
+    </div>
+
+    <!-- BODY DYNAMIQUE -->
+    <div class="review-body" id="reviewBody"></div>
+
+    <!-- ACTIONS DYNAMIQUES -->
+    <div class="review-actions mode-review" id="reviewActions"></div>
+  </div>
+</div>
+
+<script>
+// Données de démo
+const DEMO_RULES = [
+  {
+    id: 142,
+    category: "Équipe",
+    rule: "Simon Ducasse = Enryk, AMO technique intervenant sur dossiers ACC (notamment SARL des Moines)",
+    confidence: 0.60,
+    reinforcements: 1,
+    created_at: "2026-04-21T10:00:00Z",
+    source: "synthesis",
+  },
+  {
+    id: 148,
+    category: "Comportement",
+    rule: "Quand Guillaume conteste une donnée, relancer une recherche ciblée dans les sources primaires (Odoo, mails) plutôt que reformuler la même réponse erronée",
+    confidence: 0.60,
+    reinforcements: 1,
+    created_at: "2026-04-21T10:00:00Z",
+    source: "synthesis",
+  },
+  {
+    id: 155,
+    category: "Odoo",
+    rule: "L'API Odoo actuelle n'expose que les métadonnées des devis (nom, montant, client, date) sans le détail des lignes",
+    confidence: 0.55,
+    reinforcements: 1,
+    created_at: "2026-04-20T10:00:00Z",
+    source: "synthesis",
+  },
+  {
+    id: 160,
+    category: "Comportement",
+    rule: "Ne jamais inventer de données client (prénom, contact, montant) — si l'information n'est pas clairement remontée par la source, dire explicitement qu'elle est absente plutôt que combler par une supposition",
+    confidence: 0.70,
+    reinforcements: 1,
+    created_at: "2026-04-20T10:00:00Z",
+    source: "synthesis",
+  },
+  {
+    id: 165,
+    category: "Patrimoine",
+    rule: "SARL des Moines = dossier PV où Legroux (Jean-Bernard, Arrault Legroux, Saint-Pryvé-Saint-Mesmin 45750) est le contact/gérant côté client",
+    confidence: 0.60,
+    reinforcements: 1,
+    created_at: "2026-04-19T10:00:00Z",
+    source: "synthesis",
+  },
+];
+
+const CANONICAL_CATEGORIES = [
+  "Tri mails","Comportement","Outils","Équipe","Projets & roadmap",
+  "Patrimoine","Clients","Drive","Regroupement","Odoo","Mémoire",
+  "Communication","Identité","Priorités","UX","Données","Limites"
+];
+
+// État de la modale
+let _state = {
+  mode: 'review',      // 'review' | 'edit' | 'delete' | 'done'
+  index: 0,
+  handled: 0,
+  rules: DEMO_RULES,
+};
+
+function openReview() {
+  _state.index = 0;
+  _state.handled = 0;
+  _state.mode = 'review';
+  document.getElementById('reviewModal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+  render();
+}
+function closeReview() {
+  document.getElementById('reviewModal').classList.remove('open');
+  document.body.style.overflow = '';
+}
+
+function formatRelative(iso) {
+  const d = new Date(iso);
+  const days = Math.floor((new Date() - d) / 86400000);
+  if (days < 1) return "aujourd'hui";
+  if (days === 1) return "hier";
+  if (days < 7) return `il y a ${days} jours`;
+  return `il y a ${Math.floor(days/7)} semaine${days>=14?'s':''}`;
+}
+
+function render() {
+  const body = document.getElementById('reviewBody');
+  const actions = document.getElementById('reviewActions');
+  const head = document.getElementById('reviewHead');
+  const title = document.getElementById('reviewHeadTitle');
+  const fill = document.getElementById('reviewProgressFill');
+  const progressTxt = document.getElementById('reviewProgressText');
+
+  // Fin du parcours
+  if (_state.index >= _state.rules.length && _state.mode === 'review') {
+    head.className = 'review-head';
+    title.textContent = 'Parcours terminé';
+    fill.style.width = '100%';
+    progressTxt.textContent = `${_state.handled}/${_state.rules.length} terminé`;
+    body.innerHTML = `
+      <div class="review-body-content review-empty">
+        <div class="review-empty-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <h3>Merci, c'est terminé !</h3>
+        <p>Tu as parcouru ${_state.handled} règle${_state.handled > 1 ? 's' : ''} dans cette session.<br>Raya prend note de tes retours.</p>
+      </div>`;
+    actions.className = 'review-actions mode-edit';
+    actions.innerHTML = `<div></div><button class="btn btn-primary" onclick="closeReview()">Revenir à mes règles</button>`;
+    return;
+  }
+
+  const rule = _state.rules[_state.index];
+  const pct = Math.round(((_state.handled) / _state.rules.length) * 100);
+  fill.style.width = pct + '%';
+  progressTxt.textContent = `${_state.index + 1} sur ${_state.rules.length}`;
+
+  // === MODE REVIEW : vue de la règle ===
+  if (_state.mode === 'review') {
+    head.className = 'review-head';
+    title.textContent = 'Faisons le point avec Raya';
+    body.innerHTML = `
+      <div class="review-body-content">
+        <div class="review-card">
+          <div class="review-card-meta">
+            <span class="category-pill">${rule.category}</span>
+            <span>règle #${rule.id}</span>
+            <span class="meta-dot"></span>
+            <span>${formatRelative(rule.created_at)}</span>
+            <span class="meta-dot"></span>
+            <span>confiance ${Math.round(rule.confidence * 100)} %</span>
+            <span class="meta-dot"></span>
+            <span>${rule.reinforcements ? `renforcée ${rule.reinforcements}×` : 'jamais renforcée'}</span>
+          </div>
+          <div class="review-card-text">${rule.rule}</div>
+          <div class="review-card-context">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+            <span>J'ai retenu ça après notre conversation de la journée. Je ne suis pas encore complètement sûre — ton avis m'aidera à bien calibrer.</span>
+          </div>
+        </div>
+      </div>`;
+    actions.className = 'review-actions mode-review';
+    actions.innerHTML = `
+      <button class="review-action keep" onclick="action('keep')"><span class="icon-wrap">✓</span><span>Garde-la</span></button>
+      <button class="review-action edit" onclick="switchTo('edit')"><span class="icon-wrap">✎</span><span>Corrige-la</span></button>
+      <button class="review-action delete" onclick="switchTo('delete')"><span class="icon-wrap">🗑</span><span>Supprime-la</span></button>
+      <button class="review-action skip" onclick="action('skip')"><span class="icon-wrap">→</span><span>Plus tard</span></button>
+    `;
+    return;
+  }
+
+  // === MODE EDIT : formulaire d'édition ===
+  if (_state.mode === 'edit') {
+    head.className = 'review-head edit-mode';
+    title.textContent = 'Corriger la règle';
+    const catOptions = CANONICAL_CATEGORIES.map(c =>
+      `<option value="${c}" ${c === rule.category ? 'selected' : ''}>${c}</option>`
+    ).join('');
+    body.innerHTML = `
+      <div class="review-body-content">
+        <div class="review-breadcrumb">
+          <button onclick="switchTo('review')">← Retour à la règle</button>
+          <span class="sep">·</span>
+          <span>Règle #${rule.id}</span>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Catégorie</label>
+          <select class="field-input" id="editCategory">${catOptions}</select>
+          <div class="field-hint">Choisis une catégorie existante ou écris-en une nouvelle si aucune ne colle vraiment.</div>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Texte de la règle</label>
+          <textarea class="field-textarea" id="editText">${rule.rule}</textarea>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Ta confiance dans cette règle</label>
+          <div class="conf-levels">
+            <div class="conf-level" data-conf="0.3">Pas sûr du tout</div>
+            <div class="conf-level" data-conf="0.6">Plutôt d'accord</div>
+            <div class="conf-level active" data-conf="0.9">Oui, clairement</div>
+            <div class="conf-level" data-conf="1.0">C'est une règle absolue</div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Explique à Raya pourquoi tu corriges (optionnel)</label>
+          <textarea class="field-textarea" id="editFeedback" placeholder="Ex : 'Tu avais mal compris, c'est plutôt…', 'Simon n'est plus sur le dossier'…"></textarea>
+          <div class="field-hint">Ce retour aide Raya à mieux comprendre et ne pas répéter la même erreur.</div>
+        </div>
+      </div>
+    `;
+    // Bind conf-levels
+    body.querySelectorAll('.conf-level').forEach(l => {
+      l.addEventListener('click', () => {
+        body.querySelectorAll('.conf-level').forEach(x => x.classList.remove('active'));
+        l.classList.add('active');
+      });
+    });
+    actions.className = 'review-actions mode-edit';
+    actions.innerHTML = `
+      <button class="btn" onclick="switchTo('review')">Annuler</button>
+      <button class="btn btn-primary" onclick="saveEdit()">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+        Enregistrer et passer à la suivante
+      </button>
+    `;
+    return;
+  }
+
+  // === MODE DELETE : formulaire de suppression ===
+  if (_state.mode === 'delete') {
+    head.className = 'review-head delete-mode';
+    title.textContent = 'Supprimer cette règle';
+    document.getElementById('reviewHeadIcon').innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 01-2 2H9a2 2 0 01-2-2L5 6"/></svg>`;
+    body.innerHTML = `
+      <div class="review-body-content">
+        <div class="review-breadcrumb">
+          <button onclick="switchTo('review')">← Retour à la règle</button>
+          <span class="sep">·</span>
+          <span>Règle #${rule.id}</span>
+        </div>
+
+        <p style="font-size:13.5px;color:var(--text);margin:0 0 10px"><strong>Règle concernée :</strong></p>
+        <div class="delete-rule-preview">${rule.rule}</div>
+
+        <div class="delete-warning" style="margin-bottom:14px">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="flex-shrink:0;margin-top:1px"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          <span>Cette règle sera désactivée. Raya ne la prendra plus en compte, mais l'historique est conservé 30 jours au cas où.</span>
+        </div>
+
+        <div class="field">
+          <label class="field-label">Qu'est-ce qui cloche avec cette règle ? <span style="color:var(--danger)">*</span></label>
+          <textarea class="field-textarea" id="deleteFeedback" placeholder="Ex : 'Je n'ai jamais dit ça', 'C'est une mauvaise interprétation', 'Ça ne correspond plus à ma façon de travailler'…"></textarea>
+          <div class="field-hint">Un retour est obligatoire — ça évite que Raya recrée une règle similaire dans le futur.</div>
+        </div>
+      </div>
+    `;
+    // Restaurer l'icone du header au retour review (sauvegardée implicitement par le HTML initial)
+    actions.className = 'review-actions mode-delete';
+    actions.innerHTML = `
+      <button class="btn" onclick="switchTo('review')">Annuler</button>
+      <button class="btn btn-danger" onclick="confirmDelete()">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 01-2 2H9a2 2 0 01-2-2L5 6"/></svg>
+        Supprimer et passer à la suivante
+      </button>
+    `;
+    return;
+  }
+}
+
+function switchTo(newMode) {
+  _state.mode = newMode;
+  // Restaurer l'icône du header si on revient en review/edit
+  if (newMode !== 'delete') {
+    document.getElementById('reviewHeadIcon').innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a3 3 0 00-3 3v2a3 3 0 00-3 3v2a3 3 0 003 3v5a3 3 0 006 0v-5a3 3 0 003-3v-2a3 3 0 00-3-3V5a3 3 0 00-3-3z"/></svg>`;
+  }
+  render();
+}
+
+function action(type) {
+  // Passage direct a la suivante, sans pop-up de confirmation
+  _state.handled++;
+  _state.index++;
+  _state.mode = 'review';
+  render();
+}
+
+function saveEdit() {
+  // Recupere les valeurs juste pour validation minimale (texte non vide)
+  const text = document.getElementById('editText').value.trim();
+  if (!text) return; // on ne sauve pas une regle vide, on reste sur l'ecran
+  // Sauvegarde simulee + passage direct a la suivante (pas de pop-up)
+  _state.handled++;
+  _state.index++;
+  _state.mode = 'review';
+  render();
+}
+
+function confirmDelete() {
+  const feedback = document.getElementById('deleteFeedback').value.trim();
+  if (!feedback) {
+    // Le feedback reste obligatoire pour supprimer — petit indicateur visuel
+    const ta = document.getElementById('deleteFeedback');
+    ta.style.borderColor = 'var(--danger)';
+    ta.focus();
+    setTimeout(() => { ta.style.borderColor = ''; }, 2000);
+    return;
+  }
+  // Suppression simulee + passage direct a la suivante (pas de pop-up)
+  _state.handled++;
+  _state.index++;
+  _state.mode = 'review';
+  render();
+}
+
+// Échap pour fermer
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.getElementById('reviewModal').classList.contains('open')) {
+    closeReview();
+  }
+});
+// Clic hors modale
+document.getElementById('reviewModal').addEventListener('click', e => {
+  if (e.target.id === 'reviewModal') closeReview();
+});
+</script>
+
+</body>
+</html>
