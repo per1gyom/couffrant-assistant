@@ -468,3 +468,40 @@ def trigger_migrate_auto_tags(
         }
     except Exception as e:
         return {"status": "error", "message": str(e)[:200]}
+
+
+@router.post("/admin/maintenance/migrate-category-duplicates")
+def trigger_migrate_category_duplicates(
+    request: Request,
+    payload: dict = Body(default={}),
+    user: dict = Depends(require_super_admin),
+):
+    """Declenche la fusion des doublons de categories (Phase 2).
+
+    Apres la Phase 1 (extraction des tags [xxx]), il reste des doublons
+    casse/slug : 'comportement' vs 'Comportement', 'tri_mails' vs
+    'tri-mails' vs 'Tri mails', etc. Cet endpoint fusionne tout vers
+    la forme canonique definie dans scripts/migrate_category_duplicates.py.
+
+    Payload : {
+      "target_username": "guillaume",
+      "dry_run": true/false (default true)
+    }
+
+    Super-admin uniquement. Idempotent.
+    """
+    target = payload.get("target_username", "").strip()
+    dry_run = payload.get("dry_run", True)
+    if not target:
+        return {"status": "error", "message": "target_username obligatoire"}
+    try:
+        from scripts.migrate_category_duplicates import migrate_duplicates
+        stats = migrate_duplicates(target, dry_run=bool(dry_run))
+        return {
+            "status": "ok" if "error" not in stats else "error",
+            "dry_run": bool(dry_run),
+            "target_username": target,
+            "stats": stats,
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:200]}
