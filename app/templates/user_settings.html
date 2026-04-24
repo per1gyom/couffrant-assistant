@@ -590,6 +590,13 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
             </div>
             <label class="toggle"><input type="checkbox" id="toggleCompactMode"><span class="toggle-slider"></span></label>
           </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-title">Lecture automatique des réponses</div>
+              <div class="toggle-desc">Raya lit ses réponses à voix haute dans le chat. Appliqué au prochain chargement du chat.</div>
+            </div>
+            <label class="toggle"><input type="checkbox" id="toggleAutoSpeak"><span class="toggle-slider"></span></label>
+          </div>
         </div>
 
         <!-- Bloc Sécurité -->
@@ -1253,6 +1260,7 @@ async function loadProfile() {
     document.getElementById('toggleEmailNotifications').checked = settings.email_notifications !== false; // default true
     document.getElementById('toggleShowResponseTime').checked = !!settings.show_response_time;
     document.getElementById('toggleCompactMode').checked = !!settings.compact_mode;
+    document.getElementById('toggleAutoSpeak').checked = settings.auto_speak === true; // default false
     // Dernière connexion
     document.getElementById('lastLoginText').textContent = formatRelativeDate(d.last_login);
   } catch (e) {
@@ -1272,6 +1280,7 @@ async function saveProfile() {
     email_notifications: document.getElementById('toggleEmailNotifications').checked,
     show_response_time: document.getElementById('toggleShowResponseTime').checked,
     compact_mode: document.getElementById('toggleCompactMode').checked,
+    auto_speak: document.getElementById('toggleAutoSpeak').checked,
   };
   const errors = [];
   try {

@@ -93,7 +93,7 @@ let speakSpeed = 1.2;
 let isListening=false, currentAudio=null, speakAborted=false, currentSpeakBtn=null;
 let triageQueue=[], triageCurrent=null, silenceTimer=null;
 let finalTextBase='';
-let autoSpeak=true;
+let autoSpeak=false;  // OFF par défaut — l'utilisateur active via /settings → Profil, persistance DB
 let currentFile=null;
 let currentUser='';
 let isAdmin=false;
@@ -118,6 +118,8 @@ async function checkHealth() {
 async function loadUserInfo() {
   try {
     const d = await (await fetch('/profile')).json();
+    // Synchro auto_speak depuis les preferences DB (null/undefined -> on garde false)
+    if (d.settings && d.settings.auto_speak === true) autoSpeak = true;
     const scope = d.scope || '';
     const name = d.display_name || d.username || d.email || '';
     // Nom dans le footer (à côté des 3 points)
