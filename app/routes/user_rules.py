@@ -230,3 +230,138 @@ def delete_rule(
         return {"status": "error", "message": str(e)[:150]}
     finally:
         if conn: conn.close()
+
+
+@router.get("/rules/review-queue")
+def review_queue(request: Request, user: dict = Depends(require_user)):
+    """Phase 3 UX /settings — file d'attente du mode parcours guide 'Faisons le point'.
+
+    Retourne les regles 'a revoir' triees par incertitude (moins sures en premier).
+    Meme critere que l'affichage 'A revoir' du panel :
+      - creees dans les 7 derniers jours
+      - ET confidence < 0.8 ET reinforcements <= 2
+    """
+    username = user["username"]
+    tenant_id = user["tenant_id"]
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT id, category, rule, confidence, reinforcements, created_at, source
+            FROM aria_rules
+            WHERE username=%s AND (tenant_id=%s OR tenant_id IS NULL) AND active=true
+              AND created_at > NOW() - INTERVAL '7 days'
+              AND COALESCE(confidence, 0) < 0.8
+              AND COALESCE(reinforcements, 0) <= 2
+            ORDER BY confidence ASC, reinforcements ASC, created_at DESC
+            """,
+            (username, tenant_id)
+        )
+        rows = c.fetchall()
+        return {
+            "rules": [
+                {
+                    "id": r[0],
+                    "category": r[1] or "auto",
+                    "rule": r[2] or "",
+                    "confidence": float(r[3]) if r[3] is not None else 0.5,
+                    "reinforcements": r[4] or 0,
+                    "created_at": r[5].isoformat() if r[5] else None,
+                    "source": r[6] or "unknown",
+                }
+                for r in rows
+            ],
+            "total": len(rows),
+        }
+    except Exception as e:
+        return {"error": str(e)[:150], "rules": [], "total": 0}
+    finally:
+        if conn: conn.close()
+
+
+@router.post("/rules/{rule_id}/confirm")
+def confirm_rule(
+    request: Request,
+    rule_id: int = Path(...),
+    user: dict = Depends(require_user),
+):
+    """Valide une regle ('Garde-la') : confidence += 0.1, reinforcements += 1.
+
+    Utilise par le mode parcours guide pour marquer une regle comme confirmee
+    par l'utilisateur (sans la modifier). Log dans rule_modifications.
+    """
+    username = user["username"]
+    tenant_id = user["tenant_id"]
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        # Verif appartenance + recup etat actuel
+        c.execute(
+            "SELECT confidence, reinforcements FROM aria_rules "
+            "WHERE id=%s AND username=%s AND (tenant_id=%s OR tenant_id IS NULL)",
+            (rule_id, username, tenant_id)
+        )
+        row = c.fetchone()
+        if not row:
+            return {"status": "error", "message": "Regle introuvable."}
+        old_conf, old_reinf = row
+        new_conf = min(1.0, (old_conf or 0.5) + 0.1)
+        new_reinf = (old_reinf or 0) + 1
+        c.execute(
+            "UPDATE aria_rules SET confidence=%s, reinforcements=%s, updated_at=NOW() "
+            "WHERE id=%s",
+            (new_conf, new_reinf, rule_id)
+        )
+        # Log
+        c.execute(
+            "INSERT INTO rule_modifications "
+            "(rule_id, username, tenant_id, action_type, dialogue_turns, feedback_text, "
+            " old_confidence, new_confidence) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)",
+            (rule_id, username, tenant_id, 'edit', json.dumps([]),
+             "[review_session] Confirmee par l'utilisateur (Garde-la)",
+             old_conf, new_conf)
+        )
+        conn.commit()
+        return {"status": "ok", "confidence": new_conf, "reinforcements": new_reinf}
+    except Exception as e:
+        if conn: conn.rollback()
+        return {"status": "error", "message": str(e)[:150]}
+    finally:
+        if conn: conn.close()
+
+
+@router.post("/rules/{rule_id}/skip")
+def skip_rule(
+    request: Request,
+    rule_id: int = Path(...),
+    user: dict = Depends(require_user),
+):
+    """Skip une regle dans le mode parcours guide ('Passe, on verra plus tard').
+
+    Ne modifie pas la regle elle-meme, juste trace l'action dans rule_modifications
+    pour que le systeme sache que l'utilisateur l'a vue et choisi de repasser.
+    """
+    username = user["username"]
+    tenant_id = user["tenant_id"]
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO rule_modifications "
+            "(rule_id, username, tenant_id, action_type, dialogue_turns, feedback_text) "
+            "VALUES (%s,%s,%s,%s,%s,%s)",
+            (rule_id, username, tenant_id, 'edit', json.dumps([]),
+             "[review_session] Skipped (Passe, on verra plus tard)")
+        )
+        conn.commit()
+        return {"status": "ok"}
+    except Exception as e:
+        if conn: conn.rollback()
+        return {"status": "error", "message": str(e)[:150]}
+    finally:
+        if conn: conn.close()
