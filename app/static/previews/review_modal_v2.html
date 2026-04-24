@@ -429,24 +429,18 @@ function switchTo(newMode) {
 }
 
 function action(type) {
-  if (type === 'keep') {
-    alert('✓ Règle gardée (+ confidence, + reinforcements) [simulé]');
-    _state.handled++;
-    _state.index++;
-  } else if (type === 'skip') {
-    alert('→ Règle passée [simulé]');
-    _state.handled++;
-    _state.index++;
-  }
+  // Passage direct a la suivante, sans pop-up de confirmation
+  _state.handled++;
+  _state.index++;
   _state.mode = 'review';
   render();
 }
 
 function saveEdit() {
-  const text = document.getElementById('editText').value;
-  const category = document.getElementById('editCategory').value;
-  const feedback = document.getElementById('editFeedback').value;
-  alert(`Règle mise à jour [simulé] :\nCatégorie : ${category}\nTexte : ${text.slice(0,60)}…\nFeedback : ${feedback || '(vide)'}`);
+  // Recupere les valeurs juste pour validation minimale (texte non vide)
+  const text = document.getElementById('editText').value.trim();
+  if (!text) return; // on ne sauve pas une regle vide, on reste sur l'ecran
+  // Sauvegarde simulee + passage direct a la suivante (pas de pop-up)
   _state.handled++;
   _state.index++;
   _state.mode = 'review';
@@ -456,10 +450,14 @@ function saveEdit() {
 function confirmDelete() {
   const feedback = document.getElementById('deleteFeedback').value.trim();
   if (!feedback) {
-    alert('Un retour est obligatoire pour supprimer une règle.');
+    // Le feedback reste obligatoire pour supprimer — petit indicateur visuel
+    const ta = document.getElementById('deleteFeedback');
+    ta.style.borderColor = 'var(--danger)';
+    ta.focus();
+    setTimeout(() => { ta.style.borderColor = ''; }, 2000);
     return;
   }
-  alert(`Règle supprimée [simulé] — retour : ${feedback}`);
+  // Suppression simulee + passage direct a la suivante (pas de pop-up)
   _state.handled++;
   _state.index++;
   _state.mode = 'review';
