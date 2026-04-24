@@ -47,6 +47,7 @@ from app.routes.admin_drive import router as admin_drive_router
 from app.routes.admin_rules import router as admin_rules_router
 from app.routes.raya_deepen import router as raya_deepen_router
 from app.routes.user_settings import router as user_settings_router
+from app.routes.user_rules import router as user_rules_router
 
 SESSION_INACTIVITY_TIMEOUT = int(os.getenv("SESSION_INACTIVITY_TIMEOUT", "7200"))
 
@@ -127,6 +128,7 @@ app.include_router(admin_drive_router)
 app.include_router(admin_rules_router)
 app.include_router(raya_deepen_router)
 app.include_router(user_settings_router)
+app.include_router(user_rules_router)
 
 
 @app.get("/")

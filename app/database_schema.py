@@ -257,6 +257,27 @@ def get_schema_statements() -> list[str]:
         )
     """,
         """
+        CREATE TABLE IF NOT EXISTS rule_modifications (
+            id SERIAL PRIMARY KEY,
+            rule_id INTEGER,
+            username TEXT NOT NULL,
+            tenant_id TEXT,
+            action_type TEXT NOT NULL CHECK (action_type IN ('edit','delete','create','pin','unpin')),
+            dialogue_turns JSONB DEFAULT '[]',
+            feedback_text TEXT,
+            old_rule TEXT,
+            new_rule TEXT,
+            old_category TEXT,
+            new_category TEXT,
+            old_confidence REAL,
+            new_confidence REAL,
+            created_at TIMESTAMP DEFAULT NOW()
+        )
+    """,
+        """CREATE INDEX IF NOT EXISTS idx_rule_modif_username ON rule_modifications(username)""",
+        """CREATE INDEX IF NOT EXISTS idx_rule_modif_rule_id ON rule_modifications(rule_id)""",
+        """CREATE INDEX IF NOT EXISTS idx_rule_modif_created ON rule_modifications(created_at DESC)""",
+        """
         CREATE TABLE IF NOT EXISTS activity_log (
             id SERIAL PRIMARY KEY, username TEXT NOT NULL, tenant_id TEXT,
             action_type TEXT NOT NULL, action_target TEXT, action_detail TEXT,
