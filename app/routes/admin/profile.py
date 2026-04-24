@@ -221,3 +221,70 @@ def update_profile_settings(
         return {"status": "error", "message": str(e)[:100]}
     finally:
         if conn: conn.close()
+
+
+@router.get("/profile/data-stats")
+def get_data_stats(request: Request, user: dict = Depends(require_user)):
+    """Phase 3 /settings — stats RGPD (ce que Raya a collecte sur toi).
+
+    Retourne les compteurs pour l'onglet Mes donnees, utilises dans le
+    bloc 'Ce que Raya a collecte sur toi'.
+    """
+    username = user["username"]
+    stats = {
+        "rules": 0,
+        "mails_analyzed": 0,
+        "conversations": 0,
+        "contacts": 0,
+        "account_age_days": 0,
+        "created_at": None,
+    }
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        # Regles apprises
+        try:
+            c.execute("SELECT COUNT(*) FROM aria_rules WHERE username=%s", (username,))
+            stats["rules"] = c.fetchone()[0] or 0
+        except Exception:
+            pass
+        # Mails analyses (sent + received)
+        try:
+            c.execute("SELECT COUNT(*) FROM sent_mail_memory WHERE username=%s", (username,))
+            stats["mails_analyzed"] = c.fetchone()[0] or 0
+        except Exception:
+            pass
+        # Conversations (sessions distinctes de chat avec Raya)
+        try:
+            c.execute("SELECT COUNT(*) FROM aria_session_digests WHERE username=%s", (username,))
+            stats["conversations"] = c.fetchone()[0] or 0
+        except Exception:
+            pass
+        # Contacts uniques (destinataires distincts)
+        try:
+            c.execute(
+                "SELECT COUNT(DISTINCT LOWER(to_email)) FROM sent_mail_memory "
+                "WHERE username=%s AND to_email IS NOT NULL",
+                (username,)
+            )
+            stats["contacts"] = c.fetchone()[0] or 0
+        except Exception:
+            pass
+        # Age du compte
+        try:
+            c.execute("SELECT created_at FROM users WHERE username=%s", (username,))
+            row = c.fetchone()
+            if row and row[0]:
+                from datetime import datetime
+                created = row[0]
+                delta = datetime.utcnow() - created
+                stats["account_age_days"] = max(0, delta.days)
+                stats["created_at"] = created.isoformat()
+        except Exception:
+            pass
+        return stats
+    except Exception as e:
+        return {"error": str(e)[:100], **stats}
+    finally:
+        if conn: conn.close()

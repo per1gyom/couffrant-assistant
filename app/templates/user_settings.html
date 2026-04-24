@@ -921,25 +921,38 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
         <div class="field-group" style="padding:20px 22px">
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:14px">
             <div>
-              <div style="font-size:24px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1">2 847</div>
+              <div id="statMails" style="font-size:24px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1">—</div>
               <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Mails analysés</div>
             </div>
             <div>
-              <div style="font-size:24px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1">134</div>
+              <div id="statRules" style="font-size:24px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1">—</div>
               <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Règles apprises</div>
             </div>
             <div>
-              <div style="font-size:24px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1">412</div>
+              <div id="statConversations" style="font-size:24px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1">—</div>
               <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Conversations</div>
             </div>
             <div>
-              <div style="font-size:24px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1">89</div>
+              <div id="statContacts" style="font-size:24px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;line-height:1">—</div>
               <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Contacts</div>
             </div>
           </div>
-          <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);font-size:12.5px;color:var(--text-muted);line-height:1.55">
-            Données collectées depuis le <strong style="color:var(--text)">12 mars 2026</strong> — soit 43 jours de service.
-            Hébergées en Europe (Pays-Bas) sur <strong style="color:var(--text)">Railway</strong>, chiffrées au repos et en transit.
+          <div id="statMeta" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);font-size:12.5px;color:var(--text-muted);line-height:1.55">
+            Chargement des statistiques…
+          </div>
+        </div>
+
+        <!-- Bannière : Demande de suppression en cours (conditionnelle) -->
+        <div id="deletionPendingBanner" style="display:none;margin:14px 0;padding:14px 18px;background:#fef3c7;border:1px solid #fde68a;border-radius:12px">
+          <div style="display:flex;align-items:center;gap:12px">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#92400e" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <div style="flex:1">
+              <div style="font-weight:600;color:#92400e;margin-bottom:2px">Demande de suppression en cours</div>
+              <div id="deletionPendingDate" style="font-size:12.5px;color:#92400e">Ton compte sera supprimé dans 7 jours.</div>
+            </div>
+            <button class="btn" onclick="cancelAccountDeletion()" style="border-color:#fde68a">
+              Annuler la demande
+            </button>
           </div>
         </div>
 
@@ -954,17 +967,17 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
           <div class="toggle-row" style="border-bottom:none;padding:0">
             <div class="toggle-info">
               <div class="toggle-title">Télécharger une archive complète</div>
-              <div class="toggle-desc">Un fichier <code style="background:var(--surface2);padding:1px 5px;border-radius:4px;font-family:var(--font-mono);font-size:11.5px">.zip</code> contenant toutes tes données au format JSON lisible : mails analysés, conversations avec Raya, règles, contacts, préférences. Génération quasi immédiate.</div>
+              <div class="toggle-desc">Un fichier <code style="background:var(--surface2);padding:1px 5px;border-radius:4px;font-family:var(--font-mono);font-size:11.5px">.json</code> contenant toutes tes données : mails analysés, conversations avec Raya, règles, contacts, préférences. Génération quasi immédiate.</div>
             </div>
-            <button class="btn btn-primary" onclick="alert('Génération de l\'export en cours — à implémenter')">
+            <a class="btn btn-primary" href="/account/export" download>
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
               Télécharger
-            </button>
+            </a>
           </div>
         </div>
         <div class="field-hint" style="margin-top:-8px;margin-bottom:14px">
           <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-          Dernier export : jamais. Prévois <strong>~15 Mo</strong> pour ton volume actuel.
+          Le fichier contient toutes tes données conformément au <strong>RGPD article 20</strong> (droit à la portabilité).
         </div>
 
         <!-- Conservation des données -->
@@ -1021,7 +1034,7 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
                 Ton administrateur sera notifié. La suppression effective intervient après <strong>7 jours</strong> — tu peux annuler pendant ce délai depuis n'importe quel mail de Raya.
               </div>
             </div>
-            <button class="btn btn-danger" onclick="alert('Modal de confirmation suppression compte — à implémenter')">
+            <button class="btn btn-danger" onclick="openDeleteAccountModal()">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 01-2 2H9a2 2 0 01-2-2L5 6"/></svg>
               Demander la suppression
             </button>
@@ -1263,6 +1276,38 @@ Guillaume</div>
       <button class="btn" style="background:var(--danger);border-color:var(--danger);color:#fff" onclick="confirmDeleteRule()">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 01-2 2H9a2 2 0 01-2-2L5 6"/></svg>
         Supprimer et envoyer le retour
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL SUPPRESSION COMPTE -->
+<div class="modal-overlay" id="deleteAccountModal">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-head" style="background:#fef2f2;border-bottom-color:#fecaca">
+      <div class="modal-icon" style="background:#fee2e2;color:#b91c1c">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      </div>
+      <div>
+        <div class="modal-title" style="color:#b91c1c">Supprimer mon compte</div>
+        <div class="modal-subtitle">Action irréversible après 7 jours</div>
+      </div>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13.5px;color:var(--text);line-height:1.55">
+        Tu t'apprêtes à demander la suppression définitive de ton compte et de <strong>toutes tes données</strong> — mails, conversations, règles, contacts. La suppression sera effective après un délai de <strong>7 jours</strong> pendant lequel tu pourras l'annuler. Ton administrateur sera notifié.
+      </p>
+      <div class="field" style="margin-top:16px;margin-bottom:0">
+        <label class="field-label">Confirme avec ton mot de passe</label>
+        <input type="password" class="field-input" id="deleteAccountPwd" autocomplete="current-password" placeholder="••••••••••">
+      </div>
+      <div id="deleteAccountError" style="display:none;margin-top:12px;padding:10px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:var(--danger);font-size:13px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeDeleteAccountModal()">Annuler</button>
+      <button class="btn btn-danger" onclick="confirmDeleteAccount()">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 01-2 2H9a2 2 0 01-2-2L5 6"/></svg>
+        Confirmer la demande
       </button>
     </div>
   </div>
@@ -1767,10 +1812,144 @@ document.getElementById('passwordModal')?.addEventListener('click', e => {
 
 // Chargement initial au DOMContentLoaded
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', loadProfile);
+  document.addEventListener('DOMContentLoaded', () => {
+    loadProfile();
+    loadDataStats();
+    checkDeletionStatus();
+  });
 } else {
   loadProfile();
+  loadDataStats();
+  checkDeletionStatus();
 }
+
+// ===========================================================================
+// PHASE 3 — Onglet Mes données (RGPD) branché sur /profile/data-stats et /account/*
+// ===========================================================================
+
+// Formate un nombre avec espaces comme séparateur de milliers (2847 -> "2 847")
+function formatNumber(n) {
+  if (n === null || n === undefined) return '—';
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00A0');
+}
+
+// Formate une date ISO en français long (15 avril 2026)
+function formatDateLong(isoStr) {
+  if (!isoStr) return '—';
+  const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return '—';
+  const months = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+  return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+// Charge les stats de données (ce que Raya a collecté)
+async function loadDataStats() {
+  try {
+    const r = await fetch('/profile/data-stats');
+    const d = await r.json();
+    document.getElementById('statMails').textContent = formatNumber(d.mails_analyzed);
+    document.getElementById('statRules').textContent = formatNumber(d.rules);
+    document.getElementById('statConversations').textContent = formatNumber(d.conversations);
+    document.getElementById('statContacts').textContent = formatNumber(d.contacts);
+    const meta = document.getElementById('statMeta');
+    if (d.created_at) {
+      const createdTxt = formatDateLong(d.created_at);
+      const days = d.account_age_days;
+      meta.innerHTML = `Données collectées depuis le <strong style="color:var(--text)">${createdTxt}</strong> — soit <strong style="color:var(--text)">${days} jour${days > 1 ? 's' : ''}</strong> de service. Hébergées en Europe (Pays-Bas) sur <strong style="color:var(--text)">Railway</strong>, chiffrées au repos et en transit.`;
+    }
+  } catch (e) {
+    console.error('Failed to load data stats:', e);
+  }
+}
+
+// Vérifie si une demande de suppression est en cours et affiche la bannière
+async function checkDeletionStatus() {
+  try {
+    const r = await fetch('/profile');
+    const d = await r.json();
+    const banner = document.getElementById('deletionPendingBanner');
+    if (d.deletion_requested_at) {
+      banner.style.display = 'block';
+      // Calcul du délai restant (7 jours à partir de la demande)
+      const requested = new Date(d.deletion_requested_at);
+      const deadline = new Date(requested.getTime() + 7 * 24 * 3600 * 1000);
+      const now = new Date();
+      const remainingMs = deadline - now;
+      const remainingDays = Math.max(0, Math.ceil(remainingMs / (24 * 3600 * 1000)));
+      const reqTxt = formatDateLong(d.deletion_requested_at);
+      document.getElementById('deletionPendingDate').innerHTML = `Demandée le <strong>${reqTxt}</strong>. Suppression effective dans <strong>${remainingDays} jour${remainingDays > 1 ? 's' : ''}</strong>.`;
+    } else {
+      banner.style.display = 'none';
+    }
+  } catch (e) {
+    console.error('Failed to check deletion status:', e);
+  }
+}
+
+// Modale suppression compte
+function openDeleteAccountModal() {
+  document.getElementById('deleteAccountPwd').value = '';
+  document.getElementById('deleteAccountError').style.display = 'none';
+  document.getElementById('deleteAccountModal').classList.add('open');
+}
+function closeDeleteAccountModal() {
+  document.getElementById('deleteAccountModal').classList.remove('open');
+}
+async function confirmDeleteAccount() {
+  const pwd = document.getElementById('deleteAccountPwd').value;
+  const err = document.getElementById('deleteAccountError');
+  if (!pwd) {
+    err.textContent = 'Mot de passe requis pour confirmer.';
+    err.style.display = 'block'; return;
+  }
+  try {
+    const r = await fetch('/account/delete/request', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({password: pwd}),
+    });
+    const d = await r.json();
+    if (d.status === 'ok') {
+      closeDeleteAccountModal();
+      const toast = document.getElementById('toast');
+      toast.lastChild.textContent = ' Demande enregistrée — tu peux annuler pendant 7 jours.';
+      toast.style.background = 'var(--yellow)';
+      toast.classList.add('open');
+      setTimeout(() => { toast.classList.remove('open'); toast.style.background = ''; }, 4200);
+      checkDeletionStatus(); // Affiche la bannière
+    } else {
+      err.textContent = d.message || 'Erreur lors de la demande.';
+      err.style.display = 'block';
+    }
+  } catch (e) {
+    err.textContent = 'Erreur réseau : ' + e.message;
+    err.style.display = 'block';
+  }
+}
+async function cancelAccountDeletion() {
+  if (!confirm('Confirmer l\'annulation de ta demande de suppression ?')) return;
+  try {
+    const r = await fetch('/account/delete/cancel', {method: 'DELETE'});
+    const d = await r.json();
+    if (d.status === 'ok') {
+      const toast = document.getElementById('toast');
+      toast.lastChild.textContent = ' Demande de suppression annulée';
+      toast.style.background = 'var(--success)';
+      toast.classList.add('open');
+      setTimeout(() => { toast.classList.remove('open'); toast.style.background = ''; }, 2800);
+      checkDeletionStatus(); // Masque la bannière
+    } else {
+      alert('Erreur : ' + (d.message || 'inconnue'));
+    }
+  } catch (e) {
+    alert('Erreur réseau : ' + e.message);
+  }
+}
+// Fermer la modale suppression compte en cliquant hors
+document.getElementById('deleteAccountModal')?.addEventListener('click', e => {
+  if (e.target.id === 'deleteAccountModal') closeDeleteAccountModal();
+});
+
 // Animation spin pour le spinner du bouton Enregistrer
 const _spinStyle = document.createElement('style');
 _spinStyle.textContent = '@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}';
