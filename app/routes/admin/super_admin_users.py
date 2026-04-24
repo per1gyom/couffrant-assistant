@@ -435,3 +435,36 @@ def admin_debug_last_memories(
         return {"status": "error", "message": str(e)[:300]}
     finally:
         if conn: conn.close()
+
+
+@router.post("/admin/maintenance/migrate-auto-tags")
+def trigger_migrate_auto_tags(
+    request: Request,
+    payload: dict = Body(default={}),
+    user: dict = Depends(require_super_admin),
+):
+    """Declenche la migration des regles 'auto' avec tag implicite [xxx].
+
+    Payload : {
+      "target_username": "guillaume",      # utilisateur a migrer
+      "dry_run": true/false                # par defaut true (secu)
+    }
+
+    Super-admin uniquement. Voir scripts/migrate_auto_category_tags.py
+    pour le detail de la logique + docs/roadmap_categories_auto.md.
+    """
+    target = payload.get("target_username", "").strip()
+    dry_run = payload.get("dry_run", True)
+    if not target:
+        return {"status": "error", "message": "target_username obligatoire"}
+    try:
+        from scripts.migrate_auto_category_tags import migrate_user_rules
+        stats = migrate_user_rules(target, dry_run=bool(dry_run))
+        return {
+            "status": "ok" if "error" not in stats else "error",
+            "dry_run": bool(dry_run),
+            "target_username": target,
+            "stats": stats,
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:200]}
