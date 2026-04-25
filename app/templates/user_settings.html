@@ -2361,7 +2361,7 @@ function _sigEditorBuildToolbar() {
     <button type="button" title="Insérer une image (depuis ton ordinateur)" onmousedown="event.preventDefault();_sigInsertImage()">
       <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
     </button>
-    <button type="button" title="Insérer un emoji" onmousedown="event.preventDefault();_sigToggleEmojiPicker()">
+    <button type="button" title="Insérer un emoji" onmousedown="event.preventDefault();_sigToggleEmojiPicker(event)">
       <span style="font-size:15px;line-height:1">😀</span>
     </button>
     <span class="toolbar-sep"></span>
@@ -2446,7 +2446,7 @@ const _SIG_EMOJI_CATEGORIES = [
 ];
 
 // Affiche / cache le picker emoji
-function _sigToggleEmojiPicker() {
+function _sigToggleEmojiPicker(event) {
   const picker = document.getElementById('sigEmojiPicker');
   if (!picker) return;
   if (picker.classList.contains('open')) {
@@ -2465,18 +2465,34 @@ function _sigToggleEmojiPicker() {
     `).join('');
     picker.dataset.built = '1';
   }
-  // Position : juste au-dessus de la toolbar du bouton emoji.
-  // On cherche le field-group parent et on positionne dedans.
-  const toolbar = document.getElementById('sigEditorToolbar');
-  const editorWrap = toolbar ? toolbar.closest('.field-group') : null;
-  if (editorWrap && toolbar) {
-    const tbRect = toolbar.getBoundingClientRect();
-    const parentRect = editorWrap.getBoundingClientRect();
-    // Positionne sous la toolbar, aligne a droite
-    picker.style.top = ((tbRect.bottom - parentRect.top) + 4) + 'px';
-    picker.style.left = 'auto';
-    picker.style.right = '0';
+  // Position : juste sous le bouton 😀 de la toolbar (dropdown style natif)
+  // On utilise position:fixed + getBoundingClientRect() pour eviter les pieges
+  // de position:absolute avec un parent positionne mal defini.
+  // event.currentTarget peut etre null apres l'event en JS inline, donc on
+  // remonte depuis event.target (le span emoji ou le bouton lui-meme).
+  const btn = event && (event.currentTarget || (event.target && event.target.closest('button')));
+  if (!btn) return;
+  const rect = btn.getBoundingClientRect();
+  const popupW = 300, popupH = 280; // dimensions max du popup
+  const margin = 6;
+  // Position par defaut : sous le bouton, aligne a gauche du bouton
+  let top = rect.bottom + margin;
+  let left = rect.left;
+  // Si le popup deborderait en bas de la fenetre -> on l'ouvre AU-DESSUS du bouton
+  if (top + popupH > window.innerHeight - 10) {
+    top = rect.top - popupH - margin;
   }
+  // Si le popup deborderait a droite -> on aligne a droite du bouton
+  if (left + popupW > window.innerWidth - 10) {
+    left = rect.right - popupW;
+  }
+  // Clamp final pour rester dans la fenetre
+  if (left < 10) left = 10;
+  if (top < 10) top = 10;
+  picker.style.position = 'fixed';
+  picker.style.top = top + 'px';
+  picker.style.left = left + 'px';
+  picker.style.right = 'auto';
   picker.classList.add('open');
 }
 
