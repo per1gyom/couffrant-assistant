@@ -4,17 +4,17 @@ Bienvenue dans la documentation du projet Raya. Ce dossier contient les document
 
 Les documents historiques (roadmaps v1/v2, spécifications remplacées, livrables conclus, sessions ponctuelles) sont dans `archives/` avec leur propre README.
 
-**Dernière mise à jour de cet index** : 20 avril 2026
+**Dernière mise à jour de cet index** : 25 avril 2026
 
 ---
 
 ## 🎯 Démarrage — Lire en premier
 
-1. **`raya_vision_guillaume.md`** — la vision globale du projet, le "pourquoi"
-2. **`vision_architecture_raya.md`** — 🔥 **référence architecturale** (minimaliste, anti-bâillonnage, 20/04 soir)
-3. **`plan_resilience_et_securite.md`** — 🛡️ **plan de protection** (2FA, backups auto, bascule d'urgence)
-4. **`raya_planning_v4.md`** — la roadmap active, ce qu'on fait en ce moment
-5. **`raya_principe_memoire_3_niveaux.md`** — principe architectural universel (adopté 20/04)
+1. `raya_vision_guillaume.md` — la vision globale du projet, le "pourquoi"
+2. `vision_architecture_raya.md` — 🔥 **référence architecturale** (minimaliste, anti-bâillonnage, 20/04 soir)
+3. `plan_resilience_et_securite.md` — 🛡️ **plan de protection** (2FA, backups auto, bascule d'urgence)
+4. `raya_planning_v4.md` — la roadmap active, ce qu'on fait en ce moment
+5. `raya_principe_memoire_3_niveaux.md` — principe architectural universel (adopté 20/04)
 6. **`raya_memory_architecture.md`** — les 4 couches mémoire (Live / Graphe / Vectorisation / Surveillance)
 7. **`architecture_connexions.md`** — modèle mental connexions (scope tenant vs user)
 
@@ -28,6 +28,7 @@ Les documents historiques (roadmaps v1/v2, spécifications remplacées, livrable
 | `raya_roles_roadmap.md` | Modèle de rôles super_admin / admin / tenant_admin / user |
 | `onboarding_nouveau_tenant.md` | Procédure pour brancher un nouveau tenant client |
 | `raya_style_guide.md` | Guide de style visuel et tonal de Raya |
+| `design_system_modal.md` | 🎨 **Design system des modales** (squelette + 2 tailles + 5 tons, à lire avant toute modale) |
 | `raya_test_protocol.md` | Protocole de test (check-list à dérouler) |
 | `raya_maintenance.md` | Guide de maintenance |
 | `raya_changelog.md` | Log des changements livrés |

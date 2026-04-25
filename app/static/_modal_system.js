@@ -1,6 +1,9 @@
 /**
  * _modal_system.js — Comportements universels du système modale Raya v1
  *
+ * 📘 DOCUMENTATION COMPLÈTE : docs/design_system_modal.md
+ *    (squelette HTML, choix taille/ton, anti-patterns, checklist)
+ *
  * Source unique de vérité pour les modales du système "clean" (pages user :
  * /settings et /chat).
  *
