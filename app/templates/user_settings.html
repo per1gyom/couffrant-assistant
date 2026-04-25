@@ -304,6 +304,16 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 .sig-mailbox-row .mb-default{margin-left:auto;font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px}
 .sig-mailbox-row.checked .mb-default{color:var(--text)}
 .sig-mailbox-row input[type="checkbox"][disabled]+label{opacity:.6;cursor:not-allowed}
+
+/* === Popup de redimensionnement image (etape C) === */
+#sigImageSizePopup{font-family:inherit}
+#sigImageSizePopup.open{display:flex !important}
+.sig-size-btn{padding:5px 10px;background:transparent;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:12.5px;font-family:inherit;color:var(--text);transition:.12s;white-space:nowrap}
+.sig-size-btn:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+.sig-size-btn.active{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+/* Bordure visuelle pour l'image selectionnee dans l'editeur */
+#sigEditorContent img.sig-img-selected{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+#sigEditorContent img{cursor:pointer;max-width:100%;height:auto}
 .review-head{padding:20px 28px 18px;background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%);border-bottom:1px solid #bfdbfe;position:relative;transition:background .2s ease}
 .review-head.edit-mode{background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%)}
 .review-head.delete-mode{background:linear-gradient(135deg,#fef2f2 0%,#fecaca 100%);border-bottom-color:#fca5a5}
@@ -1107,6 +1117,17 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
         <div id="sigEditorToolbar" style="display:flex;flex-wrap:wrap;gap:4px;padding:6px 8px;background:var(--surface2);border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0"></div>
         <div id="sigEditorContent" contenteditable="true" style="min-height:160px;max-height:240px;overflow-y:auto;padding:12px 14px;background:#fff;border:1px solid var(--border);border-radius:0 0 8px 8px;font-size:14px;line-height:1.5;outline:none" data-placeholder="Écris ta signature ici…"></div>
         <input type="file" id="sigEditorImageFile" accept="image/png,image/jpeg,image/gif,image/webp" style="display:none" onchange="_sigOnImageFileSelected(event)">
+        <!-- Popup de redim image (cache par defaut, repositionne au clic sur une img) -->
+        <div id="sigImageSizePopup" style="position:absolute;display:none;z-index:10;background:#fff;border:1px solid var(--border);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.15);padding:6px;gap:4px;align-items:center;font-size:12.5px">
+          <button type="button" class="sig-size-btn" data-size="100" onclick="_sigApplyImageSize(100)" title="Petite (100px)">Petite</button>
+          <button type="button" class="sig-size-btn" data-size="180" onclick="_sigApplyImageSize(180)" title="Moyenne (180px)">Moyenne</button>
+          <button type="button" class="sig-size-btn" data-size="280" onclick="_sigApplyImageSize(280)" title="Grande (280px)">Grande</button>
+          <button type="button" class="sig-size-btn" onclick="_sigToggleCustomSlider()" title="Taille personnalisee">Personnalisée</button>
+          <div id="sigCustomSliderWrap" style="display:none;align-items:center;gap:6px;padding:0 6px;border-left:1px solid var(--border);margin-left:4px">
+            <input type="range" id="sigCustomSlider" min="40" max="500" step="5" style="width:100px" oninput="_sigApplyImageSize(this.value)">
+            <span id="sigCustomSliderVal" style="font-variant-numeric:tabular-nums;color:var(--text-muted);min-width:38px">180px</span>
+          </div>
+        </div>
         <div class="field-hint" style="margin-top:6px">Tu peux utiliser les outils de mise en forme ci-dessus.</div>
       </div>
 
@@ -2190,11 +2211,34 @@ function openSignatureEditor(sigId) {
   // Construit les rows de boîtes mail + toolbar
   _sigEditorRenderMailboxes(sig);
   _sigEditorBuildToolbar();
+  // Branche le listener de clic image (etape C : popup redim)
+  const editor = document.getElementById('sigEditorContent');
+  editor.removeEventListener('click', _sigContentClickHandler);
+  editor.addEventListener('click', _sigContentClickHandler);
+  // Ferme le popup quand on clique ailleurs dans le document
+  document.removeEventListener('click', _sigDocClickHandler);
+  document.addEventListener('click', _sigDocClickHandler);
   Modal.open('signatureEditorModal');
   setTimeout(() => document.getElementById('sigEditorName').focus(), 100);
 }
 
-function closeSignatureEditor() { Modal.close('signatureEditorModal'); }
+function closeSignatureEditor() {
+  // Nettoyage des listeners temporaires + popup ouvert
+  _sigHideImageSizePopup();
+  document.removeEventListener('click', _sigDocClickHandler);
+  Modal.close('signatureEditorModal');
+}
+
+// Listener doc-level : ferme le popup si on clique en dehors d'une img ou du popup
+function _sigDocClickHandler(e) {
+  const popup = document.getElementById('sigImageSizePopup');
+  if (!popup || !popup.classList.contains('open')) return;
+  // Ne pas fermer si clic dans le popup lui-meme
+  if (popup.contains(e.target)) return;
+  // Ne pas fermer si clic sur une img dans le contenteditable (le handler dedie s'en charge)
+  if (e.target.tagName === 'IMG' && e.target.closest('#sigEditorContent')) return;
+  _sigHideImageSizePopup();
+}
 
 // Rend la liste des boîtes mail avec checkboxes "associée" + "défaut"
 function _sigEditorRenderMailboxes(sig) {
@@ -2340,6 +2384,19 @@ async function _sigOnImageFileSelected(event) {
     }
     document.getElementById('sigEditorContent').focus();
     document.execCommand('insertImage', false, dataUrl);
+    // Apres insertion : applique la taille par defaut "Moyenne" (180px) et ouvre le popup
+    // pour montrer a l'utilisateur qu'il peut ajuster.
+    setTimeout(() => {
+      const editor = document.getElementById('sigEditorContent');
+      const insertedImg = editor.querySelector('img[src^="data:"]:not([data-sized])');
+      if (insertedImg) {
+        insertedImg.setAttribute('width', 180);
+        insertedImg.setAttribute('data-sized', '1');
+        insertedImg.style.width = '180px';
+        insertedImg.style.height = 'auto';
+        _sigShowImageSizePopup(insertedImg);
+      }
+    }, 50);
   } catch (e) {
     console.error('[Sig] Erreur traitement image :', e);
     alert('Erreur lors du traitement de l\'image : ' + e.message);
@@ -2416,6 +2473,100 @@ async function _sigCompressImage(file, targetBytes) {
   // Echec total : on retourne quand meme la version la plus compressee
   // (rare : seulement pour images vraiment incompressibles type photos detaillees)
   throw new Error('Image trop complexe a compresser sous 100 KB. Essaie une image plus simple ou plus petite.');
+}
+
+// ─── REDIMENSIONNEMENT D'UNE IMAGE INSEREE (Etape C) ───────────────────────
+
+// Image actuellement selectionnee (pour le popup de redim)
+let _sigSelectedImg = null;
+
+// Listener delegue dans le contenteditable : clic sur une <img> -> popup de taille
+function _sigContentClickHandler(e) {
+  if (e.target.tagName === 'IMG' && e.target.closest('#sigEditorContent')) {
+    _sigShowImageSizePopup(e.target);
+    e.stopPropagation();
+  }
+}
+
+// Affiche le popup de redim positionne au-dessus de l'image
+function _sigShowImageSizePopup(img) {
+  // Deselectionner ancienne image si differente
+  if (_sigSelectedImg && _sigSelectedImg !== img) {
+    _sigSelectedImg.classList.remove('sig-img-selected');
+  }
+  _sigSelectedImg = img;
+  img.classList.add('sig-img-selected');
+
+  const popup = document.getElementById('sigImageSizePopup');
+  const editorWrap = img.closest('.field-group');
+  if (!popup || !editorWrap) return;
+
+  // Calcul position : juste au-dessus de l'image, ancre dans le field-group parent
+  // (qui est positionne relativement par defaut)
+  const imgRect = img.getBoundingClientRect();
+  const parentRect = editorWrap.getBoundingClientRect();
+  const popupTop = (imgRect.top - parentRect.top) - 44; // 44px au-dessus de l'image
+  const popupLeft = Math.max(0, (imgRect.left - parentRect.left));
+
+  // Si le popup deborderait en haut (image en debut d'editeur), on l'affiche en-dessous
+  const finalTop = popupTop < 0 ? (imgRect.bottom - parentRect.top) + 6 : popupTop;
+
+  popup.style.top = finalTop + 'px';
+  popup.style.left = popupLeft + 'px';
+  popup.classList.add('open');
+
+  // Marquer le bouton actif selon la largeur actuelle de l'image
+  const currentWidth = img.getAttribute('width') || img.naturalWidth || 180;
+  _sigUpdateActiveSizeBtn(parseInt(currentWidth));
+
+  // Pre-remplir le slider custom avec la valeur actuelle
+  const slider = document.getElementById('sigCustomSlider');
+  const sliderVal = document.getElementById('sigCustomSliderVal');
+  if (slider) slider.value = Math.min(500, Math.max(40, parseInt(currentWidth)));
+  if (sliderVal) sliderVal.textContent = currentWidth + 'px';
+}
+
+// Cache le popup et desselectionne l'image
+function _sigHideImageSizePopup() {
+  const popup = document.getElementById('sigImageSizePopup');
+  if (popup) popup.classList.remove('open');
+  if (_sigSelectedImg) {
+    _sigSelectedImg.classList.remove('sig-img-selected');
+    _sigSelectedImg = null;
+  }
+  // Reset le slider custom (cache)
+  const wrap = document.getElementById('sigCustomSliderWrap');
+  if (wrap) wrap.style.display = 'none';
+}
+
+// Applique une largeur a l'image selectionnee
+function _sigApplyImageSize(width) {
+  if (!_sigSelectedImg) return;
+  const w = parseInt(width);
+  if (!w || w < 20 || w > 800) return;
+  _sigSelectedImg.setAttribute('width', w);
+  // Auto height pour garder le ratio
+  _sigSelectedImg.removeAttribute('height');
+  _sigSelectedImg.style.width = w + 'px';
+  _sigSelectedImg.style.height = 'auto';
+  // Met a jour le bouton actif et le slider
+  _sigUpdateActiveSizeBtn(w);
+  const sliderVal = document.getElementById('sigCustomSliderVal');
+  if (sliderVal) sliderVal.textContent = w + 'px';
+}
+
+// Marque le bon bouton de preset comme actif selon la largeur actuelle
+function _sigUpdateActiveSizeBtn(width) {
+  document.querySelectorAll('#sigImageSizePopup .sig-size-btn[data-size]').forEach(btn => {
+    btn.classList.toggle('active', parseInt(btn.dataset.size) === width);
+  });
+}
+
+// Affiche/cache le slider custom
+function _sigToggleCustomSlider() {
+  const wrap = document.getElementById('sigCustomSliderWrap');
+  if (!wrap) return;
+  wrap.style.display = (wrap.style.display === 'flex') ? 'none' : 'flex';
 }
 
 // Sauvegarde (création ou modification)
