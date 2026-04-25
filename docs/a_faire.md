@@ -176,6 +176,10 @@ Quand l'architecture aura mûri, identifier dans les règles personnelles celles
 
 ## 🔴 Priorité 1 — Audit isolation multi-tenant et utilisateur
 
+> ✅ **AUDIT FAIT** le 25/04 soir. Voir `docs/audit_isolation_25avril_complementaire.md` (758 lignes). Bilan : 8 trous CRITIQUES, 15 IMPORTANT, 10 ATTENTION identifiés. Checklist permanente créée : `docs/checklist_isolation_multitenant.md`.
+>
+> ⚠️ **DÉCISION EN ATTENTE** : modèle de rôles utilisateur à trancher avant d'appliquer les corrections. Voir `docs/decision_roles_utilisateurs_a_trancher.md`. 5 questions à répondre, \~10 min de lecture, à faire à tête reposée.
+
 **Contexte** : avant d'onboarder Pierre, Sabrina, Benoît ou un 2e tenant, vérifier que le modèle d'isolation décrit ci-dessus est bien respecté partout dans le code.
 
 ### Sous-chantier 1.1 — Isolation tenant (société vs société)
