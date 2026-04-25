@@ -4,7 +4,7 @@ Bienvenue dans la documentation du projet Raya. Ce dossier contient les document
 
 Les documents historiques (roadmaps v1/v2, spécifications remplacées, livrables conclus, sessions ponctuelles) sont dans `archives/` avec leur propre README.
 
-**Dernière mise à jour de cet index** : 25 avril 2026
+**Dernière mise à jour de cet index** : 25 avril 2026 (soir — design system modale + éditeur signatures en cours)
 
 ---
 
