@@ -91,11 +91,11 @@ function openShortcutEdit(shortcut) {
   document.getElementById('shortcutEditPrompt').value = shortcut ? shortcut.prompt : '';
   document.getElementById('shortcutEditTitle').textContent = shortcut ? 'Modifier le raccourci' : 'Nouveau raccourci';
   renderColorPicker();
-  document.getElementById('modalShortcutEdit').classList.add('open');
+  Modal.open('modalShortcutEdit');
 }
 
 function closeShortcutEdit() {
-  document.getElementById('modalShortcutEdit').classList.remove('open');
+  Modal.close('modalShortcutEdit');
 }
 
 function renderColorPicker() {
@@ -140,6 +140,4 @@ async function saveShortcutEdit() {
   } catch(e) { showToast('Erreur sauvegarde', 'err', 3000); }
 }
 
-document.getElementById('modalShortcutEdit').addEventListener('click', e => {
-  if (e.target === document.getElementById('modalShortcutEdit')) closeShortcutEdit();
-});
+// (Listener clic-fond modalShortcutEdit géré par _modal_system.js — plus besoin ici)
