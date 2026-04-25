@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Design System Modale — Raya v1</title>
+<style>
+:root{
+  --bg:#f2f5fa; --surface:#fff; --surface2:#fafcff;
+  --text:#1a1d23; --text-muted:#6b7482;
+  --border:#e6eaf0;
+  --accent:#0057b8; --accent-light:#e8f0fc;
+  --success:#059669; --success-light:#d1fae5;
+  --danger:#dc2626; --danger-light:#fee2e2;
+  --warning:#d97706; --warning-light:#fef3c7;
+  --radius:14px;
+  --shadow:0 20px 60px rgba(0,0,0,.25);
+  --shadow-lg:0 30px 80px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg);color:var(--text);font-feature-settings:"tnum";line-height:1.55}
+
+.doc-wrap{max-width:1100px;margin:0 auto;padding:40px 24px 80px}
+.doc-head{margin-bottom:32px}
+.doc-head h1{font-size:24px;margin:0 0 6px;font-weight:700}
+.doc-head .lede{color:var(--text-muted);font-size:14px;line-height:1.6;max-width:760px}
+.doc-section{margin-top:40px}
+.doc-section h2{font-size:18px;margin:0 0 14px;padding-bottom:10px;border-bottom:1px solid var(--border)}
+.doc-section h3{font-size:14px;margin:24px 0 10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600}
+.doc-section p{font-size:13.5px;color:var(--text-muted);max-width:760px;margin:0 0 14px}
+.tag{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:600;background:var(--accent-light);color:var(--accent)}
+.tag.ok{background:var(--success-light);color:var(--success)}
+.tag.warn{background:var(--warning-light);color:var(--warning)}
+.tag.danger{background:var(--danger-light);color:var(--danger)}
+
+table{width:100%;border-collapse:collapse;font-size:13px;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+th,td{padding:8px 10px;text-align:left;border-bottom:1px solid var(--border);vertical-align:top}
+thead th{background:var(--surface2);font-weight:600;font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em}
+tbody tr:last-child td{border-bottom:none}
+code{background:#f1f5f9;padding:1px 6px;border-radius:4px;font-size:12px;color:#1e3a8a;font-family:'SFMono-Regular',Menlo,Consolas,monospace}
+
+.demo-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:14px 0}
+.demo-btn{padding:14px;background:var(--surface);border:1.5px solid var(--border);border-radius:10px;cursor:pointer;font-family:inherit;font-size:13.5px;font-weight:500;color:var(--text);text-align:left;transition:.15s}
+.demo-btn:hover{border-color:var(--accent);background:var(--accent-light);color:var(--accent);transform:translateY(-1px)}
+.demo-btn .name{font-weight:700;display:block;margin-bottom:4px}
+.demo-btn .hint{font-size:12px;color:var(--text-muted);font-weight:400;display:block}
+
+pre.codeblock{background:#1e293b;color:#e2e8f0;border-radius:8px;padding:16px 18px;font-size:12.5px;line-height:1.6;overflow-x:auto;margin:10px 0}
+pre.codeblock code{background:transparent;color:inherit;padding:0}
+
+/* ================================================================== */
+/* DESIGN SYSTEM MODALE — proposition v1                                 */
+/* ================================================================== */
+
+/* ---- OVERLAY (commun à tous les thèmes) ---- */
+.modal-overlay{position:fixed;inset:0;background:rgba(26,29,35,.5);backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:1000;padding:16px;animation:none}
+.modal-overlay.open{display:flex;animation:modalFadeIn .22s ease}
+@keyframes modalFadeIn{from{opacity:0}to{opacity:1}}
+@keyframes modalPopIn{from{opacity:0;transform:scale(.96) translateY(8px)}to{opacity:1;transform:scale(1) translateY(0)}}
+
+/* ---- BASE MODAL (thème CLEAN par défaut) ---- */
+.modal{background:var(--surface);border-radius:var(--radius);width:100%;box-shadow:var(--shadow);overflow:hidden;animation:modalPopIn .3s cubic-bezier(.16,1,.3,1);display:flex;flex-direction:column}
+
+/* ---- TAILLES ---- */
+.modal.size-sm{max-width:440px}
+.modal.size-md{max-width:640px}
+.modal.size-lg{max-width:860px}
+.modal.size-xl{max-width:1100px}
+.modal.size-parcours{max-width:900px;height:720px;max-height:92vh}
+
+/* ---- HEADER ---- */
+.modal-head{padding:18px 24px 14px;border-bottom:1px solid var(--border);display:flex;align-items:flex-start;gap:12px;background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%);border-bottom-color:#bfdbfe;flex-shrink:0}
+.modal-icon{width:36px;height:36px;background:linear-gradient(135deg,#3b82f6,#0057b8);color:#fff;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 3px 8px rgba(0,87,184,.25)}
+.modal-icon svg{width:18px;height:18px}
+.modal-title-wrap{flex:1;min-width:0}
+.modal-title{font-size:15.5px;font-weight:700;color:var(--text);margin:0}
+.modal-subtitle{font-size:12.5px;color:var(--text-muted);margin-top:2px}
+.modal-close{background:transparent;border:none;cursor:pointer;color:var(--text-muted);padding:6px;border-radius:6px;display:flex;align-items:center;justify-content:center;transition:.15s;font-size:18px;line-height:1;margin-left:8px;flex-shrink:0}
+.modal-close:hover{background:rgba(0,0,0,.06);color:var(--text)}
+
+/* ---- BODY ---- */
+.modal-body{padding:20px 24px;flex:1 1 auto;overflow-y:auto;scrollbar-gutter:stable}
+.modal-body p{font-size:13.5px;color:var(--text-muted);margin:0 0 14px;line-height:1.6}
+.modal.size-parcours .modal-body{padding:24px}
+
+/* ---- FOOTER ---- */
+.modal-foot{padding:14px 24px 18px;display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--border);background:var(--surface2);flex-shrink:0;flex-wrap:wrap}
+.modal-foot .left{margin-right:auto}
+
+/* ---- VARIANTES DE TON (impact: header) ---- */
+.modal.tone-danger .modal-head{background:linear-gradient(135deg,#fef2f2 0%,#fecaca 100%);border-bottom-color:#fca5a5}
+.modal.tone-danger .modal-icon{background:linear-gradient(135deg,#ef4444,#b91c1c);box-shadow:0 3px 8px rgba(185,28,28,.25)}
+
+.modal.tone-warning .modal-head{background:linear-gradient(135deg,#fffbeb 0%,#fef3c7 100%);border-bottom-color:#fde68a}
+.modal.tone-warning .modal-icon{background:linear-gradient(135deg,#f59e0b,#d97706);box-shadow:0 3px 8px rgba(217,119,6,.25)}
+
+.modal.tone-success .modal-head{background:linear-gradient(135deg,#ecfdf5 0%,#d1fae5 100%);border-bottom-color:#a7f3d0}
+.modal.tone-success .modal-icon{background:linear-gradient(135deg,#10b981,#059669);box-shadow:0 3px 8px rgba(5,150,105,.25)}
+
+.modal.tone-neutral .modal-head{background:var(--surface2);border-bottom-color:var(--border)}
+.modal.tone-neutral .modal-icon{background:var(--accent-light);color:var(--accent);box-shadow:none}
+
+/* ---- BOUTONS COMMUNS ---- */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:9px 16px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:8px;font-size:13.5px;font-weight:500;cursor:pointer;font-family:inherit;transition:.15s}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-primary:hover{background:#003f85;color:#fff}
+.btn-danger{background:var(--danger);color:#fff;border-color:var(--danger)}
+.btn-danger:hover{background:#991b1b;color:#fff}
+.btn-warning{background:var(--warning);color:#fff;border-color:var(--warning)}
+.btn-warning:hover{background:#a8590a;color:#fff}
+.btn svg{width:14px;height:14px}
+
+/* ---- CHAMPS DE FORMULAIRE COMMUNS ---- */
+.field-group{margin-bottom:16px}
+.field-label{display:block;font-size:12.5px;font-weight:600;color:var(--text);margin-bottom:6px}
+.field-hint{font-size:12px;color:var(--text-muted);margin-top:4px;line-height:1.45}
+.field-input,.field-textarea,.field-select{width:100%;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;font-family:inherit;font-size:13.5px;color:var(--text);transition:.15s;box-sizing:border-box}
+.field-input:focus,.field-textarea:focus,.field-select:focus{outline:none;border-color:var(--accent);background:#fff;box-shadow:0 0 0 3px var(--accent-light)}
+.field-textarea{min-height:80px;resize:vertical;line-height:1.55}
+
+/* ================================================================== */
+/* ANIMATIONS & RESPONSIVE                                              */
+/* ================================================================== */
+@media (max-width:600px){
+  .modal{max-width:100%!important;border-radius:14px 14px 0 0}
+  .modal-head{padding:16px 18px 12px}
+  .modal-body{padding:16px 18px}
+  .modal-foot{padding:12px 18px 16px}
+  .modal-foot button{flex:1}
+}
+</style>
+</head>
+<body>
+
+<div class="doc-wrap">
+
+  <div class="doc-head">
+    <h1>🎨 Design System Modale — Raya v1</h1>
+    <p class="lede">Audit + proposition d'un système modale unifié pour le site. <strong>Ce que tu vois ici est cliquable et fonctionnel</strong> — chaque bouton ouvre une vraie modale dans le bon style. Valide chaque exemple avant qu'on déploie.</p>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- AUDIT                                                            -->
+  <!-- ============================================================== -->
+  <section class="doc-section">
+    <h2>📋 État des lieux : 4 systèmes de modales coexistent aujourd'hui</h2>
+    <p>L'audit a identifié <strong>15 modales</strong> réparties dans <strong>5 fichiers</strong>, suivant <strong>4 patterns CSS différents</strong>. La proposition ci-dessous unifie tout ça.</p>
+
+    <table>
+      <thead><tr><th>Page</th><th>Modale</th><th>Système actuel</th><th>Action</th></tr></thead>
+      <tbody>
+        <tr><td>/settings</td><td><code>requestModal</code></td><td><span class="tag ok">Système A (clean)</span></td><td>Migrer vers le système unifié</td></tr>
+        <tr><td>/settings</td><td><code>deleteAccountModal</code></td><td><span class="tag ok">Système A (clean)</span></td><td>Migrer + variante <code>tone-danger</code></td></tr>
+        <tr><td>/settings</td><td><code>passwordModal</code></td><td><span class="tag ok">Système A (clean)</span></td><td>Migrer</td></tr>
+        <tr><td>/settings</td><td><code>reviewSessionModal</code></td><td><span class="tag warn">Système B (parcours, hauteur fixe)</span></td><td>Migrer + variante <code>size-parcours</code></td></tr>
+        <tr><td>/chat</td><td><code>modalShortcutEdit</code></td><td><span class="tag warn">Système D (chat compact)</span></td><td>Migrer + variante <code>size-sm</code></td></tr>
+        <tr><td>/chat</td><td><code>modalUserSettings</code></td><td><span class="tag danger">Legacy à supprimer</span></td><td>Supprimer (Temps 3)</td></tr>
+        <tr><td>/chat</td><td><code>modalDeleteAccount</code></td><td><span class="tag danger">Legacy à supprimer</span></td><td>Supprimer (Temps 3)</td></tr>
+        <tr><td>/admin/panel</td><td>6 modales <code>modal-*</code></td><td><span class="tag">Système C (admin sombre)</span></td><td><strong>Conservé tel quel</strong> (thème tech volontaire)</td></tr>
+        <tr><td>/tenant/panel</td><td>2 modales <code>modal-*</code></td><td><span class="tag">Système C (admin sombre)</span></td><td><strong>Conservé tel quel</strong></td></tr>
+      </tbody>
+    </table>
+
+    <p style="margin-top:14px;padding:12px 16px;background:var(--warning-light);border-left:3px solid var(--warning);border-radius:6px;font-size:13px;color:#78350f;max-width:none">
+      <strong>Décision tranchée :</strong> les pages super-admin et tenant-admin ont leur identité visuelle propre (thème sombre/JetBrains Mono). On ne touche pas — l'unification se fait uniquement sur les pages utilisateur (<code>/settings</code>, <code>/chat</code>).
+    </p>
+  </section>
+
+  <!-- ============================================================== -->
+  <!-- PROPOSITION                                                      -->
+  <!-- ============================================================== -->
+  <section class="doc-section">
+    <h2>✨ Proposition : système unifié</h2>
+    <p>Un seul squelette HTML, 5 tailles, 4 tons. Toutes les modales du système clean adopteront ce pattern.</p>
+
+    <h3>Tailles</h3>
+    <div class="demo-grid">
+      <button class="demo-btn" onclick="openDemo('sm','neutral','Petite modale','Confirmation simple, message court')">
+        <span class="name">size-sm</span><span class="hint">440px — confirmations rapides</span>
+      </button>
+      <button class="demo-btn" onclick="openDemo('md','neutral','Modale moyenne','Formulaire à 3-5 champs')">
+        <span class="name">size-md</span><span class="hint">640px — formulaires courts</span>
+      </button>
+      <button class="demo-btn" onclick="openDemo('lg','neutral','Modale large','Formulaire complet ou contenu riche')">
+        <span class="name">size-lg</span><span class="hint">860px — formulaires longs (défaut)</span>
+      </button>
+      <button class="demo-btn" onclick="openDemo('xl','neutral','Très grande modale','Éditeur WYSIWYG, dashboard, etc.')">
+        <span class="name">size-xl</span><span class="hint">1100px — éditeurs riches</span>
+      </button>
+      <button class="demo-btn" onclick="openDemo('parcours','neutral','Modale parcours','Hauteur fixe, multi-modes')">
+        <span class="name">size-parcours</span><span class="hint">900px × 720px — parcours guidés</span>
+      </button>
+    </div>
+
+    <h3>Tons (impact: couleur du header)</h3>
+    <div class="demo-grid">
+      <button class="demo-btn" onclick="openDemo('md','neutral','Information','Action sans charge émotionnelle')">
+        <span class="name">tone-neutral</span><span class="hint">Gris/blanc — info neutre</span>
+      </button>
+      <button class="demo-btn" onclick="openDemo('md','default','Action principale','Création, édition, validation positive')">
+        <span class="name">tone par défaut</span><span class="hint">Bleu Raya — action principale</span>
+      </button>
+      <button class="demo-btn" onclick="openDemo('md','success','Succès','Action confirmée, état OK')">
+        <span class="name">tone-success</span><span class="hint">Vert — succès, confirmation</span>
+      </button>
+      <button class="demo-btn" onclick="openDemo('md','warning','Avertissement','Attention requise, action réversible')">
+        <span class="name">tone-warning</span><span class="hint">Jaune/orange — avertissement</span>
+      </button>
+      <button class="demo-btn" onclick="openDemo('md','danger','Action dangereuse','Action irréversible, suppression')">
+        <span class="name">tone-danger</span><span class="hint">Rouge — danger, suppression</span>
+      </button>
+    </div>
+
+    <h3>Cas d'usage concret : modale de confirmation de suppression</h3>
+    <div class="demo-grid">
+      <button class="demo-btn" onclick="openExample('delete-account')">
+        <span class="name">Suppression compte</span><span class="hint"><code>size-md</code> + <code>tone-danger</code> + feedback obligatoire</span>
+      </button>
+      <button class="demo-btn" onclick="openExample('change-password')">
+        <span class="name">Changement mot de passe</span><span class="hint"><code>size-md</code> + <code>tone</code> par défaut</span>
+      </button>
+      <button class="demo-btn" onclick="openExample('shortcut-edit')">
+        <span class="name">Édition raccourci (chat)</span><span class="hint"><code>size-sm</code> + <code>tone</code> par défaut</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- ============================================================== -->
+  <!-- SQUELETTE                                                        -->
+  <!-- ============================================================== -->
+  <section class="doc-section">
+    <h2>📐 Squelette HTML standard</h2>
+    <p>À copier-coller pour <strong>toute</strong> nouvelle modale du système clean. Pas d'invention.</p>
+
+    <pre class="codeblock"><code>&lt;div class="modal-overlay" id="myModal"&gt;
+  &lt;div class="modal size-md tone-neutral"&gt;
+    &lt;div class="modal-head"&gt;
+      &lt;div class="modal-icon"&gt;
+        &lt;!-- icône SVG 18×18 --&gt;
+      &lt;/div&gt;
+      &lt;div class="modal-title-wrap"&gt;
+        &lt;div class="modal-title"&gt;Titre de la modale&lt;/div&gt;
+        &lt;div class="modal-subtitle"&gt;Sous-titre optionnel&lt;/div&gt;
+      &lt;/div&gt;
+      &lt;button class="modal-close" onclick="closeMyModal()"&gt;×&lt;/button&gt;
+    &lt;/div&gt;
+    &lt;div class="modal-body"&gt;
+      &lt;!-- Contenu principal --&gt;
+    &lt;/div&gt;
+    &lt;div class="modal-foot"&gt;
+      &lt;button class="btn"&gt;Annuler&lt;/button&gt;
+      &lt;button class="btn btn-primary"&gt;Valider&lt;/button&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+
+    <h3>Comportements universels (gérés automatiquement par <code>_modal_system.js</code>)</h3>
+    <ul style="font-size:13.5px;color:var(--text-muted);line-height:1.8;padding-left:22px;max-width:760px">
+      <li><strong>Échap</strong> : ferme la modale active</li>
+      <li><strong>Clic sur le fond</strong> : ferme la modale active</li>
+      <li><strong>Clic sur la croix</strong> : ferme la modale active (ou appel <code>data-close</code>)</li>
+      <li><strong>Scroll lock</strong> : le body est verrouillé tant qu'une modale est ouverte</li>
+      <li><strong>Focus trap</strong> : Tab/Shift+Tab restent dans la modale</li>
+      <li><strong>Animation</strong> : fadeIn 220ms à l'ouverture, popIn sur la modale</li>
+      <li><strong>Mobile</strong> : la modale prend toute la largeur, coins arrondis en haut uniquement (effet "bottom sheet")</li>
+    </ul>
+  </section>
+
+</div>
+
+<!-- ================================================================== -->
+<!-- DEMO MODAL — instance unique, manipulée en JS                       -->
+<!-- ================================================================== -->
+<div class="modal-overlay" id="demoModal">
+  <div class="modal size-md tone-neutral" id="demoModalShell">
+    <div class="modal-head">
+      <div class="modal-icon" id="demoIcon">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+      </div>
+      <div class="modal-title-wrap">
+        <div class="modal-title" id="demoTitle">Titre démo</div>
+        <div class="modal-subtitle" id="demoSubtitle">Sous-titre démo</div>
+      </div>
+      <button class="modal-close" onclick="closeDemo()">×</button>
+    </div>
+    <div class="modal-body" id="demoBody">
+      <p>Ceci est un exemple de contenu de modale. Tu peux fermer cette modale avec :</p>
+      <ul style="font-size:13.5px;color:var(--text-muted);line-height:1.7">
+        <li>La touche <strong>Échap</strong></li>
+        <li>Un <strong>clic sur le fond</strong> flouté</li>
+        <li>La <strong>croix</strong> en haut à droite</li>
+        <li>Le bouton <strong>Annuler</strong> en bas</li>
+      </ul>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeDemo()">Annuler</button>
+      <button class="btn btn-primary" onclick="closeDemo()">Valider</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function openDemo(size, tone, title, subtitle){
+  const shell = document.getElementById('demoModalShell');
+  shell.className = 'modal size-' + size + (tone === 'default' ? '' : ' tone-' + tone);
+  document.getElementById('demoTitle').textContent = title;
+  document.getElementById('demoSubtitle').textContent = subtitle;
+  document.getElementById('demoModal').classList.add('open');
+  document.body.style.overflow = 'hidden';
+}
+function closeDemo(){
+  document.getElementById('demoModal').classList.remove('open');
+  document.body.style.overflow = '';
+}
+function openExample(kind){
+  if(kind === 'delete-account'){
+    openDemo('md','danger','Supprimer mon compte','Action irréversible après 7 jours');
+    document.getElementById('demoBody').innerHTML = `
+      <p>Cette demande sera transmise à votre administrateur pour validation. Vous disposez de 7 jours pour annuler.</p>
+      <div class="field-group">
+        <label class="field-label">Mot de passe actuel <span style="color:var(--danger)">*</span></label>
+        <input type="password" class="field-input" placeholder="Confirmez votre identité">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Pourquoi tu pars ? <span style="color:var(--text-muted)">(optionnel)</span></label>
+        <textarea class="field-textarea" placeholder="Ton retour nous aide à améliorer Raya"></textarea>
+      </div>
+    `;
+    document.querySelector('#demoModal .modal-foot').innerHTML = `
+      <button class="btn" onclick="closeDemo()">Annuler</button>
+      <button class="btn btn-danger">Confirmer la suppression</button>
+    `;
+  } else if(kind === 'change-password'){
+    openDemo('md','default','Changer mon mot de passe','Minimum 12 caractères');
+    document.getElementById('demoBody').innerHTML = `
+      <div class="field-group">
+        <label class="field-label">Mot de passe actuel</label>
+        <input type="password" class="field-input">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Nouveau mot de passe</label>
+        <input type="password" class="field-input">
+        <div class="field-hint">12 caractères minimum, mix de lettres, chiffres et symboles recommandé</div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Confirmer le nouveau mot de passe</label>
+        <input type="password" class="field-input">
+      </div>
+    `;
+    document.querySelector('#demoModal .modal-foot').innerHTML = `
+      <button class="btn" onclick="closeDemo()">Annuler</button>
+      <button class="btn btn-primary">Mettre à jour</button>
+    `;
+  } else if(kind === 'shortcut-edit'){
+    openDemo('sm','default','Éditer le raccourci','Renomme ou modifie le prompt');
+    document.getElementById('demoBody').innerHTML = `
+      <div class="field-group">
+        <label class="field-label">Nom</label>
+        <input type="text" class="field-input" value="📧 Trier mes mails">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Prompt envoyé à Raya</label>
+        <textarea class="field-textarea">Trie mes mails non lus par priorité</textarea>
+      </div>
+    `;
+    document.querySelector('#demoModal .modal-foot').innerHTML = `
+      <button class="btn" onclick="closeDemo()" style="margin-right:auto;color:var(--danger);border-color:var(--danger)">Supprimer</button>
+      <button class="btn" onclick="closeDemo()">Annuler</button>
+      <button class="btn btn-primary">Enregistrer</button>
+    `;
+  }
+}
+// Fermer avec Escape
+document.addEventListener('keydown', e => {
+  if(e.key === 'Escape' && document.getElementById('demoModal').classList.contains('open')) closeDemo();
+});
+// Fermer avec clic fond
+document.getElementById('demoModal').addEventListener('click', e => {
+  if(e.target.id === 'demoModal') closeDemo();
+});
+</script>
+
+</body>
+</html>
