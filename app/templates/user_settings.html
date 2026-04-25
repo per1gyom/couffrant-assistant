@@ -280,7 +280,7 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 .msg-preview strong{color:var(--accent);font-weight:600}
 .modal-foot{padding:14px 24px 18px;display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--border);background:#fafcff}
 /* Variante : modal compacte (pour demandes simples comme "Demander un ajustement") */
-#requestModal .modal{max-width:560px}
+/* requestModal utilise maintenant .size-standard du _modal_system.css */
 /* === Mode parcours guidé "Faisons le point" — modale UNIFIÉE (review/edit/delete) === */
 #reviewSessionModal{padding:0}
 #reviewSessionModal.open{animation:fadeIn .25s ease}
@@ -900,15 +900,16 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 
 <!-- MODAL DE DEMANDE D'AJUSTEMENT -->
 <div class="modal-overlay" id="requestModal">
-  <div class="modal">
+  <div class="modal size-standard">
     <div class="modal-head">
       <div class="modal-icon">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
       </div>
-      <div>
+      <div class="modal-title-wrap">
         <div class="modal-title">Demander un ajustement de mon plafond</div>
         <div class="modal-subtitle" id="requestModalSubtitle">Ce message sera envoyé à l'administrateur de ta société</div>
       </div>
+      <button class="modal-close" aria-label="Fermer">×</button>
     </div>
     <div class="modal-body">
       <p>Voici le message qui sera envoyé. Tu peux l'envoyer tel quel, ou fermer cette fenêtre et reparler à Raya si tu veux ajuster quelque chose.</p>
@@ -1151,10 +1152,10 @@ function openRequestModal(){
   if (sub && _profileState?.tenant_name) {
     sub.textContent = `Ce message sera envoyé à l'administrateur de ${_profileState.tenant_name}`;
   }
-  document.getElementById('requestModal').classList.add('open');
+  Modal.open('requestModal');
 }
 function closeRequestModal(){
-  document.getElementById('requestModal').classList.remove('open');
+  Modal.close('requestModal');
 }
 async function sendRequest(){
   const preview = document.getElementById('requestMessagePreview');
@@ -1181,14 +1182,7 @@ async function sendRequest(){
     alert('Erreur réseau : ' + e.message);
   }
 }
-// Fermer la modal avec Escape
-document.addEventListener('keydown', e => {
-  if(e.key === 'Escape') closeRequestModal();
-});
-// Fermer en cliquant hors de la modale
-document.getElementById('requestModal').addEventListener('click', e => {
-  if(e.target.id === 'requestModal') closeRequestModal();
-});
+// (Listeners Escape et clic-fond gérés par _modal_system.js — plus besoin ici)
 
 // ===========================================================================
 // PHASE 2 — Onglet Profil branché sur /profile API
