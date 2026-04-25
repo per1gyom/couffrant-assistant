@@ -962,15 +962,16 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 
 <!-- MODAL SUPPRESSION COMPTE -->
 <div class="modal-overlay" id="deleteAccountModal">
-  <div class="modal" style="max-width:560px">
-    <div class="modal-head" style="background:#fef2f2;border-bottom-color:#fecaca">
-      <div class="modal-icon" style="background:#fee2e2;color:#b91c1c">
+  <div class="modal size-standard tone-danger">
+    <div class="modal-head">
+      <div class="modal-icon">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
       </div>
-      <div>
-        <div class="modal-title" style="color:#b91c1c">Supprimer mon compte</div>
+      <div class="modal-title-wrap">
+        <div class="modal-title">Supprimer mon compte</div>
         <div class="modal-subtitle">Action irréversible après 7 jours</div>
       </div>
+      <button class="modal-close" aria-label="Fermer">×</button>
     </div>
     <div class="modal-body">
       <p style="font-size:13.5px;color:var(--text);line-height:1.55">
@@ -1449,10 +1450,10 @@ async function checkDeletionStatus() {
 function openDeleteAccountModal() {
   document.getElementById('deleteAccountPwd').value = '';
   document.getElementById('deleteAccountError').style.display = 'none';
-  document.getElementById('deleteAccountModal').classList.add('open');
+  Modal.open('deleteAccountModal');
 }
 function closeDeleteAccountModal() {
-  document.getElementById('deleteAccountModal').classList.remove('open');
+  Modal.close('deleteAccountModal');
 }
 async function confirmDeleteAccount() {
   const pwd = document.getElementById('deleteAccountPwd').value;
@@ -1504,10 +1505,7 @@ async function cancelAccountDeletion() {
     alert('Erreur réseau : ' + e.message);
   }
 }
-// Fermer la modale suppression compte en cliquant hors
-document.getElementById('deleteAccountModal')?.addEventListener('click', e => {
-  if (e.target.id === 'deleteAccountModal') closeDeleteAccountModal();
-});
+// (Listener clic-fond deleteAccountModal géré par _modal_system.js — plus besoin ici)
 
 // ===========================================================================
 // PHASE 4 — Onglet Mes règles Raya branché sur /memory/rules + /memory/rules/stats
