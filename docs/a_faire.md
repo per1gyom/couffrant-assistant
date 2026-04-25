@@ -9,28 +9,30 @@ Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 ## 🆕 Récap des chantiers TERMINÉS cette semaine (22-26 avril)
 
 ### Page /settings — 6 phases déployées en prod
+
 - Phase 1-6 : route /settings + 5 onglets (Profil, Conso, Règles, Connexions, Données)
-- Mes règles : refonte UX complète (chip "À revoir" intelligente, regroupement Divers,
-  sessions 5/5)
+- Mes règles : refonte UX complète (chip "À revoir" intelligente, regroupement Divers, sessions 5/5)
 - Catégories : 2 vagues de migration (37 → 17 catégories canoniques, 0 doublon casse/slug)
-- Validateur Sonnet sur [ACTION:LEARN] (be2f0b0)
+- Validateur Sonnet sur \[ACTION:LEARN\] (be2f0b0)
 - Mode parcours guidé "Faisons le point" — modale unifiée 3 modes review/edit/delete
 
 ### Lecture automatique TTS rapatriée (validée Guillaume 25/04)
+
 - Toggle dans /settings → Profil + toggle rapide menu 3-points avec switch animé
 - Persistance forte DB (settings.auto_speak)
 - OFF par défaut pour tout le monde, l'utilisateur active selon son contexte
 
 ### 🎨 Design system modale (TERMINÉ 25/04)
+
 **Source de vérité** : `docs/design_system_modal.md`
+
 - `app/static/_modal_system.css` (288 lignes) + `_modal_system.js` (123 lignes)
 - 2 tailles : `size-standard` (640px adaptative) / `size-parcours` (900×720 fixe)
 - 5 tons : neutral / default(bleu) / success / warning / danger
-- API `Modal.open/close/onOpen/onClose` + comportements universels (Escape, clic-fond,
-  scroll lock, focus trap)
-- 5 modales user migrées : requestModal, passwordModal, deleteAccountModal (tone-danger),
-  modalShortcutEdit, reviewSessionModal (size-parcours)
+- API `Modal.open/close/onOpen/onClose` + comportements universels (Escape, clic-fond, scroll lock, focus trap)
+- 5 modales user migrées : requestModal, passwordModal, deleteAccountModal (tone-danger), modalShortcutEdit, reviewSessionModal (size-parcours)
 - Panels admin/super-admin/tenant volontairement NON migrés (gardent leur thème sombre tech)
+
 ### ✍️ Éditeur signatures multi-boîtes (✅ TERMINÉ — 25 avril soir)
 
 **État final** : fonctionnalité complète en prod. Backend, frontend et nettoyage du legacy faits. L'utilisateur peut créer/éditer/supprimer ses signatures avec un éditeur WYSIWYG sur le design system unifié, et définir une signature par défaut pour chaque boîte mail.
@@ -63,27 +65,63 @@ Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 - 558 lignes supprimées au total, 0 ajoutée
 
 ---
-
 #### 🚀 Améliorations futures à prévoir pour les signatures
 
-🔵 **AMÉLIORATION : insertion d'image en local (upload, pas URL)** — *demande Guillaume 25/04 soir*
+✅ **TERMINÉ : insertion d'image en local (upload + redim + compression auto)** — *fait le 25/04 soir*
 
-- **Problème actuel** : le bouton 🖼 de la toolbar WYSIWYG insère une image **par URL**. L'utilisateur doit donc avoir son logo hébergé quelque part (Drive public, CDN, etc.) avant de pouvoir l'insérer. Pas pratique pour un logo perso ou une signature pro.
-- **À faire** :
-  - Ajouter un bouton "Importer depuis mon ordinateur" à côté du bouton URL existant
-  - Drag & drop sur la zone d'édition également supporté
-  - Backend : endpoint `POST /signatures/upload-image` qui accepte un fichier image (PNG/JPG/WEBP, max ~500KB), le stocke dans `app/static/signatures_uploads/` avec un nom hashé (ex: `<username>_<sha256>.png`), et retourne l'URL publique
-  - Frontend : insère l'image dans le contenteditable via `<img src="/static/signatures_uploads/...">`
-  - Sécurité : limiter le poids, valider le type MIME, nettoyer périodiquement les fichiers orphelins (signatures supprimées qui référençaient des images uploadées)
-- **Cas d'usage type** : Guillaume veut mettre le logo Couffrant Solar dans sa signature pro, sans avoir à le re-héberger ailleurs.
-- **Estimation** : ~1h30 (~30 min backend + ~45 min frontend + ~15 min tests)
-- **Priorité** : moyenne — pas bloquant aujourd'hui, mais utile pour Pierre/Sabrina/Benoît quand ils seront onboardés (vrais utilisateurs métier, pas développeurs).
+- **Approche choisie** : base64 inline (pas stockage serveur fichier) → pas de problème CDN, signature auto-portable, marche partout (Gmail, Outlook, Apple Mail)
+- **Compression auto** : canvas + boucle qualité/taille dégressive, tient sous 100 KB peu importe la photo source (testé : photo 1920x1080 → JPEG 800x450 q=92 → ~19 KB)
+- **GIF** : préservés tels quels (sinon perte d'animation), limite stricte 100 KB en entrée
+- **PNG transparent** : transparence préservée tant que possible
+- **Redimensionnement à la souris (presets)** : popup au clic sur l'image avec 4 presets Petite/Moyenne/Grande/Personnalisée + slider 40-500px
+- **Commits** : `eacf292` (file picker) + `ea48ce9` (compression) + `4bce014` (popup redim)
 
-🔵 **AMÉLIORATION : redimensionnement des images insérées**
+🟢 **PRIORITÉ HAUTE : éditeur de mail enrichi avec apprentissage par diff** — *vision Guillaume 25/04 soir*
 
-- Une fois insérée, une image gagne à pouvoir être redimensionnée à la souris (poignées de coin), ou via un slider de taille.
-- Existait déjà dans l'ancien `chat-signatures.js` (fonction `_activateImgResize`) que nous avons supprimée — récupérable depuis l'historique git (commit `3e51c54^` ou avant).
-- **Estimation** : ~30 min de portage.
+> Ce n'est pas une amélioration cosmétique mais une **fonctionnalité majeure** qui transforme la façon dont Raya rédige les mails. À traiter dès qu'on aura un peu de bande passante.
+
+**Le contexte** : aujourd'hui, quand Raya rédige un mail, elle propose un texte dans le chat et l'envoie tel quel via Gmail/Outlook. Si l'utilisateur n'aime pas, il dit "modifie-le, mets X au lieu de Y, ajoute des puces…" — c'est lent, l'utilisateur doit verbaliser ses corrections, et Raya ne capitalise pas vraiment.
+
+**La vision** :
+
+1. **Vrai éditeur WYSIWYG** dans l'interface chat (pas juste du texte brut). Quand Raya prépare un mail, l'utilisateur peut :
+   - Modifier directement le texte (typing en place)
+   - Ajouter du gras / italique / souligné
+   - Insérer des puces ou listes numérotées
+   - Insérer des emojis (réutiliser le picker `_SIG_EMOJI_CATEGORIES` qu'on a fait pour les signatures)
+   - Mettre des couleurs si pertinent
+   - Insérer des images (réutiliser tout l'upload + compression + redim qu'on a fait pour les signatures)
+
+2. **Apprentissage par diff à la validation** :
+   - Au moment où l'utilisateur clique "Envoyer" (après ses modifications), Raya capture les **2 versions** :
+     - V1 = ce que Raya avait initialement rédigé
+     - V2 = ce que l'utilisateur a effectivement envoyé
+   - Calcule la **diff** (texte + structure : ajout/retrait de puces, changement de ton, mots remplacés, formules de politesse modifiées…)
+   - Génère une **règle** dans le système de règles existant (pas de nouvelle infrastructure) :
+     - Ex : "Pour les mails à des clients, préférer 'Cordialement' à 'Bien à vous'"
+     - Ex : "L'utilisateur préfère des phrases courtes en bullet points pour les récap de réunion"
+     - Ex : "Quand le mail est court (< 5 phrases), pas de formule de politesse longue"
+   - Soumet la règle au validateur Sonnet (déjà en place via `rule_validator.py`) pour vérifier la pertinence avant de l'enregistrer
+
+3. **Brouillon meilleur la fois suivante** :
+   - Les règles tirées des diffs précédentes sont injectées dans le prompt système au moment où Raya rédige un nouveau mail dans le même contexte (mêmes destinataires, mêmes catégories de sujet)
+   - Au fil du temps, Raya devient de plus en plus alignée sur le style de l'utilisateur
+
+**Architecture estimée** :
+- **Frontend** (~3-4h) : composant éditeur WYSIWYG dans `chat-messages.js`, réutilise les fonctions signatures (toolbar, emoji picker, image upload). Bouton "Modifier" qui transforme le brouillon Raya en zone éditable.
+- **Backend diff** (~2-3h) : endpoint `POST /mails/log-diff` qui reçoit V1 et V2, calcule la diff (lib `difflib` Python ou équivalent), envoie au LLM (Haiku) pour transformer la diff en règle candidate, soumet au validateur Sonnet existant.
+- **Branchement règles** (~1h) : ajouter une catégorie de règles `email_drafting_style` au système de catégories canoniques. Inclure ces règles dans le prompt de rédaction de mail au runtime.
+
+**Estimation totale** : 6-8h sur une session dédiée. Mérite sa propre session bien préparée.
+
+**Pré-requis** :
+- Nouveau composant éditeur WYSIWYG (mais on peut largement copier-coller depuis l'éditeur signatures)
+- Logique de diff (lib standard Python)
+- Pas d'infra nouvelle DB (on réutilise la table `rules` existante)
+
+**Priorité** : Haute, mais pas urgent. À traiter après l'audit isolation multi-tenant (priorité 1 actuelle) et la connexion simplifiée des outils tiers (priorité 2). Ce sera **probablement la fonctionnalité phare de la v3**.
+
+---
 
 🔵 **AMÉLIORATION : prévisualisation "comme dans un vrai mail"**
 
@@ -95,7 +133,7 @@ Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 
 - Si plusieurs signatures matchent une boîte sans défaut → Raya demande à l'utilisateur, retient le choix comme règle pour la prochaine fois
 - Décision Guillaume 25/04 : reporté à une session future, le mécanisme "tu définis toi-même la défaut depuis /settings" suffit pour le MVP
-- **Estimation** : ~1h (interrompre le flow d'envoi, dialogue avec choix multiples, update `default_for_emails` côté backend après choix utilisateur)
+- **Estimation** : \~1h (interrompre le flow d'envoi, dialogue avec choix multiples, update `default_for_emails` côté backend après choix utilisateur)
 
 ---
 
@@ -103,69 +141,49 @@ Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 
 ### Modèle d'isolation multi-tenant (clarifié 24/04)
 
-**Un tenant = une société cliente de Raya.**
-Le dirigeant de la société souscrit à Raya pour son équipe.
+**Un tenant = une société cliente de Raya**.Le dirigeant de la société souscrit à Raya pour son équipe.
 
 #### Niveau tenant (société) — Isolation COMPLÈTE
 
-Aucune fuite de données entre sociétés. Tenant A ne voit jamais les
-données du tenant B, et réciproquement. Respecté actuellement via
-`tenant_id NOT NULL` sur toutes les tables critiques.
+Aucune fuite de données entre sociétés. Tenant A ne voit jamais les données du tenant B, et réciproquement. Respecté actuellement via `tenant_id NOT NULL` sur toutes les tables critiques.
 
 #### Niveau utilisateur dans un tenant — Isolation QUASI-COMPLÈTE (phase actuelle)
 
-**Décision Guillaume 24/04 matin** : on ne mutualise PAS les règles
-apprises entre utilisateurs d'un même tenant pour l'instant. Risque
-trop élevé de conflits d'un utilisateur à l'autre.
+**Décision Guillaume 24/04 matin** : on ne mutualise PAS les règles apprises entre utilisateurs d'un même tenant pour l'instant. Risque trop élevé de conflits d'un utilisateur à l'autre.
 
 **Privé par utilisateur** :
-- ❌ **Règles apprises** : privées à chaque utilisateur. Les
-  préférences, raccourcis, conventions de Guillaume ne polluent pas
-  celles de Pierre/Sabrina. Chacun construit sa propre base.
+
+- ❌ **Règles apprises** : privées à chaque utilisateur. Les préférences, raccourcis, conventions de Guillaume ne polluent pas celles de Pierre/Sabrina. Chacun construit sa propre base.
 - ❌ **Conversations personnelles** : privées.
-- ❌ **Mails consultés** : chaque utilisateur accède à SA boîte
-  Outlook/Gmail uniquement.
+- ❌ **Mails consultés** : chaque utilisateur accède à SA boîte Outlook/Gmail uniquement.
 
 **Partagé par tenant (seul point commun aujourd'hui)** :
-- ✅ **Données métier externes** (Odoo, SharePoint, Drive commun)
-  accessibles à tous les utilisateurs du tenant selon leur périmètre
-  autorisé. C'est ce qui permet aux analyses croisées métier.
+
+- ✅ **Données métier externes** (Odoo, SharePoint, Drive commun) accessibles à tous les utilisateurs du tenant selon leur périmètre autorisé. C'est ce qui permet aux analyses croisées métier.
 
 #### Évolution future — Promotion de règles tenant (pas maintenant)
 
-Quand l'architecture aura mûri, identifier dans les règles personnelles
-celles qui sont **génériques à la société** vs celles **spécifiques à
-l'utilisateur** :
+Quand l'architecture aura mûri, identifier dans les règles personnelles celles qui sont **génériques à la société** vs celles **spécifiques à l'utilisateur** :
 
-- Règles spécifiques (ex. "Guillaume préfère signer ses mails 'Perrin G.'")
-  → restent dans `aria_rules`, filtrées par `username`.
-- Règles société (ex. "Chez Couffrant, RFAC veut dire Règlement de
-  Facture") → promues dans une 2ème base partagée (ex. `tenant_rules`
-  ou `aria_rules_tenant`), visibles de tous les utilisateurs du tenant.
+- Règles spécifiques (ex. "Guillaume préfère signer ses mails 'Perrin G.'") → restent dans `aria_rules`, filtrées par `username`.
+- Règles société (ex. "Chez Couffrant, RFAC veut dire Règlement de Facture") → promues dans une 2ème base partagée (ex. `tenant_rules`ou `aria_rules_tenant`), visibles de tous les utilisateurs du tenant.
 
-**Mécanisme de promotion** : NON-AUTOMATIQUE. La détection
-(heuristique ou validation admin) doit passer par une confirmation
-consciente, probablement via le dirigeant du tenant dans un panel
-admin. Jamais d'auto-promotion silencieuse pour éviter la pollution
-involontaire.
+**Mécanisme de promotion** : NON-AUTOMATIQUE. La détection (heuristique ou validation admin) doit passer par une confirmation consciente, probablement via le dirigeant du tenant dans un panel admin. Jamais d'auto-promotion silencieuse pour éviter la pollution involontaire.
 
-À traiter plus tard, quand l'architecture sera stable et qu'on aura
-plusieurs utilisateurs par tenant en usage réel.
+À traiter plus tard, quand l'architecture sera stable et qu'on aura plusieurs utilisateurs par tenant en usage réel.
 
 ---
 
 ## 🔴 Priorité 1 — Audit isolation multi-tenant et utilisateur
 
-**Contexte** : avant d'onboarder Pierre, Sabrina, Benoît ou un 2e tenant,
-vérifier que le modèle d'isolation décrit ci-dessus est bien respecté
-partout dans le code.
+**Contexte** : avant d'onboarder Pierre, Sabrina, Benoît ou un 2e tenant, vérifier que le modèle d'isolation décrit ci-dessus est bien respecté partout dans le code.
 
 ### Sous-chantier 1.1 — Isolation tenant (société vs société)
 
-Tous les SELECT sur les tables sensibles doivent filtrer sur `tenant_id`
-en plus de `username` quand pertinent.
+Tous les SELECT sur les tables sensibles doivent filtrer sur `tenant_id`en plus de `username` quand pertinent.
 
 Fichiers à auditer en priorité :
+
 - `app/memory_rules.py` — save_rule, get_active_rules, lecture règles
 - `app/routes/aria_context.py` — injection règles dans prompt v1
 - `app/routes/raya_agent_core.py` — injection règles dans prompt v2
@@ -180,43 +198,34 @@ Fichiers à auditer en priorité :
 
 **Phase actuelle : isolation quasi-complète** (voir section Vision).
 
-Ce sous-chantier est NOUVEAU et distinct du 1.1. Il faut vérifier que
-toutes les tables sensibles filtrent à la fois sur `tenant_id` ET
-sur `username` :
+Ce sous-chantier est NOUVEAU et distinct du 1.1. Il faut vérifier que toutes les tables sensibles filtrent à la fois sur `tenant_id` ET sur `username` :
 
 **Privé par utilisateur** (filtrer sur `username`) :
-- `aria_rules` (règles apprises) : chaque user a sa propre base de
-  règles, pas de partage entre users du même tenant. **Attention :
-  c'est un changement par rapport à ce qui avait été supposé
-  initialement.** Corriger si du code existant partage les règles au
-  niveau tenant.
+
+- `aria_rules` (règles apprises) : chaque user a sa propre base de règles, pas de partage entre users du même tenant. **Attention : c'est un changement par rapport à ce qui avait été supposé initialement.** Corriger si du code existant partage les règles au niveau tenant.
 - `aria_memory` (conversations) : privées à chaque user
 - `mail_memory` (mails indexés) : chaque user a sa boîte
 - `aria_insights` : à vérifier selon leur nature
 - Préférences, historique graphe, etc.
 
 **Partagé par tenant** (filtrer uniquement sur `tenant_id`) :
-- Accès aux données métier externes : Odoo, SharePoint, Drive commun
-  (la permission est gérée côté source, pas côté Raya)
-- Connecteurs OAuth de niveau tenant : Odoo API key, Anthropic API
-  key si BYO, etc.
+
+- Accès aux données métier externes : Odoo, SharePoint, Drive commun (la permission est gérée côté source, pas côté Raya)
+- Connecteurs OAuth de niveau tenant : Odoo API key, Anthropic API key si BYO, etc.
 
 ### Tests de non-régression à faire ensuite
 
-Créer un 2e user fictif dans le tenant `couffrant_solar` (ex. `pierre_test`),
-puis vérifier :
+Créer un 2e user fictif dans le tenant `couffrant_solar` (ex. `pierre_test`), puis vérifier :
 
-1. Pierre NE voit PAS les règles de Guillaume ❌ (nouveau : isolation
-   utilisateur)
+1. Pierre NE voit PAS les règles de Guillaume ❌ (nouveau : isolation utilisateur)
 2. Pierre NE voit PAS les conversations privées de Guillaume ❌
 3. Pierre NE voit PAS les mails de Guillaume ❌
-4. Pierre ET Guillaume voient tous deux les données Odoo Couffrant
-   (accès partagé métier) ✅
+4. Pierre ET Guillaume voient tous deux les données Odoo Couffrant (accès partagé métier) ✅
 5. Une règle apprise par Pierre n'affecte PAS les réponses de Guillaume ❌
 
 Puis tester l'isolation tenant :
-- `charlotte_agency` / `charlotte` ne doit voir QUE ses 10 règles, jamais
-  celles de couffrant_solar.
+
+- `charlotte_agency` / `charlotte` ne doit voir QUE ses 10 règles, jamais celles de couffrant_solar.
 
 **Durée estimée** : 60-90 min (audit + 4-6 fichiers à corriger + tests)
 
@@ -224,35 +233,21 @@ Puis tester l'isolation tenant :
 
 ## 🟠 Priorité 2 — Connexion simplifiée des outils tiers (panel admin tenant)
 
-**Contexte** : aujourd'hui brancher une boîte Outlook/Gmail ou un compte
-Drive demande des manipulations techniques (OAuth dans la console Azure,
-configuration Railway, etc.). C'est acceptable pour Guillaume mais
-impossible à déléguer à Pierre, Sabrina ou un nouveau tenant.
+**Contexte** : aujourd'hui brancher une boîte Outlook/Gmail ou un compte Drive demande des manipulations techniques (OAuth dans la console Azure, configuration Railway, etc.). C'est acceptable pour Guillaume mais impossible à déléguer à Pierre, Sabrina ou un nouveau tenant.
 
 ### Objectif
 
-Le panel admin d'un tenant doit proposer un **catalogue de connecteurs**
-avec, pour chacun, un bouton **"Connecter"** qui :
+Le panel admin d'un tenant doit proposer un **catalogue de connecteurs**avec, pour chacun, un bouton **"Connecter"** qui :
 
 1. Ouvre une pop-up OAuth/API key
-2. Guide l'utilisateur étape par étape (ex. Gmail : authentifier,
-   autoriser, c'est fini)
-3. Stocke automatiquement les tokens en DB avec le bon `tenant_id` +
-   `username`
+2. Guide l'utilisateur étape par étape (ex. Gmail : authentifier, autoriser, c'est fini)
+3. Stocke automatiquement les tokens en DB avec le bon `tenant_id` + `username`
 4. Valide la connexion (test GET) et affiche ✅ Connecté
 5. Permet de déconnecter / reconnecter facilement
 
 ### Connecteurs prioritaires à ouvrir (par ordre d'impact)
 
-| # | Service | Mode | Effort |
-|---|---|---|---|
-| 1 | **Gmail** (OAuth) | Semi-auto via Google OAuth flow | Moyen |
-| 2 | **Outlook / Microsoft 365** (OAuth) | Déjà en place pour Guillaume, à généraliser | Faible |
-| 3 | **Google Drive** (OAuth) | Même flow que Gmail | Faible (une fois #1 fait) |
-| 4 | **OneDrive / SharePoint** (OAuth) | Même que Outlook | Faible |
-| 5 | **Odoo OpenFire** (API key) | Déjà en place, à encapsuler dans l'UI | Faible |
-| 6 | **Anthropic API key** (si BYO) | Saisie manuelle simple | Très faible |
-| 7 | **Calendrier Google/Outlook** (OAuth) | Intégré à #1 et #2 | Très faible |
+#ServiceModeEffort1**Gmail** (OAuth)Semi-auto via Google OAuth flowMoyen2**Outlook / Microsoft 365** (OAuth)Déjà en place pour Guillaume, à généraliserFaible3**Google Drive** (OAuth)Même flow que GmailFaible (une fois #1 fait)4**OneDrive / SharePoint** (OAuth)Même que OutlookFaible5**Odoo OpenFire** (API key)Déjà en place, à encapsuler dans l'UIFaible6**Anthropic API key** (si BYO)Saisie manuelle simpleTrès faible7**Calendrier Google/Outlook** (OAuth)Intégré à #1 et #2Très faible
 
 ### Architecture technique cible
 
