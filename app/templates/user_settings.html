@@ -292,6 +292,10 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 /* === Editeur de signature WYSIWYG === */
 #sigEditorContent[data-placeholder]:empty::before{content:attr(data-placeholder);color:var(--text-muted);font-style:italic;pointer-events:none}
 #sigEditorContent:focus{box-shadow:inset 0 0 0 1px var(--accent)}
+/* Listes : restaure le padding et le list-style ecrases par le reset global *,*::before,*::after{margin:0;padding:0} ligne 13 */
+#sigEditorContent ul{padding-left:24px;list-style:disc;margin:4px 0}
+#sigEditorContent ol{padding-left:24px;list-style:decimal;margin:4px 0}
+#sigEditorContent li{margin:2px 0}
 #sigEditorToolbar button{background:transparent;border:none;width:30px;height:30px;border-radius:6px;cursor:pointer;color:var(--text);display:inline-flex;align-items:center;justify-content:center;transition:.12s;font-size:13px}
 #sigEditorToolbar button:hover{background:rgba(0,87,184,.1);color:var(--accent)}
 #sigEditorToolbar button.active{background:var(--accent);color:#fff}
