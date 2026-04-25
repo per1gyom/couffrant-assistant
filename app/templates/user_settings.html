@@ -288,6 +288,22 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 /* Shell + body : la taille (900x720) est maintenant géree par .modal.size-parcours du _modal_system.css */
 /* Body : prend l'espace restant, scrolle si besoin */
 #reviewSessionModal .review-body{flex:1 1 auto;overflow-y:auto;padding:28px;scrollbar-gutter:stable}
+
+/* === Editeur de signature WYSIWYG === */
+#sigEditorContent[data-placeholder]:empty::before{content:attr(data-placeholder);color:var(--text-muted);font-style:italic;pointer-events:none}
+#sigEditorContent:focus{box-shadow:inset 0 0 0 1px var(--accent)}
+#sigEditorToolbar button{background:transparent;border:none;width:30px;height:30px;border-radius:6px;cursor:pointer;color:var(--text);display:inline-flex;align-items:center;justify-content:center;transition:.12s;font-size:13px}
+#sigEditorToolbar button:hover{background:rgba(0,87,184,.1);color:var(--accent)}
+#sigEditorToolbar button.active{background:var(--accent);color:#fff}
+#sigEditorToolbar select{padding:4px 6px;border-radius:6px;border:1px solid var(--border);background:#fff;font-size:12px;font-family:inherit;cursor:pointer}
+#sigEditorToolbar input[type="color"]{width:30px;height:28px;border:1px solid var(--border);border-radius:6px;cursor:pointer;padding:1px;background:#fff}
+#sigEditorToolbar .toolbar-sep{width:1px;background:var(--border);margin:2px 4px;align-self:stretch}
+.sig-mailbox-row{display:flex;align-items:center;gap:10px;padding:8px 10px;background:#fff;border-radius:6px;border:1px solid transparent}
+.sig-mailbox-row:hover{border-color:var(--border)}
+.sig-mailbox-row.checked{border-color:var(--accent);background:var(--surface2)}
+.sig-mailbox-row .mb-default{margin-left:auto;font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px}
+.sig-mailbox-row.checked .mb-default{color:var(--text)}
+.sig-mailbox-row input[type="checkbox"][disabled]+label{opacity:.6;cursor:not-allowed}
 .review-head{padding:20px 28px 18px;background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%);border-bottom:1px solid #bfdbfe;position:relative;transition:background .2s ease}
 .review-head.edit-mode{background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%)}
 .review-head.delete-mode{background:linear-gradient(135deg,#fef2f2 0%,#fecaca 100%);border-bottom-color:#fca5a5}
@@ -1056,6 +1072,57 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
   </div>
 </div>
 
+<!-- MODAL EDITEUR DE SIGNATURE (avril 2026) — design system size-parcours -->
+<div class="modal-overlay" id="signatureEditorModal">
+  <div class="modal size-parcours">
+    <div class="modal-head">
+      <div class="modal-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+      </div>
+      <div class="modal-title-wrap">
+        <div class="modal-title" id="sigEditorTitle">Nouvelle signature</div>
+        <div class="modal-subtitle" id="sigEditorSubtitle">Crée une signature et choisis pour quelles boîtes mail elle s'applique</div>
+      </div>
+      <button class="modal-close" aria-label="Fermer">×</button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:18px">
+
+      <!-- BLOC 1 : Nom -->
+      <div class="field-group" style="margin:0">
+        <label class="field-label">Nom de la signature <span style="color:var(--danger)">*</span></label>
+        <input type="text" id="sigEditorName" class="field-input" placeholder="ex: Pro clients, Interne équipe…" maxlength="100">
+        <div class="field-hint">Pour t'aider à les retrouver. Pas affiché dans le mail.</div>
+      </div>
+
+      <!-- BLOC 2 : Boîtes mail -->
+      <div class="field-group" style="margin:0">
+        <label class="field-label">Boîtes mail concernées</label>
+        <div class="field-hint" style="margin-bottom:10px">Coche les boîtes auxquelles cette signature peut s'appliquer. Tu peux ensuite la définir comme défaut pour chaque boîte.</div>
+        <div id="sigEditorMailboxes" style="display:flex;flex-direction:column;gap:8px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px"></div>
+      </div>
+
+      <!-- BLOC 3 : Contenu WYSIWYG -->
+      <div class="field-group" style="margin:0">
+        <label class="field-label">Contenu de la signature <span style="color:var(--danger)">*</span></label>
+        <div id="sigEditorToolbar" style="display:flex;flex-wrap:wrap;gap:4px;padding:6px 8px;background:var(--surface2);border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0"></div>
+        <div id="sigEditorContent" contenteditable="true" style="min-height:160px;max-height:240px;overflow-y:auto;padding:12px 14px;background:#fff;border:1px solid var(--border);border-radius:0 0 8px 8px;font-size:14px;line-height:1.5;outline:none" data-placeholder="Écris ta signature ici…"></div>
+        <div class="field-hint" style="margin-top:6px">Tu peux utiliser les outils de mise en forme ci-dessus.</div>
+      </div>
+
+    </div>
+    <div class="modal-foot">
+      <button class="btn" id="sigEditorDeleteBtn" onclick="sigEditorDeleteCurrent()" style="margin-right:auto;color:var(--danger);border-color:var(--border);display:none">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 01-2 2H9a2 2 0 01-2-2L5 6"/></svg>
+        Supprimer
+      </button>
+      <button class="btn" onclick="closeSignatureEditor()">Annuler</button>
+      <button class="btn btn-primary" onclick="saveSignature()">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+        Enregistrer
+      </button>
+    </div>
+  </div>
+</div>
 <script>
 // Switch entre onglets de la sidebar
 document.querySelectorAll('.tab').forEach(t => {
@@ -2103,10 +2170,197 @@ function renderSignatureCard(sig) {
     </div>`;
 }
 
-// Stub : ouvrir l'éditeur de signature (sera implémenté à la sous-étape 2.3)
+// État de l'éditeur (signature en cours d'édition)
+let _sigEditorState = { editingId: null, mailboxes: [] };
+
+// Ouvre l'éditeur (sigId=null pour création, ou un id pour modification)
 function openSignatureEditor(sigId) {
-  alert('Éditeur de signature : à implémenter à la sous-étape 2.3 (modale WYSIWYG).\n\n' +
-        (sigId ? `Tu cliques sur "Modifier" la signature #${sigId}.` : 'Tu cliques sur "Nouvelle signature".'));
+  _sigEditorState.editingId = sigId || null;
+  _sigEditorState.mailboxes = _signaturesState.mailboxes || [];
+  // Reset des champs
+  const sig = sigId ? _signaturesState.signatures.find(s => s.id === sigId) : null;
+  document.getElementById('sigEditorTitle').textContent = sig ? 'Modifier la signature' : 'Nouvelle signature';
+  document.getElementById('sigEditorSubtitle').textContent = sig
+    ? 'Modifie le contenu, le nom ou les boîtes mail concernées.'
+    : 'Crée une signature et choisis pour quelles boîtes mail elle s\'applique';
+  document.getElementById('sigEditorName').value = sig ? (sig.name || '') : '';
+  document.getElementById('sigEditorContent').innerHTML = sig ? (sig.signature_html || '') : '';
+  document.getElementById('sigEditorDeleteBtn').style.display = sig ? 'inline-flex' : 'none';
+  // Construit les rows de boîtes mail + toolbar
+  _sigEditorRenderMailboxes(sig);
+  _sigEditorBuildToolbar();
+  Modal.open('signatureEditorModal');
+  setTimeout(() => document.getElementById('sigEditorName').focus(), 100);
+}
+
+function closeSignatureEditor() { Modal.close('signatureEditorModal'); }
+
+// Rend la liste des boîtes mail avec checkboxes "associée" + "défaut"
+function _sigEditorRenderMailboxes(sig) {
+  const container = document.getElementById('sigEditorMailboxes');
+  const mboxes = _sigEditorState.mailboxes;
+  if (!mboxes || mboxes.length === 0) {
+    container.innerHTML = '<div style="font-size:12.5px;color:var(--text-muted);padding:6px 4px;font-style:italic">Aucune boîte mail connectée. Connecte Gmail ou Outlook depuis l\'onglet Mes connexions.</div>';
+    return;
+  }
+  const apply = sig ? (sig.apply_to_emails || []) : [];
+  const defaults = sig ? (sig.default_for_emails || []) : [];
+  container.innerHTML = mboxes.map(mb => {
+    const email = (typeof mb === 'string') ? mb : (mb.email || mb.address || '');
+    if (!email) return '';
+    const isApply = apply.includes(email);
+    const isDefault = defaults.includes(email);
+    const safeId = 'sigmb_' + email.replace(/[^a-z0-9]/gi, '_');
+    return `
+      <div class="sig-mailbox-row${isApply ? ' checked' : ''}" data-email="${_escapeHtml(email)}">
+        <input type="checkbox" id="${safeId}" ${isApply ? 'checked' : ''} onchange="_sigEditorOnApplyChange(this)">
+        <label for="${safeId}" style="font-size:13.5px;font-weight:500;color:var(--text);cursor:pointer">${_escapeHtml(email)}</label>
+        <label class="mb-default">
+          <input type="checkbox" class="mb-default-cb" ${isDefault ? 'checked' : ''} ${isApply ? '' : 'disabled'} onchange="_sigEditorOnDefaultChange(this)">
+          <span>Définir comme défaut</span>
+        </label>
+      </div>`;
+  }).join('');
+}
+
+// Quand on coche/décoche "associer la boîte"
+function _sigEditorOnApplyChange(cb) {
+  const row = cb.closest('.sig-mailbox-row');
+  row.classList.toggle('checked', cb.checked);
+  const defaultCb = row.querySelector('.mb-default-cb');
+  if (defaultCb) {
+    defaultCb.disabled = !cb.checked;
+    if (!cb.checked) defaultCb.checked = false;  // on retire le défaut si plus associée
+  }
+}
+
+// Quand on coche "défaut pour cette boîte"
+function _sigEditorOnDefaultChange(cb) {
+  // Pas de logique spéciale ici : on autorise plusieurs défauts cochés simultanément
+  // (1 signature peut être défaut pour 2 boîtes différentes — c'est par boîte que ça
+  // doit être unique, et on gère ça côté backend lors du save).
+}
+
+// Construit la toolbar WYSIWYG avec execCommand
+function _sigEditorBuildToolbar() {
+  const tb = document.getElementById('sigEditorToolbar');
+  tb.innerHTML = `
+    <button type="button" title="Gras (Ctrl+B)" onmousedown="event.preventDefault();_sigCmd('bold')"><b>B</b></button>
+    <button type="button" title="Italique (Ctrl+I)" onmousedown="event.preventDefault();_sigCmd('italic')"><i>I</i></button>
+    <button type="button" title="Souligné (Ctrl+U)" onmousedown="event.preventDefault();_sigCmd('underline')"><u>U</u></button>
+    <span class="toolbar-sep"></span>
+    <select title="Police" onchange="_sigCmd('fontName', this.value); this.value=''">
+      <option value="">Police</option>
+      <option value="Arial">Arial</option>
+      <option value="Helvetica">Helvetica</option>
+      <option value="Georgia">Georgia</option>
+      <option value="Times New Roman">Times</option>
+      <option value="Courier New">Courier</option>
+      <option value="Verdana">Verdana</option>
+    </select>
+    <select title="Taille" onchange="_sigCmd('fontSize', this.value); this.value=''">
+      <option value="">Taille</option>
+      <option value="1">Très petit</option>
+      <option value="2">Petit</option>
+      <option value="3">Normal</option>
+      <option value="4">Moyen</option>
+      <option value="5">Grand</option>
+      <option value="6">Très grand</option>
+    </select>
+    <span class="toolbar-sep"></span>
+    <input type="color" title="Couleur du texte" onchange="_sigCmd('foreColor', this.value)">
+    <input type="color" title="Surligner" onchange="_sigCmd('hiliteColor', this.value)">
+    <span class="toolbar-sep"></span>
+    <button type="button" title="Lien" onmousedown="event.preventDefault();_sigInsertLink()">
+      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+    </button>
+    <button type="button" title="Image" onmousedown="event.preventDefault();_sigInsertImage()">
+      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+    </button>
+    <span class="toolbar-sep"></span>
+    <button type="button" title="Liste à puces" onmousedown="event.preventDefault();_sigCmd('insertUnorderedList')">•</button>
+    <button type="button" title="Liste numérotée" onmousedown="event.preventDefault();_sigCmd('insertOrderedList')">1.</button>
+    <span class="toolbar-sep"></span>
+    <button type="button" title="Effacer la mise en forme" onmousedown="event.preventDefault();_sigCmd('removeFormat')">
+      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7V5a2 2 0 012-2h13"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="3" x2="12" y2="20"/><path d="M3 21l18-18"/></svg>
+    </button>
+  `;
+}
+
+// Wrapper execCommand qui garde le focus sur le contenteditable
+function _sigCmd(cmd, val) {
+  document.getElementById('sigEditorContent').focus();
+  document.execCommand(cmd, false, val || null);
+}
+
+// Insertion d'un lien
+function _sigInsertLink() {
+  const url = prompt('URL du lien (ex: https://couffrant-solar.fr) :');
+  if (!url) return;
+  document.getElementById('sigEditorContent').focus();
+  document.execCommand('createLink', false, url);
+}
+
+// Insertion d'une image (par URL)
+function _sigInsertImage() {
+  const url = prompt('URL de l\'image (ex: https://exemple.com/logo.png) :');
+  if (!url) return;
+  document.getElementById('sigEditorContent').focus();
+  document.execCommand('insertImage', false, url);
+}
+
+// Sauvegarde (création ou modification)
+async function saveSignature() {
+  const name = document.getElementById('sigEditorName').value.trim();
+  const html = document.getElementById('sigEditorContent').innerHTML.trim();
+  if (!name) { alert('Donne un nom à ta signature'); return; }
+  if (!html || html === '<br>') { alert('La signature ne peut pas être vide'); return; }
+  // Récupère apply_to_emails et default_for_emails depuis les checkboxes
+  const apply = [], defaults = [];
+  document.querySelectorAll('#sigEditorMailboxes .sig-mailbox-row').forEach(row => {
+    const email = row.dataset.email;
+    const applyCb = row.querySelector('input[type="checkbox"]:not(.mb-default-cb)');
+    const defaultCb = row.querySelector('.mb-default-cb');
+    if (applyCb && applyCb.checked) {
+      apply.push(email);
+      if (defaultCb && defaultCb.checked) defaults.push(email);
+    }
+  });
+  const payload = {
+    name, signature_html: html,
+    apply_to_emails: apply,
+    default_for_emails: defaults,
+  };
+  try {
+    const sigId = _sigEditorState.editingId;
+    const url = sigId ? `/signatures/${sigId}` : '/signatures';
+    const method = sigId ? 'PATCH' : 'POST';
+    const r = await fetch(url, {
+      method, headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const d = await r.json();
+    if (!r.ok || d.error) throw new Error(d.error || 'Erreur sauvegarde');
+    closeSignatureEditor();
+    await loadSignatures();
+    const toast = document.getElementById('toast');
+    if (toast) {
+      toast.lastChild.textContent = sigId ? ' Signature modifiée' : ' Signature créée';
+      toast.style.background = 'var(--success)';
+      toast.classList.add('open');
+      setTimeout(() => { toast.classList.remove('open'); toast.style.background = ''; }, 2400);
+    }
+  } catch (e) {
+    alert('Erreur : ' + e.message);
+  }
+}
+
+// Suppression depuis la modale d'édition (variante du bouton de la card)
+async function sigEditorDeleteCurrent() {
+  const sigId = _sigEditorState.editingId;
+  if (!sigId) return;
+  closeSignatureEditor();
+  await deleteSignature(sigId);
 }
 
 // Suppression d'une signature
