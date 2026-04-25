@@ -302,6 +302,11 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 #sigEditorToolbar select{padding:4px 6px;border-radius:6px;border:1px solid var(--border);background:#fff;font-size:12px;font-family:inherit;cursor:pointer}
 #sigEditorToolbar input[type="color"]{width:30px;height:28px;border:1px solid var(--border);border-radius:6px;cursor:pointer;padding:1px;background:#fff}
 #sigEditorToolbar .toolbar-sep{width:1px;background:var(--border);margin:2px 4px;align-self:stretch}
+/* Boutons couleur explicites (texte + surlignage) — F2 */
+.sig-color-btn{position:relative;width:30px;height:30px;display:inline-flex;flex-direction:column;align-items:center;justify-content:center;background:transparent;border:none;border-radius:6px;cursor:pointer;color:var(--text);transition:.12s;padding:0;gap:1px}
+.sig-color-btn:hover{background:rgba(0,87,184,.1)}
+.sig-color-letter{font-size:14px;font-weight:700;line-height:1;font-family:Georgia,serif;transition:color .15s}
+.sig-color-bar{display:block;width:18px;height:3px;border-radius:1px;border:1px solid rgba(0,0,0,.08);transition:background .15s}
 .sig-mailbox-row{display:flex;align-items:center;gap:10px;padding:8px 10px;background:#fff;border-radius:6px;border:1px solid transparent}
 .sig-mailbox-row:hover{border-color:var(--border)}
 .sig-mailbox-row.checked{border-color:var(--accent);background:var(--surface2)}
@@ -2317,8 +2322,16 @@ function _sigEditorBuildToolbar() {
       <option value="6">Très grand</option>
     </select>
     <span class="toolbar-sep"></span>
-    <input type="color" title="Couleur du texte" onchange="_sigCmd('foreColor', this.value)">
-    <input type="color" title="Surligner" onchange="_sigCmd('hiliteColor', this.value)">
+    <button type="button" class="sig-color-btn" title="Couleur du texte" onmousedown="event.preventDefault();_sigOpenColorPicker('fore')">
+      <span class="sig-color-letter" id="sigForeColorLabel" style="color:#dc2626">A</span>
+      <span class="sig-color-bar" id="sigForeColorBar" style="background:#dc2626"></span>
+    </button>
+    <button type="button" class="sig-color-btn" title="Surligner le texte" onmousedown="event.preventDefault();_sigOpenColorPicker('hilite')">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l-6 6v3h3l6-6"/><path d="M22 12l-4.6-4.6a2 2 0 0 0-2.8 0l-5.2 5.2 7.4 7.4 5.2-5.2a2 2 0 0 0 0-2.8z"/></svg>
+      <span class="sig-color-bar" id="sigHiliteColorBar" style="background:#fde047"></span>
+    </button>
+    <input type="color" id="sigForeColorInput" value="#dc2626" style="position:absolute;left:-9999px;width:1px;height:1px" onchange="_sigOnColorPicked('fore', this.value)">
+    <input type="color" id="sigHiliteColorInput" value="#fde047" style="position:absolute;left:-9999px;width:1px;height:1px" onchange="_sigOnColorPicked('hilite', this.value)">
     <span class="toolbar-sep"></span>
     <button type="button" title="Lien" onmousedown="event.preventDefault();_sigInsertLink()">
       <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
@@ -2340,6 +2353,57 @@ function _sigEditorBuildToolbar() {
 function _sigCmd(cmd, val) {
   document.getElementById('sigEditorContent').focus();
   document.execCommand(cmd, false, val || null);
+}
+
+// Sauvegarde de la selection courante dans le contenteditable
+// (necessaire car ouvrir un input color fait perdre la selection)
+let _sigSavedRange = null;
+function _sigSaveSelection() {
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount > 0) {
+    const r = sel.getRangeAt(0);
+    // Sauvegarde uniquement si la selection est dans notre editeur
+    const editor = document.getElementById('sigEditorContent');
+    if (editor && editor.contains(r.commonAncestorContainer)) {
+      _sigSavedRange = r.cloneRange();
+    }
+  }
+}
+function _sigRestoreSelection() {
+  if (!_sigSavedRange) return;
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(_sigSavedRange);
+}
+
+// Ouvre le color picker natif (cache) pour fore ou hilite
+function _sigOpenColorPicker(kind) {
+  // 1) Sauve la selection actuelle (sinon le picker la perdra)
+  _sigSaveSelection();
+  // 2) Trigger le click sur l'input color cache
+  const inputId = (kind === 'fore') ? 'sigForeColorInput' : 'sigHiliteColorInput';
+  const input = document.getElementById(inputId);
+  if (input) input.click();
+}
+
+// Quand l'utilisateur a choisi une couleur dans le picker
+function _sigOnColorPicked(kind, color) {
+  // 1) Restaure la selection
+  document.getElementById('sigEditorContent').focus();
+  _sigRestoreSelection();
+  // 2) Applique la couleur via execCommand
+  const cmd = (kind === 'fore') ? 'foreColor' : 'hiliteColor';
+  document.execCommand(cmd, false, color);
+  // 3) Update le visuel du bouton (lettre A ou barre du surligneur)
+  if (kind === 'fore') {
+    const label = document.getElementById('sigForeColorLabel');
+    const bar = document.getElementById('sigForeColorBar');
+    if (label) label.style.color = color;
+    if (bar) bar.style.background = color;
+  } else {
+    const bar = document.getElementById('sigHiliteColorBar');
+    if (bar) bar.style.background = color;
+  }
 }
 
 // Insertion d'un lien
