@@ -284,8 +284,8 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 /* === Mode parcours guidé "Faisons le point" — modale UNIFIÉE (review/edit/delete) === */
 #reviewSessionModal{padding:0}
 #reviewSessionModal.open{animation:fadeIn .25s ease}
-/* Shell : hauteur fixe 720px pour eviter que la modale 'saute' quand on change de mode */
-#reviewSessionModal .review-shell{width:100%;max-width:900px;height:720px;max-height:92vh;background:var(--surface);border-radius:18px;display:flex;flex-direction:column;box-shadow:0 30px 80px rgba(0,0,0,.35);overflow:hidden;animation:popIn .35s cubic-bezier(.16,1,.3,1)}
+
+/* Shell + body : la taille (900x720) est maintenant géree par .modal.size-parcours du _modal_system.css */
 /* Body : prend l'espace restant, scrolle si besoin */
 #reviewSessionModal .review-body{flex:1 1 auto;overflow-y:auto;padding:28px;scrollbar-gutter:stable}
 .review-head{padding:20px 28px 18px;background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%);border-bottom:1px solid #bfdbfe;position:relative;transition:background .2s ease}
@@ -932,7 +932,7 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 
 <!-- ============ MODAL UNIFIÉE : parcours + édition + suppression ============ -->
 <div class="modal-overlay" id="reviewSessionModal">
-  <div class="review-shell" role="dialog" aria-labelledby="reviewTitle">
+  <div class="modal size-parcours" role="dialog" aria-labelledby="reviewTitle">
     <!-- HEADER ADAPTATIF (couleur change selon mode) -->
     <div class="review-head" id="reviewHead">
       <div class="review-head-top">
@@ -2204,8 +2204,7 @@ let _reviewState = {
 // Depuis le bouton "Faisons le point" de la bannière
 async function openReviewSession() {
   _reviewState = {mode:'review', queue:[], index:0, handled:0, initialTotal:0, single:false};
-  document.getElementById('reviewSessionModal').classList.add('open');
-  document.body.style.overflow = 'hidden';
+  Modal.open('reviewSessionModal');
   try {
     const r = await fetch('/rules/review-queue');
     const d = await r.json();
@@ -2226,8 +2225,7 @@ function openEditModal(ruleId) {
   const rule = _allRules.find(r => r.id === ruleId);
   if (!rule) { console.error('Rule not found:', ruleId); return; }
   _reviewState = {mode:'edit', queue:[rule], index:0, handled:0, initialTotal:1, single:true};
-  document.getElementById('reviewSessionModal').classList.add('open');
-  document.body.style.overflow = 'hidden';
+  Modal.open('reviewSessionModal');
   renderReviewStep();
 }
 
@@ -2236,14 +2234,12 @@ function openDeleteModal(ruleId) {
   const rule = _allRules.find(r => r.id === ruleId);
   if (!rule) { console.error('Rule not found:', ruleId); return; }
   _reviewState = {mode:'delete', queue:[rule], index:0, handled:0, initialTotal:1, single:true};
-  document.getElementById('reviewSessionModal').classList.add('open');
-  document.body.style.overflow = 'hidden';
+  Modal.open('reviewSessionModal');
   renderReviewStep();
 }
 
 function closeReviewSession() {
-  document.getElementById('reviewSessionModal').classList.remove('open');
-  document.body.style.overflow = '';
+  Modal.close('reviewSessionModal');
   // Rafraîchir la liste des règles derrière
   if (typeof loadRules === 'function') loadRules();
 }
@@ -2563,16 +2559,14 @@ async function confirmDeleteAndNext() {
   renderReviewStep();
 }
 
-// Fermer avec Escape
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && document.getElementById('reviewSessionModal')?.classList.contains('open')) {
-    closeReviewSession();
-  }
-});
-// Fermer en cliquant sur le fond
-document.getElementById('reviewSessionModal')?.addEventListener('click', e => {
-  if (e.target.id === 'reviewSessionModal') closeReviewSession();
-});
+// Escape + clic-fond gérés par _modal_system.js (ouverture/fermeture).
+// On garde un callback onClose pour relancer loadRules() automatiquement
+// lorsque la modale est fermée par n'importe quel moyen (Escape, croix, clic-fond, bouton Annuler).
+if (window.Modal) {
+  Modal.onClose('reviewSessionModal', () => {
+    if (typeof loadRules === 'function') loadRules();
+  });
+}
 
 // Animation spin pour le spinner du bouton Enregistrer
 const _spinStyle = document.createElement('style');
