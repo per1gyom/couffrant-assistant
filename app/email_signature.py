@@ -45,11 +45,15 @@ def get_email_signature(username: str, from_address: str = None,
     """
     Retourne la signature HTML pour un utilisateur.
 
-    Ordre de résolution :
-      1. DB : signature dont apply_to_emails contient from_address (match exact)
-      2. DB : signature is_default = true
-      3. DB : signature générique (email_address IS NULL, ancienne logique)
-      4. Fallback statique
+    Ordre de résolution (avril 2026) :
+      1. DB : signature dont default_for_emails contient from_address
+         → priorité absolue (défaut explicite par boîte mail)
+      2. DB : signature dont apply_to_emails contient from_address
+         (la plus récemment modifiée si plusieurs candidates)
+      3. DB : signature avec email_address = from_address (ancienne logique)
+      4. DB : signature is_default = true (ancien défaut global, déprécié)
+      5. DB : signature générique (email_address IS NULL, vieille logique)
+      6. Fallback statique
     """
     conn = None
     try:
@@ -58,7 +62,18 @@ def get_email_signature(username: str, from_address: str = None,
         c = conn.cursor()
 
         if from_address:
-            # Nouvelle logique : array apply_to_emails
+            # 1. PRIORITÉ : default_for_emails (défaut explicite par boîte)
+            c.execute("""
+                SELECT signature_html FROM email_signatures
+                WHERE username = %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
+                  AND %s = ANY(default_for_emails)
+                ORDER BY updated_at DESC LIMIT 1
+            """, (username, tenant_id, from_address))
+            row = c.fetchone()
+            if row:
+                return row[0]
+            # 2. apply_to_emails (signature associée mais pas marquée défaut)
             c.execute("""
                 SELECT signature_html FROM email_signatures
                 WHERE username = %s
@@ -69,7 +84,7 @@ def get_email_signature(username: str, from_address: str = None,
             row = c.fetchone()
             if row:
                 return row[0]
-            # Ancienne logique : colonne email_address
+            # 3. Ancienne logique : colonne email_address
             c.execute("""
                 SELECT signature_html FROM email_signatures
                 WHERE username = %s
@@ -81,7 +96,7 @@ def get_email_signature(username: str, from_address: str = None,
             if row:
                 return row[0]
 
-        # Signature par défaut
+        # 4. is_default global (ancien défaut, déprécié)
         c.execute("""
             SELECT signature_html FROM email_signatures
             WHERE username = %s
@@ -93,7 +108,7 @@ def get_email_signature(username: str, from_address: str = None,
         if row:
             return row[0]
 
-        # Signature générique (ancienne logique)
+        # 5. Signature générique (ancienne logique)
         c.execute("""
             SELECT signature_html FROM email_signatures
             WHERE username = %s

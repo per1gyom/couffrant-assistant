@@ -29,10 +29,15 @@ def _graph_delete(token, path):
 
 
 
-def _build_email_html(body: str, username: str = "guillaume") -> str:
-    """Corps HTML du mail avec signature. EMAIL-SIGNATURE : deleguee a get_email_signature()."""
+def _build_email_html(body: str, username: str = "guillaume", from_address: str = None) -> str:
+    """Corps HTML du mail avec signature.
+
+    EMAIL-SIGNATURE : déléguée à get_email_signature(username, from_address).
+    Si from_address est fourni, la logique de matching par boîte mail s'applique
+    (default_for_emails > apply_to_emails > is_default global > fallback statique).
+    """
     from app.email_signature import get_email_signature
-    signature = get_email_signature(username)
+    signature = get_email_signature(username, from_address=from_address)
     # Convertir les sauts de ligne en <br> — white-space:pre-line est ignore par Gmail/Outlook
     body_html = body.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '<br>\n')
     return f'<div style="font-family:Arial,sans-serif;font-size:14px;color:#222;">{body_html}</div>{signature}'
