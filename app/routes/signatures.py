@@ -28,16 +28,17 @@ def list_signatures(user: dict = Depends(require_user)):
     try:
         conn = _get_conn(); c = conn.cursor()
         c.execute("""
-            SELECT id, name, signature_html, apply_to_emails, is_default, updated_at
+            SELECT id, name, signature_html, apply_to_emails, is_default, default_for_emails, updated_at
             FROM email_signatures WHERE username = %s
               AND (tenant_id = %s OR tenant_id IS NULL)
-            ORDER BY is_default DESC, updated_at DESC
+            ORDER BY updated_at DESC
         """, (username, tenant_id))
         rows = c.fetchall()
         return [{"id": r[0], "name": r[1] or f"Signature {r[0]}",
                  "signature_html": r[2], "apply_to_emails": r[3] or [],
                  "is_default": r[4] or False,
-                 "updated_at": str(r[5]) if r[5] else ""} for r in rows]
+                 "default_for_emails": r[5] or [],
+                 "updated_at": str(r[6]) if r[6] else ""} for r in rows]
     except Exception as e:
         return JSONResponse({"error": str(e)[:100]}, status_code=500)
     finally:
@@ -52,23 +53,36 @@ async def create_signature(request: Request, user: dict = Depends(require_user))
     name = (data.get("name") or "Nouvelle signature").strip()[:100]
     html = data.get("signature_html", "").strip()
     emails = data.get("apply_to_emails", [])
+    default_for = data.get("default_for_emails", [])
+    # is_default global devient deprecie : on laisse passer pour compat mais on n'ecrase plus les autres
     is_default = bool(data.get("is_default", False))
     if not html:
         return JSONResponse({"error": "signature_html requis"}, status_code=400)
+    # Validation : default_for_emails doit etre un sous-ensemble de apply_to_emails
+    # (on ne peut pas etre 'defaut pour une boite' sans etre 'associe a cette boite')
+    if default_for:
+        default_for = [e for e in default_for if e in emails]
     conn = None
     try:
         conn = _get_conn(); c = conn.cursor()
-        if is_default:
-            c.execute(
-                "UPDATE email_signatures SET is_default=false "
-                "WHERE username=%s AND (tenant_id = %s OR tenant_id IS NULL)",
-                (username, tenant_id))
         c.execute("""
             INSERT INTO email_signatures
-              (username, tenant_id, name, signature_html, apply_to_emails, is_default, updated_at)
-            VALUES (%s,%s,%s,%s,%s,%s,NOW()) RETURNING id
-        """, (username, tenant_id, name, html, emails, is_default))
+              (username, tenant_id, name, signature_html, apply_to_emails,
+               is_default, default_for_emails, updated_at)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,NOW()) RETURNING id
+        """, (username, tenant_id, name, html, emails, is_default, default_for))
         new_id = c.fetchone()[0]
+        # Si cette signature devient defaut pour des boites, on retire ces boites
+        # du default_for_emails des autres signatures du meme user (1 defaut par boite max)
+        if default_for:
+            c.execute("""
+                UPDATE email_signatures
+                SET default_for_emails = ARRAY(
+                  SELECT unnest(default_for_emails) EXCEPT SELECT unnest(%s::text[])
+                )
+                WHERE username=%s AND id != %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
+            """, (default_for, username, new_id, tenant_id))
         conn.commit()
         return {"ok": True, "id": new_id}
     except Exception as e:
@@ -86,23 +100,36 @@ async def update_signature(sig_id: int, request: Request, user: dict = Depends(r
     try:
         conn = _get_conn(); c = conn.cursor()
         c.execute(
-            "SELECT id FROM email_signatures WHERE id=%s AND username=%s "
+            "SELECT id, apply_to_emails FROM email_signatures WHERE id=%s AND username=%s "
             "AND (tenant_id = %s OR tenant_id IS NULL)",
             (sig_id, username, tenant_id))
-        if not c.fetchone():
+        row = c.fetchone()
+        if not row:
             return JSONResponse({"error": "Introuvable"}, status_code=404)
+        # Validation : default_for_emails doit etre un sous-ensemble de apply_to_emails
+        # (en utilisant la nouvelle valeur de apply_to_emails si elle est fournie, sinon l'ancienne)
+        if "default_for_emails" in data:
+            new_emails = data.get("apply_to_emails", row[1] or [])
+            data["default_for_emails"] = [e for e in (data["default_for_emails"] or []) if e in new_emails]
         fields, vals = [], []
         for key, col in [("name","name"), ("signature_html","signature_html"),
-                         ("apply_to_emails","apply_to_emails"), ("is_default","is_default")]:
+                         ("apply_to_emails","apply_to_emails"), ("is_default","is_default"),
+                         ("default_for_emails","default_for_emails")]:
             if key in data:
                 fields.append(f"{col}=%s"); vals.append(data[key])
         if not fields:
             return {"ok": True}
-        if "is_default" in data and data["is_default"]:
-            c.execute(
-                "UPDATE email_signatures SET is_default=false "
-                "WHERE username=%s AND id!=%s AND (tenant_id = %s OR tenant_id IS NULL)",
-                (username, sig_id, tenant_id))
+        # Si cette signature devient defaut pour de nouvelles boites, on retire ces boites
+        # du default_for_emails des autres signatures (1 defaut par boite max)
+        if "default_for_emails" in data and data["default_for_emails"]:
+            c.execute("""
+                UPDATE email_signatures
+                SET default_for_emails = ARRAY(
+                  SELECT unnest(default_for_emails) EXCEPT SELECT unnest(%s::text[])
+                )
+                WHERE username=%s AND id != %s
+                  AND (tenant_id = %s OR tenant_id IS NULL)
+            """, (data["default_for_emails"], username, sig_id, tenant_id))
         vals += [sig_id, username, tenant_id]
         c.execute(f"UPDATE email_signatures SET {','.join(fields)},updated_at=NOW() "
                   f"WHERE id=%s AND username=%s "
