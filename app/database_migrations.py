@@ -218,6 +218,11 @@ MIGRATIONS = [
     "ALTER TABLE email_signatures ADD COLUMN IF NOT EXISTS apply_to_emails TEXT[] DEFAULT '{}'",
     "ALTER TABLE email_signatures ADD COLUMN IF NOT EXISTS is_default BOOLEAN DEFAULT false",
     "ALTER TABLE email_signatures ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW()",
+    # -- SIGNATURES v3 : defaut PAR BOITE MAIL (avril 2026) --
+    # Une signature peut etre 'par defaut' pour plusieurs boites mail differentes.
+    # Ex: signature_id=42 -> default_for_emails=['guillaume@couffrant-solar.fr'] => Raya l'utilise auto pour cette boite
+    # Remplace progressivement is_default (qui etait global, devient deprecie).
+    "ALTER TABLE email_signatures ADD COLUMN IF NOT EXISTS default_for_emails TEXT[] DEFAULT '{}'",
     # -- CONNECTEURS V2 : email + oauth_state sur tenant_connections --
     "ALTER TABLE tenant_connections ADD COLUMN IF NOT EXISTS connected_email TEXT",
     "ALTER TABLE tenant_connections ADD COLUMN IF NOT EXISTS oauth_state TEXT",
