@@ -994,15 +994,16 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 
 <!-- MODAL CHANGEMENT DE MOT DE PASSE -->
 <div class="modal-overlay" id="passwordModal">
-  <div class="modal" style="max-width:520px">
+  <div class="modal size-standard">
     <div class="modal-head">
       <div class="modal-icon">
         <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
       </div>
-      <div>
+      <div class="modal-title-wrap">
         <div class="modal-title">Changer de mot de passe</div>
         <div class="modal-subtitle">Minimum 10 caractères, avec chiffres et lettres.</div>
       </div>
+      <button class="modal-close" aria-label="Fermer">×</button>
     </div>
     <div class="modal-body">
       <div class="field">
@@ -1315,10 +1316,10 @@ async function saveProfile() {
 function openPasswordModal() {
   ['pwdCurrent','pwdNew','pwdConfirm'].forEach(id => { document.getElementById(id).value = ''; });
   document.getElementById('pwdError').style.display = 'none';
-  document.getElementById('passwordModal').classList.add('open');
+  Modal.open('passwordModal');
 }
 function closePasswordModal() {
-  document.getElementById('passwordModal').classList.remove('open');
+  Modal.close('passwordModal');
 }
 async function savePassword() {
   const cur = document.getElementById('pwdCurrent').value;
@@ -1360,10 +1361,7 @@ async function savePassword() {
     err.style.display = 'block';
   }
 }
-// Fermer la modale mot de passe en cliquant hors
-document.getElementById('passwordModal')?.addEventListener('click', e => {
-  if (e.target.id === 'passwordModal') closePasswordModal();
-});
+// (Listener clic-fond passwordModal géré par _modal_system.js — plus besoin ici)
 
 // Chargement initial au DOMContentLoaded
 if (document.readyState === 'loading') {
