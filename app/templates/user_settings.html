@@ -389,6 +389,10 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
         <svg class="tab-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
         Mes connexions
       </div>
+      <div class="tab" data-tab="signatures">
+        <svg class="tab-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7l7 0 0 7"/><path d="M3 21h18"/></svg>
+        Mes signatures
+      </div>
       <div class="tabs-sep"></div>
       <div class="tab" data-tab="donnees">
         <svg class="tab-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -745,6 +749,27 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
         </div>
 
       </div><!-- fin panel connexions -->
+
+      <!-- ============ PANEL : MES SIGNATURES ============ -->
+      <div class="tab-panel" data-panel="signatures">
+        <div class="content-title">Mes signatures</div>
+        <div class="content-desc">Gère les signatures que Raya ajoute automatiquement à tes mails. Tu peux en créer plusieurs et définir laquelle s'applique à chaque boîte mail.</div>
+
+        <div id="signaturesList" style="margin-top:18px;display:flex;flex-direction:column;gap:12px">
+          <div class="empty-hint" id="signaturesEmpty" style="display:none;text-align:center;padding:48px 24px;color:var(--text-muted);font-size:14px;background:var(--surface2);border:1px dashed var(--border);border-radius:12px">
+            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="opacity:.4;margin-bottom:12px"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7l7 0 0 7"/><path d="M3 21h18"/></svg>
+            <div style="font-weight:600;color:var(--text);margin-bottom:6px">Tu n'as pas encore de signature</div>
+            <div>Crée ta première signature pour que Raya l'ajoute automatiquement à tes mails.</div>
+          </div>
+        </div>
+
+        <div style="margin-top:18px;display:flex;justify-content:flex-end">
+          <button class="btn btn-primary" onclick="openSignatureEditor()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Nouvelle signature
+          </button>
+        </div>
+      </div><!-- fin panel signatures -->
 
       <!-- ============ PANEL : MES DONNÉES (RGPD) ============ -->
       <div class="tab-panel" data-panel="donnees">
@@ -1373,6 +1398,7 @@ if (document.readyState === 'loading') {
     loadRules();
     loadConnections();
     loadUsage();
+    loadSignatures();
   });
 } else {
   loadProfile();
@@ -1381,6 +1407,7 @@ if (document.readyState === 'loading') {
   loadRules();
   loadConnections();
   loadUsage();
+  loadSignatures();
 }
 
 // ===========================================================================
@@ -1984,6 +2011,123 @@ async function fetchMySignatures() {
   }
   btn.disabled = false;
   btn.innerHTML = originalHTML;
+}
+
+// ===========================================================================
+// ONGLET MES SIGNATURES (avril 2026)
+// ===========================================================================
+
+// État global de l'onglet
+let _signaturesState = { signatures: [], mailboxes: [] };
+
+// Échappe le HTML pour affichage sécurisé
+function _escapeHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Charge la liste des signatures + des boîtes mail disponibles depuis l'API
+async function loadSignatures() {
+  const list = document.getElementById('signaturesList');
+  const empty = document.getElementById('signaturesEmpty');
+  if (!list) return;
+  try {
+    // 2 fetches en parallèle
+    const [sigsRes, mboxRes] = await Promise.all([
+      fetch('/signatures'),
+      fetch('/signatures/mailboxes'),
+    ]);
+    const sigs = await sigsRes.json();
+    const mbox = await mboxRes.json();
+    _signaturesState.signatures = Array.isArray(sigs) ? sigs : [];
+    _signaturesState.mailboxes = mbox.mailboxes || [];
+    renderSignaturesList();
+  } catch (e) {
+    console.warn('[Signatures] Échec chargement :', e);
+    list.innerHTML = '<div style="color:var(--danger);font-size:13px;padding:12px">Erreur de chargement des signatures.</div>';
+  }
+}
+
+// Rend la liste de signatures (cards) ou l'état vide
+function renderSignaturesList() {
+  const list = document.getElementById('signaturesList');
+  const empty = document.getElementById('signaturesEmpty');
+  if (!list) return;
+  const sigs = _signaturesState.signatures;
+  // Vider la liste sauf le placeholder vide
+  Array.from(list.children).forEach(child => {
+    if (child.id !== 'signaturesEmpty') child.remove();
+  });
+  if (sigs.length === 0) {
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  sigs.forEach(sig => {
+    list.insertAdjacentHTML('beforeend', renderSignatureCard(sig));
+  });
+}
+
+// Rend une card de signature (HTML string)
+function renderSignatureCard(sig) {
+  const apply = sig.apply_to_emails || [];
+  const defaults = sig.default_for_emails || [];
+  const name = _escapeHtml(sig.name || 'Sans nom');
+  // Badges des boîtes mail : étoile pleine si défaut, vide si juste associée
+  const badges = apply.length === 0
+    ? '<span style="font-size:12px;color:var(--text-muted);font-style:italic">Aucune boîte associée</span>'
+    : apply.map(em => {
+        const isDefault = defaults.includes(em);
+        return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:999px;font-size:11.5px;background:${isDefault ? 'var(--accent-light, #e8f0fc)' : 'var(--surface2)'};color:${isDefault ? 'var(--accent)' : 'var(--text-muted)'};border:1px solid ${isDefault ? 'var(--accent)' : 'var(--border)'};font-weight:${isDefault ? 600 : 500}">
+          ${isDefault ? '<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><polygon points="12 2 15 9 22 9 17 14 19 21 12 17 5 21 7 14 2 9 9 9 12 2"/></svg>' : ''}
+          ${_escapeHtml(em)}
+        </span>`;
+      }).join(' ');
+  // Preview HTML : on insère tel quel mais dans une boîte avec scroll
+  return `
+    <div class="signature-card" data-sig-id="${sig.id}" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px 18px;display:flex;gap:14px;align-items:flex-start;transition:.15s">
+      <div style="flex:1;min-width:0">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+          <div style="font-size:14.5px;font-weight:600;color:var(--text)">${name}</div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px">${badges}</div>
+        <div style="font-size:12px;color:var(--text-muted);max-height:60px;overflow:hidden;border:1px dashed var(--border);background:var(--surface2);border-radius:6px;padding:8px 10px;line-height:1.4">${sig.signature_html || '<em>Signature vide</em>'}</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:6px;flex-shrink:0">
+        <button class="btn" onclick="openSignatureEditor(${sig.id})" title="Modifier" style="padding:6px 10px">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </button>
+        <button class="btn" onclick="deleteSignature(${sig.id})" title="Supprimer" style="padding:6px 10px;color:var(--danger);border-color:var(--border)">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 01-2 2H9a2 2 0 01-2-2L5 6"/></svg>
+        </button>
+      </div>
+    </div>`;
+}
+
+// Stub : ouvrir l'éditeur de signature (sera implémenté à la sous-étape 2.3)
+function openSignatureEditor(sigId) {
+  alert('Éditeur de signature : à implémenter à la sous-étape 2.3 (modale WYSIWYG).\n\n' +
+        (sigId ? `Tu cliques sur "Modifier" la signature #${sigId}.` : 'Tu cliques sur "Nouvelle signature".'));
+}
+
+// Suppression d'une signature
+async function deleteSignature(sigId) {
+  const sig = _signaturesState.signatures.find(s => s.id === sigId);
+  const name = sig ? sig.name : 'cette signature';
+  if (!confirm(`Supprimer "${name}" ?\n\nCette action est définitive.`)) return;
+  try {
+    const r = await fetch(`/signatures/${sigId}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error('Échec suppression');
+    await loadSignatures();
+    const toast = document.getElementById('toast');
+    if (toast) {
+      toast.lastChild.textContent = ' Signature supprimée';
+      toast.style.background = 'var(--success)';
+      toast.classList.add('open');
+      setTimeout(() => { toast.classList.remove('open'); toast.style.background = ''; }, 2400);
+    }
+  } catch (e) {
+    alert('Erreur : ' + e.message);
+  }
 }
 
 // ===========================================================================
