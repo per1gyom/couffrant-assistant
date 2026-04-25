@@ -2324,13 +2324,25 @@ async function _sigOnImageFileSelected(event) {
     return;
   }
   try {
-    // Etape A : lecture brute en base64 (pas encore de redim/compression — viendra en B)
-    const dataUrl = await _sigReadFileAsDataUrl(file);
+    // Compression auto : redim a max 800px de cote + JPEG qualite degressive
+    // jusqu'a passer sous 100 KB. Pour les GIF (animes) on garde tel quel.
+    let dataUrl;
+    if (file.type === 'image/gif') {
+      // Pas de compression sur GIF (perdrait l'animation). Limite stricte 100 KB.
+      dataUrl = await _sigReadFileAsDataUrl(file);
+      const sizeKB = Math.round(dataUrl.length * 0.75 / 1024);
+      if (sizeKB > 100) {
+        alert('GIF trop lourd (' + sizeKB + ' KB > 100 KB max). Utilise un GIF plus leger ou un PNG.');
+        return;
+      }
+    } else {
+      dataUrl = await _sigCompressImage(file, 100 * 1024); // 100 KB cible
+    }
     document.getElementById('sigEditorContent').focus();
     document.execCommand('insertImage', false, dataUrl);
   } catch (e) {
-    console.error('[Sig] Erreur lecture image :', e);
-    alert('Erreur lors de la lecture de l\'image : ' + e.message);
+    console.error('[Sig] Erreur traitement image :', e);
+    alert('Erreur lors du traitement de l\'image : ' + e.message);
   }
 }
 
@@ -2342,6 +2354,68 @@ function _sigReadFileAsDataUrl(file) {
     reader.onerror = () => reject(new Error('FileReader a echoue'));
     reader.readAsDataURL(file);
   });
+}
+
+// Charge une image depuis une dataURL et retourne l'objet Image (pour canvas)
+function _sigLoadImageFromDataUrl(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('Impossible de charger l\'image'));
+    img.src = dataUrl;
+  });
+}
+
+// Compresse une image vers une taille cible (en bytes) en boucle :
+//  1) charge source -> dataURL puis Image
+//  2) redim a max 800px de cote
+//  3) tente PNG si transparent, JPEG sinon
+//  4) si encore trop lourd, baisse la qualite (0.92 -> 0.5)
+//  5) si toujours trop lourd, reduit la dimension max (800 -> 600 -> 400)
+async function _sigCompressImage(file, targetBytes) {
+  const sourceDataUrl = await _sigReadFileAsDataUrl(file);
+  const img = await _sigLoadImageFromDataUrl(sourceDataUrl);
+  // PNG seulement si l'image source est PNG (potentiellement transparente)
+  const preferPng = (file.type === 'image/png');
+  // Series de tentatives : on commence large et on resserre
+  const dimensions = [800, 600, 500, 400, 300];
+  const qualities = [0.92, 0.85, 0.78, 0.7, 0.6, 0.5];
+  for (const maxDim of dimensions) {
+    // Calcule les dimensions cibles en gardant le ratio
+    let w = img.naturalWidth, h = img.naturalHeight;
+    if (w > maxDim || h > maxDim) {
+      if (w >= h) { h = Math.round(h * maxDim / w); w = maxDim; }
+      else        { w = Math.round(w * maxDim / h); h = maxDim; }
+    }
+    // Dessine sur canvas
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, w, h);
+    // Tentative 1 : PNG si la source etait PNG (preserver transparence)
+    if (preferPng) {
+      const pngData = canvas.toDataURL('image/png');
+      const pngBytes = pngData.length * 0.75;
+      if (pngBytes <= targetBytes) {
+        return pngData;
+      }
+      // Si PNG trop lourd, on tente JPEG (perd la transparence mais bcp plus leger)
+    }
+    // Tentatives JPEG avec qualites degressives
+    for (const q of qualities) {
+      const jpegData = canvas.toDataURL('image/jpeg', q);
+      const jpegBytes = jpegData.length * 0.75;
+      if (jpegBytes <= targetBytes) {
+        return jpegData;
+      }
+    }
+    // Toutes les qualites JPEG ont echoue a ce maxDim, on reduit la dimension
+  }
+  // Echec total : on retourne quand meme la version la plus compressee
+  // (rare : seulement pour images vraiment incompressibles type photos detaillees)
+  throw new Error('Image trop complexe a compresser sous 100 KB. Essaie une image plus simple ou plus petite.');
 }
 
 // Sauvegarde (création ou modification)
