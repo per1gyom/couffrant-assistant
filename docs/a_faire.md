@@ -31,42 +31,71 @@ Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 - 5 modales user migrées : requestModal, passwordModal, deleteAccountModal (tone-danger),
   modalShortcutEdit, reviewSessionModal (size-parcours)
 - Panels admin/super-admin/tenant volontairement NON migrés (gardent leur thème sombre tech)
+### ✍️ Éditeur signatures multi-boîtes (✅ TERMINÉ — 25 avril soir)
 
-### ✍️ Éditeur signatures multi-boîtes (60% — étape 2 en cours)
-**État** : moteur backend 100% terminé + frontend opérationnel, reste le ménage final.
+**État final** : fonctionnalité complète en prod. Backend, frontend et nettoyage du legacy faits. L'utilisateur peut créer/éditer/supprimer ses signatures avec un éditeur WYSIWYG sur le design system unifié, et définir une signature par défaut pour chaque boîte mail.
 
-✅ **Étape 1 — Le moteur (TERMINÉE)**
+✅ **Étape 1 — Le moteur**
+
 - DB : nouvelle colonne `default_for_emails TEXT[]` (commit 44cca2f)
 - Endpoints `/signatures` GET/POST/PATCH adaptés (efdceb9)
-- `get_email_signature(username, from_address)` : nouvelle logique de matching avec
-  priorité au `default_for_emails` (f367e4e)
-- 🐛 Fix bug Outlook : `_build_email_html` propage maintenant `from_address` au matching
-  (avant : tjs fallback statique sur Outlook)
+- `get_email_signature(username, from_address)` : nouvelle logique de matching avec priorité au `default_for_emails` (f367e4e)
+- 🐛 Fix bug Outlook : `_build_email_html` propage maintenant `from_address` au matching (avant : tjs fallback statique sur Outlook)
 
 ✅ **Étape 2.1 + 2.2 + 2.3 — L'interface**
-- Nouvel onglet "Mes signatures" dans /settings avec icône dédiée
-- Liste des signatures sous forme de cards (preview HTML, badges boîtes
-  "⭐ défaut" / "associée")
-- Bouton suppression direct + Modal de confirmation
-- Modale d'édition WYSIWYG (commit 83332e9) en `size-parcours` :
+
+- Nouvel onglet "Mes signatures" dans /settings avec icône dédiée (5c2e313)
+- Liste des signatures sous forme de cards (preview HTML, badges boîtes "⭐ défaut" / "associée")
+- Bouton suppression direct + confirmation
+- Modale d'édition WYSIWYG (83332e9) en `size-parcours` :
   - Bloc Nom + Bloc Boîtes mail (checkbox associer + checkbox défaut par boîte)
-  - Toolbar 13 outils : B/I/U, polices, tailles, couleurs, lien, image, listes,
-    effacer mise en forme
+  - Toolbar 13 outils : B/I/U, polices, tailles, couleurs, lien, image (par URL), listes, effacer mise en forme
   - contenteditable avec placeholder
   - Bouton Supprimer dans le footer en mode édition
 - Toutes les fonctionnalités branchées sur les vrais endpoints API
 
-⏳ **Étape 2.5 — Suppression du legacy chat-signatures.js (À FAIRE)**
-- 212 lignes obsolètes dans `app/static/chat-signatures.js`
-- Référence à supprimer dans `raya_chat.html`
-- Note : la modale `modalUserSettings` qui contenait l'ancien éditeur sera
-  supprimée au Temps 3 du plan global (chantier suivant)
+✅ **Étape 2.5 + Temps 3 — Suppression du legacy** (3e51c54)
 
-🔮 **Étape 2.5+ — Mécanisme "Raya demande puis apprend" (REPORTÉ)**
-- Si plusieurs signatures matchent une boîte sans défaut → Raya demande à
-  l'utilisateur, retient le choix comme règle
-- Décision Guillaume 25/04 : reporté à une session future, le mécanisme
-  "tu définis toi-même la défaut depuis /settings" suffit pour le MVP
+- `chat-signatures.js` supprimé (212 lignes)
+- `modalUserSettings` + `modalDeleteAccount` supprimés de `raya_chat.html`
+- 13 fonctions JS legacy supprimées
+- `raya_chat.html` allégé de 51% (657 → 321 lignes)
+- 558 lignes supprimées au total, 0 ajoutée
+
+---
+
+#### 🚀 Améliorations futures à prévoir pour les signatures
+
+🔵 **AMÉLIORATION : insertion d'image en local (upload, pas URL)** — *demande Guillaume 25/04 soir*
+
+- **Problème actuel** : le bouton 🖼 de la toolbar WYSIWYG insère une image **par URL**. L'utilisateur doit donc avoir son logo hébergé quelque part (Drive public, CDN, etc.) avant de pouvoir l'insérer. Pas pratique pour un logo perso ou une signature pro.
+- **À faire** :
+  - Ajouter un bouton "Importer depuis mon ordinateur" à côté du bouton URL existant
+  - Drag & drop sur la zone d'édition également supporté
+  - Backend : endpoint `POST /signatures/upload-image` qui accepte un fichier image (PNG/JPG/WEBP, max ~500KB), le stocke dans `app/static/signatures_uploads/` avec un nom hashé (ex: `<username>_<sha256>.png`), et retourne l'URL publique
+  - Frontend : insère l'image dans le contenteditable via `<img src="/static/signatures_uploads/...">`
+  - Sécurité : limiter le poids, valider le type MIME, nettoyer périodiquement les fichiers orphelins (signatures supprimées qui référençaient des images uploadées)
+- **Cas d'usage type** : Guillaume veut mettre le logo Couffrant Solar dans sa signature pro, sans avoir à le re-héberger ailleurs.
+- **Estimation** : ~1h30 (~30 min backend + ~45 min frontend + ~15 min tests)
+- **Priorité** : moyenne — pas bloquant aujourd'hui, mais utile pour Pierre/Sabrina/Benoît quand ils seront onboardés (vrais utilisateurs métier, pas développeurs).
+
+🔵 **AMÉLIORATION : redimensionnement des images insérées**
+
+- Une fois insérée, une image gagne à pouvoir être redimensionnée à la souris (poignées de coin), ou via un slider de taille.
+- Existait déjà dans l'ancien `chat-signatures.js` (fonction `_activateImgResize`) que nous avons supprimée — récupérable depuis l'historique git (commit `3e51c54^` ou avant).
+- **Estimation** : ~30 min de portage.
+
+🔵 **AMÉLIORATION : prévisualisation "comme dans un vrai mail"**
+
+- Aujourd'hui la preview dans la card est un aperçu compact (max 60px de haut).
+- Idée : un bouton "Aperçu" qui ouvre une mini-modale montrant la signature dans un faux mail (sujet + corps + signature) pour voir le rendu réel.
+- **Estimation** : ~30 min.
+
+🔵 **AMÉLIORATION : mécanisme "Raya demande puis apprend"** (REPORTÉ depuis le MVP)
+
+- Si plusieurs signatures matchent une boîte sans défaut → Raya demande à l'utilisateur, retient le choix comme règle pour la prochaine fois
+- Décision Guillaume 25/04 : reporté à une session future, le mécanisme "tu définis toi-même la défaut depuis /settings" suffit pour le MVP
+- **Estimation** : ~1h (interrompre le flow d'envoi, dialogue avec choix multiples, update `default_for_emails` côté backend après choix utilisateur)
 
 ---
 
