@@ -384,3 +384,375 @@ le même pattern que `admin_drive.py`. Même correction nécessaire.
   vérifier que le caller a bien le droit de cibler ce tenant
   (`create-user`, `drive/select`, `sharepoint/select`).
 
+
+## 🔍 Phase 5 — Privilege escalation : user → admin tenant → super admin
+
+### ✅ Endpoints utilisateur correctement isolés
+
+Tous les endpoints `/profile/*` (admin/profile.py) utilisent `require_user`,
+ce qui est correct (chaque user accède à son propre profil). L'isolation
+était imparfaite côté SQL (cf. Phase 1 : 6 trous identifiés) mais pas côté
+auth/routing.
+
+### ✅ 6 endpoints avec isolation cross-tenant correctement protégée
+
+Pattern propre dans plusieurs endpoints `tenant_admin` :
+```python
+user: dict = Depends(require_tenant_admin),
+):
+    if user["scope"] != "admin":
+        assert_same_tenant(request, target)
+```
+Ce pattern protège bien contre les tenant_admins qui voudraient toucher
+des users d'un autre tenant. Légitime.
+
+### 🟠 Bug logique — super_admin bloqué par assert_same_tenant
+
+**Problème** : la comparaison `if user["scope"] != "admin"` ne tient pas
+compte du `super_admin`. Conséquence : Guillaume (super_admin) déclenche
+quand même `assert_same_tenant`, qui lève 403 si le target est dans un
+autre tenant.
+
+**Fichiers concernés** :
+- `app/routes/admin/super_admin.py` (admin_suspend_user, admin_unsuspend_user, admin_toggle_user_direct_actions)
+- `app/routes/admin/super_admin_users.py` (admin_users_reset_password)
+
+**Impact** : Guillaume ne peut pas suspendre / unsuspend / reset password
+des users d'autres tenants depuis ces endpoints (alors qu'il devrait
+pouvoir tout faire).
+
+**Correction** : remplacer
+```python
+if user["scope"] != "admin":
+    assert_same_tenant(request, target)
+```
+par
+```python
+if user["scope"] not in ("admin", "super_admin"):
+    assert_same_tenant(request, target)
+```
+
+(Ou utiliser `SCOPE_ADMIN`, `SCOPE_SUPER_ADMIN` constantes pour éviter
+les magic strings.)
+
+### 🚨 CRITIQUE — Promotion de scope arbitraire
+
+**Fichier `app/routes/admin/super_admin_users.py` ligne 75-86** :
+```python
+@router.put("/admin/update-user/{target}")
+def admin_update_user(
+    request: Request,
+    target: str,
+    payload: dict = Body(...),
+    admin: dict = Depends(require_admin),  # ← accepte SCOPE_ADMIN
+):
+    new_scope = payload.get("scope", "")
+    result = update_user(target, email=..., scope=new_scope)
+    log_admin_action(admin["username"], "update_scope", target, new_scope)
+    return result
+```
+
+**Risques** :
+1. Un admin tenant peut **promouvoir un user en `super_admin`**
+2. Un admin tenant peut **se promouvoir lui-même** en super_admin
+3. Aucune vérification que `target` est dans le tenant de l'admin
+4. Aucune vérification que `new_scope` est valide (un attaquant pourrait
+   passer une string arbitraire qui casserait des comparaisons ailleurs)
+5. Aucune vérification que `new_scope` ≤ scope de l'admin
+
+**Pourquoi ce n'est pas immédiatement exploité** :
+`get_effective_scope()` (cf. Phase 3) applique un override hardcoded
+pour les super-admins listés en dur. Donc même si on promeut un user
+en `super_admin` en DB, `get_effective_scope()` retournera son vrai
+scope effectif. Mais c'est un filet de sécurité fragile : tout endpoint
+qui lit directement `users.scope` sans passer par `get_effective_scope`
+serait vulnérable.
+
+**Correction** :
+```python
+@router.put("/admin/update-user/{target}")
+def admin_update_user(
+    request: Request,
+    target: str,
+    payload: dict = Body(...),
+    admin: dict = Depends(require_admin),
+):
+    new_scope = payload.get("scope", "").strip()
+    # 1. Valider que new_scope est un scope valide
+    if new_scope and new_scope not in ALL_SCOPES:
+        raise HTTPException(400, f"Scope invalide : {new_scope}")
+    # 2. Empêcher la promotion en super_admin (réservé à hardcoded)
+    if new_scope == SCOPE_SUPER_ADMIN:
+        raise HTTPException(403, "Le scope super_admin est hardcoded")
+    # 3. Empêcher la promotion d'un scope > celui de l'admin
+    scope_levels = {SCOPE_USER: 1, SCOPE_TENANT_ADMIN: 2, SCOPE_ADMIN: 3, SCOPE_SUPER_ADMIN: 4}
+    if scope_levels.get(new_scope, 0) > scope_levels.get(admin["scope"], 0):
+        raise HTTPException(403, "Vous ne pouvez pas promouvoir au-dessus de votre propre scope")
+    # 4. Si admin tenant, vérifier same tenant
+    if admin["scope"] not in (SCOPE_ADMIN, SCOPE_SUPER_ADMIN):
+        assert_same_tenant(request, target)
+    result = update_user(target, email=payload.get("email"), scope=new_scope)
+    log_admin_action(admin["username"], "update_scope", target, new_scope)
+    return result
+```
+
+### 📋 Récap Phase 5
+
+- ✅ **123 endpoints `/admin/*`** correctement protégés par require_admin
+  ou require_super_admin (audit automatique)
+- ✅ **6 endpoints tenant_admin** avec pattern défensif
+  `assert_same_tenant`
+- 🚨 **1 CRITIQUE** : `PUT /admin/update-user/{target}` permet la
+  promotion de scope arbitraire sans contrôle (super_admin compris)
+- 🟠 **4 endpoints** avec bug logique `scope != "admin"` qui bloque
+  involontairement le super_admin cross-tenant
+
+
+## 🔍 Phase 6 — Tokens OAuth + connecteurs externes
+
+### 🚨 CRITIQUE — Toutes les fonctions de gestion de tokens OAuth ignorent tenant_id
+
+**Fichier `app/token_manager.py`** :
+
+```python
+def get_valid_microsoft_token(username: str = 'guillaume') -> str | None:
+    c.execute("""
+        SELECT access_token, refresh_token, expires_at
+        FROM oauth_tokens
+        WHERE provider = 'microsoft' AND username = %s
+        ORDER BY updated_at DESC LIMIT 1
+    """, (username,))
+```
+
+**Problèmes** :
+1. **Default `'guillaume'`** dans la signature — anti-pattern multi-tenant
+2. **Aucun filtre `tenant_id`** dans la requête SQL
+3. La table `oauth_tokens` HAS `tenant_id` column (vérifié en DB), donc
+   c'est juste le code qui ne l'utilise pas
+
+**Impact** : si jamais 2 users avec le même username existent dans 2 tenants
+(scénario théorique aujourd'hui mais probable demain), ils se partageraient
+les mêmes tokens OAuth = catastrophe absolue (Pierre du tenant juillet
+récupère le token Outlook de Pierre du tenant couffrant_solar).
+
+**Fonctions concernées** (toutes dans `app/token_manager.py`) :
+- `get_valid_microsoft_token(username='guillaume')` — ligne 17
+- `save_microsoft_token(username, ...)` — ligne 89 (INSERT sans tenant_id)
+- `get_valid_google_token(username)` — ligne 112
+- `save_google_token(username, ...)` — ligne 177
+- `get_all_users_with_tokens(provider)` — ligne 214 (SELECT cross-tenant)
+- `get_connected_providers(username)` — ligne 230 (déjà identifié Phase 1)
+
+**Correction** :
+1. Ajouter `tenant_id: str` dans la signature de toutes les fonctions
+2. Filtrer SQL : `WHERE provider = %s AND username = %s AND tenant_id = %s`
+3. Retirer la valeur par défaut `'guillaume'`
+4. Mettre à jour tous les appelants pour passer `tenant_id`
+
+### 🟠 connection_token_manager.py — même problème mais moins critique
+
+**Fichier `app/connection_token_manager.py`** :
+
+```python
+def get_connection_token(username: str, tool_type: str) -> str | None:
+def _get_v2_token(username: str, tool_type: str) -> str | None:
+```
+
+Ces fonctions filtrent par `username` mais pas par `tenant_id`. Heureusement,
+elles passent par un JOIN avec `tenant_connections` qui contient le `tenant_id`,
+donc en pratique le filtre passe. Mais c'est implicite et fragile.
+
+**Correction** : ajouter explicitement `tenant_id` dans les requêtes.
+
+### 📋 Récap Phase 6
+
+- 🚨 **6 fonctions CRITIQUES** dans `token_manager.py` ne filtrent pas
+  par `tenant_id` — si un user homonyme apparaît dans un autre tenant,
+  les tokens fuitent
+- 🟠 **2 fonctions** dans `connection_token_manager.py` reposent sur un
+  filtre indirect via JOIN — à durcir explicitement
+
+
+## 🔍 Phase 7 — Tests dynamiques en DB
+
+Vérifications directes contre la base de production via `postgres` (lecture seule).
+
+### ✅ Test 7.1 — Aucune ligne avec `tenant_id IS NULL`
+
+| Table | Lignes avec tenant_id NULL |
+|---|---|
+| aria_rules | 0 |
+| aria_memory | 0 |
+| mail_memory | 0 |
+| sent_mail_memory | 0 |
+| aria_insights | 0 |
+| email_signatures | 0 |
+| oauth_tokens | 0 |
+| aria_session_digests | 0 |
+| llm_usage | 0 |
+
+✅ Toutes les données ont bien un `tenant_id` non NULL.
+
+### ✅ Test 7.2 — Aucun username dupliqué cross-tenant
+
+Vérifié : aucun username n'existe dans 2 tenants différents. C'est ce qui
+rend la majorité des bugs identifiés **latents** (théoriques) plutôt
+qu'**actifs** aujourd'hui. Mais dès qu'un homonyme apparaîtra (Pierre du
+tenant juillet par exemple), tous les bugs identifiés deviendront
+exploitables.
+
+### ✅ Test 7.3 — Cohérence des données vs leur user
+
+Vérification jointure `aria_rules ↔ users`, `aria_memory ↔ users`,
+`mail_memory ↔ users`, `sent_mail_memory ↔ users`, `aria_insights ↔ users` :
+
+**0 incohérence détectée**. Toutes les lignes pointent bien vers le
+tenant de leur user.
+
+### ✅ Test 7.4 — Répartition réelle des données par tenant
+
+| tenant_id | nb_users | nb_rules | nb_messages | nb_mails | nb_signatures |
+|---|---|---|---|---|---|
+| couffrant_solar | 5 | 203 | 200 | 946 | 1 |
+| juillet | 1 | 10 | 9 | 0 | 0 |
+
+**Charlotte (tenant `juillet`) a déjà 10 règles et 9 messages**.
+L'isolation est **déjà testable en pratique** : si une fuite existait,
+Charlotte verrait potentiellement des données de Couffrant Solar (ou
+inversement).
+
+### 📋 Récap Phase 7
+
+- ✅ **Données en bon état** : pas de NULL, pas d'incohérence cross-tenant,
+  pas de homonyme entre tenants
+- ✅ **Charlotte (juillet) déjà active en prod** : on a un cas réel de
+  cross-tenant à surveiller
+- ✅ Les bugs identifiés dans les Phases 1-6 sont **latents** (théoriques)
+  aujourd'hui, mais deviendraient **actifs** dès le premier homonyme
+  cross-tenant (très probable demain)
+
+
+---
+
+## 🎯 SYNTHÈSE GLOBALE — 7 phases d'audit
+
+### Bilan des findings
+
+| Gravité | Nombre | Détail |
+|---|---|---|
+| 🔴 CRITIQUE | **8** | Voir liste ci-dessous |
+| 🟠 IMPORTANT | **15** | Voir liste ci-dessous |
+| 🟡 ATTENTION | **10** | Voir liste ci-dessous |
+| 🟢 OK | nombreux | Architecture d'auth solide, 30 fichiers du 24/04 toujours bons |
+
+### 🔴 Trous CRITIQUES à corriger AVANT onboarding
+
+1. **`token_manager.py:230 get_connected_providers()`** — sans tenant_id
+2. **`token_manager.py:17,89,112,177,214` — toutes les fonctions tokens**
+   sans tenant_id (dont `get_valid_microsoft_token` avec default 'guillaume')
+3. **`POST /admin/tenants`** — `require_admin` au lieu de `require_super_admin`
+4. **`DELETE /admin/tenants/{id}`** — pareil, un tenant_admin peut **supprimer
+   n'importe quel tenant**
+5. **`PUT /admin/update-user/{target}`** — promotion arbitraire de scope
+   (un tenant_admin peut promouvoir en super_admin)
+6. **`DEFAULT_TENANT='couffrant_solar'`** silencieux dans `get_tenant_id`
+   (en cas de bug DB, fuite vers Couffrant Solar)
+7. **Schema `users.tenant_id` NULLABLE** au lieu de NOT NULL
+8. **Default bizarre `users.scope='couffrant_solar'`** au lieu de 'user'
+
+### 🟠 Trous IMPORTANT à corriger avant onboarding sérieux
+
+9. **`admin/profile.py`** — 6 requêtes sans tenant_id (stats user, oauth, llm_usage)
+10. **`memory_teams.py`** — 2 requêtes teams_sync_state sans tenant_id
+11. **`synthesis_engine.py:171`** — UPDATE aria_hot_summary sans tenant_id
+12. **`report_actions.py:22`** — daily_reports sans tenant_id
+13. **`POST /admin/create-user`** — accepte tenant_id du payload sans contrôle
+14. **`POST /admin/drive/select`** — pareil, admin tenant peut choisir
+    n'importe quel tenant_id
+15. **`POST /admin/sharepoint/select`** — pareil
+16. **`connection_token_manager.py`** — 2 fonctions reposent sur JOIN implicite
+
+### 🟡 ATTENTION (défense en profondeur, peuvent attendre)
+
+17. **4 endpoints super_admin_users.py** — pas de tenant_id (accessibles
+    super-admin seulement, mais cross-tenant si homonyme)
+18. **Bug logique `scope != "admin"`** dans 4 endpoints — bloque le
+    super-admin cross-tenant alors qu'il devrait pouvoir
+19. **Anti-pattern default 'guillaume'** dans `_build_email_html`
+20. **Magic strings `"admin"`** au lieu de constantes `SCOPE_ADMIN`
+
+### 📋 Plan de correction proposé
+
+**Étape A — Hotfixes critiques avant onboarding (2-3h)** :
+- Fix `token_manager.py` : ajouter tenant_id à toutes les fonctions tokens
+- Fix `POST /admin/tenants` et `DELETE /admin/tenants` : `require_super_admin`
+- Fix `PUT /admin/update-user` : valider scope, vérifier same_tenant
+- Fix `get_tenant_id` : retirer le fallback DEFAULT_TENANT, lever une erreur explicite
+- Migration DB : `users.tenant_id NOT NULL`, fix default scope
+
+**Étape B — Corrections IMPORTANT (2h)** :
+- Fix les 6 requêtes `admin/profile.py`
+- Fix `memory_teams.py`, `synthesis_engine.py`, `report_actions.py`
+- Fix les 3 endpoints admin acceptant tenant_id sans contrôle
+- Durcir `connection_token_manager.py`
+
+**Étape C — Défense en profondeur (1h)** :
+- Fix bug logique `scope != "admin"` dans 4 endpoints
+- Retirer les valeurs par défaut "guillaume"
+- Remplacer magic strings par constantes
+
+**Étape D — Tests bout en bout (1h)** :
+- Exécuter le `plan_tests_isolation_pierre_test.md` (créé le 24/04 mais
+  jamais lancé)
+- Créer un user `pierre_test` dans `couffrant_solar`
+- Tester les 5 scénarios de fuite
+- Tester aussi sur Charlotte (`juillet`) puisqu'elle est déjà en DB
+
+**Étape E — Hardening permanent** :
+- Voir checklist ci-dessous
+
+---
+
+## ✅ CHECKLIST permanente — à passer avant chaque nouvelle fonctionnalité
+
+À mettre dans `docs/checklist_isolation_multitenant.md` (fichier dédié à créer).
+
+### Pour toute nouvelle table en DB
+- [ ] La table a-t-elle `tenant_id TEXT NOT NULL` (sauf cas users-only documenté) ?
+- [ ] La table a-t-elle `username TEXT NOT NULL` (si user-scoped) ?
+- [ ] Index sur `(tenant_id, username)` créé ?
+- [ ] La migration backfill correctement les anciennes lignes ?
+
+### Pour toute nouvelle requête SQL
+- [ ] La requête filtre-t-elle `username = %s` (si user-scoped) ?
+- [ ] La requête filtre-t-elle `tenant_id = %s` (toujours, sauf jobs cross-tenant) ?
+- [ ] Le paramètre `tenant_id` est-il bien passé dans le tuple de paramètres ?
+- [ ] Si UPDATE/DELETE, le filtre tenant_id est-il dans le WHERE ?
+
+### Pour tout nouvel endpoint HTTP
+- [ ] Le décorateur `Depends(require_user)` (ou plus restrictif) est-il là ?
+- [ ] L'endpoint refuse-t-il `username` et `tenant_id` venant du client
+      (sauf super-admin légitime) ?
+- [ ] Si paramètre `target` (user à manipuler), `assert_same_tenant` est-il
+      appelé pour les non-admin globaux ?
+- [ ] Les requêtes SQL utilisent-elles `user["tenant_id"]` (et pas un
+      fallback) ?
+
+### Pour toute manipulation de scope/role
+- [ ] Le scope demandé est-il dans `ALL_SCOPES` (validation enum) ?
+- [ ] Le scope demandé est-il ≤ scope du caller (pas d'escalation) ?
+- [ ] Si scope = `super_admin`, l'opération est-elle refusée
+      (super_admin = hardcoded uniquement) ?
+- [ ] Le changement est-il loggé dans `admin_audit_log` ?
+
+### Pour toute fonction qui prend `username` en paramètre
+- [ ] Le paramètre est-il sans valeur par défaut (`username: str` et
+      pas `username: str = "guillaume"`) ?
+- [ ] La fonction prend-elle aussi `tenant_id` ?
+- [ ] Les appelants passent-ils explicitement `user["tenant_id"]` ?
+
+### Tests de non-régression
+- [ ] Le test `pierre_test` du plan d'audit passe-t-il sans fuite ?
+- [ ] Aucune ligne nouvelle avec `tenant_id IS NULL` après le déploiement ?
+- [ ] Cohérence `JOIN users` reste OK pour toutes les tables sensibles ?
+
