@@ -1,0 +1,288 @@
+/* ==========================================================================
+   DESIGN SYSTEM MODALE — Raya v1
+   --------------------------------------------------------------------------
+   Source unique de vérité pour les modales du système "clean" (pages user :
+   /settings et /chat). Les panels admin/super-admin/tenant gardent leur
+   thème sombre propre (admin-panel.css) et n'utilisent PAS ce système.
+
+   Structure HTML attendue (toujours la même) :
+
+   <div class="modal-overlay" id="myModal">
+     <div class="modal size-{standard|parcours} tone-{neutral|default|success|warning|danger}">
+       <div class="modal-head">
+         <div class="modal-icon"><svg .../></div>
+         <div class="modal-title-wrap">
+           <div class="modal-title">Titre</div>
+           <div class="modal-subtitle">Sous-titre optionnel</div>
+         </div>
+         <button class="modal-close" aria-label="Fermer">×</button>
+       </div>
+       <div class="modal-body">...</div>
+       <div class="modal-foot">
+         <button class="btn">Annuler</button>
+         <button class="btn btn-primary">Valider</button>
+       </div>
+     </div>
+   </div>
+
+   Tailles :
+     .size-standard : 640px largeur, hauteur adaptative (320–720px max)
+                      → 90% des cas (formulaires courts, confirmations)
+     .size-parcours : 900×720px hauteur fixe
+                      → parcours multi-modes ou éditeurs riches
+
+   Tons (impact: header) :
+     .tone-neutral  : header gris-blanc, icône bleu accent
+     (par défaut)   : header gradient bleu, icône bleue
+     .tone-success  : header gradient vert, icône verte
+     .tone-warning  : header gradient orange, icône orange
+     .tone-danger   : header gradient rouge, icône rouge
+
+   Comportements universels gérés par _modal_system.js :
+   - Échap ferme la modale active
+   - Clic sur le fond ferme la modale active
+   - Bouton .modal-close ferme la modale parente
+   - Scroll lock du body
+   - Focus trap (Tab/Shift+Tab restent dans la modale)
+   ========================================================================== */
+
+/* ─── OVERLAY (commun à tous) ──────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(26, 29, 35, .5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+.modal-overlay.open {
+  display: flex;
+  animation: modalFadeIn .22s ease;
+}
+@keyframes modalFadeIn { from { opacity: 0 } to { opacity: 1 } }
+@keyframes modalPopIn {
+  from { opacity: 0; transform: scale(.96) translateY(8px) }
+  to   { opacity: 1; transform: scale(1) translateY(0) }
+}
+
+/* ─── MODAL BASE ───────────────────────────────────────────────────────── */
+.modal {
+  background: var(--surface);
+  border-radius: 14px;
+  width: 100%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, .25);
+  overflow: hidden;
+  animation: modalPopIn .3s cubic-bezier(.16, 1, .3, 1);
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── TAILLES ──────────────────────────────────────────────────────────── */
+.modal.size-standard {
+  max-width: 640px;
+  min-height: 320px;
+  max-height: 92vh;
+}
+.modal.size-parcours {
+  max-width: 900px;
+  height: 720px;
+  max-height: 92vh;
+}
+
+/* ─── HEADER ───────────────────────────────────────────────────────────── */
+.modal-head {
+  padding: 18px 24px 14px;
+  border-bottom: 1px solid #bfdbfe;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  flex-shrink: 0;
+  transition: background .2s ease;
+}
+.modal-icon {
+  width: 36px;
+  height: 36px;
+  background: linear-gradient(135deg, #3b82f6, #0057b8);
+  color: #fff;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 3px 8px rgba(0, 87, 184, .25);
+  transition: background .2s ease;
+}
+.modal-icon svg { width: 18px; height: 18px }
+
+.modal-title-wrap { flex: 1; min-width: 0 }
+.modal-title {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+  line-height: 1.3;
+}
+.modal-subtitle {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+.modal-close {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: .15s;
+  font-size: 20px;
+  line-height: 1;
+  margin-left: 8px;
+  flex-shrink: 0;
+}
+.modal-close:hover { background: rgba(0, 0, 0, .06); color: var(--text) }
+
+/* ─── BODY ─────────────────────────────────────────────────────────────── */
+.modal-body {
+  padding: 20px 24px;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.modal-body p {
+  font-size: 13.5px;
+  color: var(--text-muted);
+  margin: 0 0 14px;
+  line-height: 1.6;
+}
+.modal-body p:last-child { margin-bottom: 0 }
+.modal.size-parcours .modal-body { padding: 24px }
+
+/* ─── FOOTER ───────────────────────────────────────────────────────────── */
+.modal-foot {
+  padding: 14px 24px 18px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-top: 1px solid var(--border);
+  background: #fafcff;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+.modal-foot .left { margin-right: auto }
+
+/* ─── VARIANTES DE TON ─────────────────────────────────────────────────── */
+.modal.tone-neutral .modal-head {
+  background: #fafcff;
+  border-bottom-color: var(--border);
+}
+.modal.tone-neutral .modal-icon {
+  background: var(--accent-light, #e8f0fc);
+  color: var(--accent, #0057b8);
+  box-shadow: none;
+}
+
+.modal.tone-success .modal-head {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  border-bottom-color: #a7f3d0;
+}
+.modal.tone-success .modal-icon {
+  background: linear-gradient(135deg, #10b981, #059669);
+  box-shadow: 0 3px 8px rgba(5, 150, 105, .25);
+}
+
+.modal.tone-warning .modal-head {
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  border-bottom-color: #fde68a;
+}
+.modal.tone-warning .modal-icon {
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  box-shadow: 0 3px 8px rgba(217, 119, 6, .25);
+}
+
+.modal.tone-danger .modal-head {
+  background: linear-gradient(135deg, #fef2f2 0%, #fecaca 100%);
+  border-bottom-color: #fca5a5;
+}
+.modal.tone-danger .modal-icon {
+  background: linear-gradient(135deg, #ef4444, #b91c1c);
+  box-shadow: 0 3px 8px rgba(185, 28, 28, .25);
+}
+
+/* ─── CHAMPS DE FORMULAIRE COMMUNS (utilisables dans .modal-body) ─────── */
+.modal-body .field-group { margin-bottom: 16px }
+.modal-body .field-group:last-child { margin-bottom: 0 }
+.modal-body .field-label {
+  display: block;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.modal-body .field-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.45;
+}
+
+.modal-body .field-input,
+.modal-body .field-textarea,
+.modal-body .field-select {
+  width: 100%;
+  padding: 10px 12px;
+  background: #fafcff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13.5px;
+  color: var(--text);
+  transition: .15s;
+  box-sizing: border-box;
+}
+.modal-body .field-input:focus,
+.modal-body .field-textarea:focus,
+.modal-body .field-select:focus {
+  outline: none;
+  border-color: var(--accent, #0057b8);
+  background: #fff;
+  box-shadow: 0 0 0 3px var(--accent-light, #e8f0fc);
+}
+.modal-body .field-textarea {
+  min-height: 80px;
+  resize: vertical;
+  line-height: 1.55;
+}
+
+/* ─── RESPONSIVE MOBILE ────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .modal {
+    max-width: 100% !important;
+    width: 100%;
+    border-radius: 16px 16px 0 0;
+    max-height: 92vh;
+  }
+  .modal.size-parcours {
+    height: 92vh;
+  }
+  .modal-head { padding: 16px 18px 12px }
+  .modal-body { padding: 16px 18px }
+  .modal-foot {
+    padding: 12px 18px 16px;
+  }
+  .modal-foot .btn { flex: 1 }
+  .modal-foot .left { flex: 0 0 100%; margin-bottom: 6px }
+}
