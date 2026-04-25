@@ -323,6 +323,14 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
 /* Bordure visuelle pour l'image selectionnee dans l'editeur */
 #sigEditorContent img.sig-img-selected{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
 #sigEditorContent img{cursor:pointer;max-width:100%;height:auto}
+
+/* === Picker emoji (F3) === */
+#sigEmojiPicker.open{display:block !important}
+.sig-emoji-cat{font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 4px;padding-left:2px}
+.sig-emoji-cat:first-child{margin-top:0}
+.sig-emoji-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:2px}
+.sig-emoji-btn{font-size:20px;line-height:1;background:transparent;border:none;border-radius:6px;cursor:pointer;padding:5px;transition:.1s;width:32px;height:32px;display:flex;align-items:center;justify-content:center}
+.sig-emoji-btn:hover{background:var(--accent-light, #e8f0fc);transform:scale(1.15)}
 .review-head{padding:20px 28px 18px;background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%);border-bottom:1px solid #bfdbfe;position:relative;transition:background .2s ease}
 .review-head.edit-mode{background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%)}
 .review-head.delete-mode{background:linear-gradient(135deg,#fef2f2 0%,#fecaca 100%);border-bottom-color:#fca5a5}
@@ -1137,6 +1145,8 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
             <span id="sigCustomSliderVal" style="font-variant-numeric:tabular-nums;color:var(--text-muted);min-width:38px">180px</span>
           </div>
         </div>
+        <!-- Popup picker d'emojis (cache par defaut, ouvert par le bouton 😀 de la toolbar) -->
+        <div id="sigEmojiPicker" style="position:absolute;display:none;z-index:10;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.15);padding:10px;width:300px;max-height:280px;overflow-y:auto;font-size:18px"></div>
         <div class="field-hint" style="margin-top:6px">Tu peux utiliser les outils de mise en forme ci-dessus.</div>
       </div>
 
@@ -2232,21 +2242,33 @@ function openSignatureEditor(sigId) {
 }
 
 function closeSignatureEditor() {
-  // Nettoyage des listeners temporaires + popup ouvert
+  // Nettoyage des listeners temporaires + popups ouverts
   _sigHideImageSizePopup();
+  _sigHideEmojiPicker();
   document.removeEventListener('click', _sigDocClickHandler);
   Modal.close('signatureEditorModal');
 }
 
 // Listener doc-level : ferme le popup si on clique en dehors d'une img ou du popup
 function _sigDocClickHandler(e) {
-  const popup = document.getElementById('sigImageSizePopup');
-  if (!popup || !popup.classList.contains('open')) return;
-  // Ne pas fermer si clic dans le popup lui-meme
-  if (popup.contains(e.target)) return;
-  // Ne pas fermer si clic sur une img dans le contenteditable (le handler dedie s'en charge)
-  if (e.target.tagName === 'IMG' && e.target.closest('#sigEditorContent')) return;
-  _sigHideImageSizePopup();
+  // 1) Popup de redim image
+  const sizePopup = document.getElementById('sigImageSizePopup');
+  if (sizePopup && sizePopup.classList.contains('open')) {
+    if (!sizePopup.contains(e.target)
+        && !(e.target.tagName === 'IMG' && e.target.closest('#sigEditorContent'))) {
+      _sigHideImageSizePopup();
+    }
+  }
+  // 2) Picker emoji
+  const emojiPicker = document.getElementById('sigEmojiPicker');
+  if (emojiPicker && emojiPicker.classList.contains('open')) {
+    // Ne pas fermer si clic dans le picker lui-meme ou sur le bouton 😀 de la toolbar
+    if (emojiPicker.contains(e.target)) return;
+    // Le bouton 😀 est detecte par le span emoji a l'interieur (texte "😀")
+    const toolbarBtn = e.target.closest('button[title="Insérer un emoji"]');
+    if (toolbarBtn) return;
+    _sigHideEmojiPicker();
+  }
 }
 
 // Rend la liste des boîtes mail avec checkboxes "associée" + "défaut"
@@ -2339,6 +2361,9 @@ function _sigEditorBuildToolbar() {
     <button type="button" title="Insérer une image (depuis ton ordinateur)" onmousedown="event.preventDefault();_sigInsertImage()">
       <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
     </button>
+    <button type="button" title="Insérer un emoji" onmousedown="event.preventDefault();_sigToggleEmojiPicker()">
+      <span style="font-size:15px;line-height:1">😀</span>
+    </button>
     <span class="toolbar-sep"></span>
     <button type="button" title="Liste à puces" onmousedown="event.preventDefault();_sigCmd('insertUnorderedList')">•</button>
     <button type="button" title="Liste numérotée" onmousedown="event.preventDefault();_sigCmd('insertOrderedList')">1.</button>
@@ -2404,6 +2429,74 @@ function _sigOnColorPicked(kind, color) {
     const bar = document.getElementById('sigHiliteColorBar');
     if (bar) bar.style.background = color;
   }
+}
+
+// ─── PICKER EMOJI (F3) ────────────────────────────────────────────────────
+// Liste organisee par categories. Choix : emojis utiles dans une signature
+// pro/perso, sans rentrer dans l'exotique (qui nécessiterait une lib externe).
+const _SIG_EMOJI_CATEGORIES = [
+  { label: 'Salutations',     emojis: ['👋','🤝','🙏','👍','✌️','🙌','🫶','🤞'] },
+  { label: 'Émotions',        emojis: ['😊','😄','😃','🙂','😉','😎','🤗','☺️'] },
+  { label: 'Travail',         emojis: ['💼','📧','📞','📅','📊','✅','⚡','🚀','💡','🎯'] },
+  { label: 'Communication',   emojis: ['💬','📝','✉️','📩','📨','✍️','📣','🔔'] },
+  { label: 'Décor & accents', emojis: ['⭐','✨','🌟','☀️','🌈','🎉','🏆','💪','🔥','💯'] },
+  { label: 'Coordonnées',     emojis: ['📍','🌐','🔗','📌','🏢','🗓️','📲','💻'] },
+  { label: 'Solaire & nature',emojis: ['☀️','🌱','🌿','🌳','⚡','🔋','♻️','🌍'] },
+  { label: 'Cœurs',           emojis: ['❤️','💚','💙','🧡','💛','🤍'] },
+];
+
+// Affiche / cache le picker emoji
+function _sigToggleEmojiPicker() {
+  const picker = document.getElementById('sigEmojiPicker');
+  if (!picker) return;
+  if (picker.classList.contains('open')) {
+    _sigHideEmojiPicker();
+    return;
+  }
+  // Sauve la selection avant d'ouvrir (le clic sur un emoji ne doit pas perdre le caret)
+  _sigSaveSelection();
+  // Construit le contenu si pas deja fait
+  if (!picker.dataset.built) {
+    picker.innerHTML = _SIG_EMOJI_CATEGORIES.map(cat => `
+      <div class="sig-emoji-cat">${cat.label}</div>
+      <div class="sig-emoji-grid">
+        ${cat.emojis.map(e => `<button type="button" class="sig-emoji-btn" onmousedown="event.preventDefault();_sigInsertEmoji('${e}')" title="${e}">${e}</button>`).join('')}
+      </div>
+    `).join('');
+    picker.dataset.built = '1';
+  }
+  // Position : juste au-dessus de la toolbar du bouton emoji.
+  // On cherche le field-group parent et on positionne dedans.
+  const toolbar = document.getElementById('sigEditorToolbar');
+  const editorWrap = toolbar ? toolbar.closest('.field-group') : null;
+  if (editorWrap && toolbar) {
+    const tbRect = toolbar.getBoundingClientRect();
+    const parentRect = editorWrap.getBoundingClientRect();
+    // Positionne sous la toolbar, aligne a droite
+    picker.style.top = ((tbRect.bottom - parentRect.top) + 4) + 'px';
+    picker.style.left = 'auto';
+    picker.style.right = '0';
+  }
+  picker.classList.add('open');
+}
+
+function _sigHideEmojiPicker() {
+  const picker = document.getElementById('sigEmojiPicker');
+  if (picker) picker.classList.remove('open');
+}
+
+// Insere un emoji a la position du caret
+function _sigInsertEmoji(emoji) {
+  const editor = document.getElementById('sigEditorContent');
+  if (!editor) return;
+  editor.focus();
+  _sigRestoreSelection();
+  // execCommand insertText insere bien a la position du caret
+  document.execCommand('insertText', false, emoji);
+  // Re-sauve la nouvelle position pour permettre d'enchainer plusieurs emojis
+  _sigSaveSelection();
+  // Le picker reste ouvert pour permettre d'inserer plusieurs emojis a la suite
+  // -> l'utilisateur clique en dehors pour le fermer
 }
 
 // Insertion d'un lien
