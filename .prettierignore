@@ -1,0 +1,20 @@
+# Auto-formatage des fichiers Markdown DESACTIVE (26/04/2026)
+#
+# Pourquoi : un auto-formateur (Prettier ou equivalent dans l'IDE)
+# reformatait les fichiers .md a chaque ouverture/sauvegarde, ce qui
+# pollue les diffs git :
+# - paragraphes consolides en lignes longues (au lieu de ~80 chars)
+# - gras supprimes autour de backticks ambigus
+# - tildes echappes (~ -> \~)
+#
+# Le contenu textuel reste identique mais le formatage devient illisible
+# en diff. On prefere garder le controle manuel sur la presentation des
+# docs, surtout pour les longs documents d'audit/incidents.
+#
+# Voir docs/incident_pool_db_26avril.md pour le contexte de l'incident
+# qui a revele ce comportement.
+#
+# Si on veut un jour reactiver le formatage auto sur certains fichiers,
+# il suffit de retirer leur entree de cette liste.
+
+*.md
