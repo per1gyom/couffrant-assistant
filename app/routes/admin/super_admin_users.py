@@ -451,6 +451,209 @@ def admin_reject_delete(
             conn.close()
 
 
+# ─── Workflow purge definitive (etape B.1a-2 du 26/04) ───
+# Decision Guillaume : la suppression DEFINITIVE des donnees d'un user
+# est un acte irreversible reserve au super_admin. Le tenant_admin peut
+# en faire la DEMANDE (pose un flag), mais seul le super_admin VALIDE.
+# Le user doit etre soft-delete au prealable (deleted_at IS NOT NULL).
+
+@router.post("/admin/users/{username}/request-permanent-deletion")
+def admin_request_permanent_deletion(
+    request: Request,
+    username: str,
+    payload: dict = Body(...),
+    admin: dict = Depends(require_tenant_admin),
+):
+    """Le tenant_admin (ou super_admin) demande la purge definitive d'un
+    user soft-delete. Pose un flag permanent_deletion_requested_at +
+    motivation. Le super_admin devra ensuite confirmer.
+    Durci : assert_same_tenant pour empecher demande cross-tenant.
+    """
+    if admin.get("scope") not in (SCOPE_ADMIN, SCOPE_SUPER_ADMIN):
+        assert_same_tenant(request, username)
+    reason = (payload.get("reason") or "").strip()
+    if len(reason) < 10:
+        raise HTTPException(
+            400,
+            "Motivation obligatoire (10 caracteres min). Ex: 'Marc a "
+            "quitte l'entreprise il y a 6 mois, donnees a purger RGPD'.",
+        )
+    from app.database import get_pg_conn
+    from app.admin_audit import log_admin_action
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        # Verifier que le user est bien soft-delete (prerequis)
+        c.execute(
+            "SELECT deleted_at, permanent_deletion_requested_at "
+            "FROM users WHERE username = %s",
+            (username,),
+        )
+        row = c.fetchone()
+        if not row:
+            raise HTTPException(404, f"User '{username}' introuvable.")
+        if row[0] is None:
+            raise HTTPException(
+                400,
+                f"User '{username}' n'est pas soft-delete. Soft-delete "
+                f"d'abord avant de demander la purge definitive.",
+            )
+        if row[1] is not None:
+            return {
+                "status": "ok",
+                "message": f"Demande de purge deja existante pour "
+                           f"'{username}'. En attente de validation super_admin.",
+            }
+        c.execute(
+            "UPDATE users SET "
+            "permanent_deletion_requested_at = NOW(), "
+            "permanent_deletion_requested_by = %s, "
+            "permanent_deletion_reason = %s "
+            "WHERE username = %s",
+            (admin["username"], reason, username),
+        )
+        conn.commit()
+        log_admin_action(
+            admin["username"], "request_permanent_deletion", username, reason[:100]
+        )
+        return {
+            "status": "ok",
+            "message": f"Demande de purge definitive enregistree pour "
+                       f"'{username}'. En attente de validation super_admin.",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:200]}
+    finally:
+        if conn:
+            conn.close()
+
+
+@router.post("/admin/users/{username}/confirm-permanent-deletion")
+def admin_confirm_permanent_deletion(
+    request: Request,
+    username: str,
+    admin: dict = Depends(require_super_admin),
+):
+    """Le super_admin valide une demande de purge definitive. Execute
+    le hard-delete via permanent_delete_user() : suppression DB + cascade
+    + anonymisation des donnees collectives. IRREVERSIBLE.
+    """
+    from app.database import get_pg_conn
+    from app.user_crud import permanent_delete_user
+    from app.admin_audit import log_admin_action
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            "SELECT permanent_deletion_requested_at, permanent_deletion_reason "
+            "FROM users WHERE username = %s",
+            (username,),
+        )
+        row = c.fetchone()
+        if not row:
+            raise HTTPException(404, f"User '{username}' introuvable.")
+        if row[0] is None:
+            raise HTTPException(
+                400,
+                f"Aucune demande de purge pour '{username}'. Le tenant_admin "
+                f"doit d'abord faire la demande via "
+                f"POST /admin/users/{username}/request-permanent-deletion.",
+            )
+        reason = row[1] or "(motivation absente)"
+    finally:
+        if conn:
+            conn.close()
+    # Execution hors du with pour eviter conflit de transaction avec
+    # permanent_delete_user qui ouvre sa propre connexion
+    result = permanent_delete_user(username, admin["username"])
+    if result.get("status") == "ok":
+        log_admin_action(
+            admin["username"], "confirm_permanent_deletion", username,
+            f"reason={reason[:80]}",
+        )
+    return result
+
+
+@router.post("/admin/users/{username}/restore")
+def admin_restore_user(
+    request: Request,
+    username: str,
+    admin: dict = Depends(require_super_admin),
+):
+    """Le super_admin restaure un user soft-delete : remet deleted_at
+    a NULL. Verifie le quota du tenant avant restauration : si plein,
+    refuse (le super_admin doit d'abord augmenter max_users via le
+    futur endpoint quota update).
+    """
+    from app.database import get_pg_conn
+    from app.admin_audit import log_admin_action
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        # 1. Verifier que le user est bien soft-delete
+        c.execute(
+            "SELECT deleted_at, tenant_id FROM users WHERE username = %s",
+            (username,),
+        )
+        row = c.fetchone()
+        if not row:
+            raise HTTPException(404, f"User '{username}' introuvable.")
+        if row[0] is None:
+            return {
+                "status": "ok",
+                "message": f"User '{username}' est deja actif.",
+            }
+        target_tenant = row[1]
+        # 2. Verifier que le tenant a un seat libre
+        c.execute(
+            "SELECT max_users, "
+            "(SELECT count(*) FROM users WHERE tenant_id = %s "
+            "AND deleted_at IS NULL) AS used "
+            "FROM tenants WHERE id = %s",
+            (target_tenant, target_tenant),
+        )
+        quota_row = c.fetchone()
+        if quota_row and quota_row[1] >= quota_row[0]:
+            raise HTTPException(
+                403,
+                f"Tenant '{target_tenant}' plein ({quota_row[1]}/{quota_row[0]}). "
+                f"Augmenter max_users avant de restaurer le user, ou "
+                f"soft-delete un autre user pour liberer un seat.",
+            )
+        # 3. Restauration
+        c.execute(
+            "UPDATE users SET deleted_at = NULL, deleted_by = NULL "
+            "WHERE username = %s",
+            (username,),
+        )
+        # Annule aussi une eventuelle demande de purge en attente
+        c.execute(
+            "UPDATE users SET permanent_deletion_requested_at = NULL, "
+            "permanent_deletion_requested_by = NULL, "
+            "permanent_deletion_reason = NULL "
+            "WHERE username = %s",
+            (username,),
+        )
+        conn.commit()
+        log_admin_action(admin["username"], "restore_user", username)
+        return {
+            "status": "ok",
+            "message": f"User '{username}' restaure dans tenant "
+                       f"'{target_tenant}'.",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:200]}
+    finally:
+        if conn:
+            conn.close()
+
 
 @router.api_route("/admin/reset-history/{target}", methods=["GET", "POST"])
 def admin_reset_history(
