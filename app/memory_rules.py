@@ -34,7 +34,16 @@ def _embed_rule(rule_text: str, category: str):
 
 # ─── FONCTIONS ACTIVES ───
 
-def get_aria_rules(username: str = 'guillaume', tenant_id: str = None) -> str:
+def get_aria_rules(username: str, tenant_id: str = None) -> str:
+    """Retourne les regles aria d'un user.
+
+    HOTFIX 26/04 (etape A.5) : retire le default 'guillaume' et log un
+    WARNING si appele sans tenant_id (la branche else qui ne filtre pas
+    par tenant est conservee pour compat legacy mais signale toute
+    dependance silencieuse). A retirer dans une session future quand
+    tous les callers seront durcis."""
+    from app.logging_config import get_logger
+    logger = get_logger("raya.memory")
     conn = None
     try:
         conn = get_pg_conn()
@@ -51,6 +60,12 @@ def get_aria_rules(username: str = 'guillaume', tenant_id: str = None) -> str:
                 LIMIT 60
             """, (username, tenant_id))
         else:
+            logger.warning(
+                "[get_aria_rules] Appel SANS tenant_id pour user '%s' "
+                "-> branche non isolee (risque fuite cross-tenant en cas "
+                "d homonyme). Caller a durcir.",
+                username,
+            )
             c.execute("""
                 SELECT id, category, rule, confidence, reinforcements
                 FROM aria_rules
@@ -181,12 +196,25 @@ def save_rule(category: str, rule: str, source: str = "auto",
             conn.close()
 
 
-def delete_rule(rule_id: int, username: str = 'guillaume',
+def delete_rule(rule_id: int, username: str,
                 tenant_id: str = None) -> bool:
     """
     Desactive une regle (active=false).
     5F-2 : snapshot 'deactivated' dans l'historique.
+
+    HOTFIX 26/04 (etape A.5) : retire le default 'guillaume' (anti-pattern
+    multi-tenant) et log un WARNING si appele sans tenant_id explicite.
+    Le pattern (tenant_id = %s OR tenant_id IS NULL) reste pour compat
+    avec les regles personnelles (personal=True) qui ont tenant_id NULL.
     """
+    from app.logging_config import get_logger
+    logger = get_logger("raya.memory")
+    if tenant_id is None:
+        logger.warning(
+            "[delete_rule] Appel SANS tenant_id pour user '%s' rule_id=%s "
+            "-> risque fuite cross-tenant en cas d homonyme. Caller a durcir.",
+            username, rule_id,
+        )
     conn = None
     try:
         conn = get_pg_conn()

@@ -170,7 +170,9 @@ def _handle_memory_actions(response: str, username: str, synth_threshold: int,
     for match in re.finditer(r'\[ACTION:FORGET:(\d+)\]', response):
         rule_id = int(match.group(1))
         try:
-            deleted = delete_rule(rule_id, username)
+            # HOTFIX 26/04 (etape A.5) : propage tenant_id explicitement
+            # pour eviter le warning et garantir l'isolation cross-tenant.
+            deleted = delete_rule(rule_id, username, tenant_id=tenant_id)
             confirmed.append(
                 f"\U0001f5d1\ufe0f Regle {rule_id} desactivee." if deleted
                 else f"\u274c Regle {rule_id} introuvable."

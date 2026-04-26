@@ -437,7 +437,12 @@ def _execute_forget_preference(inp: dict, username: str, tenant_id: str) -> dict
 
     preference_id = inp.get("preference_id", "")
     try:
-        deleted = delete_rule(rule_id=int(preference_id), username=username)
+        # HOTFIX 26/04 (etape A.5) : propage tenant_id explicitement.
+        deleted = delete_rule(
+            rule_id=int(preference_id),
+            username=username,
+            tenant_id=tenant_id,
+        )
     except (ValueError, TypeError):
         return {"status": "invalid_id", "preference_id": preference_id}
     return {
