@@ -18,6 +18,12 @@ def _job_pattern_analysis():
 
         conn = get_pg_conn()
         c = conn.cursor()
+        # CROSS-TENANT INTENTIONNEL (etape A.5 part 2 du 26/04) :
+        # Ce job tourne en boucle scheduler et traite TOUS les users
+        # actifs tous tenants confondus. Le SELECT ne filtre donc
+        # volontairement pas par tenant_id. Les fonctions appelees en
+        # aval doivent re-resoudre le tenant_id depuis le username.
+        # Voir docs/tests_isolation_26avril.md scenario 1.2.
         c.execute("""
             SELECT username, COUNT(*) FROM aria_memory
             GROUP BY username HAVING COUNT(*) > 20

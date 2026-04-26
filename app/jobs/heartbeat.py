@@ -19,6 +19,12 @@ def _job_heartbeat_morning():
         from app.database import get_pg_conn
         conn = get_pg_conn()
         c = conn.cursor()
+        # CROSS-TENANT INTENTIONNEL (etape A.5 part 2 du 26/04) :
+        # Ce job tourne en boucle scheduler et traite TOUS les users
+        # actifs tous tenants confondus. Le SELECT ne filtre donc
+        # volontairement pas par tenant_id. Les fonctions appelees en
+        # aval doivent re-resoudre le tenant_id depuis le username.
+        # Voir docs/tests_isolation_26avril.md scenario 1.2.
         c.execute("""
             SELECT DISTINCT username FROM aria_memory
             WHERE created_at > NOW() - INTERVAL '7 days'

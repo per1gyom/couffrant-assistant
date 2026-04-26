@@ -182,8 +182,11 @@ def _handle_memory_actions(response: str, username: str, synth_threshold: int,
 
     for _ in re.finditer(r'\[ACTION:SYNTH:\]', response):
         try:
+            # HOTFIX 26/04 (etape A.5 part 2) : propage tenant_id pour ne
+            # pas tomber dans le fallback DEFAULT_TENANT silencieux.
             threading.Thread(
-                target=lambda u=username, t=synth_threshold: synthesize_session(t, u),
+                target=lambda u=username, t=synth_threshold, tid=tenant_id:
+                    synthesize_session(t, u, tenant_id=tid),
                 daemon=True
             ).start()
             confirmed.append("\U0001f504 Synthese lancee en arriere-plan.")

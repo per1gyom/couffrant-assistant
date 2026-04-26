@@ -110,7 +110,9 @@ def memory_status(request: Request, user: dict = Depends(require_user)):
 def trigger_synth(request: Request, user: dict = Depends(require_user), n: int = 15):
     if not MEMORY_OK:
         return {"error": "Module mémoire non disponible"}
-    return synthesize_session(n, user["username"])
+    # HOTFIX 26/04 (etape A.5 part 2) : propage tenant_id explicitement
+    # pour ne pas tomber dans le fallback DEFAULT_TENANT silencieux.
+    return synthesize_session(n, user["username"], tenant_id=user["tenant_id"])
 
 
 @router.get("/rules")

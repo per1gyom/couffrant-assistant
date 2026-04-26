@@ -67,8 +67,26 @@ def get_aria_insights(limit: int = 8, username: str = 'guillaume',
         if conn: conn.close()
 
 
-def synthesize_session(n_conversations: int = 15, username: str = 'guillaume',
+def synthesize_session(n_conversations: int = 15, username: str = None,
                        tenant_id: str = None) -> dict:
+    """Synthese de session : compresse les anciennes conversations en
+    insights puis archive les originales.
+
+    HOTFIX 26/04 (etape A.5 part 2) : retire le default username='guillaume'
+    (anti-pattern multi-tenant) et log un WARNING si tenant_id absent
+    (le fallback DEFAULT_TENANT est conserve pour compat mais signale
+    toute dependance silencieuse). Aligne sur le pattern token_manager.py
+    et memory_rules.py."""
+    if not username:
+        raise ValueError("synthesize_session : username obligatoire")
+    from app.logging_config import get_logger
+    logger = get_logger("raya.memory")
+    if tenant_id is None:
+        logger.warning(
+            "[synthesize_session] Appel SANS tenant_id pour user '%s' "
+            "-> fallback DEFAULT_TENANT='%s'. Caller a durcir.",
+            username, DEFAULT_TENANT,
+        )
     effective_tenant = tenant_id or DEFAULT_TENANT
     conn = None
     try:

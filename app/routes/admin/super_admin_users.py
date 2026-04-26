@@ -422,12 +422,19 @@ def admin_debug_last_memories(
     request: Request,
     target: str,
     limit: int = 10,
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_super_admin),
 ):
     """Endpoint de debug : retourne les N derniers aria_memory d'un user.
     Utile pour diagnostiquer les bugs de perte de contexte conversationnel
-    (voir si la réponse de Raya a bien été stockée avec du contenu ou si
-    elle a été vidée par le nettoyage regex).
+    (voir si la reponse de Raya a bien ete stockee avec du contenu ou si
+    elle a ete videe par le nettoyage regex).
+
+    HOTFIX 26/04 (etape A.5 part 2) : passe en require_super_admin (etait
+    require_admin). Lit aria_memory SANS filtre tenant_id sur la requete
+    (intentionnel pour le debug plateforme : seul le super_admin peut
+    consulter les conversations privees d'un user, pas les tenant_admins
+    de chaque tenant). Cohorent avec la philosophie SaaS : les
+    conversations user/IA ne sont pas des donnees admin tenant.
     """
     conn = None
     try:

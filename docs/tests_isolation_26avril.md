@@ -572,3 +572,74 @@ deviendront actifs et exploitables.
 *Document créé le 26 avril 2026, à utiliser comme référence pour
 les audits d'isolation futurs. Ré-exécutable : les requêtes SQL et
 les recherches de patterns sont reproductibles tel quel.*
+
+---
+
+# 🔬 Phase 3 — Audit détaillé `aria_memory` (étape A.5 part 2)
+
+**Méthode** : pour chaque fichier ayant `FROM aria_memory`, lire la
+fonction concernée, classifier :
+
+- ✅ **Sûre** : prend `tenant_id` ET le filtre dans la requête
+- ⚠️ **Conditionnelle** : `if tenant_id: filtré, else: pas_de_filtre` ou pattern (`tenant_id = %s OR tenant_id IS NULL`) acceptable selon contexte
+- ❌ **Dangereuse** : pas de filtre `tenant_id` du tout
+- 🔵 **Cross-tenant légitime** : volontairement non isolé (jobs cron qui itèrent sur tous tenants)
+
+## Liste des 17 fichiers
+
+| # | Fichier | Verdict |
+|---|---|---|
+| 1 | feedback.py | ⏳ |
+| 2 | jobs/anomaly_detection.py | ⏳ |
+| 3 | jobs/briefing.py | ⏳ |
+| 4 | jobs/external_observer.py | ⏳ |
+| 5 | jobs/graph_indexer.py | ⏳ |
+| 6 | jobs/heartbeat.py | ⏳ |
+| 7 | jobs/pattern_analysis.py | ⏳ |
+| 8 | jobs/proactivity_scan.py | ⏳ |
+| 9 | maturity.py | ⏳ |
+| 10 | memory_synthesis.py | ⏳ |
+| 11 | retrieval.py | ⏳ |
+| 12 | routes/admin/super_admin_users.py | ⏳ |
+| 13 | routes/aria_loaders.py | ⏳ |
+| 14 | routes/chat_history.py | ⏳ |
+| 15 | routes/raya_agent_core.py | ⏳ |
+| 16 | routes/raya_deepen.py | ⏳ |
+| 17 | synthesis_engine.py | ⏳ |
+
+
+## 📊 Résultats détaillés Phase 3
+
+### Scoring final sur 17 fichiers / ~22 requêtes
+
+| Verdict | Count | Fichiers |
+|---|---|---|
+| ✅ Sûre | 11 | feedback.py, graph_indexer.py (2), maturity.py, retrieval.py, aria_loaders.py (2), chat_history.py, raya_agent_core.py, raya_deepen.py, synthesis_engine.py |
+| 🔵 Cross-tenant légitime | 6 | anomaly_detection.py, briefing.py, external_observer.py, heartbeat.py, proactivity_scan.py, pattern_analysis.py |
+| ⚠️ Anti-pattern default | 1 | memory_synthesis.py (default username='guillaume' + DEFAULT_TENANT) |
+| ❌ Dangereuse | 1 | super_admin_users.py:440 (require_admin sans filtre tenant_id) |
+
+### Fixes appliqués le 26/04 après-midi
+
+**Fix 1 — `super_admin_users.py:426` ❌ → ✅**
+- `GET /admin/debug/last-memories/{target}` : `require_admin` → `require_super_admin`
+- Charlotte (tenant_admin) ne peut plus consulter les conversations des users de couffrant_solar
+- Cohérent avec philosophie SaaS : conversations user/IA = données privées, pas données admin tenant
+
+**Fix 2 — `memory_synthesis.py` ⚠️ → ✅**
+- Retiré default `username='guillaume'` (anti-pattern multi-tenant)
+- Log WARNING si `tenant_id is None` (durcissement progressif)
+- Callers durcis : `memory.py:113` et `memory_actions.py:186` propagent désormais `tenant_id`
+
+**Fix 3 — 6 jobs cron 🔵 documentés**
+- Ajout d'un commentaire CROSS-TENANT INTENTIONNEL au-dessus de chaque SELECT cross-tenant
+- Liens vers ce doc pour le contexte
+- Aucun changement fonctionnel : pure documentation pour éviter qu'un futur fix transforme par erreur ces jobs en versions tenant-scopées (= régression)
+
+### Score global Étape A.5 (parts 1 + 2)
+
+Au début de l'Étape D (matin) : 1 ❌ + 1 ⚠️ + 11 ✅ + 6 🔵
+À la fin de l'Étape A.5 (soir) : 0 ❌ + 0 ⚠️ + 13 ✅ + 6 🔵
+
+**Toutes les zones grises sont maintenant traitées.**
+
