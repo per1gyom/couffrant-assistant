@@ -441,6 +441,12 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
         <svg class="tab-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Mes données
       </div>
+      <!-- Onglet Equipe : visible uniquement si tenant_admin ou super_admin -->
+      <div class="tabs-sep" id="teamTabSep" style="display:none"></div>
+      <div class="tab" data-tab="equipe" id="teamTab" style="display:none">
+        <svg class="tab-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        Mon équipe
+      </div>
     </div>
     <!-- CONTENU -->
     <div class="content">
@@ -958,6 +964,60 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
         </div>
 
       </div><!-- fin panel donnees -->
+
+      <!-- ============================================== -->
+      <!-- ONGLET ÉQUIPE (visible si tenant_admin/super_admin) -->
+      <!-- ============================================== -->
+      <div class="tab-panel" data-panel="equipe">
+        <div class="content-title">Mon équipe</div>
+        <div class="content-desc">Gérez les utilisateurs de votre tenant : création, modification, suspension, suppression.</div>
+
+        <!-- COMPTEUR SEATS -->
+        <div id="teamQuotaCard" style="margin:20px 0;padding:16px 20px;border-radius:12px;background:var(--surface-2,#f7f9fc);border:1px solid var(--border,#e5e7eb);display:flex;align-items:center;justify-content:space-between;gap:16px">
+          <div>
+            <div style="font-size:13px;color:var(--text-muted,#6b7280);margin-bottom:4px">Quota de votre tenant</div>
+            <div id="teamQuotaText" style="font-size:18px;font-weight:600;color:var(--text)">— / —</div>
+            <div id="teamQuotaSubtext" style="font-size:12px;color:var(--text-muted,#6b7280);margin-top:4px"></div>
+          </div>
+          <div id="teamQuotaBadge" style="padding:6px 12px;border-radius:20px;font-size:12px;font-weight:600">…</div>
+        </div>
+
+        <!-- ACTIONS GLOBALES -->
+        <div style="margin:16px 0;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary" id="teamBtnCreateUser" onclick="openTeamCreateUserModal()">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+            Ajouter un utilisateur
+          </button>
+          <button class="btn" onclick="loadTeamData()" title="Recharger">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+            Recharger
+          </button>
+        </div>
+
+        <!-- LISTE USERS ACTIFS -->
+        <div style="margin-top:24px">
+          <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:8px">Utilisateurs actifs</div>
+          <div id="teamActiveUsersList" style="display:flex;flex-direction:column;gap:8px">
+            <div style="padding:24px;text-align:center;color:var(--text-muted,#6b7280);font-size:13px">Chargement…</div>
+          </div>
+        </div>
+
+        <!-- SECTION USERS DESACTIVES (collapsable) -->
+        <div style="margin-top:32px">
+          <details>
+            <summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted,#6b7280);padding:8px 0">
+              <span id="teamDeletedCountLabel">Utilisateurs désactivés (—)</span>
+            </summary>
+            <div style="margin-top:12px;padding:12px;background:var(--surface-2,#f7f9fc);border-radius:8px;font-size:12.5px;color:var(--text-muted,#6b7280);line-height:1.5">
+              Les utilisateurs désactivés sont conservés (rules, conversations, mails). Leur seat est libéré.
+              Vous pouvez demander leur purge définitive (effacement RGPD) au super_admin via le bouton ci-dessous.
+            </div>
+            <div id="teamDeletedUsersList" style="display:flex;flex-direction:column;gap:8px;margin-top:12px"></div>
+          </details>
+        </div>
+
+      </div><!-- fin panel equipe -->
+
     </div><!-- fin .content -->
   </div><!-- fin .page-body -->
   <div class="footer-info">
@@ -1094,6 +1154,53 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
       <button class="btn btn-primary" onclick="savePassword()">
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
         Enregistrer
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL CREATION UTILISATEUR (Equipe) -->
+<div class="modal-overlay" id="teamCreateUserModal">
+  <div class="modal size-standard">
+    <div class="modal-head">
+      <div class="modal-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+      </div>
+      <div class="modal-title-wrap">
+        <div class="modal-title">Ajouter un utilisateur</div>
+        <div class="modal-subtitle">Le user devra changer son mot de passe à la première connexion.</div>
+      </div>
+      <button class="modal-close" aria-label="Fermer" onclick="closeTeamCreateUserModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="field">
+        <label class="field-label">Identifiant <span style="color:var(--danger,#dc2626)">*</span></label>
+        <input type="text" class="field-input" id="teamCuUsername" placeholder="ex: marc.dupont" autocomplete="off">
+      </div>
+      <div class="field">
+        <label class="field-label">Email</label>
+        <input type="email" class="field-input" id="teamCuEmail" placeholder="marc.dupont@exemple.fr" autocomplete="off">
+      </div>
+      <div class="field">
+        <label class="field-label">Mot de passe temporaire <span style="color:var(--danger,#dc2626)">*</span></label>
+        <input type="text" class="field-input" id="teamCuPwd" placeholder="8 caractères min" autocomplete="new-password">
+        <div style="font-size:12px;color:var(--text-muted,#6b7280);margin-top:4px">Le user devra le changer à sa première connexion.</div>
+      </div>
+      <div class="field">
+        <label class="field-label">Rôle</label>
+        <select class="field-input" id="teamCuScope">
+          <option value="user">Utilisateur standard</option>
+          <option value="cs">Chargé de support (CS)</option>
+          <option value="tenant_admin">Administrateur du tenant</option>
+        </select>
+      </div>
+      <div id="teamCuError" style="display:none;margin-top:12px;padding:10px 12px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;color:var(--danger,#dc2626);font-size:13px"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn" onclick="closeTeamCreateUserModal()">Annuler</button>
+      <button class="btn btn-primary" onclick="submitTeamCreateUser()">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>
+        Créer l'utilisateur
       </button>
     </div>
   </div>
@@ -1382,6 +1489,10 @@ async function loadProfile() {
       document.getElementById('badgeTenantName').textContent = d.tenant_name;
     }
     document.getElementById('badgeSuperAdmin').style.display = d.is_super_admin ? 'inline-flex' : 'none';
+    // ÉQUIPE : afficher l'onglet uniquement aux tenant_admin / super_admin
+    const _showTeam = d.is_tenant_admin || d.is_super_admin;
+    document.getElementById('teamTab').style.display = _showTeam ? 'flex' : 'none';
+    document.getElementById('teamTabSep').style.display = _showTeam ? 'block' : 'none';
     // Inputs modifiables
     document.getElementById('inputDisplayName').value = d.display_name || '';
     document.getElementById('inputPhone').value = d.phone || '';
@@ -3404,6 +3515,308 @@ if (window.Modal) {
 const _spinStyle = document.createElement('style');
 _spinStyle.textContent = '@keyframes spin{from{transform:rotate(0)}to{transform:rotate(360deg)}}';
 document.head.appendChild(_spinStyle);
+
+// =========================================================================
+// PHASE B.2-3 — Onglet Équipe : gestion des users du tenant
+// =========================================================================
+
+let _teamData = { quota: null, users: [], isSuperAdmin: false, currentUser: null };
+
+// Charge l'onglet equipe quand on l'ouvre
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => {
+    if (t.dataset.tab === 'equipe') {
+      loadTeamData();
+    }
+  });
+});
+
+async function loadTeamData() {
+  try {
+    // Recharger profile pour avoir scope/tenant_id à jour
+    const pr = await fetch('/profile').then(r => r.json());
+    _teamData.isSuperAdmin = !!pr.is_super_admin;
+    _teamData.currentUser = pr.username;
+    const tenantId = pr.tenant_id;
+    if (!tenantId) {
+      document.getElementById('teamActiveUsersList').innerHTML =
+        '<div style="padding:16px;color:var(--danger,#dc2626)">Erreur : tenant inconnu.</div>';
+      return;
+    }
+    // Quota + liste users en parallele
+    const [quotaR, usersR] = await Promise.all([
+      fetch('/admin/tenants/' + encodeURIComponent(tenantId) + '/quota').then(r => r.json()),
+      fetch('/tenant/users').then(r => r.json())
+    ]);
+    _teamData.quota = quotaR;
+    _teamData.users = Array.isArray(usersR) ? usersR : [];
+    renderTeamQuota();
+    renderTeamUsers();
+  } catch (e) {
+    document.getElementById('teamActiveUsersList').innerHTML =
+      '<div style="padding:16px;color:var(--danger,#dc2626)">Erreur : ' + e.message + '</div>';
+  }
+}
+
+function renderTeamQuota() {
+  const q = _teamData.quota;
+  if (!q || q.max_users === undefined) return;
+  document.getElementById('teamQuotaText').textContent =
+    q.used + ' / ' + q.max_users + ' seats utilisés';
+  let badge = document.getElementById('teamQuotaBadge');
+  let subtext = '';
+  let bgColor, txtColor;
+  if (q.is_full) {
+    bgColor = '#fee2e2'; txtColor = '#991b1b';
+    badge.textContent = '🔒 PLEIN';
+    subtext = 'Pour ajouter un utilisateur : désactivez un user existant pour libérer un seat, ou contactez le super_admin pour augmenter le quota.';
+  } else if (q.available <= 1) {
+    bgColor = '#fef3c7'; txtColor = '#92400e';
+    badge.textContent = '⚠️ ' + q.available + ' libre';
+    subtext = 'Plus que ' + q.available + ' seat libre dans votre tenant.';
+  } else {
+    bgColor = '#d1fae5'; txtColor = '#065f46';
+    badge.textContent = '✓ ' + q.available + ' libres';
+    subtext = q.available + ' seats disponibles dans votre tenant.';
+  }
+  badge.style.background = bgColor; badge.style.color = txtColor;
+  if (q.soft_deleted > 0) {
+    subtext += ' (' + q.soft_deleted + ' user' + (q.soft_deleted > 1 ? 's' : '') + ' désactivé' + (q.soft_deleted > 1 ? 's' : '') + ' hors quota.)';
+  }
+  document.getElementById('teamQuotaSubtext').textContent = subtext;
+  // Bouton creer user désactivé si plein
+  const btnCreate = document.getElementById('teamBtnCreateUser');
+  btnCreate.disabled = q.is_full;
+  btnCreate.style.opacity = q.is_full ? '0.5' : '1';
+  btnCreate.style.cursor = q.is_full ? 'not-allowed' : 'pointer';
+  btnCreate.title = q.is_full ? 'Quota plein' : '';
+}
+
+function renderTeamUsers() {
+  const active = _teamData.users.filter(u => !u.deleted_at);
+  const deleted = _teamData.users.filter(u => u.deleted_at);
+  // Liste actifs
+  const listA = document.getElementById('teamActiveUsersList');
+  if (active.length === 0) {
+    listA.innerHTML = '<div style="padding:16px;color:var(--text-muted,#6b7280)">Aucun utilisateur actif.</div>';
+  } else {
+    listA.innerHTML = active.map(u => renderUserCard(u, false)).join('');
+  }
+  // Liste desactives
+  document.getElementById('teamDeletedCountLabel').textContent =
+    'Utilisateurs désactivés (' + deleted.length + ')';
+  const listD = document.getElementById('teamDeletedUsersList');
+  if (deleted.length === 0) {
+    listD.innerHTML = '<div style="padding:12px;color:var(--text-muted,#6b7280);font-size:12.5px;text-align:center">Aucun utilisateur désactivé.</div>';
+  } else {
+    listD.innerHTML = deleted.map(u => renderUserCard(u, true)).join('');
+  }
+}
+
+function renderUserCard(u, isDeleted) {
+  const isMe = u.username === _teamData.currentUser;
+  const displayName = u.display_name || u.username;
+  const initials = (displayName.trim().split(/\s+/).map(p => p[0]).join('').slice(0, 2) || '?').toUpperCase();
+  // Badges d'etat
+  const badges = [];
+  if (isDeleted) {
+    badges.push('<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:#e5e7eb;color:#374151;font-weight:600">DÉSACTIVÉ</span>');
+  }
+  if (u.suspended) {
+    badges.push('<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:#fef3c7;color:#92400e;font-weight:600">SUSPENDU</span>');
+  }
+  if (u.must_reset_password) {
+    badges.push('<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:#dbeafe;color:#1e40af;font-weight:600">MDP À CHANGER</span>');
+  }
+  if (u.account_locked) {
+    badges.push('<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:#fee2e2;color:#991b1b;font-weight:600">VERROUILLÉ</span>');
+  }
+  if (u.permanent_deletion_requested_at) {
+    badges.push('<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:#fce7f3;color:#9f1239;font-weight:600">PURGE DEMANDÉE</span>');
+  }
+  if (u.deletion_requested_at && !isDeleted) {
+    badges.push('<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:#fef3c7;color:#92400e;font-weight:600">DEMANDE RGPD</span>');
+  }
+  if (isMe) {
+    badges.push('<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:#e0e7ff;color:#3730a3;font-weight:600">VOUS</span>');
+  }
+  const scopeBadge = '<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:#f3f4f6;color:#374151;font-weight:500">' + (u.scope || 'user') + '</span>';
+  // Actions
+  const actions = [];
+  if (!isDeleted && !isMe) {
+    if (u.suspended) {
+      actions.push('<button class="btn" onclick="teamUnsuspend(\'' + u.username + '\')" title="Réactiver l accès">✓ Réactiver</button>');
+    } else {
+      actions.push('<button class="btn" onclick="teamSuspend(\'' + u.username + '\')" title="Suspendre temporairement">⏸ Suspendre</button>');
+    }
+    actions.push('<button class="btn" onclick="teamResetPwd(\'' + u.username + '\')" title="Forcer changement mdp">🔑 Reset MDP</button>');
+    actions.push('<button class="btn btn-danger" onclick="teamSoftDelete(\'' + u.username + '\')" title="Désactiver le compte">🗑 Désactiver</button>');
+  }
+  if (isDeleted) {
+    if (_teamData.isSuperAdmin) {
+      actions.push('<button class="btn" onclick="teamRestore(\'' + u.username + '\')" title="Restaurer le compte">↩ Restaurer</button>');
+    }
+    if (u.permanent_deletion_requested_at) {
+      if (_teamData.isSuperAdmin) {
+        actions.push('<button class="btn btn-danger" onclick="teamConfirmPurge(\'' + u.username + '\')" title="Purger DÉFINITIVEMENT">⚠ Purger définitivement</button>');
+      } else {
+        actions.push('<span style="font-size:12px;color:var(--text-muted,#6b7280);font-style:italic">Purge en attente de validation super_admin</span>');
+      }
+    } else {
+      actions.push('<button class="btn" onclick="teamRequestPurge(\'' + u.username + '\')" title="Demander la purge RGPD">🗂 Demander purge RGPD</button>');
+      if (_teamData.isSuperAdmin) {
+        actions.push('<button class="btn btn-danger" onclick="teamForcePurge(\'' + u.username + '\')" title="Purger directement (super_admin)">⚠ Purger maintenant</button>');
+      }
+    }
+  }
+  const opacityStyle = isDeleted ? 'opacity:0.65' : '';
+  return '<div style="padding:14px 16px;border:1px solid var(--border,#e5e7eb);border-radius:10px;background:var(--surface,#fff);' + opacityStyle + '">' +
+    '<div style="display:flex;align-items:center;gap:14px">' +
+    '<div style="width:38px;height:38px;border-radius:50%;background:var(--surface-2,#f3f4f6);display:flex;align-items:center;justify-content:center;font-weight:600;font-size:14px;color:var(--text)">' + escapeHtml(initials) + '</div>' +
+    '<div style="flex:1;min-width:0">' +
+    '<div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:2px">' + escapeHtml(displayName) + ' <span style="font-weight:400;color:var(--text-muted,#6b7280);font-size:12.5px">@' + escapeHtml(u.username) + '</span></div>' +
+    '<div style="font-size:12px;color:var(--text-muted,#6b7280)">' + escapeHtml(u.email || '—') + '</div>' +
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px">' + scopeBadge + badges.join('') + '</div>' +
+    (u.suspended_reason ? '<div style="font-size:11.5px;color:#92400e;margin-top:4px;font-style:italic">Raison suspension : ' + escapeHtml(u.suspended_reason) + '</div>' : '') +
+    (u.permanent_deletion_reason ? '<div style="font-size:11.5px;color:#9f1239;margin-top:4px;font-style:italic">Motivation purge : ' + escapeHtml(u.permanent_deletion_reason) + '</div>' : '') +
+    '</div></div>' +
+    (actions.length ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:12px;padding-top:12px;border-top:1px solid var(--border,#e5e7eb)">' + actions.join('') + '</div>' : '') +
+    '</div>';
+}
+
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s).replace(/[&<>"\']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// === Actions sur un user ===
+
+async function teamSuspend(username) {
+  const reason = prompt('Raison de la suspension ? (optionnel)') || '';
+  if (reason === null) return;
+  await teamCall('POST', '/admin/suspend-user/' + encodeURIComponent(username), { reason });
+}
+async function teamUnsuspend(username) {
+  if (!confirm('Réactiver l\'accès de ' + username + ' ?')) return;
+  await teamCall('POST', '/admin/unsuspend-user/' + encodeURIComponent(username), {});
+}
+async function teamResetPwd(username) {
+  if (!confirm('Générer un nouveau mot de passe temporaire pour ' + username + ' ? Le user devra le changer à sa prochaine connexion.')) return;
+  await teamCall('POST', '/tenant/reset-password/' + encodeURIComponent(username), {});
+}
+async function teamSoftDelete(username) {
+  if (!confirm('Désactiver ' + username + ' ?\n\nLe user ne pourra plus se connecter, mais ses données (rules, conversations, mails) seront conservées et pourront être restaurées.')) return;
+  await teamCall('DELETE', '/tenant/delete-user/' + encodeURIComponent(username), null);
+}
+async function teamRestore(username) {
+  if (!confirm('Restaurer ' + username + ' ?\n\nLe compte redevient actif. Vérifier qu\'un seat est libre dans le tenant.')) return;
+  await teamCall('POST', '/admin/users/' + encodeURIComponent(username) + '/restore', {});
+}
+async function teamRequestPurge(username) {
+  const reason = prompt('Motivation pour la purge définitive RGPD ?\n\n(10 caractères min, ex : "Marc a quitté l\'entreprise il y a 6 mois, plus de raison de garder ses données")');
+  if (!reason || reason.trim().length < 10) {
+    if (reason !== null) alert('Motivation trop courte (10 caractères min).');
+    return;
+  }
+  await teamCall('POST', '/admin/users/' + encodeURIComponent(username) + '/request-permanent-deletion', { reason });
+}
+async function teamConfirmPurge(username) {
+  // Triple validation pour acte irreversible
+  if (!confirm('⚠ ATTENTION : action IRRÉVERSIBLE\n\nVous allez purger DÉFINITIVEMENT toutes les données de ' + username + ' :\n- Compte user\n- Conversations Raya\n- Mails ingérés\n- Tokens OAuth\n- Settings\n\nLes règles et insights collectifs seront anonymisés en "ancien_' + username + '".\n\nContinuer ?')) return;
+  const typed = prompt('Pour confirmer, tapez exactement le nom d\'utilisateur : ' + username);
+  if (typed !== username) {
+    alert('Nom incorrect, opération annulée.');
+    return;
+  }
+  await teamCall('POST', '/admin/users/' + encodeURIComponent(username) + '/confirm-permanent-deletion', {});
+}
+async function teamForcePurge(username) {
+  // Mode force super_admin : encore plus de garde-fous
+  if (!confirm('⚠ PURGE DIRECTE (mode force super_admin)\n\nPas de demande tenant_admin préalable. Action IRRÉVERSIBLE.\n\nContinuer ?')) return;
+  const reason = prompt('Motivation obligatoire (10 caractères min) :');
+  if (!reason || reason.trim().length < 10) {
+    if (reason !== null) alert('Motivation trop courte.');
+    return;
+  }
+  const typed = prompt('Pour confirmer, tapez exactement : ' + username);
+  if (typed !== username) {
+    alert('Nom incorrect, opération annulée.');
+    return;
+  }
+  await teamCall('POST', '/admin/users/' + encodeURIComponent(username) + '/confirm-permanent-deletion', { force: true, reason });
+}
+
+async function teamCall(method, url, body) {
+  try {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body !== null && body !== undefined) opts.body = JSON.stringify(body);
+    const r = await fetch(url, opts);
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.status === 'error') {
+      alert('Erreur : ' + (d.detail || d.message || r.status));
+    } else if (d.message) {
+      // Petit toast simple via alert (peut etre ameliore plus tard)
+      console.log('[team] ' + d.message);
+    }
+    await loadTeamData();
+  } catch (e) {
+    alert('Erreur réseau : ' + e.message);
+  }
+}
+
+// === Modale création user ===
+
+function openTeamCreateUserModal() {
+  if (_teamData.quota && _teamData.quota.is_full) {
+    alert('Quota plein. Désactivez un user existant ou contactez le super_admin pour augmenter le quota.');
+    return;
+  }
+  document.getElementById('teamCreateUserModal').classList.add('open');
+  document.getElementById('teamCuUsername').value = '';
+  document.getElementById('teamCuEmail').value = '';
+  document.getElementById('teamCuPwd').value = '';
+  document.getElementById('teamCuScope').value = 'user';
+  document.getElementById('teamCuError').style.display = 'none';
+}
+function closeTeamCreateUserModal() {
+  document.getElementById('teamCreateUserModal').classList.remove('open');
+}
+async function submitTeamCreateUser() {
+  const username = document.getElementById('teamCuUsername').value.trim();
+  const email = document.getElementById('teamCuEmail').value.trim();
+  const password = document.getElementById('teamCuPwd').value;
+  const scope = document.getElementById('teamCuScope').value;
+  const errEl = document.getElementById('teamCuError');
+  errEl.style.display = 'none';
+  if (!username || !password) {
+    errEl.textContent = 'Identifiant et mot de passe requis.';
+    errEl.style.display = 'block';
+    return;
+  }
+  if (password.length < 8) {
+    errEl.textContent = 'Mot de passe trop court (8 caractères min).';
+    errEl.style.display = 'block';
+    return;
+  }
+  try {
+    const r = await fetch('/tenant/create-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, email, password, scope })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || d.status === 'error') {
+      errEl.textContent = d.detail || d.message || ('Erreur ' + r.status);
+      errEl.style.display = 'block';
+      return;
+    }
+    closeTeamCreateUserModal();
+    await loadTeamData();
+  } catch (e) {
+    errEl.textContent = 'Erreur réseau : ' + e.message;
+    errEl.style.display = 'block';
+  }
+}
 </script>
 <script src="/static/_modal_system.js?v=1"></script>
 </body>
