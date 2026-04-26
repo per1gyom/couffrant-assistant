@@ -42,34 +42,11 @@ INACTIVITY_MINUTES = 1  # Delai minimal pour le lot si batch=1 pas atteint
 # ==========================================================================
 # PRE-REQUIS DB
 # ==========================================================================
-
-def ensure_schema() -> None:
-    """
-    Ajoute la colonne aria_memory.indexed_in_graph si elle n existe pas.
-    Idempotent. Appele au demarrage du job.
-    """
-    from app.database import get_pg_conn
-
-    conn = get_pg_conn()
-    try:
-        c = conn.cursor()
-        c.execute(
-            "ALTER TABLE aria_memory "
-            "ADD COLUMN IF NOT EXISTS indexed_in_graph BOOLEAN DEFAULT false"
-        )
-        c.execute(
-            "ALTER TABLE aria_memory "
-            "ADD COLUMN IF NOT EXISTS graph_indexed_at TIMESTAMP"
-        )
-        c.execute(
-            "CREATE INDEX IF NOT EXISTS idx_aria_memory_not_indexed "
-            "ON aria_memory (indexed_in_graph, id) "
-            "WHERE indexed_in_graph = false"
-        )
-        conn.commit()
-        logger.info("[graph_indexer] Schema aria_memory verifie/ajuste")
-    finally:
-        conn.close()
+# NOTE 26/04/2026 : ensure_schema() supprimee. Les colonnes
+# aria_memory.indexed_in_graph + graph_indexed_at + l'index partiel
+# sont maintenant gerees au niveau application dans
+# app/database_migrations.py (migrations M-G01 et M-G02). Source
+# unique de verite pour les schemas, alignee avec tous les autres jobs.
 
 
 # ==========================================================================
@@ -302,8 +279,6 @@ def run_batch(tenant_id: str) -> dict:
         }
     """
     from app.database import get_pg_conn
-
-    ensure_schema()
 
     pending = get_pending_conversations(tenant_id, limit=100)
     if not pending:

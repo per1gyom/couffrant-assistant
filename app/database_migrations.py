@@ -946,4 +946,26 @@ MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS permanent_deletion_requested_at TIMESTAMP NULL",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS permanent_deletion_requested_by TEXT NULL",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS permanent_deletion_reason TEXT NULL",
+
+    # -- Phase graph_indexer (26/04/2026, fix etape Audit-3-points) --
+    # Le job graph_indexer (cree le 21/04, commit 0c11904) avait sa
+    # propre fonction ensure_schema() qui ajoutait ces 2 colonnes a
+    # aria_memory + 1 index. Mais cette fonction n'etait appelee que
+    # depuis run_batch(), lui-meme bloque par should_run_batch() qui
+    # plantait sur la colonne manquante (cycle ferme).
+    # Resultat : depuis le 21/04, le job plantait toutes les 3 min
+    # avec "column am.indexed_in_graph does not exist" et 209
+    # conversations attendaient d'etre indexees dans le graphe semantique.
+    # Fix : creer les colonnes ici, supprimer ensure_schema() du job.
+
+    # M-G01 : flag d indexation (defaut false = pas encore indexe)
+    "ALTER TABLE aria_memory ADD COLUMN IF NOT EXISTS indexed_in_graph BOOLEAN DEFAULT false",
+    "ALTER TABLE aria_memory ADD COLUMN IF NOT EXISTS graph_indexed_at TIMESTAMP",
+
+    # M-G02 : index partiel pour scanner rapidement les conversations
+    # non encore indexees (le job tourne toutes les 3 min, l'index
+    # evite un seq scan a chaque iteration)
+    "CREATE INDEX IF NOT EXISTS idx_aria_memory_not_indexed "
+    "ON aria_memory (indexed_in_graph, id) "
+    "WHERE indexed_in_graph = false",
 ]
