@@ -911,4 +911,24 @@ MIGRATIONS = [
     # Avant cette migration, un INSERT sans scope donnait scope = un tenant_id
     # (n'importe quoi). Le default correct pour un nouveau user est 'user'.
     "ALTER TABLE users ALTER COLUMN scope SET DEFAULT 'user'",
+
+    # -- Phase isolation oauth_tokens (26/04, etape A.1) --
+    # Probleme identifie : la contrainte UNIQUE (provider, username) etait
+    # trop laxe. Si demain Pierre du tenant 'juillet' connecte Outlook alors
+    # qu'un Pierre/microsoft de 'couffrant_solar' existe deja, l'INSERT ON
+    # CONFLICT ecraserait silencieusement le token de l'autre Pierre.
+    # On la remplace par UNIQUE (provider, username, tenant_id).
+
+    # M-O01 : securite defensive avant de mettre tenant_id NOT NULL
+    "UPDATE oauth_tokens SET tenant_id = 'couffrant_solar' WHERE tenant_id IS NULL",
+
+    # M-O02 : tenant_id NOT NULL sur oauth_tokens (anti-orphelin)
+    "ALTER TABLE oauth_tokens ALTER COLUMN tenant_id SET NOT NULL",
+
+    # M-O03 : remplacer la contrainte UNIQUE (provider, username) par
+    # UNIQUE (provider, username, tenant_id) pour autoriser les homonymes
+    # cross-tenant a avoir chacun leur propre token.
+    "ALTER TABLE oauth_tokens DROP CONSTRAINT IF EXISTS oauth_tokens_provider_username_unique",
+    "ALTER TABLE oauth_tokens DROP CONSTRAINT IF EXISTS oauth_tokens_provider_username_tenant_unique",
+    "ALTER TABLE oauth_tokens ADD CONSTRAINT oauth_tokens_provider_username_tenant_unique UNIQUE (provider, username, tenant_id)",
 ]

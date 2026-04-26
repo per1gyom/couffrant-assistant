@@ -12,20 +12,44 @@ def _make_aware(dt):
     return dt.astimezone(timezone.utc)
 
 
+def _resolve_tenant_strict(username: str, conn) -> str | None:
+    """Resout le tenant_id d'un user de maniere stricte. Retourne None
+    si user inconnu ou sans tenant_id (PAS de fallback DEFAULT_TENANT
+    silencieux : ce serait un risque de fuite cross-tenant en cas
+    d'homonyme, qui est precisement le scenario qu'on veut bloquer).
+
+    Reutilise la connexion existante pour eviter de gaspiller le pool.
+    Ajoute le 26/04 (etape A.1 audit isolation, fix isolation tokens
+    OAuth)."""
+    c = conn.cursor()
+    c.execute("SELECT tenant_id FROM users WHERE username = %s", (username,))
+    row = c.fetchone()
+    return row[0] if row and row[0] else None
+
+
 # ─── MICROSOFT ───
 
-def get_valid_microsoft_token(username: str = 'guillaume') -> str | None:
-    """Retourne un token Microsoft valide, avec auto-refresh et déchiffrement."""
+def get_valid_microsoft_token(username: str) -> str | None:
+    """Retourne un token Microsoft valide, avec auto-refresh et dechiffrement.
+
+    HOTFIX 26/04 (etape A.1 audit isolation) :
+    - Default 'guillaume' retire (anti-pattern multi-tenant)
+    - Resolution stricte du tenant_id depuis username (return None si inconnu)
+    - Filtre AND tenant_id = %s ajoute dans le SELECT pour empecher la fuite
+      en cas d'homonyme cross-tenant (Pierre/microsoft existant dans 2 tenants)."""
     conn = None
     try:
         conn = get_pg_conn()
+        tenant_id = _resolve_tenant_strict(username, conn)
+        if not tenant_id:
+            return None  # User inconnu : pas de token, pas de fallback
         c = conn.cursor()
         c.execute("""
             SELECT access_token, refresh_token, expires_at
             FROM oauth_tokens
-            WHERE provider = 'microsoft' AND username = %s
+            WHERE provider = 'microsoft' AND username = %s AND tenant_id = %s
             ORDER BY updated_at DESC LIMIT 1
-        """, (username,))
+        """, (username, tenant_id))
         row = c.fetchone()
     finally:
         if conn: conn.close()
@@ -71,37 +95,48 @@ def get_valid_microsoft_token(username: str = 'guillaume') -> str | None:
 
 
 def _save_microsoft_token_raw(username: str, access_enc: str, refresh_enc: str, expires_at):
-    """Sauvegarde les tokens déjà chiffrés (usage interne migration)."""
+    """Sauvegarde les tokens deja chiffres (usage interne migration).
+    HOTFIX 26/04 : ajout filtre tenant_id pour ne pas ecraser le token
+    d'un homonyme cross-tenant."""
     conn = None
     try:
         conn = get_pg_conn()
+        tenant_id = _resolve_tenant_strict(username, conn)
+        if not tenant_id:
+            return  # User inconnu : on ne sauvegarde rien
         c = conn.cursor()
         c.execute("""
             UPDATE oauth_tokens
             SET access_token=%s, refresh_token=%s, expires_at=%s, updated_at=NOW()
-            WHERE provider='microsoft' AND username=%s
-        """, (access_enc, refresh_enc, expires_at, username))
+            WHERE provider='microsoft' AND username=%s AND tenant_id=%s
+        """, (access_enc, refresh_enc, expires_at, username, tenant_id))
         conn.commit()
     finally:
         if conn: conn.close()
 
 
 def save_microsoft_token(username: str, access_token: str, refresh_token: str, expires_in: int = 3600):
-    """Sauvegarde le token Microsoft en base, chiffré."""
+    """Sauvegarde le token Microsoft en base, chiffre.
+    HOTFIX 26/04 : ajout du tenant_id (colonne + ON CONFLICT) pour
+    permettre des homonymes cross-tenant. Si user inconnu, on raise
+    plutot que de sauvegarder dans le mauvais tenant."""
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
     conn = None
     try:
         conn = get_pg_conn()
+        tenant_id = _resolve_tenant_strict(username, conn)
+        if not tenant_id:
+            raise ValueError(f"save_microsoft_token: user '{username}' inconnu, refus de sauvegarde")
         c = conn.cursor()
         c.execute("""
-            INSERT INTO oauth_tokens (provider, username, access_token, refresh_token, expires_at)
-            VALUES ('microsoft', %s, %s, %s, %s)
-            ON CONFLICT (provider, username) DO UPDATE SET
+            INSERT INTO oauth_tokens (provider, username, tenant_id, access_token, refresh_token, expires_at)
+            VALUES ('microsoft', %s, %s, %s, %s, %s)
+            ON CONFLICT (provider, username, tenant_id) DO UPDATE SET
                 access_token = EXCLUDED.access_token,
                 refresh_token = EXCLUDED.refresh_token,
                 expires_at = EXCLUDED.expires_at,
                 updated_at = NOW()
-        """, (username, encrypt_token(access_token), encrypt_token(refresh_token), expires_at))
+        """, (username, tenant_id, encrypt_token(access_token), encrypt_token(refresh_token), expires_at))
         conn.commit()
     finally:
         if conn: conn.close()
@@ -111,24 +146,32 @@ def save_microsoft_token(username: str, access_token: str, refresh_token: str, e
 
 def get_valid_google_token(username: str) -> str | None:
     """
-    Retourne un token Google valide, avec auto-refresh et déchiffrement.
+    Retourne un token Google valide, avec auto-refresh et dechiffrement.
     Cherche d'abord dans oauth_tokens (provider='google'),
-    puis dans gmail_tokens (fallback lecture seule — table dépréciée).
+    puis dans gmail_tokens (fallback lecture seule - table depreciee).
+
+    HOTFIX 26/04 (etape A.1) : ajout filtre tenant_id sur SELECT et
+    UPDATE refresh pour empecher fuite cross-tenant. Si user inconnu,
+    return None.
     """
     conn = None
+    tenant_id = None
     try:
         conn = get_pg_conn()
+        tenant_id = _resolve_tenant_strict(username, conn)
+        if not tenant_id:
+            return None
         c = conn.cursor()
         c.execute("""
             SELECT access_token, refresh_token, expires_at
             FROM oauth_tokens
-            WHERE provider = 'google' AND username = %s
+            WHERE provider = 'google' AND username = %s AND tenant_id = %s
             ORDER BY updated_at DESC LIMIT 1
-        """, (username,))
+        """, (username, tenant_id))
         row = c.fetchone()
 
         if not row:
-            # Fallback lecture seule : migration depuis gmail_tokens
+            # Fallback lecture seule : migration depuis gmail_tokens (table legacy)
             c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE username = %s LIMIT 1", (username,))
             legacy = c.fetchone()
             if not legacy:
@@ -158,12 +201,13 @@ def get_valid_google_token(username: str) -> str | None:
         conn = None
         try:
             conn = get_pg_conn()
+            # tenant_id deja resolu en debut de fonction, on le reutilise
             c = conn.cursor()
             c.execute("""
                 UPDATE oauth_tokens
                 SET access_token=%s, expires_at=%s, updated_at=NOW()
-                WHERE provider='google' AND username=%s
-            """, (encrypt_token(new_token), new_expires, username))
+                WHERE provider='google' AND username=%s AND tenant_id=%s
+            """, (encrypt_token(new_token), new_expires, username, tenant_id))
             conn.commit()
         finally:
             if conn: conn.close()
@@ -177,23 +221,29 @@ def get_valid_google_token(username: str) -> str | None:
 def save_google_token(username: str, access_token: str, refresh_token: str,
                       email: str = "", expires_in: int = 3600):
     """
-    Sauvegarde un token Google chiffré dans oauth_tokens.
-    Met aussi à jour gmail_tokens.email pour que le bandeau affiche l'adresse.
+    Sauvegarde un token Google chiffre dans oauth_tokens.
+    Met aussi a jour gmail_tokens.email pour que le bandeau affiche l'adresse.
+
+    HOTFIX 26/04 (etape A.1) : ajout du tenant_id (colonne + ON CONFLICT)
+    pour permettre des homonymes cross-tenant. Si user inconnu, on raise.
     """
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
     conn = None
     try:
         conn = get_pg_conn()
+        tenant_id = _resolve_tenant_strict(username, conn)
+        if not tenant_id:
+            raise ValueError(f"save_google_token: user '{username}' inconnu, refus de sauvegarde")
         c = conn.cursor()
         c.execute("""
-            INSERT INTO oauth_tokens (provider, username, access_token, refresh_token, expires_at)
-            VALUES ('google', %s, %s, %s, %s)
-            ON CONFLICT (provider, username) DO UPDATE SET
+            INSERT INTO oauth_tokens (provider, username, tenant_id, access_token, refresh_token, expires_at)
+            VALUES ('google', %s, %s, %s, %s, %s)
+            ON CONFLICT (provider, username, tenant_id) DO UPDATE SET
                 access_token = EXCLUDED.access_token,
                 refresh_token = EXCLUDED.refresh_token,
                 expires_at = EXCLUDED.expires_at,
                 updated_at = NOW()
-        """, (username, encrypt_token(access_token), encrypt_token(refresh_token), expires_at))
+        """, (username, tenant_id, encrypt_token(access_token), encrypt_token(refresh_token), expires_at))
         # Sauvegarder aussi l'email dans gmail_tokens pour affichage dans le bandeau
         if email:
             c.execute("""
@@ -212,6 +262,15 @@ def save_google_token(username: str, access_token: str, refresh_token: str,
 # ─── HELPERS ───
 
 def get_all_users_with_tokens(provider: str = 'microsoft') -> list[str]:
+    """Retourne la liste des usernames (tous tenants confondus) ayant un
+    token pour ce provider.
+
+    NOTE 26/04 (etape A.1) : cette fonction est volontairement
+    CROSS-TENANT (utilisee par les jobs cron type token_refresh qui
+    iterent sur tous les users de tous les tenants). Les callers DOIVENT
+    re-resoudre le tenant_id avant tout traitement specifique au user
+    (typiquement via _resolve_tenant_strict). Le risque d'homonymes
+    cross-tenant est gere au niveau ligne par ligne par chaque caller."""
     conn = None
     try:
         conn = get_pg_conn()
@@ -223,11 +282,20 @@ def get_all_users_with_tokens(provider: str = 'microsoft') -> list[str]:
 
 
 def get_connected_providers(username: str) -> list[str]:
+    """Retourne la liste des providers connectes pour ce user dans son
+    tenant. HOTFIX 26/04 (etape A.1) : ajout du filtre tenant_id pour
+    eviter de retourner les providers d'un homonyme cross-tenant."""
     conn = None
     try:
         conn = get_pg_conn()
+        tenant_id = _resolve_tenant_strict(username, conn)
+        if not tenant_id:
+            return []  # User inconnu : aucun provider
         c = conn.cursor()
-        c.execute("SELECT provider FROM oauth_tokens WHERE username = %s", (username,))
+        c.execute(
+            "SELECT provider FROM oauth_tokens WHERE username = %s AND tenant_id = %s",
+            (username, tenant_id),
+        )
         return [r[0] for r in c.fetchall()]
     finally:
         if conn: conn.close()
