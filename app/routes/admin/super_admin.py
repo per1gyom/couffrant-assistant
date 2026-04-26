@@ -36,7 +36,7 @@ from app.app_security import (
     create_user, delete_user, update_user, list_users, init_default_user,
     get_user_tools, set_user_tool, remove_user_tool,
     generate_reset_token, hash_password,
-    SCOPE_USER, DEFAULT_TENANT,
+    SCOPE_USER, SCOPE_ADMIN, SCOPE_SUPER_ADMIN, DEFAULT_TENANT,
 )
 from app.security_auth import unlock_account
 from app.routes.deps import require_admin, require_super_admin, require_tenant_admin, assert_same_tenant
