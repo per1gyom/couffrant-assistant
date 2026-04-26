@@ -31,14 +31,20 @@ logger = logging.getLogger("raya.odoo_polling")
 # qui n existe pas sur ces modeles chez Couffrant (boucle d erreur
 # "Invalid field 'name' on model of.survey.answers"). A re-activer
 # apres purge/regeneration de leurs manifests.
+# NOTE 26/04 : mail.activity desactive pour le meme motif (boucle
+# "Invalid field 'name' on model 'mail.activity'" qui polluait les logs
+# en boucle a chaque webhook). Un fix propre est planifie : regenerer
+# le manifest de mail.activity en utilisant display_name ou summary
+# au lieu de name (cf. roadmap connexion Odoo durable).
 POLLED_MODELS = [
     "sale.order", "sale.order.line", "crm.lead",
-    "mail.activity", "calendar.event", "res.partner",
+    "calendar.event", "res.partner",
     "account.move", "account.payment",
     "of.planning.tour", "of.planning.task",
     "of.planning.intervention.template",
     # "of.survey.answers",           # DESACTIVE - manifest champ name invalide
     # "of.survey.user_input.line",   # DESACTIVE - manifest champ name invalide
+    # "mail.activity",               # DESACTIVE 26/04 - meme symptome
     "of.custom.document",
 ]
 

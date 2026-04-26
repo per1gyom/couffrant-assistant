@@ -127,7 +127,7 @@ def should_run_batch(tenant_id: str) -> tuple[bool, str]:
         c = conn.cursor()
         c.execute(
             """
-            SELECT COUNT(*), MAX(created_at)
+            SELECT COUNT(*), MAX(am.created_at)
             FROM aria_memory am
             LEFT JOIN users u ON u.username = am.username
             WHERE (am.indexed_in_graph = false OR am.indexed_in_graph IS NULL)
