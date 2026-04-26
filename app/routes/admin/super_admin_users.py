@@ -36,7 +36,8 @@ from app.app_security import (
     create_user, delete_user, update_user, list_users, init_default_user,
     get_user_tools, set_user_tool, remove_user_tool,
     generate_reset_token, hash_password,
-    SCOPE_USER, DEFAULT_TENANT,
+    SCOPE_USER, SCOPE_TENANT_ADMIN, SCOPE_ADMIN, SCOPE_SUPER_ADMIN,
+    ALL_SCOPES, DEFAULT_TENANT,
 )
 from app.security_auth import unlock_account
 from app.routes.deps import require_admin, require_tenant_admin, require_super_admin, assert_same_tenant
@@ -80,7 +81,35 @@ def admin_update_user(
     payload: dict = Body(...),
     admin: dict = Depends(require_admin),
 ):
-    new_scope = payload.get("scope", "")
+    """Met a jour un user. Durci le 26/04 (etape A.4 audit isolation)
+    contre 3 vecteurs de privilege escalation identifies par l'audit :
+    - tenant_admin promouvant un user en super_admin
+    - tenant_admin manipulant un user d'un autre tenant
+    - scope arbitraire passe (string libre qui casserait des comparaisons
+      ailleurs dans le code)."""
+    new_scope = (payload.get("scope") or "").strip()
+
+    # 1. Validation enum : refuse les scopes invalides
+    if new_scope and new_scope not in ALL_SCOPES:
+        raise HTTPException(
+            400,
+            f"Scope invalide : '{new_scope}'. Valides : {sorted(ALL_SCOPES)}",
+        )
+
+    # 2. La promotion en super_admin est INTERDITE par cette voie
+    # (le super_admin est hardcoded via get_effective_scope, pas via DB)
+    if new_scope == SCOPE_SUPER_ADMIN:
+        raise HTTPException(
+            403,
+            "Le scope super_admin ne peut pas etre attribue par API "
+            "(hardcoded uniquement via get_effective_scope).",
+        )
+
+    # 3. Si l'appelant n'est pas admin/super_admin global, il ne peut
+    # toucher qu'un user de son propre tenant
+    if admin.get("scope") not in (SCOPE_ADMIN, SCOPE_SUPER_ADMIN):
+        assert_same_tenant(request, target)
+
     result = update_user(target, email=payload.get("email"), scope=new_scope)
     log_admin_action(admin["username"], "update_scope", target, new_scope)
     return result

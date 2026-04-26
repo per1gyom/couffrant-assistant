@@ -61,13 +61,38 @@ def set_must_reset_password(username: str, value: bool = True):
 # ─── CRUD (tenant_id) ───
 
 def get_tenant_id(username: str) -> str:
+    """Retourne le tenant_id d'un user.
+
+    HOTFIX 26/04 (etape A.2 audit isolation) : ajout de logs explicites
+    quand on tombe dans le fallback DEFAULT_TENANT. Avant ce fix, le
+    fallback etait silencieux et masquait des bugs (user introuvable,
+    exception SQL, etc.). Le fallback est conserve pour ne pas casser
+    les 21 callers existants. A retirer dans une session future une fois
+    tous les callers durcis (cf. backlog action de suivi).
+    """
+    from app.logging_config import get_logger
+    logger = get_logger("raya.auth")
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
         c.execute("SELECT tenant_id FROM users WHERE username = %s", (username.strip(),))
         row = c.fetchone()
-        return row[0] if row and row[0] else DEFAULT_TENANT
-    except Exception:
+        if row and row[0]:
+            return row[0]
+        # User introuvable OU tenant_id NULL (impossible apres M-S01 mais
+        # protection defensive). On log pour exposer la dependance silencieuse.
+        logger.warning(
+            "[get_tenant_id] User '%s' introuvable ou sans tenant_id "
+            "-> fallback DEFAULT_TENANT='%s'. Probable bug dans l'appelant.",
+            username, DEFAULT_TENANT,
+        )
+        return DEFAULT_TENANT
+    except Exception as e:
+        logger.error(
+            "[get_tenant_id] Exception SQL pour user '%s': %s "
+            "-> fallback DEFAULT_TENANT='%s'.",
+            username, str(e)[:200], DEFAULT_TENANT,
+        )
         return DEFAULT_TENANT
     finally:
         if conn: conn.close()

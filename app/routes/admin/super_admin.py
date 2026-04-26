@@ -39,7 +39,7 @@ from app.app_security import (
     SCOPE_USER, DEFAULT_TENANT,
 )
 from app.security_auth import unlock_account
-from app.routes.deps import require_admin, require_tenant_admin, assert_same_tenant
+from app.routes.deps import require_admin, require_super_admin, require_tenant_admin, assert_same_tenant
 from app.admin_audit import log_admin_action
 from app.dashboard_service import get_costs_dashboard
 
@@ -225,7 +225,7 @@ def list_tenants_endpoint(request: Request, _: dict = Depends(require_admin)):
 def create_tenant_endpoint(
     request: Request,
     payload: dict = Body(...),
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_super_admin),  # FIX 26/04 : etait require_admin
 ):
     from app.tenant_manager import create_tenant
     return create_tenant(
@@ -239,7 +239,7 @@ def create_tenant_endpoint(
 def delete_tenant_endpoint(
     request: Request,
     tenant_id: str,
-    _: dict = Depends(require_admin),
+    _: dict = Depends(require_super_admin),  # FIX 26/04 : etait require_admin
 ):
     from app.tenant_manager import delete_tenant
     return delete_tenant(tenant_id)
