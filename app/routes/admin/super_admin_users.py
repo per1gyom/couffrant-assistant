@@ -542,15 +542,37 @@ def admin_request_permanent_deletion(
 def admin_confirm_permanent_deletion(
     request: Request,
     username: str,
+    payload: dict = Body(default={}),
     admin: dict = Depends(require_super_admin),
 ):
-    """Le super_admin valide une demande de purge definitive. Execute
-    le hard-delete via permanent_delete_user() : suppression DB + cascade
-    + anonymisation des donnees collectives. IRREVERSIBLE.
+    """Le super_admin valide une demande de purge definitive ou execute
+    une purge directe (mode force). Execute le hard-delete via
+    permanent_delete_user() : suppression DB + cascade + anonymisation
+    des donnees collectives. IRREVERSIBLE.
+
+    Mode normal : exige qu'une demande tenant_admin existe au prealable
+    (permanent_deletion_requested_at IS NOT NULL).
+
+    Mode force (ajout 26/04 etape B.2-2 - decision Guillaume) :
+    body { 'force': true, 'reason': '...' (10 chars min) }
+    Permet au super_admin de purger directement sans demande prealable
+    (acte exceptionnel, trace specifiquement dans audit_log avec le
+    flag 'force').
     """
     from app.database import get_pg_conn
     from app.user_crud import permanent_delete_user
     from app.admin_audit import log_admin_action
+
+    force = bool(payload.get("force", False))
+    force_reason = (payload.get("reason") or "").strip() if force else None
+
+    if force and len(force_reason) < 10:
+        raise HTTPException(
+            400,
+            "Mode force : motivation obligatoire (10 chars min). "
+            "Ex: 'Erreur de saisie tenant_admin, demande deja annulee'.",
+        )
+
     conn = None
     try:
         conn = get_pg_conn()
@@ -563,14 +585,21 @@ def admin_confirm_permanent_deletion(
         row = c.fetchone()
         if not row:
             raise HTTPException(404, f"User '{username}' introuvable.")
-        if row[0] is None:
+
+        if row[0] is None and not force:
             raise HTTPException(
                 400,
                 f"Aucune demande de purge pour '{username}'. Le tenant_admin "
                 f"doit d'abord faire la demande via "
-                f"POST /admin/users/{username}/request-permanent-deletion.",
+                f"POST /admin/users/{username}/request-permanent-deletion. "
+                f"Sinon, mode force avec body {{force: true, reason: '...'}}.",
             )
-        reason = row[1] or "(motivation absente)"
+
+        # Determine la motivation a logger
+        if force:
+            audit_reason = f"FORCE reason={force_reason[:80]}"
+        else:
+            audit_reason = f"reason={(row[1] or 'absente')[:80]}"
     finally:
         if conn:
             conn.close()
@@ -580,7 +609,7 @@ def admin_confirm_permanent_deletion(
     if result.get("status") == "ok":
         log_admin_action(
             admin["username"], "confirm_permanent_deletion", username,
-            f"reason={reason[:80]}",
+            audit_reason,
         )
     return result
 

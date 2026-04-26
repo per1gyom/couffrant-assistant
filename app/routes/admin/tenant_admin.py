@@ -35,10 +35,38 @@ def tenant_create_user(
     payload: dict = Body(...),
     user: dict = Depends(require_tenant_admin),
 ):
+    """Cree un user dans le tenant courant. Durci 26/04 (etape B.2-2) :
+    - Validation enum scope (refus strings arbitraires)
+    - Refus promotion super_admin (hardcoded only)
+    - Verification quota max_users (refuse 403 si tenant plein)
+    Le tenant_id est force depuis user['tenant_id'] (pas du payload),
+    impossible de creer dans un autre tenant.
+    """
+    from app.app_security import ALL_SCOPES, SCOPE_SUPER_ADMIN
+    from app.seat_counter import assert_seat_available
+
     tenant_id = user["tenant_id"]
-    scope = payload.get("scope", SCOPE_USER)
+    scope = (payload.get("scope") or SCOPE_USER).strip()
+
+    # 1. Validation enum scope
+    if scope not in ALL_SCOPES:
+        raise HTTPException(
+            400,
+            f"Scope invalide : '{scope}'. Valides : {sorted(ALL_SCOPES)}",
+        )
+    # 2. Refus promotion super_admin (hardcoded uniquement)
+    if scope == SCOPE_SUPER_ADMIN:
+        raise HTTPException(
+            403,
+            "Le scope super_admin ne peut pas etre attribue par API.",
+        )
+    # 3. Garde-fou tenant_admin : limite a SCOPE_USER ou SCOPE_CS
     if user["scope"] == SCOPE_TENANT_ADMIN and scope not in (SCOPE_USER, SCOPE_CS):
         scope = SCOPE_USER
+
+    # 4. Verification quota seats (refuse 403 si plein)
+    assert_seat_available(tenant_id)
+
     new_username = payload.get("username", "").strip()
     result = create_user(
         new_username,
@@ -48,7 +76,7 @@ def tenant_create_user(
         tenant_id=tenant_id,
         email=payload.get("email"),
     )
-    log_admin_action(user["username"], "create_user", new_username)
+    log_admin_action(user["username"], "create_user", new_username, tenant_id)
     return result
 
 

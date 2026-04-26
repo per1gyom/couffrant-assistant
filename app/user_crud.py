@@ -10,17 +10,53 @@ from app.security_tools import (
 )
 
 
-def get_users_in_tenant(tenant_id: str) -> list:
+def get_users_in_tenant(tenant_id: str, include_deleted: bool = True) -> list:
+    """Retourne les users d'un tenant.
+
+    HOTFIX 26/04 (etape B.2-2) : enrichi pour l'UI panel admin equipe.
+    - Ajout des champs : suspended, deleted_at, deleted_by,
+      permanent_deletion_*, display_name, phone, must_reset_password,
+      account_locked, deletion_requested_at
+    - Default include_deleted=True : on retourne aussi les soft-delete
+      pour que l'UI puisse afficher 'Users desactives' (decision
+      Guillaume : visibilite obligatoire pour pouvoir les restaurer ou
+      demander leur purge definitive).
+    """
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("""
-            SELECT username, email, scope, last_login, created_at
-            FROM users WHERE tenant_id = %s ORDER BY created_at
+        where_clause = "" if include_deleted else "AND deleted_at IS NULL"
+        c.execute(f"""
+            SELECT username, email, scope, last_login, created_at,
+                   COALESCE(suspended, false), suspended_reason,
+                   deleted_at, deleted_by,
+                   permanent_deletion_requested_at,
+                   permanent_deletion_requested_by,
+                   permanent_deletion_reason,
+                   display_name, phone,
+                   COALESCE(must_reset_password, false),
+                   COALESCE(account_locked, false),
+                   deletion_requested_at
+            FROM users
+            WHERE tenant_id = %s {where_clause}
+            ORDER BY (deleted_at IS NULL) DESC, created_at
         """, (tenant_id,))
-        return [{"username": r[0], "email": r[1], "scope": r[2],
-                 "last_login": str(r[3]) if r[3] else None, "created_at": str(r[4])}
-                for r in c.fetchall()]
+        return [{
+            "username": r[0], "email": r[1], "scope": r[2],
+            "last_login": str(r[3]) if r[3] else None,
+            "created_at": str(r[4]),
+            "suspended": bool(r[5]), "suspended_reason": r[6] or "",
+            "deleted_at": str(r[7]) if r[7] else None,
+            "deleted_by": r[8] or None,
+            "permanent_deletion_requested_at": str(r[9]) if r[9] else None,
+            "permanent_deletion_requested_by": r[10] or None,
+            "permanent_deletion_reason": r[11] or None,
+            "display_name": r[12] or "",
+            "phone": r[13] or "",
+            "must_reset_password": bool(r[14]),
+            "account_locked": bool(r[15]),
+            "deletion_requested_at": str(r[16]) if r[16] else None,
+        } for r in c.fetchall()]
     except Exception:
         return []
     finally:
