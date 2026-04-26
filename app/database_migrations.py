@@ -881,4 +881,34 @@ MIGRATIONS = [
          '{"fusions": [[69,74,2],[9,18],[24,27,29],[20,22,30],[12,13,14,19]], "pending": [[71,76,104],[70,73,102,103,163]]}'::jsonb,
          0, 0
        WHERE NOT EXISTS (SELECT 1 FROM rules_optimization_log WHERE run_type = 'manual_run2_fusions' AND username = 'guillaume')""",
+
+    # -- Phase quota & isolation schema (26/04/2026, modele SaaS) --
+    # Decision Guillaume 26/04 : modele SaaS avec quota par tenant.
+    # Le tenant_admin gere ses users dans la limite du quota fixe par
+    # le super_admin a la creation du tenant. Demande de seat
+    # supplementaire = acte de facturation (modification quota = super_admin).
+    # Voir docs/decision_roles_utilisateurs_a_trancher.md pour le contexte.
+
+    # M-Q01 : ajouter colonne max_users sur tenants
+    "ALTER TABLE tenants ADD COLUMN IF NOT EXISTS max_users INTEGER NOT NULL DEFAULT 1",
+
+    # M-Q02 : backfill des quotas initiaux pour les tenants existants
+    # Idempotent : on UPDATE seulement si on est encore sur le default
+    # (ne re-ecrase pas un quota deja modifie manuellement)
+    "UPDATE tenants SET max_users = 5 WHERE id = 'couffrant_solar' AND max_users = 1",
+    "UPDATE tenants SET max_users = 1 WHERE id = 'juillet' AND max_users = 1",
+
+    # M-S01 : users.tenant_id NOT NULL (anti-orphelin)
+    # Prerequis verifie le 26/04 : 0 user avec tenant_id NULL
+    "ALTER TABLE users ALTER COLUMN tenant_id SET NOT NULL",
+
+    # M-S02 : retirer le default 'couffrant_solar' sur users.tenant_id
+    # Force les futurs INSERT a fournir tenant_id explicitement (sinon
+    # un user etait silencieusement rattache a couffrant_solar)
+    "ALTER TABLE users ALTER COLUMN tenant_id DROP DEFAULT",
+
+    # M-S03 : fix BUG default users.scope = 'couffrant_solar' -> 'user'
+    # Avant cette migration, un INSERT sans scope donnait scope = un tenant_id
+    # (n'importe quoi). Le default correct pour un nouveau user est 'user'.
+    "ALTER TABLE users ALTER COLUMN scope SET DEFAULT 'user'",
 ]

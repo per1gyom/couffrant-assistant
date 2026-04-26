@@ -81,10 +81,7 @@ Trois ingrédients combinés :
 
 3. **Le wrapper** `_PooledConn.close()` **ne rollback pas avant** `putconn`, donc même si l'app appelait `close()`, la connexion était rendue au pool dans un état corrompu.
 
-**Mécanique de l'effet boule de neige** : à chaque tick (30 min), 1
-connexion supplémentaire fuite du pool. En 7h30, le pool de 15 est
-saturé. À partir de là, toutes les requêtes app utilisent le fallback
-"connexion directe" — l'app reste debout mais lente.
+**Mécanique de l'effet boule de neige** : à chaque tick (30 min), 1 connexion supplémentaire fuite du pool. En 7h30, le pool de 15 est saturé. À partir de là, toutes les requêtes app utilisent le fallback "connexion directe" — l'app reste debout mais lente.
 
 ---
 
@@ -96,61 +93,39 @@ Deux niveaux d'intervention, intentionnellement combinés.
 
 Tactique. Bouche le trou exact qui faisait fuir des connexions.
 
-- **Cast `created_at::timestamp`** ajouté aux 4 endroits où on comparait
-  `mail_memory.created_at` avec `NOW() - INTERVAL`.
-- **Wrapper `try/finally`** : `_scan_user` est devenu un wrapper qui
-  ouvre la connexion et garantit son retour au pool même en cas
-  d'exception. La logique métier a été extraite en `_scan_user_inner`
-  qui prend la connexion injectée en paramètre.
-- **`conn.close()` final supprimé** : redondant maintenant que le
-  wrapper s'en charge (sinon double-close).
+- **Cast** `created_at::timestamp` ajouté aux 4 endroits où on comparait `mail_memory.created_at` avec `NOW() - INTERVAL`.
+- **Wrapper** `try/finally` : `_scan_user` est devenu un wrapper qui ouvre la connexion et garantit son retour au pool même en cas d'exception. La logique métier a été extraite en `_scan_user_inner`qui prend la connexion injectée en paramètre.
+- `conn.close()` **final supprimé** : redondant maintenant que le wrapper s'en charge (sinon double-close).
 
 ### Niveau 2 — Le garde-fou structurel (`app/database.py`)
 
-**Stratégique.** Empêche n'importe quel autre bout de code de répéter
-le même piège dans le futur.
+**Stratégique.** Empêche n'importe quel autre bout de code de répéter le même piège dans le futur.
 
-- **`_PooledConn.close()`** fait maintenant `conn.rollback()` AVANT
-  `pool.putconn(conn)`. Si la connexion est saine, le rollback ne fait
-  rien. Si elle est en transaction abortée, le rollback la nettoie.
-  Dans tous les cas, ce qui revient au pool est utilisable.
+- `_PooledConn.close()` fait maintenant `conn.rollback()` AVANT `pool.putconn(conn)`. Si la connexion est saine, le rollback ne fait rien. Si elle est en transaction abortée, le rollback la nettoie. Dans tous les cas, ce qui revient au pool est utilisable.
 
-C'est ce niveau 2 qui rend le système résilient : même si un futur
-développeur (ou un futur Claude) écrit du code SQL imparfait, le pool
-ne pollue plus en cascade.
+C'est ce niveau 2 qui rend le système résilient : même si un futur développeur (ou un futur Claude) écrit du code SQL imparfait, le pool ne pollue plus en cascade.
 
 ---
 
 ## 📋 Ce qui reste à faire (futures sessions)
 
-Le fix d'aujourd'hui est une **bonne mi-mesure**, pas une mi-mesure
-paresseuse. Voici ce qui reste à faire pour aller au bout, dans
-l'ordre de priorité :
+Le fix d'aujourd'hui est une **bonne mi-mesure**, pas une mi-mesure paresseuse. Voici ce qui reste à faire pour aller au bout, dans l'ordre de priorité :
 
 ### 1. 🟠 Migration progressive des 152 patterns dangereux
 
-Un audit du codebase a révélé **152 endroits** où le code utilise le
-pattern dangereux `conn = get_pg_conn()` sans `with` block ni
-`try/finally`. Grâce au garde-fou Niveau 2 d'aujourd'hui, ils ne sont
-plus des bombes à retardement, mais ils restent **perfectibles**.
+Un audit du codebase a révélé **152 endroits** où le code utilise le pattern dangereux `conn = get_pg_conn()` sans `with` block ni `try/finally`. Grâce au garde-fou Niveau 2 d'aujourd'hui, ils ne sont plus des bombes à retardement, mais ils restent **perfectibles**.
 
-**Action** : convertir progressivement ces 152 patterns vers le pattern
-sain `with get_pg_conn() as conn:`. Pas urgent, mais à intégrer dans
-toute session qui touche à un fichier concerné (réflexe à acquérir).
+**Action** : convertir progressivement ces 152 patterns vers le pattern sain `with get_pg_conn() as conn:`. Pas urgent, mais à intégrer dans toute session qui touche à un fichier concerné (réflexe à acquérir).
 
-**Estimation** : ~5-10 min par fichier × 30 fichiers principaux = 3-5h
-réparties sur plusieurs sessions.
+**Estimation** : \~5-10 min par fichier × 30 fichiers principaux = 3-5h réparties sur plusieurs sessions.
 
-**Comment commencer** : depuis ce repo, `grep -rn "conn = get_pg_conn()"
-app/ --include="*.py"` donne la liste exhaustive.
+**Comment commencer** : depuis ce repo, `grep -rn "conn = get_pg_conn()" app/ --include="*.py"` donne la liste exhaustive.
 
 ### 2. 🟠 Monitoring du pool de connexions
 
-Aujourd'hui on ne sait pas que le pool sature **avant** de voir les
-warnings. Il faut un monitoring proactif.
+Aujourd'hui on ne sait pas que le pool sature **avant** de voir les warnings. Il faut un monitoring proactif.
 
-**Action** : ajouter dans `app/jobs/system_monitor.py` (qui tourne déjà
-toutes les 10 min) une vérification :
+**Action** : ajouter dans `app/jobs/system_monitor.py` (qui tourne déjà toutes les 10 min) une vérification :
 
 ```sql
 SELECT count(*) FROM pg_stat_activity
@@ -158,26 +133,20 @@ WHERE datname = current_database()
   AND state = 'idle in transaction (aborted)'
 ```
 
-Si le résultat dépasse un seuil (ex. 3), créer une alerte dans
-`system_alerts` avec severity `warning`. Si ça dépasse 10, severity
-`critical`.
+Si le résultat dépasse un seuil (ex. 3), créer une alerte dans `system_alerts` avec severity `warning`. Si ça dépasse 10, severity `critical`.
 
 **Estimation** : 30-45 min de dev + tests.
 
 ### 3. 🟡 Migration du type `mail_memory.created_at` en timestamp
 
-La cause profonde du bug initial est que `created_at` est en `text`
-plutôt qu'en `timestamp`. Le cast `::timestamp` qu'on a ajouté est un
-contournement, pas une vraie solution.
+La cause profonde du bug initial est que `created_at` est en `text`plutôt qu'en `timestamp`. Le cast `::timestamp` qu'on a ajouté est un contournement, pas une vraie solution.
 
-**Pourquoi c'est `text` aujourd'hui** : legacy, schema initial. Plusieurs
-autres tables sont probablement dans le même cas (à auditer).
+**Pourquoi c'est** `text` **aujourd'hui** : legacy, schema initial. Plusieurs autres tables sont probablement dans le même cas (à auditer).
 
 **Action** :
-1. Auditer toutes les colonnes `created_at`, `updated_at`,
-   `received_at` de la DB → faire la liste de celles qui sont en `text`
-2. Pour chacune, écrire une migration idempotente dans
-   `app/database_migrations.py` :
+
+1. Auditer toutes les colonnes `created_at`, `updated_at`, `received_at` de la DB → faire la liste de celles qui sont en `text`
+2. Pour chacune, écrire une migration idempotente dans `app/database_migrations.py` :
    - Ajouter une nouvelle colonne `created_at_ts TIMESTAMP`
    - Backfill via `created_at_ts = created_at::timestamp`
    - Switch les requêtes vers la nouvelle colonne
@@ -186,8 +155,7 @@ autres tables sont probablement dans le même cas (à auditer).
 
 **Estimation** : 1-2h selon le nombre de tables concernées.
 
-**Précaution** : à faire **après** un backup propre (cf.
-`plan_resilience_et_securite.md` étape 2).
+**Précaution** : à faire **après** un backup propre (cf. `plan_resilience_et_securite.md` étape 2).
 
 ---
 
@@ -195,10 +163,7 @@ autres tables sont probablement dans le même cas (à auditer).
 
 Ajoutée dans `docs/checklist_isolation_multitenant.md` (section "Règle 8") :
 
-> **Toute nouvelle fonction qui ouvre une connexion DB DOIT utiliser
-> le pattern `with get_pg_conn() as conn:`**, jamais `conn = get_pg_conn()`
-> sans protection. Le `with` garantit le rollback automatique en cas
-> d'exception et le retour au pool.
+> **Toute nouvelle fonction qui ouvre une connexion DB DOIT utiliser le pattern** `with get_pg_conn() as conn:`, jamais `conn = get_pg_conn()`sans protection. Le `with` garantit le rollback automatique en cas d'exception et le retour au pool.
 
 À vérifier à chaque code review.
 
@@ -208,34 +173,19 @@ Ajoutée dans `docs/checklist_isolation_multitenant.md` (section "Règle 8") :
 
 ### Pour Claude
 
-1. **Quand ça plante en prod, regarder l'état réel de la DB d'abord**.
-   `pg_stat_activity` est la 1ʳᵉ source de vérité, pas le code source.
-   Le code montre ce qui *devrait* se passer, la DB montre ce qui *se
-   passe vraiment*.
+1. **Quand ça plante en prod, regarder l'état réel de la DB d'abord**. `pg_stat_activity` est la 1ʳᵉ source de vérité, pas le code source. Le code montre ce qui *devrait* se passer, la DB montre ce qui *se passe vraiment*.
 
-2. **Toujours regarder l'espacement des timestamps des erreurs**. Une
-   régularité de 30 min, 2 min, 1h identifie souvent un job scheduler
-   précis. C'est un raccourci diagnostic puissant.
+2. **Toujours regarder l'espacement des timestamps des erreurs**. Une régularité de 30 min, 2 min, 1h identifie souvent un job scheduler précis. C'est un raccourci diagnostic puissant.
 
-3. **Distinguer fix tactique vs fix stratégique**. Quand on identifie un
-   bug, se poser la question : *"Et si quelqu'un d'autre fait la même
-   bêtise demain dans un autre fichier ?"*. Si oui, ajouter un garde-fou
-   au niveau structure (comme le rollback dans `_PooledConn.close()`).
+3. **Distinguer fix tactique vs fix stratégique**. Quand on identifie un bug, se poser la question : *"Et si quelqu'un d'autre fait la même bêtise demain dans un autre fichier ?"*. Si oui, ajouter un garde-fou au niveau structure (comme le rollback dans `_PooledConn.close()`).
 
 ### Pour Guillaume
 
-1. **Le warning "pool exhausted" n'est pas anodin**. C'est le signal que
-   du code laisse fuir des connexions. Si ça revient un jour, c'est
-   qu'un nouveau bout de code n'a pas suivi la règle 8 de la checklist.
+1. **Le warning "pool exhausted" n'est pas anodin**. C'est le signal que du code laisse fuir des connexions. Si ça revient un jour, c'est qu'un nouveau bout de code n'a pas suivi la règle 8 de la checklist.
 
-2. **L'app reste debout en mode dégradé** grâce au fallback "connexion
-   directe", mais c'est lent et coûteux (chaque requête = ouverture
-   TCP). Il faut traiter ces warnings comme une priorité.
+2. **L'app reste debout en mode dégradé** grâce au fallback "connexion directe", mais c'est lent et coûteux (chaque requête = ouverture TCP). Il faut traiter ces warnings comme une priorité.
 
-3. **Le restart Railway est un pansement temporaire**. Il libère les
-   connexions zombies actuelles, mais si la cause root n'est pas fixée,
-   le pool sera de nouveau saturé en 7-8 heures. **Toujours fixer la
-   cause avant de restart**.
+3. **Le restart Railway est un pansement temporaire**. Il libère les connexions zombies actuelles, mais si la cause root n'est pas fixée, le pool sera de nouveau saturé en 7-8 heures. **Toujours fixer la cause avant de restart**.
 
 ---
 
@@ -249,6 +199,48 @@ Ajoutée dans `docs/checklist_isolation_multitenant.md` (section "Règle 8") :
 
 ---
 
-*Document créé le 26 avril 2026 par Claude (audit + fix) avec Guillaume
-(décisions). À mettre à jour si l'incident se reproduit ou si une des
-3 actions de suivi est complétée.*
+*Document créé le 26 avril 2026 par Claude (audit + fix) avec Guillaume (décisions). À mettre à jour si l'incident se reproduit ou si une des 3 actions de suivi est complétée.*
+
+---
+
+## 🔍 Mise à jour 26/04 après-midi — 2 erreurs résiduelles découvertes
+
+Après le fix, les warnings "pool exhausted" ont cessé. Du coup, **2 autres erreurs préexistantes sont devenues visibles** dans les logs :
+
+### Erreur A — `graph_indexer.py:128` AmbiguousColumn
+
+```
+psycopg2.errors.AmbiguousColumn: column reference "created_at" is ambiguous
+LINE 2:             SELECT COUNT(*), MAX(created_at)
+```
+
+**Diagnostic** : la fonction `should_run_batch(tenant_id)` fait un SELECT qui ne précise pas la table pour `created_at`. Probablement un JOIN entre 2 tables qui ont toutes les deux ce champ. Plante toutes les 3 minutes (fréquence du job).
+
+**Impact actuel** : graph_indexer ne tourne plus. La mémoire long terme ne s'enrichit plus avec les conversations Raya. **Pas de fuite de pool**grâce au garde-fou Niveau 2 (le rollback dans `_PooledConn.close()`).
+
+**Fix** : qualifier explicitement la table dans le SELECT (ex. `am.created_at` au lieu de `created_at`). \~5 min de fix.
+
+### Erreur B — `webhook_queue` mail.activity Invalid field 'name'
+
+```
+WebhookQueue CRASH job id=92633 : Odoo error: Invalid field 'name'
+on model 'mail.activity'
+```
+
+**Diagnostic** : le manifest pour `mail.activity` demande le champ `name`, qui n'existe pas sur ce modèle Odoo. Même symptôme que celui documenté ligne 28-32 de `odoo_polling.py` pour `of.survey.answers` et `of.survey.user_input.line` (ces deux-là ont déjà été désactivés dans `POLLED_MODELS`).
+
+**Impact actuel** : tous les jobs `mail.activity` partent en retry 3/3 puis sont abandonnés. La synchronisation des activités Odoo (relances, appels à passer, etc.) ne marche plus. **Pas de fuite de pool**.
+
+**Fix possible (rapide)** : désactiver `mail.activity` de `POLLED_MODELS`dans `app/jobs/odoo_polling.py` (\~2 min).
+
+**Fix propre (à programmer)** : régénérer le manifest pour `mail.activity`sans le champ `name` (utiliser `display_name` ou `summary` à la place).
+
+### Pourquoi ces 2 erreurs sont importantes mais pas urgentes
+
+Le **garde-fou Niveau 2** ajouté dans `database.py` (rollback avant putconn) fait que ces exceptions SQL/Odoo qui plantent en boucle **ne zombifient plus le pool**. Le pool reste sain à 3 connexions, 0 zombie, même avec ces 2 sources de crash actives.
+
+**Validation indirecte** : c'est la preuve que le fix structurel marche. Sans lui, le pool serait re-saturé en moins d'1h.
+
+Ces 2 erreurs sont à ajouter au backlog, mais elles peuvent attendre la session dédiée "stabilisation systémique" (Priorité 7 de `a_faire.md`).
+
+---
