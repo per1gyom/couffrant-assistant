@@ -3531,30 +3531,54 @@ document.querySelectorAll('.tab').forEach(t => {
   });
 });
 
-async function loadTeamData() {
+// Helper de fetch instrumente : capture HTTP status et body en cas d'erreur
+// (etape diagnostic 26/04 21h30 - bug "The string did not match the expected pattern")
+async function _teamFetchJson(url, label) {
+  let r;
   try {
-    // Recharger profile pour avoir scope/tenant_id à jour
-    const pr = await fetch('/profile').then(r => r.json());
+    r = await fetch(url);
+  } catch (e) {
+    throw new Error('[' + label + '] Echec reseau : ' + e.message);
+  }
+  const text = await r.text();
+  if (!r.ok) {
+    throw new Error('[' + label + '] HTTP ' + r.status + ' : ' + text.slice(0, 200));
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error('[' + label + '] JSON invalide (HTTP ' + r.status + ') : ' + text.slice(0, 200));
+  }
+}
+
+async function loadTeamData() {
+  const errBox = document.getElementById('teamActiveUsersList');
+  try {
+    // Etape 1 : profile
+    const pr = await _teamFetchJson('/profile', 'profile');
     _teamData.isSuperAdmin = !!pr.is_super_admin;
     _teamData.currentUser = pr.username;
     const tenantId = pr.tenant_id;
     if (!tenantId) {
-      document.getElementById('teamActiveUsersList').innerHTML =
-        '<div style="padding:16px;color:var(--danger,#dc2626)">Erreur : tenant inconnu.</div>';
+      errBox.innerHTML = '<div style="padding:16px;color:var(--danger,#dc2626)">Erreur : tenant_id absent dans /profile (payload : ' + JSON.stringify(pr).slice(0,200) + ')</div>';
       return;
     }
-    // Quota + liste users en parallele
+    // Etape 2 : quota + users en parallele, mais on capture les erreurs separement
+    const quotaUrl = '/admin/tenants/' + encodeURIComponent(tenantId) + '/quota';
     const [quotaR, usersR] = await Promise.all([
-      fetch('/admin/tenants/' + encodeURIComponent(tenantId) + '/quota').then(r => r.json()),
-      fetch('/tenant/users').then(r => r.json())
+      _teamFetchJson(quotaUrl, 'quota'),
+      _teamFetchJson('/tenant/users', 'users')
     ]);
     _teamData.quota = quotaR;
     _teamData.users = Array.isArray(usersR) ? usersR : [];
     renderTeamQuota();
     renderTeamUsers();
   } catch (e) {
-    document.getElementById('teamActiveUsersList').innerHTML =
-      '<div style="padding:16px;color:var(--danger,#dc2626)">Erreur : ' + e.message + '</div>';
+    errBox.innerHTML =
+      '<div style="padding:16px;color:var(--danger,#dc2626);font-family:monospace;font-size:12px;white-space:pre-wrap;word-break:break-word">'
+      + 'Erreur diagnostic :\n\n' + (e.message || e)
+      + '</div>';
+    console.error('[loadTeamData]', e);
   }
 }
 
