@@ -33,22 +33,48 @@ def _job_proactivity_scan():
 
 
 def _scan_user(username: str):
+    """Wrapper qui garantit la fermeture de la connexion meme en cas
+    d'exception SQL. HOTFIX 26/04/2026 : avant ce wrapper, une exception
+    SQL dans la fonction faisait fuir la connexion du pool en etat
+    'idle in transaction (aborted)' — cause originelle de la saturation
+    'pool exhausted' qui a commence le 25/04 ~20h42."""
     from app.database import get_pg_conn
+    conn = get_pg_conn()
+    try:
+        _scan_user_inner(username, conn)
+    finally:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def _scan_user_inner(username: str, conn):
+    """Logique reelle de scan (extraite par hotfix 26/04). Re-utilise la
+    connexion ouverte par le wrapper plutot que d'en ouvrir une nouvelle,
+    pour que le finally du wrapper la libere proprement."""
     from app.proactive_alerts import create_alert
     from app.app_security import get_tenant_id
 
     tenant_id = get_tenant_id(username)
-    conn = get_pg_conn()
     c = conn.cursor()
 
     # Mails urgents non traités
+    # HOTFIX 26/04/2026 : mail_memory.created_at est de type text. Sans
+    # cast explicite, la comparaison avec NOW() declenchait une exception
+    # de conversion implicite qui fuyait la connexion du pool (origine
+    # de la saturation "pool exhausted" depuis le 25/04 ~20h42).
     c.execute("""
         SELECT id, subject, from_email, priority, received_at FROM mail_memory
         WHERE username = %s
           AND (tenant_id = %s OR tenant_id IS NULL)
           AND priority = 'haute'
-          AND created_at > NOW() - INTERVAL '48 hours'
-          AND created_at < NOW() - INTERVAL '2 hours'
+          AND created_at::timestamp > NOW() - INTERVAL '48 hours'
+          AND created_at::timestamp < NOW() - INTERVAL '2 hours'
           AND id NOT IN (
               SELECT CAST(source_id AS INTEGER) FROM proactive_alerts
               WHERE username = %s
@@ -67,13 +93,14 @@ def _scan_user(username: str):
         )
 
     # Réponses en attente
+    # HOTFIX 26/04/2026 : meme cast que ci-dessus pour eviter fuite pool.
     c.execute("""
         SELECT id, subject, from_email, reply_urgency FROM mail_memory
         WHERE username = %s
           AND (tenant_id = %s OR tenant_id IS NULL)
           AND needs_reply = 1 AND reply_status = 'pending'
-          AND created_at < NOW() - INTERVAL '24 hours'
-          AND created_at > NOW() - INTERVAL '7 days'
+          AND created_at::timestamp < NOW() - INTERVAL '24 hours'
+          AND created_at::timestamp > NOW() - INTERVAL '7 days'
           AND id NOT IN (
               SELECT CAST(source_id AS INTEGER) FROM proactive_alerts
               WHERE username = %s
@@ -125,7 +152,9 @@ def _scan_user(username: str):
     except Exception as e:
         logger.error(f"[Cyclic] Erreur patterns cycliques {username}: {e}")
 
-    conn.close()
+    # HOTFIX 26/04 : la fermeture de la connexion est faite par le
+    # wrapper _scan_user via try/finally. Surtout pas de conn.close() ici
+    # (sinon double-close, la connexion partirait au pool 2 fois).
 
 
 def _check_cyclic_alert(now: datetime, description: str, evidence: str) -> str | None:

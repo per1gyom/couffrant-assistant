@@ -2,7 +2,7 @@
 
 Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 
-**Dernière MAJ** : 25 avril 2026 soir.
+**Dernière MAJ** : 26 avril 2026 matin.
 
 ---
 
@@ -65,12 +65,13 @@ Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 - 558 lignes supprimées au total, 0 ajoutée
 
 ---
+
 #### 🚀 Améliorations futures à prévoir pour les signatures
 
 ✅ **TERMINÉ : insertion d'image en local (upload + redim + compression auto)** — *fait le 25/04 soir*
 
 - **Approche choisie** : base64 inline (pas stockage serveur fichier) → pas de problème CDN, signature auto-portable, marche partout (Gmail, Outlook, Apple Mail)
-- **Compression auto** : canvas + boucle qualité/taille dégressive, tient sous 100 KB peu importe la photo source (testé : photo 1920x1080 → JPEG 800x450 q=92 → ~19 KB)
+- **Compression auto** : canvas + boucle qualité/taille dégressive, tient sous 100 KB peu importe la photo source (testé : photo 1920x1080 → JPEG 800x450 q=92 → \~19 KB)
 - **GIF** : préservés tels quels (sinon perte d'animation), limite stricte 100 KB en entrée
 - **PNG transparent** : transparence préservée tant que possible
 - **Redimensionnement à la souris (presets)** : popup au clic sur l'image avec 4 presets Petite/Moyenne/Grande/Personnalisée + slider 40-500px
@@ -85,6 +86,7 @@ Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 **La vision** :
 
 1. **Vrai éditeur WYSIWYG** dans l'interface chat (pas juste du texte brut). Quand Raya prépare un mail, l'utilisateur peut :
+
    - Modifier directement le texte (typing en place)
    - Ajouter du gras / italique / souligné
    - Insérer des puces ou listes numérotées
@@ -93,6 +95,7 @@ Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
    - Insérer des images (réutiliser tout l'upload + compression + redim qu'on a fait pour les signatures)
 
 2. **Apprentissage par diff à la validation** :
+
    - Au moment où l'utilisateur clique "Envoyer" (après ses modifications), Raya capture les **2 versions** :
      - V1 = ce que Raya avait initialement rédigé
      - V2 = ce que l'utilisateur a effectivement envoyé
@@ -100,21 +103,24 @@ Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
    - Génère une **règle** dans le système de règles existant (pas de nouvelle infrastructure) :
      - Ex : "Pour les mails à des clients, préférer 'Cordialement' à 'Bien à vous'"
      - Ex : "L'utilisateur préfère des phrases courtes en bullet points pour les récap de réunion"
-     - Ex : "Quand le mail est court (< 5 phrases), pas de formule de politesse longue"
+     - Ex : "Quand le mail est court (&lt; 5 phrases), pas de formule de politesse longue"
    - Soumet la règle au validateur Sonnet (déjà en place via `rule_validator.py`) pour vérifier la pertinence avant de l'enregistrer
 
 3. **Brouillon meilleur la fois suivante** :
+
    - Les règles tirées des diffs précédentes sont injectées dans le prompt système au moment où Raya rédige un nouveau mail dans le même contexte (mêmes destinataires, mêmes catégories de sujet)
    - Au fil du temps, Raya devient de plus en plus alignée sur le style de l'utilisateur
 
 **Architecture estimée** :
-- **Frontend** (~3-4h) : composant éditeur WYSIWYG dans `chat-messages.js`, réutilise les fonctions signatures (toolbar, emoji picker, image upload). Bouton "Modifier" qui transforme le brouillon Raya en zone éditable.
-- **Backend diff** (~2-3h) : endpoint `POST /mails/log-diff` qui reçoit V1 et V2, calcule la diff (lib `difflib` Python ou équivalent), envoie au LLM (Haiku) pour transformer la diff en règle candidate, soumet au validateur Sonnet existant.
-- **Branchement règles** (~1h) : ajouter une catégorie de règles `email_drafting_style` au système de catégories canoniques. Inclure ces règles dans le prompt de rédaction de mail au runtime.
+
+- **Frontend** (\~3-4h) : composant éditeur WYSIWYG dans `chat-messages.js`, réutilise les fonctions signatures (toolbar, emoji picker, image upload). Bouton "Modifier" qui transforme le brouillon Raya en zone éditable.
+- **Backend diff** (\~2-3h) : endpoint `POST /mails/log-diff` qui reçoit V1 et V2, calcule la diff (lib `difflib` Python ou équivalent), envoie au LLM (Haiku) pour transformer la diff en règle candidate, soumet au validateur Sonnet existant.
+- **Branchement règles** (\~1h) : ajouter une catégorie de règles `email_drafting_style` au système de catégories canoniques. Inclure ces règles dans le prompt de rédaction de mail au runtime.
 
 **Estimation totale** : 6-8h sur une session dédiée. Mérite sa propre session bien préparée.
 
 **Pré-requis** :
+
 - Nouveau composant éditeur WYSIWYG (mais on peut largement copier-coller depuis l'éditeur signatures)
 - Logique de diff (lib standard Python)
 - Pas d'infra nouvelle DB (on réutilise la table `rules` existante)
@@ -127,7 +133,7 @@ Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 
 - Aujourd'hui la preview dans la card est un aperçu compact (max 60px de haut).
 - Idée : un bouton "Aperçu" qui ouvre une mini-modale montrant la signature dans un faux mail (sujet + corps + signature) pour voir le rendu réel.
-- **Estimation** : ~30 min.
+- **Estimation** : \~30 min.
 
 🔵 **AMÉLIORATION : mécanisme "Raya demande puis apprend"** (REPORTÉ depuis le MVP)
 
@@ -325,11 +331,7 @@ Passer un lot 3 ou 4 à l'endpoint d'archivage groupé qu'on a codé hier (commi
 - Auto-calibration des seuils par feedback utilisateur
 - Décroissance automatique : -0.1 de confidence tous les 40j sans reinforcement
 - Auto-normalisation des catégories
-- Détection de contradictions → table `pending_rules_questions` avec question posée au premier message du lendemain
-
-**Durée estimée** : 2-3h de dev + 1h de tests
-
-**Prérequis** : audit multi-tenant fait (Priorité 1) pour garantir que le job nocturne respecte l'isolation.
+- Détection de contradictions → table `pending_rules_questions` avec question posée au premier message du lendemain **Durée estimée** : 2-3h de dev + 1h de tests **Prérequis** : audit multi-tenant fait (Priorité 1) pour garantir que le job nocturne respecte l'isolation.
 
 ---
 
@@ -344,5 +346,33 @@ Détaillé dans `docs/plan_resilience_et_securite.md` :
 **Durée totale estimée** : 2h15
 
 **Priorité** : haute mais pas urgente. À faire avant d'avoir un 2e utilisateur réel sur la plateforme.
+
+---
+
+## 🟣 Priorité 7 — Résilience pool de connexions DB (suite incident 25-26/04)
+
+**Contexte** : un incident de saturation du pool DB a été diagnostiqué et fixé le 26/04 matin (cf. `docs/incident_pool_db_26avril.md`). Les fixes immédiats sont déployés (cast `created_at::timestamp` dans `proactivity_scan.py` + rollback défensif dans `_PooledConn.close()`).
+
+3 actions de suivi restent à programmer pour aller au bout :
+
+### 7.1 — 🟠 Migration progressive des 152 patterns dangereux
+
+152 endroits dans le codebase utilisent `conn = get_pg_conn()` sans `with` block. Grâce au garde-fou rollback ajouté dans `_PooledConn`, ils ne sont plus des bombes à retardement, mais ils restent perfectibles. À convertir progressivement vers `with get_pg_conn() as conn:` au fil des sessions qui touchent aux fichiers concernés.
+
+**Estimation** : 5-10 min par fichier × \~30 fichiers principaux = 3-5h réparties sur plusieurs sessions.
+
+### 7.2 — 🟠 Monitoring proactif du pool
+
+Ajouter dans `app/jobs/system_monitor.py` une vérification toutes les 10 min du nombre de connexions en état `idle in transaction (aborted)`. Au-dessus d'un seuil, créer une alerte dans `system_alerts`. Permet de détecter le problème **avant** que le pool soit saturé.
+
+**Estimation** : 30-45 min de dev + tests.
+
+### 7.3 — 🟡 Migration `mail_memory.created_at` en vrai timestamp
+
+La cause profonde du bug est que `created_at` est en type `text`. Le cast `::timestamp` qu'on a ajouté est un contournement. Migrer la colonne en `TIMESTAMP` propre (et auditer les autres tables dans le même cas).
+
+**Estimation** : 1-2h selon le nombre de tables concernées. **Précaution** : à faire APRÈS un backup propre (cf. Priorité 6).
+
+**Priorité globale** : modérée. Le système est stable depuis le fix. À traiter en arrière-plan dans les semaines à venir, pas un blocant pour l'audit isolation ni l'onboarding de nouveaux utilisateurs.
 
 ---

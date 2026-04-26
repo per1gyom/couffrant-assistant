@@ -63,6 +63,22 @@ class _PooledConn:
     def close(self):
         pool = self.__dict__.get("_pool")
         conn = self.__dict__.get("_conn")
+        # HOTFIX 26/04/2026 : rollback defensif AVANT de rendre la
+        # connexion au pool. Sans ce garde-fou, une connexion qui se
+        # retrouve en etat 'idle in transaction (aborted)' (apres une
+        # exception SQL non geree par le code applicatif) reste bloquee
+        # dans le pool : tout futur execute() sur cette connexion plante
+        # avec "current transaction is aborted, commands ignored until
+        # end of transaction block". En cascade, les 15 connexions du
+        # pool peuvent se retrouver toutes zombies (cf. saturation
+        # observee le 25-26/04 declenchee par proactivity_scan.py).
+        # Le rollback ici ne fait rien si la connexion est saine, mais
+        # ramene a un etat propre toute connexion en transaction abortee.
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
         if pool and conn:
             try:
                 pool.putconn(conn)

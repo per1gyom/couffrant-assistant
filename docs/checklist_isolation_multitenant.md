@@ -50,21 +50,30 @@ qui touche aux données utilisateur ou multi-tenant.
 
 - [ ] Le paramètre est-il **sans valeur par défaut** ?
       (`username: str` et **pas** `username: str = "guillaume"`)
-- [ ] La fonction prend-elle aussi `tenant_id` ?
-- [ ] Les appelants passent-ils explicitement `user["tenant_id"]` ?
-- [ ] Pas de fallback silencieux `DEFAULT_TENANT` qui masquerait une erreur ?
+- \[ \] La fonction prend-elle aussi `tenant_id` ?
+- \[ \] Les appelants passent-ils explicitement `user["tenant_id"]` ?
+- \[ \] Pas de fallback silencieux `DEFAULT_TENANT` qui masquerait une erreur ?
 
 ## 6. Pour toute manipulation cross-tenant (super-admin only)
 
-- [ ] L'opération est-elle protégée par `Depends(require_super_admin)` ?
-- [ ] Le `tenant_id` cible est-il loggé dans `admin_audit_log` ?
-- [ ] Y a-t-il une trace explicite "super-admin a modifié tenant X" ?
+- \[ \] L'opération est-elle protégée par `Depends(require_super_admin)` ?
+- \[ \] Le `tenant_id` cible est-il loggé dans `admin_audit_log` ?
+- \[ \] Y a-t-il une trace explicite "super-admin a modifié tenant X" ?
 
 ## 7. Tests de non-régression
 
-- [ ] Le plan `plan_tests_isolation_pierre_test.md` passe sans fuite ?
-- [ ] Aucune ligne nouvelle avec `tenant_id IS NULL` après le déploiement ?
-- [ ] Cohérence `JOIN users` reste OK pour toutes les tables sensibles ?
+- \[ \] Le plan `plan_tests_isolation_pierre_test.md` passe sans fuite ?
+- \[ \] Aucune ligne nouvelle avec `tenant_id IS NULL` après le déploiement ?
+- \[ \] Cohérence `JOIN users` reste OK pour toutes les tables sensibles ?
+
+## 8. Pour toute connexion à la base de données (ajoutée 26/04)
+
+> Origine : incident pool DB du 25-26/04 où une exception SQL non gérée dans `proactivity_scan.py` a saturé le pool de 15 connexions en 7h30. Détails dans `docs/incident_pool_db_26avril.md`.
+
+- \[ \] La fonction utilise-t-elle le pattern `with get_pg_conn() as conn:` ? (et **non pas** `conn = get_pg_conn()` sans protection)
+- \[ \] Si le pattern `with` est impossible (cas rare), un `try/finally`garantit-il `conn.close()` même en cas d'exception ?
+- \[ \] Les exceptions SQL sont-elles gérées proprement (pas juste loggées en haut, mais aussi en remontant pour que le `with` puisse rollback) ?
+- \[ \] Si la fonction est appelée par un job APScheduler (`scheduler_jobs.py`) ou un worker (`webhook_queue.py`), même réflexe : `with` block systématique pour éviter de polluer le pool en boucle.
 
 ---
 
@@ -75,6 +84,7 @@ qui touche aux données utilisateur ou multi-tenant.
 ```python
 # INTERDIT
 def get_token(username: str = "guillaume"):
+```
     ...
 ```
 
@@ -148,13 +158,56 @@ def connect_drive(payload: dict, admin: dict = Depends(require_admin)):
 @router.post("/admin/connect-drive")
 def connect_drive(payload: dict, admin: dict = Depends(require_admin)):
     if admin["scope"] not in (SCOPE_ADMIN, SCOPE_SUPER_ADMIN):
-        # Tenant_admin peut seulement cibler son propre tenant
-        tenant_id = admin["tenant_id"]
-    else:
-        tenant_id = payload.get("tenant_id", admin["tenant_id"])
-    ...
+```
+    # Tenant_admin peut seulement cibler son propre tenant
+    tenant_id = admin["tenant_id"]
+else:
+    tenant_id = payload.get("tenant_id", admin["tenant_id"])
+...
+```
+
+```
+
+---
+
+### ❌ Connexion DB sans `with` block ni try/finally (ajouté 26/04)
+
+```python
+# INTERDIT
+def ma_fonction():
+    conn = get_pg_conn()
+    c = conn.cursor()
+    c.execute("...")  # ← si exception ici, conn n'est jamais close
+    # → la connexion fuite du pool, en plus en etat
+    #   "idle in transaction (aborted)" qui pollue le pool entier
+    conn.close()
+```
+
+```python
+# CORRECT (pattern recommande)
+def ma_fonction():
+    with get_pg_conn() as conn:
+        c = conn.cursor()
+        c.execute("...")
+        # rollback + retour au pool automatiques en cas d'exception
+```
+
+```python
+# ACCEPTABLE (si le pattern with est vraiment impossible)
+def ma_fonction():
+    conn = get_pg_conn()
+    try:
+        c = conn.cursor()
+        c.execute("...")
+    finally:
+        try: conn.rollback()
+        except Exception: pass
+        conn.close()
 ```
 
 ---
 
 *Document vivant. À mettre à jour après chaque nouvel anti-pattern détecté.*
+
+```
+```
