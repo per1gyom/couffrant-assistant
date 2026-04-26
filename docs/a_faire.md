@@ -189,10 +189,11 @@ Quand l'architecture aura mûri, identifier dans les règles personnelles celles
 > ✅ **ÉTAPE 0 DÉPLOYÉE** le 26/04 (commit `e937dca`) : 6 migrations DB (max_users, tenant_id NOT NULL, fix default scope).
 >
 > ✅ **ÉTAPE A DÉPLOYÉE** le 26/04 (commits `2bdddb0` + `0f333da`) :
->   - A.1 : isolation tokens OAuth (token_manager.py + 3 migrations oauth_tokens)
->   - A.2 : logs explicites get_tenant_id (au lieu de fallback silencieux)
->   - A.3 : POST/DELETE /admin/tenants → require_super_admin
->   - A.4 : admin_update_user durci contre privilege escalation
+>
+> - A.1 : isolation tokens OAuth (token_manager.py + 3 migrations oauth_tokens)
+> - A.2 : logs explicites get_tenant_id (au lieu de fallback silencieux)
+> - A.3 : POST/DELETE /admin/tenants → require_super_admin
+> - A.4 : admin_update_user durci contre privilege escalation
 >
 > 🚧 **À FAIRE** : Étape B (seat counter + UI quota), C (15 IMPORTANT + 10 ATTENTION), D (tests bout en bout via plan_tests_isolation_pierre_test.md).
 
@@ -384,5 +385,43 @@ La cause profonde du bug est que `created_at` est en type `text`. Le cast `::tim
 **Estimation** : 1-2h selon le nombre de tables concernées. **Précaution** : à faire APRÈS un backup propre (cf. Priorité 6).
 
 **Priorité globale** : modérée. Le système est stable depuis le fix. À traiter en arrière-plan dans les semaines à venir, pas un blocant pour l'audit isolation ni l'onboarding de nouveaux utilisateurs.
+
+---
+
+## 🟠 Priorité 8 — Connexion Odoo durable (en attente OpenFire)
+
+**Statut** : 🚧 **BLOQUÉ par retour OpenFire**, semaine du 26/04/2026.
+
+### Contexte
+
+Aujourd'hui Raya synchronise Odoo via un polling toutes les 2 min sur 11 modèles (`sale.order`, `crm.lead`, `of.planning.tour`, etc.). C'est un palliatif en attendant qu'OpenFire livre le module custom de webhooks temps-réel (cf. `docs/demande_openfire_webhooks_temps_reel.md`).
+
+### En attente du retour d'OpenFire
+
+- État du module webhooks temps-réel custom (livraison ? planning ?)
+- Liste des champs/modèles qu'on n'arrivait pas à récupérer
+
+### 3 manifests cassés à régénérer après retour OpenFire
+
+Tous bloqués par le même bug : le manifest interroge le champ `name` qui n'existe pas sur le modèle Odoo cible (boucle d'erreur `Invalid field 'name' on model X`).
+
+- `of.survey.answers` — désactivé le 20/04
+- `of.survey.user_input.line` — désactivé le 20/04
+- `mail.activity` — désactivé le 26/04 (commit `a6b33f8`)
+
+Fix propre : régénérer les manifests en utilisant `display_name` ou `summary` au lieu de `name`.
+
+### À faire dès qu'on a le retour OpenFire
+
+1. Ouvrir un doc dédié `docs/roadmap_odoo_durable.md` qui :
+   - Cartographie l'existant (12 modèles polled, archi tenant_id-aware)
+   - Anticipe le multi-tenant Odoo (un Odoo par tenant)
+   - Anticipe la migration polling → webhooks OpenFire
+   - Liste les champs/modèles à enrichir
+2. Régénérer les 3 manifests cassés
+3. Si webhooks OpenFire dispo : prévoir le switchover sans coupure
+4. Décider si dashboard santé Odoo dans le panel admin (ou logs only)
+
+**Estimation** : impossible tant qu'on n'a pas le retour OpenFire.
 
 ---
