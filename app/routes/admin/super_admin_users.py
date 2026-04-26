@@ -107,6 +107,13 @@ def admin_create_user(
                 f"'{payload_tenant}' refusee.",
             )
 
+    # 4. Verification du quota seats (etape B.1b 26/04)
+    # Refuse 403 si tenant plein. Le super_admin peut bypasser ce check
+    # uniquement en augmentant max_users via PUT /admin/tenants/{id}/quota
+    # (pas un bypass arbitraire : c'est un acte trace de facturation).
+    from app.seat_counter import assert_seat_available
+    assert_seat_available(target_tenant)
+
     result = create_user(
         new_username,
         payload.get("password", ""),

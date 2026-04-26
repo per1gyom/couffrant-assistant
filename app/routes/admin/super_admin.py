@@ -221,6 +221,102 @@ def list_tenants_endpoint(request: Request, _: dict = Depends(require_admin)):
     return list_tenants()
 
 
+@router.get("/admin/tenants/{tenant_id}/quota")
+def get_tenant_quota_endpoint(
+    request: Request,
+    tenant_id: str,
+    admin: dict = Depends(require_tenant_admin),
+):
+    """Retourne l'etat du quota d'un tenant (etape B.1b 26/04).
+
+    Reponse :
+        {
+            'tenant_id': str,
+            'max_users': int,
+            'used': int,            # users actifs (hors soft-delete)
+            'available': int,       # max_users - used
+            'soft_deleted': int,
+            'is_full': bool
+        }
+
+    Cote tenant_admin : ne peut lire que son propre tenant
+    (assert_same_tenant via comparaison directe).
+    Cote admin/super_admin global : libre.
+    """
+    if admin.get("scope") not in (SCOPE_ADMIN, SCOPE_SUPER_ADMIN):
+        if admin.get("tenant_id") != tenant_id:
+            raise HTTPException(
+                403,
+                f"Acces refuse : vous ne pouvez consulter que le quota "
+                f"de votre propre tenant.",
+            )
+    from app.seat_counter import get_tenant_quota
+    return get_tenant_quota(tenant_id)
+
+
+@router.put("/admin/tenants/{tenant_id}/quota")
+def update_tenant_quota_endpoint(
+    request: Request,
+    tenant_id: str,
+    payload: dict = Body(...),
+    admin: dict = Depends(require_super_admin),
+):
+    """Modifie le quota max_users d'un tenant (super_admin only,
+    etape B.1b 26/04). C'est un acte de facturation : tracable dans
+    admin_audit_log avec la motivation.
+
+    Body : { 'max_users': int, 'reason': str }
+
+    Refuse de descendre max_users en dessous du nombre actuel d'users
+    actifs (sinon on aurait des users "en surnombre" sans pouvoir les
+    soft-delete proprement).
+    """
+    from app.seat_counter import get_tenant_quota
+    new_max = payload.get("max_users")
+    reason = (payload.get("reason") or "").strip()
+    if not isinstance(new_max, int) or new_max < 1:
+        raise HTTPException(400, "max_users doit etre un entier >= 1.")
+    if len(reason) < 5:
+        raise HTTPException(
+            400,
+            "Motivation obligatoire (5 chars min). Ex: 'Upgrade plan "
+            "Pro 5->10 users, facture FAC-2026-042'.",
+        )
+    quota = get_tenant_quota(tenant_id)
+    if new_max < quota["used"]:
+        raise HTTPException(
+            400,
+            f"Impossible de descendre max_users a {new_max} : le tenant "
+            f"a deja {quota['used']} users actifs. Soft-delete des users "
+            f"d'abord.",
+        )
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            "UPDATE tenants SET max_users = %s WHERE id = %s",
+            (new_max, tenant_id),
+        )
+        if c.rowcount == 0:
+            raise HTTPException(404, f"Tenant '{tenant_id}' introuvable.")
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
+    log_admin_action(
+        admin["username"], "update_tenant_quota", tenant_id,
+        f"max_users={quota['max_users']}->{new_max} reason={reason[:80]}",
+    )
+    return {
+        "status": "ok",
+        "message": f"Quota tenant '{tenant_id}' : "
+                   f"{quota['max_users']} -> {new_max} seats.",
+        "previous_max_users": quota["max_users"],
+        "new_max_users": new_max,
+    }
+
+
 @router.post("/admin/tenants")
 def create_tenant_endpoint(
     request: Request,
