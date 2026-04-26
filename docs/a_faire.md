@@ -184,7 +184,17 @@ Quand l'architecture aura mûri, identifier dans les règles personnelles celles
 
 > ✅ **AUDIT FAIT** le 25/04 soir. Voir `docs/audit_isolation_25avril_complementaire.md` (758 lignes). Bilan : 8 trous CRITIQUES, 15 IMPORTANT, 10 ATTENTION identifiés. Checklist permanente créée : `docs/checklist_isolation_multitenant.md`.
 >
-> ⚠️ **DÉCISION EN ATTENTE** : modèle de rôles utilisateur à trancher avant d'appliquer les corrections. Voir `docs/decision_roles_utilisateurs_a_trancher.md`. 5 questions à répondre, \~10 min de lecture, à faire à tête reposée.
+> ✅ **DÉCISION TRANCHÉE** le 26/04 : modèle SaaS avec quota par tenant. couffrant_solar=5 seats, juillet=1 seat. Q1-Q4 = tenant_admin, Q5 = super_admin only (jusqu'à facturation tokens).
+>
+> ✅ **ÉTAPE 0 DÉPLOYÉE** le 26/04 (commit `e937dca`) : 6 migrations DB (max_users, tenant_id NOT NULL, fix default scope).
+>
+> ✅ **ÉTAPE A DÉPLOYÉE** le 26/04 (commits `2bdddb0` + `0f333da`) :
+>   - A.1 : isolation tokens OAuth (token_manager.py + 3 migrations oauth_tokens)
+>   - A.2 : logs explicites get_tenant_id (au lieu de fallback silencieux)
+>   - A.3 : POST/DELETE /admin/tenants → require_super_admin
+>   - A.4 : admin_update_user durci contre privilege escalation
+>
+> 🚧 **À FAIRE** : Étape B (seat counter + UI quota), C (15 IMPORTANT + 10 ATTENTION), D (tests bout en bout via plan_tests_isolation_pierre_test.md).
 
 **Contexte** : avant d'onboarder Pierre, Sabrina, Benoît ou un 2e tenant, vérifier que le modèle d'isolation décrit ci-dessus est bien respecté partout dans le code.
 
