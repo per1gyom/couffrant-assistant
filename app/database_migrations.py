@@ -931,4 +931,19 @@ MIGRATIONS = [
     "ALTER TABLE oauth_tokens DROP CONSTRAINT IF EXISTS oauth_tokens_provider_username_unique",
     "ALTER TABLE oauth_tokens DROP CONSTRAINT IF EXISTS oauth_tokens_provider_username_tenant_unique",
     "ALTER TABLE oauth_tokens ADD CONSTRAINT oauth_tokens_provider_username_tenant_unique UNIQUE (provider, username, tenant_id)",
+
+    # -- Phase soft-delete users (26/04/2026, etape B.1a-1) --
+    # Decision Guillaume 26/04 : on passe en soft-delete pour permettre
+    # de "remplacer" Marc par Sophie en gardant l'historique de Marc
+    # accessible. La purge definitive devient un workflow a 2 etapes :
+    # tenant_admin demande, super_admin valide.
+
+    # M-D01 : soft-delete (par tenant_admin ou super_admin)
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_by TEXT NULL",
+
+    # M-D02 : workflow purge definitive
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS permanent_deletion_requested_at TIMESTAMP NULL",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS permanent_deletion_requested_by TEXT NULL",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS permanent_deletion_reason TEXT NULL",
 ]

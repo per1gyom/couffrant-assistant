@@ -49,17 +49,45 @@ def resolve_username(login: str) -> str | None:
 
 
 def authenticate(username: str, password: str) -> bool:
-    """Vérifie le mot de passe. Accepte username OU email comme identifiant."""
+    """Verifie le mot de passe. Accepte username OU email comme identifiant.
+
+    HOTFIX 26/04 (etape B.1a-1) : refuse les users soft-delete
+    (deleted_at IS NOT NULL) meme si le password est valide. Utiliser
+    is_user_deleted() pour differencier 401 (mauvais mdp) de 403
+    (compte desactive) cote route login.
+    """
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
         c.execute("""
-            SELECT password_hash FROM users
+            SELECT password_hash, deleted_at FROM users
             WHERE username = %s OR lower(email) = lower(%s)
         """, (username.strip(), username.strip()))
         row = c.fetchone()
         if not row: return False
+        if row[1] is not None: return False  # User soft-delete : refus
         return verify_password(password, row[0])
+    except Exception:
+        return False
+    finally:
+        if conn: conn.close()
+
+
+def is_user_deleted(username: str) -> bool:
+    """Retourne True si le user est soft-delete (deleted_at IS NOT NULL).
+    Permet a la route login d'afficher 403 explicite au lieu d'un 401
+    generique (decision Guillaume 26/04 : meilleure UX = le user sait
+    qu'il doit contacter son admin)."""
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute(
+            "SELECT deleted_at FROM users "
+            "WHERE username = %s OR lower(email) = lower(%s)",
+            (username.strip(), username.strip()),
+        )
+        row = c.fetchone()
+        return bool(row and row[0] is not None)
     except Exception:
         return False
     finally:
@@ -181,7 +209,19 @@ def update_user(username: str, email: str = None, scope: str = None,
 
 
 def delete_user(username: str, requesting_user: str, requesting_tenant: str = None) -> dict:
-    """Supprime un utilisateur et toutes ses données personnelles (RGPD)."""
+    """Soft-delete un utilisateur (refactor 26/04 etape B.1a-1).
+
+    Pose deleted_at + deleted_by, conserve toutes les donnees du user
+    intactes (rules, conversations, mails). Permet a un nouveau user
+    (ex: Marc reprend le poste de Marie) de recuperer ces donnees plus
+    tard via reassignation.
+
+    La suppression DEFINITIVE des donnees passe par
+    permanent_delete_user() (workflow 2 etapes : tenant_admin demande,
+    super_admin valide).
+
+    Idempotent : si le user est deja soft-delete, ne fait rien.
+    """
     from app.security_users import get_tenant_id
     if username.strip() == requesting_user.strip():
         return {"status": "error", "message": "Impossible de supprimer son propre compte."}
@@ -191,8 +231,52 @@ def delete_user(username: str, requesting_user: str, requesting_tenant: str = No
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("DELETE FROM users WHERE username=%s AND username!=%s",
-                  (username.strip(), requesting_user.strip()))
+        # Verifier que le user existe et n'est pas deja soft-delete
+        c.execute(
+            "SELECT deleted_at FROM users WHERE username=%s",
+            (username.strip(),),
+        )
+        row = c.fetchone()
+        if not row:
+            return {"status": "error", "message": "Introuvable."}
+        if row[0] is not None:
+            return {"status": "ok", "message": f"'{username}' deja desactive."}
+
+        # Soft-delete : marque le user, ne touche pas aux donnees
+        c.execute(
+            "UPDATE users SET deleted_at = NOW(), deleted_by = %s WHERE username = %s",
+            (requesting_user.strip(), username.strip()),
+        )
+        conn.commit()
+        return {
+            "status": "ok",
+            "message": f"'{username}' desactive. Donnees conservees, "
+                       f"recuperables ulterieurement (reassignation possible "
+                       f"a un nouveau user, ou purge definitive via super_admin).",
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:200]}
+    finally:
+        if conn: conn.close()
+
+
+def permanent_delete_user(username: str, requesting_user: str) -> dict:
+    """Purge DEFINITIVE des donnees d'un user (etape B.1a-1, super_admin
+    only). Equivaut a l'ancien delete_user() : DELETE FROM users + DELETE
+    en cascade + anonymisation des donnees collectives.
+
+    A appeler uniquement apres validation explicite du super_admin
+    (workflow request -> confirm). Operation irreversible.
+    """
+    if username.strip() == requesting_user.strip():
+        return {"status": "error", "message": "Impossible de purger son propre compte."}
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute(
+            "DELETE FROM users WHERE username=%s AND username!=%s",
+            (username.strip(), requesting_user.strip()),
+        )
         if c.rowcount == 0:
             return {"status": "error", "message": "Introuvable."}
 
@@ -209,31 +293,49 @@ def delete_user(username: str, requesting_user: str, requesting_tenant: str = No
             except Exception:
                 pass
 
+        # Anonymisation des donnees collectives (gardees pour le tenant)
         anon = f"ancien_{username.strip()}"
-        for table in ["aria_rules", "aria_insights", "aria_patterns", "dossier_narratives", "mail_memory", "activity_log"]:
+        for table in ["aria_rules", "aria_insights", "aria_patterns",
+                      "dossier_narratives", "mail_memory", "activity_log"]:
             try:
-                c.execute(f"UPDATE {table} SET username=%s WHERE username=%s", (anon, username.strip()))
+                c.execute(
+                    f"UPDATE {table} SET username=%s WHERE username=%s",
+                    (anon, username.strip()),
+                )
             except Exception:
                 pass
 
         conn.commit()
-        return {"status": "ok", "message": f"'{username}' supprimé. Données collectives conservées sous '{anon}'."}
+        return {
+            "status": "ok",
+            "message": f"'{username}' purge definitivement. "
+                       f"Donnees collectives conservees sous '{anon}'.",
+        }
     except Exception as e:
-        return {"status": "error", "message": str(e)[:100]}
+        return {"status": "error", "message": str(e)[:200]}
     finally:
         if conn: conn.close()
 
 
-def list_users() -> list:
+def list_users(include_deleted: bool = False) -> list:
+    """Liste les users.
+
+    HOTFIX 26/04 (etape B.1a-1) : ajout du parametre include_deleted
+    (defaut False = exclut les users soft-delete). Le super_admin peut
+    passer include_deleted=True pour avoir une vue complete (audit,
+    restauration, purge definitive).
+    """
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("""
+        where_clause = "" if include_deleted else "WHERE deleted_at IS NULL"
+        c.execute(f"""
             SELECT username, email, scope, tenant_id, last_login, created_at,
                    COALESCE(account_locked, false), COALESCE(must_reset_password, false), phone,
                    COALESCE(suspended, false), suspended_reason, display_name,
-                   deletion_requested_at
-            FROM users ORDER BY tenant_id, created_at
+                   deletion_requested_at, deleted_at, deleted_by
+            FROM users {where_clause}
+            ORDER BY tenant_id, created_at
         """)
         return [{
             "username": r[0], "email": r[1], "scope": r[2], "tenant_id": r[3],
@@ -243,6 +345,8 @@ def list_users() -> list:
             "suspended": bool(r[9]), "suspended_reason": r[10] or "",
             "display_name": r[11] or "",
             "deletion_requested_at": str(r[12]) if r[12] else None,
+            "deleted_at": str(r[13]) if r[13] else None,
+            "deleted_by": r[14] or None,
         } for r in c.fetchall()]
     except Exception:
         return []

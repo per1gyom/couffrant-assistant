@@ -61,16 +61,61 @@ def admin_create_user(
     payload: dict = Body(...),
     admin: dict = Depends(require_admin),
 ):
+    """Cree un user. Durci le 26/04 (etape B.1a-1) :
+    - tenant_admin force a creer dans son propre tenant uniquement
+    - validation scope contre ALL_SCOPES (refuse strings arbitraires)
+    - blocage promotion super_admin (hardcoded uniquement)
+    - retrait du fallback silencieux DEFAULT_TENANT
+    """
     new_username = payload.get("username", "").strip()
+    new_scope = (payload.get("scope") or SCOPE_USER).strip()
+
+    # 1. Validation enum scope
+    if new_scope not in ALL_SCOPES:
+        raise HTTPException(
+            400,
+            f"Scope invalide : '{new_scope}'. Valides : {sorted(ALL_SCOPES)}",
+        )
+    # 2. Refus de creation directe en super_admin
+    if new_scope == SCOPE_SUPER_ADMIN:
+        raise HTTPException(
+            403,
+            "Le scope super_admin ne peut pas etre attribue par API "
+            "(hardcoded uniquement via get_effective_scope).",
+        )
+
+    # 3. Determiner le tenant_id cible avec controle d'autorisation
+    payload_tenant = (payload.get("tenant_id") or "").strip()
+    if admin.get("scope") in (SCOPE_ADMIN, SCOPE_SUPER_ADMIN):
+        # admin/super_admin global : peut creer dans n'importe quel tenant
+        # mais on exige que tenant_id soit explicite (plus de fallback silencieux)
+        if not payload_tenant:
+            raise HTTPException(
+                400,
+                "tenant_id obligatoire pour admin/super_admin global.",
+            )
+        target_tenant = payload_tenant
+    else:
+        # tenant_admin : force creation dans SON tenant, ignore tout
+        # tenant_id du payload (anti privilege-escalation cross-tenant)
+        target_tenant = admin["tenant_id"]
+        if payload_tenant and payload_tenant != target_tenant:
+            raise HTTPException(
+                403,
+                f"Un tenant_admin ne peut creer un user que dans son "
+                f"propre tenant ('{target_tenant}'). Demande pour "
+                f"'{payload_tenant}' refusee.",
+            )
+
     result = create_user(
         new_username,
         payload.get("password", ""),
-        payload.get("scope", SCOPE_USER),
+        new_scope,
         payload.get("tools"),
-        tenant_id=payload.get("tenant_id", DEFAULT_TENANT),
+        tenant_id=target_tenant,
         email=payload.get("email"),
     )
-    log_admin_action(admin["username"], "create_user", new_username)
+    log_admin_action(admin["username"], "create_user", new_username, target_tenant)
     return result
 
 
@@ -121,6 +166,11 @@ def admin_delete_user(
     target: str,
     user: dict = Depends(require_admin),
 ):
+    """Soft-delete d'un user. Durci 26/04 (etape B.1a-1) :
+    tenant_admin force a delete uniquement dans son propre tenant.
+    """
+    if user.get("scope") not in (SCOPE_ADMIN, SCOPE_SUPER_ADMIN):
+        assert_same_tenant(request, target)
     result = delete_user(target, user["username"])
     log_admin_action(user["username"], "delete_user", target)
     return result
@@ -334,9 +384,13 @@ def admin_confirm_delete(
     admin: dict = Depends(require_tenant_admin),
 ):
     """
-    L'admin confirme la suppression d'un compte dont deletion_requested_at est renseigné.
-    Exécute la vraie suppression RGPD.
+    L'admin confirme la suppression d'un compte dont deletion_requested_at
+    est renseigne. Execute la vraie suppression RGPD.
+    Durci 26/04 (etape B.1a-1) : assert_same_tenant pour empecher un
+    tenant_admin de confirmer la suppression d'un user d'un autre tenant.
     """
+    if admin.get("scope") not in (SCOPE_ADMIN, SCOPE_SUPER_ADMIN):
+        assert_same_tenant(request, username)
     from app.database import get_pg_conn
     from app.security_users import delete_user as _delete_user
     from app.admin_audit import log_admin_action
@@ -375,8 +429,11 @@ def admin_reject_delete(
     admin: dict = Depends(require_tenant_admin),
 ):
     """
-    L'admin refuse la demande de suppression. Remet deletion_requested_at à NULL.
+    L'admin refuse la demande de suppression. Remet deletion_requested_at
+    a NULL. Durci 26/04 (etape B.1a-1) : assert_same_tenant.
     """
+    if admin.get("scope") not in (SCOPE_ADMIN, SCOPE_SUPER_ADMIN):
+        assert_same_tenant(request, username)
     from app.database import get_pg_conn
     from app.admin_audit import log_admin_action
     conn = None

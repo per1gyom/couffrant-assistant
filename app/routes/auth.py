@@ -167,6 +167,20 @@ async def login_app_post(
             error_block=f'<div class="error">{msg_lock}</div>'
         ))
 
+    # HOTFIX 26/04 (etape B.1a-1) : refuser explicitement les users
+    # soft-delete (deleted_at IS NOT NULL) avec un message clair
+    # plutot qu'un 401 generique. Decision Guillaume : meilleure UX,
+    # le user sait qu'il doit contacter son admin.
+    from app.user_crud import is_user_deleted as _is_deleted
+    if _is_deleted(login_input):
+        return HTMLResponse(
+            LOGIN_PAGE_HTML.format(
+                error_block='<div class="error">Compte desactive. '
+                            'Contactez votre administrateur pour le reactiver.</div>'
+            ),
+            status_code=403,
+        )
+
     if authenticate(login_input, password):
         clear_attempts(ip)
         clear_user_attempts(real_username)
