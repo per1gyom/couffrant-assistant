@@ -218,7 +218,7 @@ def _etape4_p2_complet(tenant_id: str, source: str) -> dict:
     return _wait_run_completion(run_id, max_seconds=10800)  # 3h max
 
 
-def _run_complete_overnight_scan(tenant_id: str = "couffrant", source: str = "odoo"):
+def _run_complete_overnight_scan(tenant_id: str = "couffrant_solar", source: str = "odoo"):
     """Fonction principale exécutée en thread daemon.
     Enchaine les 4 étapes. Chacune dans un try/except pour ne pas bloquer
     les suivantes si l'une plante."""
@@ -288,7 +288,7 @@ def _run_complete_overnight_scan(tenant_id: str = "couffrant", source: str = "od
             _scan_nuit_running = False
 
 
-def launch_async(tenant_id: str = "couffrant", source: str = "odoo") -> dict:
+def launch_async(tenant_id: str = "couffrant_solar", source: str = "odoo") -> dict:
     """Lance le scan de nuit en thread daemon. Appele par l endpoint admin.
     Retourne immediatement. Si deja en cours, refuse (verrou global).
 

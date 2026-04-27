@@ -448,7 +448,7 @@ MODEL_RECORD_LIMITS = {
 
 
 def start_scan_p1(
-    tenant_id: str = "couffrant",
+    tenant_id: str = "couffrant_solar",
     source: str = "odoo",
     priority_max: int = 1,
     purge_first: bool = True,

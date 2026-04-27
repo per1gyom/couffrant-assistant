@@ -601,7 +601,7 @@ async def admin_scanner_debug_extract(
 @router.get("/admin/scanner/integrity")
 def admin_scanner_integrity(
     request: Request,
-    tenant_id: str = "couffrant",
+    tenant_id: str = "couffrant_solar",
     source: str = "odoo",
     _: dict = Depends(require_admin),
 ):
@@ -792,7 +792,7 @@ def admin_scanner_scan_nuit_complet(
     Duree 2h-3h. Suivi via dashboard Integrite."""
     try:
         from app.jobs.scan_nuit_complet_job import launch_async
-        return launch_async(tenant_id="couffrant", source="odoo")
+        return launch_async(tenant_id="couffrant_solar", source="odoo")
     except Exception as e:
         import traceback
         return {"status": "error", "message": str(e)[:300],
@@ -1467,7 +1467,7 @@ def admin_scanner_debug_embed(
 @router.post("/admin/scanner/run/start")
 def admin_scanner_run_start(
     request: Request,
-    tenant_id: str = "couffrant",
+    tenant_id: str = "couffrant_solar",
     source: str = "odoo",
     priority_max: int = 1,
     purge_first: bool = True,
@@ -1548,7 +1548,7 @@ def admin_scanner_run_stop(
 @router.get("/admin/scanner/run/list")
 def admin_scanner_run_list(
     request: Request,
-    tenant_id: str = "couffrant",
+    tenant_id: str = "couffrant_solar",
     limit: int = 10,
     _: dict = Depends(require_admin),
 ):
@@ -1565,7 +1565,7 @@ def admin_scanner_run_list(
 @router.post("/admin/scanner/run/test-missing")
 def admin_scanner_run_test_missing(
     request: Request,
-    tenant_id: str = "couffrant",
+    tenant_id: str = "couffrant_solar",
     source: str = "odoo",
     sample_size: int = 200,
     priority_max: int = 1,
@@ -1660,7 +1660,7 @@ def admin_scanner_run_test_missing(
 @router.post("/admin/scanner/purge")
 def admin_scanner_purge(
     request: Request,
-    tenant_id: str = "couffrant",
+    tenant_id: str = "couffrant_solar",
     source: str = "odoo",
     confirm: str = "",
     _: dict = Depends(require_admin),
@@ -1681,7 +1681,7 @@ def admin_scanner_purge(
 @router.post("/admin/scanner/manifests/generate")
 def admin_scanner_generate_manifests(
     request: Request,
-    tenant_id: str = "couffrant",
+    tenant_id: str = "couffrant_solar",
     source: str = "odoo",
     _: dict = Depends(require_admin),
 ):
@@ -1706,7 +1706,7 @@ def admin_scanner_generate_manifests(
 @router.get("/admin/scanner/manifests")
 def admin_scanner_list_manifests(
     request: Request,
-    tenant_id: str = "couffrant",
+    tenant_id: str = "couffrant_solar",
     source: str = "odoo",
     _: dict = Depends(require_admin),
 ):
@@ -1723,7 +1723,7 @@ def admin_scanner_list_manifests(
 def admin_scanner_get_manifest(
     request: Request,
     model_name: str,
-    tenant_id: str = "couffrant",
+    tenant_id: str = "couffrant_solar",
     source: str = "odoo",
     _: dict = Depends(require_admin),
 ):
@@ -1743,7 +1743,7 @@ def admin_scanner_get_manifest(
 async def admin_scanner_update_manifest(
     request: Request,
     model_name: str,
-    tenant_id: str = "couffrant",
+    tenant_id: str = "couffrant_solar",
     source: str = "odoo",
     _: dict = Depends(require_admin),
 ):
