@@ -112,7 +112,7 @@ Regles non negociables :
 """
 
 
-def _load_user_preferences(username: str, tenant_id: str, query: str = "") -> str:
+def _load_user_preferences(username: str, tenant_id: str, query: str = "") -> tuple:
     """
     Charge les preferences durables (niveau 3 de la memoire).
 
@@ -120,38 +120,52 @@ def _load_user_preferences(username: str, tenant_id: str, query: str = "") -> st
     (app.rag.retrieve_context + app.embedding.search_similar sur
     aria_rules.embedding, pgvector).
 
-    Avant : SQL buggee (colonne rule_text n existait pas) + bulk 50 regles
-    Maintenant : top 10 regles par similarite cosine avec la query
+    V2.5 (27/04 soir) : retourne desormais un tuple (text, rule_ids, via_rag)
+    pour permettre le tracage des regles utilisees -> save_response_metadata
+    -> renforcement par feedback positif. Avant : retournait juste str et
+    le mode V2 ne savait pas quelles regles avaient ete injectees.
 
     Dégradation gracieuse :
       - Si OpenAI indispo : fallback SQL avec la BONNE colonne (rule)
-      - Si erreur : retourne "" et Raya continue sans regles (comportement
-        equivalent a l ancien bug, mais propre au moins)
+      - Si erreur : retourne ("", [], False) et Raya continue sans regles
 
     Filtres systematiques :
       - username = l utilisateur courant
       - tenant_id = tenant courant (evite pollution multi-tenant)
       - active = true
       - confidence >= 0.30 (deja filtre dans rag.retrieve_rules)
+
+    Returns:
+        tuple (text, rule_ids, via_rag) :
+          - text : str avec les regles formatees (a injecter dans system prompt)
+          - rule_ids : list[int] des IDs de regles injectees (pour metadata)
+          - via_rag : bool, True si retrieval semantique a fonctionne
     """
     # Tentative 1 : retrieval semantique via RAG existant
     try:
         from app.rag import retrieve_context
         rag_ctx = retrieve_context(query or "", username, tenant_id)
         rules_text = rag_ctx.get("rules_text", "")
+        rule_ids = rag_ctx.get("rule_ids", []) or []
+        via_rag = bool(rag_ctx.get("via_rag", False))
         if rules_text.strip():
-            return "\n\n=== PREFERENCES APPRISES (top 10 pertinentes) ===\n" + rules_text
+            return (
+                "\n\n=== PREFERENCES APPRISES (top 10 pertinentes) ===\n" + rules_text,
+                rule_ids,
+                via_rag,
+            )
     except Exception as e:
         logger.warning("[Agent] retrieve_context error, fallback SQL: %s", e)
 
     # Tentative 2 : fallback SQL avec la BONNE colonne (rule, pas rule_text)
-    # Utilise uniquement si retrieve_context a echoue (ex : OpenAI down)
+    # Utilise uniquement si retrieve_context a echoue (ex : OpenAI down).
+    # On recupere aussi les IDs pour traçabilite feedback meme en fallback.
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute(
-            "SELECT category, rule FROM aria_rules "
+            "SELECT id, category, rule FROM aria_rules "
             "WHERE username = %s "
             "  AND (tenant_id = %s OR tenant_id IS NULL) "
             "  AND active = true "
@@ -162,19 +176,20 @@ def _load_user_preferences(username: str, tenant_id: str, query: str = "") -> st
         )
         rules = c.fetchall()
         if not rules:
-            return ""
+            return ("", [], False)
+        rule_ids_fallback = [r[0] for r in rules]
         by_cat = {}
-        for cat, rule in rules:
+        for _id, cat, rule in rules:
             by_cat.setdefault(cat, []).append(rule)
         lines = ["\n\n=== PREFERENCES APPRISES (fallback top 30) ==="]
         for cat, items in by_cat.items():
             lines.append(f"\n[{cat}]")
             for r in items:
                 lines.append(f"  - {r}")
-        return "\n".join(lines)
+        return ("\n".join(lines), rule_ids_fallback, False)
     except Exception as e:
         logger.warning("[Agent] load_user_preferences fallback error: %s", e)
-        return ""
+        return ("", [], False)
     finally:
         if conn:
             conn.close()
@@ -441,7 +456,10 @@ def _raya_core_agent(
         display_name = username.capitalize()
         base_system = _build_agent_system_prompt(username, tenant_id, display_name)
         # V2.2 : passage de la query pour retrieval semantique cible (top 10 regles)
-        preferences = _load_user_preferences(username, tenant_id, query=payload.query or "")
+        # V2.5 : recupere aussi rule_ids et via_rag pour traçabilite feedback
+        preferences, rule_ids_injected, via_rag_used = _load_user_preferences(
+            username, tenant_id, query=payload.query or ""
+        )
         system = base_system + preferences
 
         # Consignes globales (tenant-wide)
@@ -736,6 +754,40 @@ def _raya_core_agent(
             logger.warning(
                 "[Agent] graphage conv %d a echoue : %s",
                 aria_memory_id, str(e)[:200],
+            )
+
+    # ──── METADATA RESPONSE pour feedback 👍/👎 (V2.5 - 27/04 soir) ────
+    # Stocke les infos de raisonnement pour permettre :
+    #   - le renforcement des regles via 👍 (process_positive_feedback)
+    #   - la formulation d une regle corrective via 👎 (process_negative_feedback)
+    #   - l affichage du "Pourquoi cette reponse ?" (get_response_metadata)
+    # En thread background (non bloquant) comme en V1.
+    # Bug fix : avant ce commit, save_response_metadata n etait JAMAIS
+    # appele en mode V2 agent -> aucun feedback n etait trace -> les 👍
+    # cliques par les users etaient silencieusement perdus.
+    if aria_memory_id:
+        try:
+            import threading
+            from app.feedback import save_response_metadata
+            # Resolution du nom de modele effectif a partir du tier
+            from app.llm_client import _PROVIDER_MODELS, LLM_PROVIDER
+            model_name_resolved = (
+                _PROVIDER_MODELS.get(LLM_PROVIDER, {}).get(model_tier_local)
+                or "unknown"
+            )
+            threading.Thread(
+                target=save_response_metadata,
+                args=(
+                    aria_memory_id, username, tenant_id,
+                    model_tier_local, model_name_resolved,
+                    via_rag_used, rule_ids_injected,
+                ),
+                daemon=True,
+            ).start()
+        except Exception as e:
+            logger.warning(
+                "[Agent] save_response_metadata a echoue (non bloquant) : %s",
+                str(e)[:200],
             )
 
     # Log usage total
