@@ -99,6 +99,33 @@ pas ces lignes via l API.
 
 **Priorite : Importante** (planning quotidien, fonctionnalite cle).
 
+### Audit du 27/04 23h — Le refactor est en fait trivial
+
+**Investigation** : comparaison ancien format `odoo-partner-3795` vs nouveau
+format `odoo:res.partner:3795` dans semantic_graph_nodes.
+
+**Constat** : sur 1 894 anciens noeuds, **1 881 sont des doublons** des
+nouveaux noeuds. Seulement 13 orphelins (1%), dont 12 toujours actifs
+dans odoo_semantic_content (anomalie scanner ponctuelle).
+
+**Donc** : le scanner universel a bien re-vectorise toute la base. Les
+anciens noeuds sont obsoletes.
+
+**Plan refactor pour demain (~2h propres)** :
+1. (15 min) Identifier les modules qui creent encore l'ancien format
+   (probablement `app/jobs/odoo_vectorize.py` qui n'a pas ete migre)
+2. (30 min) Desactiver ces modules ou les pointer vers le nouveau format
+3. (30 min) Regenerer les 12 partners orphelins (re-scan cible)
+4. (15 min) Supprimer les 1881 anciens noeuds + 2508 edges associes
+   (transaction unique)
+5. (15 min) Mettre a jour `_enrich_with_graph` :
+   - Format des cles : `odoo:res.partner:%s` au lieu de `odoo-partner-%s`
+   - Ajouter Tour, TourStop, Task (manquants -> bug 3 planning)
+6. (30 min) Tests prod
+
+**A ce moment-la, le bug 3 (planning sans detail) est resolu** car
+of.planning.tour ET of.planning.tour.line auront un mapping correct.
+
 ---
 
 ## 🆕 Récap des chantiers TERMINÉS cette semaine (22-26 avril)
