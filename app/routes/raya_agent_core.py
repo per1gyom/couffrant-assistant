@@ -712,8 +712,9 @@ def _raya_core_agent(
             )
             if conv_node_id:
                 flush_to_graph(aria_memory_id, tenant_id, conv_node_id)
-                # Marquer indexed_in_graph pour eviter retraitement
-                # par l ancien graph_indexer (qu on supprimera ensuite)
+                # Marquer indexed_in_graph=true (legacy : la colonne est
+                # encore en place pour une eventuelle reindexation manuelle
+                # ou un audit. graph_indexer a ete supprime le 27/04.)
                 try:
                     from app.database import get_pg_conn
                     _conn = get_pg_conn()

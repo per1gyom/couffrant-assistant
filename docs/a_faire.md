@@ -2,7 +2,45 @@
 
 Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 
-**Dernière MAJ** : 26 avril 2026 matin.
+**Dernière MAJ** : 27 avril 2026 fin d'après-midi.
+
+---
+
+## 🚨 ANOMALIE DÉCOUVERTE 27/04 — Boucle de feedback 👍/👎 inactive
+
+**Contexte** : audit pendant la session graphage des conversations.
+Guillaume a cliqué 👍 sur la conv 407 → on a vérifié en DB.
+
+**Constat** :
+- 0 entrée dans `aria_response_metadata` pour les conv 405/406/407
+  (pourtant créées juste avant)
+- 0 feedback positif jamais enregistré dans toute la base
+
+**Conséquence** :
+- Quand Guillaume clique 👍, le code prévoit un renforcement des règles
+  utilisées (+0.05 confiance) mais **rien ne se passe** car aucune métadonnée
+  n'a été stockée → pas de règle à renforcer.
+- L'apprentissage par feedback est totalement inactif depuis longtemps.
+
+**Bugs probables (à investiguer)** :
+1. **Bug A** : `save_response_metadata()` n'est plus appelé dans le mode
+   agent V2 (raya_agent_core.py). Probable régression lors du passage
+   de V1 (raya.py legacy) à V2 (raya_agent_core.py).
+2. **Bug B** : à vérifier que le bouton 👍 dans l'UI déclenche bien
+   l'appel HTTP `POST /raya/feedback`.
+
+**Code concerné** :
+- `app/feedback.py` (process_positive_feedback, save_response_metadata)
+- `app/routes/raya.py:287` (endpoint /raya/feedback)
+- `app/routes/raya_agent_core.py` (boucle V2 — manque l'appel à
+  save_response_metadata)
+
+**Effort estimé** : 1-2h (debug + fix + test)
+
+**Priorité** : Élevée. Sans feedback, Raya n'apprend pas des préférences
+de Guillaume. C'est l'une des fonctions clés du produit.
+
+**À faire après l'étape 1 graphage en cours.**
 
 ---
 

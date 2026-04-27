@@ -245,20 +245,10 @@ def _register_jobs(scheduler: BackgroundScheduler):
         logger.info("[Scheduler] Job DÉSACTIVÉ : odoo_polling")
 
 
-    # Graph indexer v2 (etape 4.8) : indexe les conversations Raya dans le
-    # graphe semantique pour la memoire longue. Se declenche toutes les
-    # 3 min mais ne fait un batch que si >=8 convs en attente OU >30 min
-    # d inactivite (logique dans graph_indexer.should_run_batch).
-    # Pertinent quand RAYA_AGENT_MODE=true, mais fonctionne aussi en v1
-    # (les convs v1 sont aussi indexables, ca prepare le terrain).
-    if _job_enabled("SCHEDULER_GRAPH_INDEXER_ENABLED", default=True):
-        try:
-            from app.jobs.graph_indexer import run_if_needed as _graph_indexer_run
-            scheduler.add_job(func=_graph_indexer_run, trigger=IntervalTrigger(minutes=3),
-                              id="graph_indexer", name="Indexation conversations dans le graphe",
-                              replace_existing=True)
-            logger.info("[Scheduler] Job enregistré : graph_indexer (3 min)")
-        except Exception as e:
-            logger.error(f"[Scheduler] Import échoué pour graph_indexer: {e}")
-    else:
-        logger.info("[Scheduler] Job DÉSACTIVÉ : graph_indexer")
+    # NOTE 27/04/2026 : job graph_indexer SUPPRIME.
+    # Remplace par graphage en temps reel via app/conversation_entities.py
+    # qui collecte les entites consultees par les outils Raya pendant
+    # l echange et cree les edges directement dans
+    # raya_agent_core._raya_core_agent apres _save_conversation.
+    # Plus precis (lien explicite a la source, confidence 1.0) et plus
+    # rapide (pas de batch 3 min). Pattern aligne sur Odoo et Drive.
