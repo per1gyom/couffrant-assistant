@@ -591,6 +591,14 @@ function addModelBadge(msgRow, modelTier) {
   if (getComputedStyle(bubble).position === 'static') {
     bubble.style.position = 'relative';
   }
+  // FIX 27/04 soir : reserver un espace en haut de la bulle pour eviter
+  // que le badge superpose le texte de la 1ere ligne (signale par
+  // Guillaume sur conv 408 - capture 21:37). Le badge fait ~16px de
+  // hauteur, on ajoute 22px de padding-top.
+  const currentPadTop = parseInt(getComputedStyle(bubble).paddingTop, 10) || 0;
+  if (currentPadTop < 22) {
+    bubble.style.paddingTop = '22px';
+  }
   bubble.appendChild(badge);
 }
 
