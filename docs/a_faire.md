@@ -42,6 +42,63 @@ de Guillaume. C'est l'une des fonctions clés du produit.
 
 **À faire après l'étape 1 graphage en cours.**
 
+### Mise à jour 27/04 fin journée — Fix 1 deploye, Fix 2 reste
+
+**Fix 1 deploye** (commit f81f5f8) : `_raya_core_agent` appelle desormais
+`save_response_metadata` apres chaque echange. Confirme en DB :
+conv 408 a bien sa metadata (model=sonnet-4-6, via_rag=true,
+10 rule_ids_injected). 
+
+**Fix 2 (reste a faire)** : Bug B detecte au test du 👍 sur conv 408 :
+- L UI affiche '👍✅' (vert) cote utilisateur
+- MAIS feedback_type reste null en DB
+- Les 6 regles concernees n ont pas vu leur confidence augmenter
+
+Hypotheses a investiguer :
+1. Le POST `/raya/feedback` n est pas envoye par chat-feedback.js
+2. Le POST arrive au backend mais `process_positive_feedback` plante
+   silencieusement (try/except sans log)
+3. La verification du return body (`d.ok || d.status === 'ok'`) du JS
+   evalue mal le retour `{status: 'ok', action: 'rules_reinforced'}`
+
+**Effort : 30 min** (debug logs + verif endpoint + fix retour API).
+
+---
+
+## 🎨 ANOMALIE UI 27/04 — Badge "Sonnet" superpose au texte
+
+**Contexte** : test feedback conv 408 (planning demain).
+
+**Symptome** (screenshot fourni par Guillaume 21:37) : le badge "Sonnet"
+qui indique le tier du modele utilise s affiche en haut a droite de la
+bulle de reponse, MAIS il chevauche le texte de la 1ere ligne. Effet
+brouillon visuel.
+
+**Solution** : remonter le badge au niveau de l heure (lun. 27 avr. a
+21:35) ou au-dessus du texte de la reponse, jamais superpose.
+
+**Effort : 15-30 min** (CSS dans chat-messages.js ou raya_chat.html).
+
+**Priorite : Moyenne** (cosmetique mais visible quotidien).
+
+---
+
+## 🔍 ANOMALIE Odoo 27/04 — of.planning.tour sans detail des lignes
+
+**Contexte** : Guillaume a demande son planning du 28/04. Raya repond
+qu elle voit bien la tournee #449 mais sans le detail des interventions
+(clients, adresses, horaires). Le modele `of.planning.tour` n expose
+pas ces lignes via l API.
+
+**Cause probable** :
+- Le manifest `of.planning.tour` n inclut pas les `tour_line_ids`
+- OU le manifest existe mais cassait au scan (cf checklist priorite 8
+  Odoo dans `roadmap_odoo_durable.md`)
+
+**Effort : 1-2h** (verifier manifest, regenerer si manquant, tester).
+
+**Priorite : Importante** (planning quotidien, fonctionnalite cle).
+
 ---
 
 ## 🆕 Récap des chantiers TERMINÉS cette semaine (22-26 avril)
