@@ -65,8 +65,15 @@ def get_response_metadata(aria_memory_id: int, username: str,
             conn.close()
             return None
 
-        meta_id, tier, model, via_rag, rule_ids_json, fb_type, fb_comment, corr_id, created = row
-        rule_ids = json.loads(rule_ids_json) if rule_ids_json else []
+        meta_id, tier, model, via_rag, rule_ids_raw, fb_type, fb_comment, corr_id, created = row
+        # psycopg2 deserialize JSONB en list/dict Python automatiquement.
+        # Pas besoin de json.loads. Fallback string si valeur historique.
+        if isinstance(rule_ids_raw, list):
+            rule_ids = rule_ids_raw
+        elif isinstance(rule_ids_raw, str):
+            rule_ids = json.loads(rule_ids_raw) if rule_ids_raw else []
+        else:
+            rule_ids = []
 
         # Charge le détail des règles injectées
         rules_detail = []
@@ -127,7 +134,17 @@ def process_positive_feedback(
             conn.close()
             return False
 
-        rule_ids = json.loads(row[0]) if row[0] else []
+        # psycopg2 deserialize JSONB en list Python automatiquement.
+        # Avant ce fix : json.loads sur une list -> TypeError silencieux
+        # (avale par le thread daemon) -> 👍 jamais traite, regle jamais
+        # renforcee, feedback_type jamais update.
+        raw = row[0]
+        if isinstance(raw, list):
+            rule_ids = raw
+        elif isinstance(raw, str):
+            rule_ids = json.loads(raw) if raw else []
+        else:
+            rule_ids = []
         if not rule_ids:
             conn.close()
             return False
@@ -201,7 +218,18 @@ def process_negative_feedback(
             LIMIT 1
         """, (aria_memory_id, username, tenant_id))
         meta_row = c.fetchone()
-        rule_ids = json.loads(meta_row[0]) if meta_row and meta_row[0] else []
+        # Meme bug fix que process_positive_feedback : JSONB -> list deja
+        # deserialisee par psycopg2.
+        if meta_row and meta_row[0]:
+            raw = meta_row[0]
+            if isinstance(raw, list):
+                rule_ids = raw
+            elif isinstance(raw, str):
+                rule_ids = json.loads(raw)
+            else:
+                rule_ids = []
+        else:
+            rule_ids = []
 
         rules_context = ""
         if rule_ids:
