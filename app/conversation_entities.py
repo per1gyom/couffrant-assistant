@@ -92,57 +92,66 @@ def add_entities_from_search_results(results: list) -> None:
                 break
 
 
-def add_entities_from_odoo_results(tenant_id: str, results: list) -> None:
-    """Helper specifique aux resultats Odoo (search_odoo, get_client_360).
+# Types d entites pertinentes pour des questions humaines.
+# On exclut volontairement les types techniques internes (Value, Schedule,
+# Question, TourStop, Tour, DealLine, Field, Message, etc.) qui sont des
+# noeuds derives d Odoo via le manifest_generator et qui partagent souvent
+# le meme source_record_id que leur partner parent. Sans ce filtre, une
+# conversation sur Coullet creerait 50+ edges parasites vers ces types
+# techniques.
+_RELEVANT_NODE_TYPES = {
+    "Person", "Company", "Project", "Product",
+    "Deal", "Invoice", "Payment",
+    "Event", "Document", "Mail",
+    "Ticket", "Task", "Lead",
+    "File", "Folder",  # Drive
+}
 
-    Les resultats Odoo contiennent (source_model, source_record_id) qui
+
+def add_entities_from_odoo_results(tenant_id: str, results: list) -> None:
+    """Helper pour les resultats des outils unified_search / hybrid_search
+    (search_odoo, search_drive, search_graph).
+
+    Les resultats contiennent (source_model, source_record_id) qui
     permettent de retrouver le node_id correspondant dans
-    semantic_graph_nodes via la colonne source_record_id.
+    semantic_graph_nodes via les colonnes (source, source_record_id).
 
     Format attendu (chaque result) :
       { "source_model": "res.partner", "source_record_id": "3795", ... }
 
-    Resolution en UNE seule requete SQL (perf) plutot que N find_node_id.
+    Filtrage : seuls les types pertinents (Person, Deal, Event, etc.) sont
+    captures. Les types techniques (Value, Schedule, Field, etc.) sont
+    ignores car ils generent du bruit.
     """
     collector = _current_collector.get()
     if collector is None or not results:
         return
 
-    # Collecter les pairs (source_model, source_record_id) uniques
-    pairs = set()
+    # Collecter les source_record_id uniques (pour minimiser les requetes)
+    source_record_ids = set()
     for r in results:
         if not isinstance(r, dict):
             continue
-        sm = r.get("source_model")
         sri = r.get("source_record_id")
-        if sm and sri:
-            pairs.add((str(sm), str(sri)))
+        if sri:
+            source_record_ids.add(str(sri))
 
-    if not pairs:
+    if not source_record_ids:
         return
 
-    # Une seule requete pour tout resoudre
+    # Une seule requete avec ANY pour tous les SRI a la fois
+    # + filtre sur les types pertinents
     from app.database import get_pg_conn
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        # Construire un VALUES (...) avec tous les pairs
-        # plus efficace qu un IN sur un seul champ
-        values_clauses = ",".join(["(%s, %s)"] * len(pairs))
-        params = []
-        for sm, sri in pairs:
-            params.extend([sm, sri])
-        params.append(tenant_id)
-
-        c.execute(f"""
+        c.execute("""
             SELECT id FROM semantic_graph_nodes
-            WHERE (source_record_id, source) IN (
-                SELECT v1, 'odoo' FROM (VALUES {values_clauses}) AS v(v1, v2)
-                WHERE v.v1 IS NOT NULL
-            )
-            AND tenant_id = %s
-        """, params)
+            WHERE tenant_id = %s
+              AND source_record_id = ANY(%s)
+              AND node_type = ANY(%s)
+        """, (tenant_id, list(source_record_ids), list(_RELEVANT_NODE_TYPES)))
         for row in c.fetchall():
             collector.add(row[0])
     except Exception as e:
@@ -156,7 +165,11 @@ def add_entity_by_source(tenant_id: str, source: str,
                          source_record_id: str) -> None:
     """Helper unitaire : resout un node_id via (source, source_record_id)
     et l ajoute au collecteur. Utile pour outils qui consultent UNE entite
-    a la fois (get_client_360, read_drive_file...)."""
+    a la fois (get_client_360, read_drive_file...).
+
+    Filtrage : limite aux types pertinents (Person, Deal, etc.), evite
+    les types techniques internes (Value, Schedule, etc.).
+    """
     collector = _current_collector.get()
     if collector is None or not source_record_id:
         return
@@ -169,10 +182,11 @@ def add_entity_by_source(tenant_id: str, source: str,
             SELECT id FROM semantic_graph_nodes
             WHERE tenant_id = %s AND source = %s
               AND source_record_id = %s
-            LIMIT 1
-        """, (tenant_id, source, str(source_record_id)))
-        row = c.fetchone()
-        if row:
+              AND node_type = ANY(%s)
+            LIMIT 5
+        """, (tenant_id, source, str(source_record_id),
+              list(_RELEVANT_NODE_TYPES)))
+        for row in c.fetchall():
             collector.add(row[0])
     except Exception as e:
         logger.debug(
