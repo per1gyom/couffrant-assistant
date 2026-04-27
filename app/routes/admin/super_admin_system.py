@@ -257,39 +257,13 @@ def admin_discovery_status(
 
 
 
-# ─── VECTORISATION ODOO (Bloc 2 du chantier memoire 4 couches, 18/04/2026) ───
-# Voir docs/raya_memory_architecture.md + app/jobs/odoo_vectorize.py
-
-@router.post("/admin/odoo/vectorize")
-def admin_odoo_vectorize(
-    request: Request,
-    _: dict = Depends(require_admin),
-):
-    """Lance la vectorisation complete Odoo pour le tenant de l'admin :
-    partners + sale.order + leads + events.
-
-    Peuple le graphe semantique typé (nœuds Person/Company/Deal/Lead/Event/
-    Product, arêtes contact_of/partner_of/has_line/scheduled_for) ET
-    vectorise le contenu textuel (descriptions, notes, commentaires RDV).
-
-    Execution synchrone : prend 30 secondes a 2 minutes selon le volume
-    de donnees Odoo du tenant. Retourne un dict avec les stats par modele.
-    """
-    try:
-        from app.tenant_manager import get_user_tenants
-        tenants = get_user_tenants(request.session.get("username", ""))
-        tenant_id = tenants[0] if tenants else "couffrant_solar"
-
-        from app.jobs.odoo_vectorize import vectorize_all
-        result = vectorize_all(tenant_id=tenant_id)
-        return {"status": "ok", "result": result}
-    except Exception as e:
-        import traceback
-        return {
-            "status": "error",
-            "message": str(e)[:300],
-            "trace": traceback.format_exc()[:2000],
-        }
+# NOTE 27/04/2026 - Endpoint /admin/odoo/vectorize supprime.
+# Il appelait app/jobs/odoo_vectorize.py qui creait des noeuds en
+# ancien format ("odoo-partner-3795"). Remplace par le scanner universel
+# (app/scanner/runner.py - format "odoo:res.partner:3795") pilote par
+# le job nocturne app/jobs/scan_nuit_complet_job.py.
+# Les anciens noeuds doublons ont ete supprimes le 27/04 (1881 noeuds
+# + 2517 edges).
 
 
 @router.get("/admin/odoo/graph-stats")

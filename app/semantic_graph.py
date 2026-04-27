@@ -108,7 +108,7 @@ def add_node(
     Retourne l'ID du nœud (int) ou None en cas d'échec.
 
     node_key doit être unique dans le scope (tenant_id, node_type).
-    Ex : pour Odoo partner #2501 → node_key = "odoo-partner-2501"
+    Ex : pour Odoo partner #2501 → node_key = "odoo:res.partner:2501"
     """
     _validate_node_type(node_type)
     if not node_key:

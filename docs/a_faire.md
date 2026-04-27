@@ -26,6 +26,51 @@ oublier l'idee.
 
 ---
 
+## 🧠 IDEE 27/04 nuit (2) — Comportement agentique multi-tour
+
+**Intuition Guillaume** (apres test sur la tournee #449) : Raya voit
+3 stops dans la tournee mais ne fait pas de 2e search pour avoir le
+detail des clients/taches a visiter. Question : ne l a-t-on pas
+bridee a force de couches de prompts ?
+
+**Diagnostic preliminaire (audit code raya_agent_core.py + retrieval.py)** :
+- Le prompt systeme V2 est plutot court (1200 chars) et encourage
+  le multi-tour (regle 2 'cherche spontanement', regle 3 'plusieurs
+  outils si besoin').
+- La detection de boucle (lignes 615-643) injecte des warnings des
+  le 2eme appel identique ou 4eme appel au meme tool. Possible
+  bridage leger pour les enchainements legitimes.
+- Surtout : le format des resultats expose des labels TECHNIQUES
+  ([of.planning.tour#449] puis 🔗 TourStop: of.planning.tour.line#4647).
+  Pas une invitation naturelle a creuser. Raya doit decoder pour
+  comprendre qu il y a du contenu vectorise derriere.
+
+**Plan de validation** (pas de modif tant qu on n a pas observe) :
+Mini-test sur 3-4 questions variant le niveau de detail demande :
+  - 'J ai quoi demain ?' -> 1 search suffit
+  - 'Qui je vais voir demain dans ma tournee ?' -> doit creuser
+  - 'Quels documents emmener demain ?' -> doit creuser
+Selon les resultats observes :
+  - Si elle creuse spontanement (cas 2 et 3) -> ne rien toucher
+  - Si elle ne creuse jamais -> retoucher prompt OU formatage
+  - Si elle creuse parfois -> noter le pattern, traiter cible
+
+**Pistes si modification necessaire** :
+1. Renommer les labels techniques en termes parlants
+   ('of.planning.tour' -> 'Tournee chantier',
+   'of.planning.tour.line' -> 'Etape de tournee')
+2. Ajouter une regle de raisonnement generique au prompt
+   ('si tu vois des entites liees avec labels techniques et que la
+   question appelle des details, fais une 2e recherche ciblee')
+3. Adoucir la detection de boucle (warning au 3eme appel identique
+   au lieu du 2eme)
+
+**Effort si modif** : 1-2h selon piste retenue.
+
+**A faire** : observer demain a frais, decider apres.
+
+---
+
 ## 🚨 ANOMALIE DÉCOUVERTE 27/04 — Boucle de feedback 👍/👎 inactive
 
 **Contexte** : audit pendant la session graphage des conversations.
