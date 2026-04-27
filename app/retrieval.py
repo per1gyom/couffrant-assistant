@@ -293,18 +293,42 @@ def _enrich_with_graph(
     refaire 5 requêtes séquentielles.
 
     Chaque résultat se voit enrichi d'un champ 'related_nodes' : liste
-    des nœuds voisins (max_hops=2 par défaut, ~10-20 nœuds max)."""
+    des nœuds voisins (max_hops=2 par défaut, ~10-20 nœuds max).
+
+    V2.6 (27/04 nuit) : refactor du mapping vers le nouveau format de cles
+    'odoo:<source_model>:<id>' utilise par le scanner universel. Ajout des
+    modeles of.planning.tour, of.planning.tour.line, of.planning.task,
+    sale.order.line, account.move.line (resolus le bug du planning sans
+    detail des interventions)."""
     from app.semantic_graph import find_node_id, traverse
 
-    # Mapping source_model -> (node_type, key_prefix)
+    # Mapping source_model Odoo -> (node_type principal, fallback_node_type)
+    # Les cles de noeuds utilisent le format 'odoo:<source_model>:<id>' depuis
+    # le scanner universel (commit 18/04 soir). L ancien format 'odoo-X-id' est
+    # obsolete (cf docs/a_faire.md - migration en cours).
+    # Le fallback gere les cas ou un modele a 2 node_types possibles
+    # (ex: res.partner peut etre Person OU Company selon is_company).
     MODEL_TO_NODE = {
-        "res.partner": ("Person", "odoo-partner-"),  # fallback Company si pas trouvé
-        "sale.order": ("Deal", "odoo-order-"),
-        "crm.lead": ("Lead", "odoo-lead-"),
-        "calendar.event": ("Event", "odoo-event-"),
-        "product.product": ("Product", "odoo-product-"),
-        "account.move": ("Invoice", "odoo-invoice-"),
-        "account.payment": ("Payment", "odoo-payment-"),
+        # Entites principales (clients, deals, factures...)
+        "res.partner":        ("Person",       "Company"),
+        "sale.order":         ("Deal",         None),
+        "sale.order.line":    ("DealLine",     None),
+        "crm.lead":           ("Lead",         None),
+        "calendar.event":     ("Event",        None),
+        "calendar.attendee":  ("Attendee",     None),
+        "account.move":       ("Invoice",      None),
+        "account.move.line":  ("InvoiceLine",  None),
+        "account.payment":    ("Payment",      None),
+        # Produits (template = catalogue, variant = unite vendable)
+        "product.template":   ("Product",         None),
+        "product.product":    ("ProductVariant",  "Product"),
+        # Planning (gros bloc OpenFire - corrige bug du 27/04 sur of.planning.tour)
+        "of.planning.tour":            ("Tour",      None),
+        "of.planning.tour.line":       ("TourStop",  None),
+        "of.planning.task":            ("Task",      None),
+        "of.planning.intervention.template": ("InterventionTemplate", None),
+        "of.planning.intervention.section":  ("InterventionSection",  None),
+        "of.planning.available.slot":  ("Slot",      None),
     }
 
     enriched = []
@@ -318,13 +342,14 @@ def _enrich_with_graph(
             enriched.append(r_copy)
             continue
 
-        node_type, prefix = mapping
-        node_key = f"{prefix}{r['source_record_id']}"
+        node_type, fallback_type = mapping
+        # Nouveau format de cle : 'odoo:<source_model>:<id>'
+        node_key = f"odoo:{r['source_model']}:{r['source_record_id']}"
         node_id = find_node_id(tenant_id, node_type, node_key)
 
-        # Fallback : pour res.partner, tenter aussi Company
-        if not node_id and node_type == "Person":
-            node_id = find_node_id(tenant_id, "Company", node_key)
+        # Fallback : essayer le node_type alternatif (ex: Company si Person echoue)
+        if not node_id and fallback_type:
+            node_id = find_node_id(tenant_id, fallback_type, node_key)
 
         if not node_id:
             enriched.append(r_copy)

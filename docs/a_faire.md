@@ -2,7 +2,27 @@
 
 Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 
-**Dernière MAJ** : 27 avril 2026 fin d'après-midi.
+**Dernière MAJ** : 27 avril 2026 nuit.
+
+---
+
+## 💡 IDEE 27/04 nuit — Auto-detection des manques par Raya
+
+**Intuition Guillaume** : quand Raya cherche une info et ne trouve rien
+dans son graphe (ex: 'l'adresse de Coullet ?' → vide), pourrait-elle se
+rendre compte du manque et proposer un re-scan cible pour combler le trou ?
+
+**Faisabilite** : oui, totalement possible. Pas dangereux si :
+- Raya **propose** le re-scan (jamais auto-execute)
+- Demande confirmation explicite avant toute ecriture
+- Periming limite a 1 record cible (pas de re-scan global)
+- Pattern aligne sur les actions Odoo existantes
+
+**Quand** : apres stabilisation du systeme actuel. Note ici pour ne pas
+oublier l'idee.
+
+**Effort estime** : 4-6h (detecter le manque + nouvel outil Raya
+'request_data_refresh' + UI confirmation + connexion au scanner).
 
 ---
 
