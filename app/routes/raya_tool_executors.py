@@ -85,6 +85,7 @@ def execute_tool(
 def _execute_search_graph(inp: dict, username: str, tenant_id: str) -> dict:
     """Recherche dans le graphe semantique unifie."""
     from app.retrieval import unified_search, format_unified_results
+    from app.conversation_entities import add_entities_from_odoo_results
 
     query = inp.get("query", "")
     max_results = inp.get("max_results", 20)
@@ -95,18 +96,24 @@ def _execute_search_graph(inp: dict, username: str, tenant_id: str) -> dict:
         tenant_id=tenant_id,
         top_k_final=max_results,
     )
+    raw = data.get("results", [])[:max_results]
+
+    # Capture des entites consultees pour graphage automatique de la conv
+    add_entities_from_odoo_results(tenant_id, raw)
+
     formatted = format_unified_results(data, max_items=max_results)
     return {
         "query": query,
         "count": len(data.get("results", [])),
         "formatted": formatted,
-        "raw_results": data.get("results", [])[:max_results],
+        "raw_results": raw,
     }
 
 
 def _execute_search_odoo(inp: dict, username: str, tenant_id: str) -> dict:
     """Recherche semantique dans Odoo uniquement."""
     from app.retrieval import hybrid_search, format_search_results
+    from app.conversation_entities import add_entities_from_odoo_results
 
     query = inp.get("query", "")
     max_results = inp.get("max_results", 10)
@@ -116,6 +123,12 @@ def _execute_search_odoo(inp: dict, username: str, tenant_id: str) -> dict:
         tenant_id=tenant_id,
         top_k_final=max_results,
     )
+    # Capture des entites consultees
+    if isinstance(data, dict):
+        add_entities_from_odoo_results(
+            tenant_id, data.get("results", [])[:max_results]
+        )
+
     formatted = format_search_results(data, max_items=max_results)
     return {
         "query": query,
@@ -127,19 +140,38 @@ def _execute_search_odoo(inp: dict, username: str, tenant_id: str) -> dict:
 def _execute_get_client_360(inp: dict, username: str, tenant_id: str) -> dict:
     """Vue 360 consolide d un client via API Odoo directe."""
     from app.connectors.odoo_client_360 import get_client_360
+    from app.conversation_entities import add_entity_by_source
 
     client = inp.get("client_name_or_id", "")
-    return get_client_360(
+    result = get_client_360(
         key_or_id=client,
         include_mails=True,
         mail_username=username,
     )
+
+    # Capture du client consulte (et ses entites liees si renvoyees)
+    if isinstance(result, dict):
+        # Le partner principal
+        pid = result.get("partner_id") or result.get("id")
+        if pid:
+            add_entity_by_source(tenant_id, "odoo", str(pid))
+        # Les ressources liees (devis, factures...) si presentes
+        for k in ("orders", "invoices", "leads", "events", "tasks"):
+            items = result.get(k) or []
+            for item in items:
+                if isinstance(item, dict):
+                    rid = item.get("id")
+                    if rid:
+                        add_entity_by_source(tenant_id, "odoo", str(rid))
+
+    return result
 
 
 def _execute_search_drive(inp: dict, username: str, tenant_id: str) -> dict:
     """Recherche dans les fichiers SharePoint."""
     # Utilise unified_search avec filtre source=drive
     from app.retrieval import unified_search, format_unified_results
+    from app.conversation_entities import add_entities_from_odoo_results
 
     query = inp.get("query", "")
     max_results = inp.get("max_results", 10)
@@ -151,6 +183,13 @@ def _execute_search_drive(inp: dict, username: str, tenant_id: str) -> dict:
         top_k_final=max_results,
         sources=["drive"],
     )
+    # Capture des entites consultees (le nom est add_entities_from_ODOO mais
+    # le helper marche pour toutes les sources qui retournent
+    # source_model + source_record_id, dont Drive)
+    add_entities_from_odoo_results(
+        tenant_id, data.get("results", [])[:max_results]
+    )
+
     return {
         "query": query,
         "count": len(data.get("results", [])),

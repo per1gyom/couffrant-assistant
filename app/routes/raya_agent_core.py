@@ -356,6 +356,13 @@ def _raya_core_agent(
     """
     start_time = time.time()
 
+    # ──── COLLECTE D ENTITES POUR GRAPHAGE AUTO (etape 1 - 27/04) ────
+    # Active le collecteur d entites consultees par les outils pendant
+    # cet echange. A la fin, flush_to_graph() creera les edges dans
+    # semantic_graph_edges. Source : explicit (pas inferee comme avant).
+    from app.conversation_entities import start_collecting
+    start_collecting()
+
     # ──── BRANCHEMENT CONTINUATION (P2/P3+) ────
     # Si existing_continuation fourni, on reprend l etat precedent
     # avec budgets etendus au lieu de repartir de zero.
@@ -676,6 +683,59 @@ def _raya_core_agent(
         user_input=payload.query or "",
         aria_response=_strip_action_tags(final_text),
     )
+
+    # ──── GRAPHAGE AUTO DE LA CONVERSATION (etape 1 - 27/04) ────
+    # Cree le noeud Conversation + les edges mentioned_in vers toutes
+    # les entites consultees pendant l echange (collectees par les
+    # executeurs d outils via add_entity_*). Pattern aligne sur
+    # Odoo et Drive : lien explicite a la source.
+    if aria_memory_id:
+        try:
+            from app.semantic_graph import add_node
+            from app.conversation_entities import flush_to_graph
+
+            user_input_text = payload.query or ""
+            summary = user_input_text[:200] + (
+                " ..." if len(user_input_text) > 200 else ""
+            )
+            conv_node_id = add_node(
+                tenant_id=tenant_id,
+                node_type="Conversation",
+                node_key=f"conv_{aria_memory_id}",
+                node_label=summary,
+                node_properties={
+                    "username": username,
+                    "iterations": iterations,
+                },
+                source="aria_memory",
+                source_record_id=str(aria_memory_id),
+            )
+            if conv_node_id:
+                flush_to_graph(aria_memory_id, tenant_id, conv_node_id)
+                # Marquer indexed_in_graph pour eviter retraitement
+                # par l ancien graph_indexer (qu on supprimera ensuite)
+                try:
+                    from app.database import get_pg_conn
+                    _conn = get_pg_conn()
+                    try:
+                        _c = _conn.cursor()
+                        _c.execute(
+                            "UPDATE aria_memory "
+                            "SET indexed_in_graph = true, "
+                            "    graph_indexed_at = NOW() "
+                            "WHERE id = %s",
+                            (aria_memory_id,),
+                        )
+                        _conn.commit()
+                    finally:
+                        _conn.close()
+                except Exception:
+                    pass  # non-critique
+        except Exception as e:
+            logger.warning(
+                "[Agent] graphage conv %d a echoue : %s",
+                aria_memory_id, str(e)[:200],
+            )
 
     # Log usage total
     log_llm_usage(
