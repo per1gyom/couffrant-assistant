@@ -19,7 +19,16 @@ def _graph_get(token, path, params=None):
     r.raise_for_status(); return r.json()
 
 
-def perform_outlook_action(action: str, params: dict, token: str) -> dict:
+def perform_outlook_action(action: str, params: dict, token: str,
+                           username: str | None = None) -> dict:
+    """Execute une action Outlook (envoi, deplacement, suppression, reponse).
+
+    Audit isolation 28/04 (followup A.5) : ajout parametre username optionnel.
+    Si fourni, les actions de creation de mail (send_reply, send_new_mail,
+    create_draft_mail, create_reply_draft) passent l username a
+    _build_email_html pour avoir la signature personnalisee. Si non fourni,
+    fallback sur warning A.5 (signature statique).
+    """
 
     if action == "list_aria_drive":
         return list_aria_drive(token, params.get("subfolder", ""))
@@ -85,7 +94,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
     if action == "send_reply":
         try:
             _graph_post(token, f"/me/messages/{params['message_id']}/reply",
-                {"message": {"body": {"contentType": "HTML", "content": _build_email_html(params.get("reply_body", ""), from_address=params.get("from_email"))}}})
+                {"message": {"body": {"contentType": "HTML", "content": _build_email_html(params.get("reply_body", ""), username=username, from_address=params.get("from_email"))}}})
             return {"status": "ok", "message": "Reponse envoyee avec succes."}
         except Exception as e: return {"status": "error", "message": f"Echec envoi : {str(e)}"}
 
@@ -93,7 +102,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         try:
             _graph_post(token, "/me/sendMail", {
                 "message": {"subject": params["subject"],
-                    "body": {"contentType": "HTML", "content": _build_email_html(params.get("body", ""), from_address=params.get("from_email"))},
+                    "body": {"contentType": "HTML", "content": _build_email_html(params.get("body", ""), username=username, from_address=params.get("from_email"))},
                     "toRecipients": [{"emailAddress": {"address": params["to_email"]}}]}})
             return {"status": "ok", "message": f"Mail envoye a {params['to_email']}."}
         except Exception as e: return {"status": "error", "message": f"Echec envoi : {str(e)}"}
@@ -102,7 +111,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         try:
             draft = _graph_post(token, "/me/messages", {
                 "subject": params.get("subject", ""),
-                "body": {"contentType": "HTML", "content": _build_email_html(params.get("body", ""), from_address=params.get("from_email"))},
+                "body": {"contentType": "HTML", "content": _build_email_html(params.get("body", ""), username=username, from_address=params.get("from_email"))},
                 "toRecipients": [{"emailAddress": {"address": params["to_email"]}}],
             })
             return {"status": "ok", "draft_id": draft.get("id"), "message": f"Brouillon cree pour {params['to_email']}."}
@@ -112,7 +121,7 @@ def perform_outlook_action(action: str, params: dict, token: str) -> dict:
         draft_id = draft.get("id")
         if not draft_id: return {"status": "error", "message": "Impossible de creer le brouillon."}
         _graph_patch(token, f"/me/messages/{draft_id}",
-            {"body": {"contentType": "HTML", "content": _build_email_html(params.get("reply_body", ""), from_address=params.get("from_email"))}})
+            {"body": {"contentType": "HTML", "content": _build_email_html(params.get("reply_body", ""), username=username, from_address=params.get("from_email"))}})
         return {"status": "ok", "draft_id": draft_id, "message": "Brouillon cree."}
 
     if action == "move_message":

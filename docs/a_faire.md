@@ -1,7 +1,10 @@
 # À faire — Roadmap Raya
+
 Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 
-**Dernière MAJ** : 27 avril 2026 nuit.
+**Dernière MAJ** : 28 avril 2026 midi.
+
+> **📌 Doc d'état le plus à jour** : voir `docs/etat_28avril_midi.md` pour la vue synthétique des chantiers TERMINÉS / EN COURS / À FAIRE après la session 28/04 matin.
 
 ---
 
@@ -56,7 +59,15 @@ Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 
 ---
 
-## 🚨 ANOMALIE DÉCOUVERTE 27/04 — Boucle de feedback 👍/👎 inactive
+## ✅ ANOMALIE 27/04 — Boucle de feedback 👍/👎 inactive — RÉSOLU 27/04 nuit
+
+> **STATUT : ✅ TERMINÉ et déployé en prod.**
+> - Fix 1 (commit `f81f5f8`) : `_raya_core_agent` appelle `save_response_metadata` après chaque échange. Validé en DB sur conv 408.
+> - Fix 2 (commit `7f4e28a`) : TypeError silencieux résolu — `rule_ids_injected` était stocké comme `list` par psycopg2 (pas `str`). `json.loads(list)` plantait dans le thread daemon. Fix `isinstance` dans 3 fonctions.
+> - **Validation prod** : metadata stockée à chaque conversation, 👍 fonctionnel et renforce les règles utilisées.
+> - Section conservée pour traçabilité historique.
+
+---
 
 **Contexte** : audit pendant la session graphage des conversations.
 Guillaume a cliqué 👍 sur la conv 407 → on a vérifié en DB.
@@ -115,7 +126,13 @@ Hypotheses a investiguer :
 
 ---
 
-## 🎨 ANOMALIE UI 27/04 — Badge "Sonnet" superpose au texte
+## ✅ ANOMALIE UI 27/04 — Badge "Sonnet" superposé au texte — RÉSOLU 27/04 nuit
+
+> **STATUT : ✅ TERMINÉ et déployé en prod (commit `3977980`).**
+> - CSS : padding-top 22px sur la bulle de réponse + cache busting v=79→v=80.
+> - Section conservée pour traçabilité historique.
+
+---
 
 **Contexte** : test feedback conv 408 (planning demain).
 
@@ -123,9 +140,7 @@ Hypotheses a investiguer :
 qui indique le tier du modele utilise s affiche en haut a droite de la
 bulle de reponse, MAIS il chevauche le texte de la 1ere ligne. Effet
 brouillon visuel.
-
-**Solution** : remonter le badge au niveau de l heure (lun. 27 avr. a
-21:35) ou au-dessus du texte de la reponse, jamais superpose.
+**Solution** : remonter le badge au niveau de l heure (lun. 27 avr. a 21:35) ou au-dessus du texte de la reponse, jamais superpose.
 
 **Effort : 15-30 min** (CSS dans chat-messages.js ou raya_chat.html).
 
@@ -133,17 +148,25 @@ brouillon visuel.
 
 ---
 
-## 🔍 ANOMALIE Odoo 27/04 — of.planning.tour sans detail des lignes
+## ✅ ANOMALIE Odoo 27/04 — of.planning.tour sans détail des lignes — RÉSOLU 27/04 nuit
 
-**Contexte** : Guillaume a demande son planning du 28/04. Raya repond
-qu elle voit bien la tournee #449 mais sans le detail des interventions
-(clients, adresses, horaires). Le modele `of.planning.tour` n expose
-pas ces lignes via l API.
+> **STATUT : ✅ TERMINÉ et déployé en prod (commits** `af50b16` **+** `f581f58`**).**
+>
+> - Refactor `_enrich_with_graph` au nouveau format de clés `odoo:res.partner:3795` (au lieu de `odoo-partner-3795`).
+> - 17 modèles mappés (vs 7 avant) : ajout Tour, TourStop, Task, sale.order.line, etc.
+> - Suppression du fichier legacy `app/jobs/odoo_vectorize.py` (797 lignes).
+> - Migration DB : DELETE 1 894 anciens noeuds doublons + 2 517 edges en transaction.
+> - **Validation prod** : Raya voit maintenant correctement la structure des tournées + détail des stops.
+> - Section conservée pour traçabilité historique.
+
+---
+
+**Contexte** : Guillaume a demande son planning du 28/04. Raya repond qu elle voit bien la tournee #449 mais sans le detail des interventions (clients, adresses, horaires). Le modele `of.planning.tour` n expose pas ces lignes via l API.
 
 **Cause probable** :
+
 - Le manifest `of.planning.tour` n inclut pas les `tour_line_ids`
-- OU le manifest existe mais cassait au scan (cf checklist priorite 8
-  Odoo dans `roadmap_odoo_durable.md`)
+- OU le manifest existe mais cassait au scan (cf checklist priorite 8 Odoo dans `roadmap_odoo_durable.md`)
 
 **Effort : 1-2h** (verifier manifest, regenerer si manquant, tester).
 
@@ -342,7 +365,6 @@ Aucune fuite de données entre sociétés. Tenant A ne voit jamais les données 
 #### Évolution future — Promotion de règles tenant (pas maintenant)
 
 Quand l'architecture aura mûri, identifier dans les règles personnelles celles qui sont **génériques à la société** vs celles **spécifiques à l'utilisateur** :
-
 - Règles spécifiques (ex. "Guillaume préfère signer ses mails 'Perrin G.'") → restent dans `aria_rules`, filtrées par `username`.
 - Règles société (ex. "Chez Couffrant, RFAC veut dire Règlement de Facture") → promues dans une 2ème base partagée (ex. `tenant_rules`ou `aria_rules_tenant`), visibles de tous les utilisateurs du tenant.
 
@@ -352,7 +374,39 @@ Quand l'architecture aura mûri, identifier dans les règles personnelles celles
 
 ---
 
-## 🔴 Priorité 1 — Audit isolation multi-tenant et utilisateur
+## ✅ Priorité 1 — Audit isolation multi-tenant — TERMINÉ 28/04 matin
+
+> **STATUT : ✅ TERMINÉ. 8 commits déployés en prod ce matin.**
+>
+> Bilan complet :
+>
+> - ✅ Étape 0 : migrations DB (commit `e937dca`, 26/04)
+> - ✅ Étape A : isolation OAuth + endpoints admin (`2bdddb0`, `0f333da`, 26/04)
+> - ✅ Étape B : seat counter + UI quota (commits 26/04)
+> - ✅ Étape 0bis : normalisation tenant `couffrant` → `couffrant_solar` (`02019e1`, 27/04)
+> - ✅ Étape C complète (28/04 matin) :
+>   - LOT 2 (`3f3e1c2`) : bug logique scope I.15 + bonus admin/costs
+>   - LOT 3a (`085542b`) : [profile.py](http://profile.py) + synthesis_engine.py + report_actions.py
+>   - LOT 3b (`db2d720`) : memory_teams (5 fonctions)
+>   - LOT 3c (`5f4283f`) : connection_token_manager (6 fonctions)
+>   - LOT 4 (`e79bb75`) : ATTENTION super_admin + outlook anti-pattern A.5
+>   - LOT 5 (`516b4e4`) : nettoyage hardcoded_permissions.py
+>   - LOT 6a (`68fbaad`) : renommage backend SCOPE_USER → SCOPE_TENANT_USER + suppression SCOPE_CS
+>   - LOT 6b (`a4bb50b`) : renommage frontend
+> ****Bilan findings audit 25/04** :
+>
+> - 🔴 8 CRITIQUE : tous fixés
+> - 🟠 15 IMPORTANT : 14/14 actifs fixés (I.12/I.13 = features intentionnelles confirmées)
+> - 🟡 10 ATTENTION : 9/10 fixés (A.4 = volontairement cross-tenant pour debug super_admin)
+> ****Reste mineur** :
+>
+> - Followup A.5 : propagation `username` dans 4 call-sites de `perform_outlook_action` (\~30 min)
+> - Tests bout-en-bout `pierre_test` (à faire par Guillaume plus tard)
+> ****Modèle de rôles tranché 28/04** : 4 scopes (super_admin / admin / tenant_admin / tenant_user). Doc archivé : `docs/archive/decision_roles_utilisateurs_a_trancher_RESOLU_28avril.md`.
+>
+> Section conservée pour traçabilité historique.
+
+---
 
 > ✅ **AUDIT FAIT** le 25/04 soir. Voir `docs/audit_isolation_25avril_complementaire.md` (758 lignes). Bilan : 8 trous CRITIQUES, 15 IMPORTANT, 10 ATTENTION identifiés. Checklist permanente créée : `docs/checklist_isolation_multitenant.md`.
 >

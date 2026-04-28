@@ -56,7 +56,7 @@ def _execute_confirmed_action(action: dict, outlook_token: str, tools: dict) -> 
             r = perform_outlook_action("send_reply", {
                 "message_id": payload["message_id"],
                 "reply_body": payload["reply_text"],
-            }, outlook_token)
+            }, outlook_token, username=username)
             to_label = payload.get("sender_name") or payload.get("to") or ""
             msg = f"Reponse envoyee a {to_label}" if to_label else "Reponse envoyee"
             return {"ok": r.get("status") == "ok", "message": msg,

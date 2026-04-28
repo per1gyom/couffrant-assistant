@@ -1,3 +1,39 @@
+# ⚠️ DOCUMENT ARCHIVÉ — RÉSOLU LE 28 AVRIL 2026
+
+> Ce document est conservé pour traçabilité historique uniquement.
+> Le sujet a été tranché lors de la session du 28 avril 2026 matin.
+
+## 📌 Décision finale prise (28/04 matin)
+
+**Modèle retenu** : `Hybride` (proche du modèle 🅲 ci-dessous, mais nuancé) :
+
+- **`super_admin`** (Guillaume, hardcoded par email) : pouvoir total. Inamovible.
+- **`admin`** (collaborateur Raya, futur) : cross-tenant volontairement. Te suppléer sur la gestion. Ne peut PAS modifier le statut super_admin.
+- **`tenant_admin`** (patron tenant) : limité à son tenant. Autonome sur la gestion quotidienne (reset password, suspension, outils).
+- **`tenant_user`** (anciennement `user`, renommé pour clarifier l'attachement à un tenant) : utilisateur normal.
+
+## 📌 Implémentation déployée le 28/04 matin
+
+8 commits, audit isolation finalisé. Voir `docs/etat_complet_chantiers_27avril_nuit.md` pour le détail des LOTs 2-6 :
+
+- LOT 2 : bug logique `scope != "admin"` corrigé partout
+- LOT 3 : isolation SQL profile/synthesis/report/memory_teams/connection_token_manager
+- LOT 4 : ATTENTION super_admin endpoints + outlook anti-pattern
+- LOT 5 : nettoyage magic strings dans hardcoded_permissions.py
+- LOT 6 : renommage `user` → `tenant_user`, suppression `SCOPE_CS` legacy
+
+## 📌 État DB final (28/04 13h35)
+
+```
+super_admin  : 1 (guillaume, couffrant_solar)
+tenant_admin : 1 (Charlotte, juillet)
+tenant_user  : 4 (Arlène, benoit, Pierre, Sabrina, couffrant_solar)
+```
+
+---
+
+# Document original (pour historique)
+
 # 🎭 Définition des rôles utilisateurs — À TRANCHER
 
 **Statut** : EN ATTENTE DE DÉCISION **Créé le** : 25 avril 2026 fin de soirée **Origine** : Discussion fin de session marathon, après audit isolation 7 phases. Guillaume trop fatigué pour trancher correctement → on documente pour reprendre à tête reposée.

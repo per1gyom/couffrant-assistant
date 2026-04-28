@@ -356,7 +356,7 @@ def raya_draft_action(
                 "to_email": payload["to_email"],
                 "subject":  payload["subject"],
                 "body":     payload["body"],
-            }, outlook_token)
+            }, outlook_token, username=username)
         elif action_type == "SEND_GMAIL":
             # Brouillon Gmail via connecteur unifié
             try:
@@ -377,7 +377,7 @@ def raya_draft_action(
             r = perform_outlook_action("create_reply_draft", {
                 "message_id": payload["message_id"],
                 "reply_body": payload["reply_text"],
-            }, outlook_token)
+            }, outlook_token, username=username)
         else:
             return {"ok": False, "message": f"Type {action_type} non supporté en brouillon."}
 
