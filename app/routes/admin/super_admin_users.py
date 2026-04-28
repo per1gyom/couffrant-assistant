@@ -233,26 +233,39 @@ def admin_users_reset_password(
 # ─── MÉMOIRE & RÈGLES ───
 
 @router.get("/admin/rules")
-def admin_rules(request: Request, user: str = "", _: dict = Depends(require_super_admin)):
+def admin_rules(request: Request, user: str = "", tenant_id: str = "",
+                _: dict = Depends(require_super_admin)):
     # ACCESS RESTREINT AU SUPER_ADMIN UNIQUEMENT (25 avril 2026)
     # Les regles perso des utilisateurs ne doivent etre visibles que par
     # le developpeur Raya (Guillaume). Le jour ou il y aura des
     # collaborateurs Raya, prevoir un systeme d'impersonation explicite
     # avec audit log.
+    #
+    # Audit isolation 28/04 (A.1) : ajout du parametre tenant_id optionnel
+    # pour distinguer les homonymes cross-tenant. Ajout aussi du tenant_id
+    # dans la reponse (toujours visible par le super_admin pour debug).
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        if user:
+        if user and tenant_id:
             c.execute(
-                "SELECT id,username,category,rule,confidence,reinforcements,active "
-                "FROM aria_rules WHERE username=%s ORDER BY active DESC,confidence DESC",
+                "SELECT id,username,tenant_id,category,rule,confidence,reinforcements,active "
+                "FROM aria_rules WHERE username=%s AND tenant_id=%s "
+                "ORDER BY active DESC,confidence DESC",
+                (user, tenant_id)
+            )
+        elif user:
+            c.execute(
+                "SELECT id,username,tenant_id,category,rule,confidence,reinforcements,active "
+                "FROM aria_rules WHERE username=%s "
+                "ORDER BY tenant_id,active DESC,confidence DESC",
                 (user,)
             )
         else:
             c.execute(
-                "SELECT id,username,category,rule,confidence,reinforcements,active "
-                "FROM aria_rules ORDER BY username,active DESC,confidence DESC"
+                "SELECT id,username,tenant_id,category,rule,confidence,reinforcements,active "
+                "FROM aria_rules ORDER BY tenant_id,username,active DESC,confidence DESC"
             )
         cols = [d[0] for d in c.description]
         return [dict(zip(cols, row)) for row in c.fetchall()]
@@ -261,24 +274,36 @@ def admin_rules(request: Request, user: str = "", _: dict = Depends(require_supe
 
 
 @router.get("/admin/insights")
-def admin_insights(request: Request, user: str = "", _: dict = Depends(require_super_admin)):
+def admin_insights(request: Request, user: str = "", tenant_id: str = "",
+                   _: dict = Depends(require_super_admin)):
     # ACCESS RESTREINT AU SUPER_ADMIN UNIQUEMENT (25 avril 2026)
     # Meme raisonnement que /admin/rules : les insights personnels
     # d'un utilisateur sont confidentiels.
+    #
+    # Audit isolation 28/04 (A.2) : ajout du parametre tenant_id optionnel
+    # + tenant_id dans la reponse pour distinguer les homonymes cross-tenant.
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        if user:
+        if user and tenant_id:
             c.execute(
-                "SELECT id,username,topic,insight,reinforcements "
-                "FROM aria_insights WHERE username=%s ORDER BY reinforcements DESC",
+                "SELECT id,username,tenant_id,topic,insight,reinforcements "
+                "FROM aria_insights WHERE username=%s AND tenant_id=%s "
+                "ORDER BY reinforcements DESC",
+                (user, tenant_id)
+            )
+        elif user:
+            c.execute(
+                "SELECT id,username,tenant_id,topic,insight,reinforcements "
+                "FROM aria_insights WHERE username=%s "
+                "ORDER BY tenant_id,reinforcements DESC",
                 (user,)
             )
         else:
             c.execute(
-                "SELECT id,username,topic,insight,reinforcements "
-                "FROM aria_insights ORDER BY username,reinforcements DESC"
+                "SELECT id,username,tenant_id,topic,insight,reinforcements "
+                "FROM aria_insights ORDER BY tenant_id,username,reinforcements DESC"
             )
         cols = [d[0] for d in c.description]
         return [dict(zip(cols, row)) for row in c.fetchall()]
@@ -695,17 +720,36 @@ def admin_restore_user(
 def admin_reset_history(
     request: Request,
     target: str,
+    tenant_id: str = "",
     _: dict = Depends(require_admin),
 ):
-    """Archive l'historique de conversation d'un utilisateur (reset sans suppression)."""
+    """Archive l'historique de conversation d'un utilisateur (reset sans suppression).
+
+    Audit isolation 28/04 (A.3) : ajout du filtre tenant_id pour eviter
+    qu un homonyme cross-tenant soit archive en meme temps. Si tenant_id
+    non fourni, on resout via users (tenant du target).
+    """
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("UPDATE aria_memory SET archived = true WHERE username = %s AND archived = false", (target,))
+        # Resolution tenant_id du target si non fourni
+        if not tenant_id:
+            c.execute("SELECT tenant_id FROM users WHERE username=%s LIMIT 1", (target,))
+            row = c.fetchone()
+            tenant_id = row[0] if row else None
+            if not tenant_id:
+                return {"status": "error", "message": f"User '{target}' introuvable."}
+        c.execute(
+            "UPDATE aria_memory SET archived = true "
+            "WHERE username = %s AND tenant_id = %s AND archived = false",
+            (target, tenant_id),
+        )
         count = c.rowcount
         conn.commit()
-        return {"status": "ok", "archived": count, "message": f"{count} message(s) archivé(s) pour {target}"}
+        return {"status": "ok", "archived": count,
+                "message": f"{count} message(s) archivé(s) pour {target} "
+                           f"(tenant {tenant_id})"}
     except Exception as e:
         return {"status": "error", "message": str(e)[:200]}
     finally:

@@ -29,15 +29,30 @@ def _graph_delete(token, path):
 
 
 
-def _build_email_html(body: str, username: str = "guillaume", from_address: str = None) -> str:
+def _build_email_html(body: str, username: str = None, from_address: str = None) -> str:
     """Corps HTML du mail avec signature.
 
     EMAIL-SIGNATURE : déléguée à get_email_signature(username, from_address).
     Si from_address est fourni, la logique de matching par boîte mail s'applique
     (default_for_emails > apply_to_emails > is_default global > fallback statique).
+
+    Audit isolation 28/04 (A.5) : retrait du default 'guillaume'. Si username
+    n est pas fourni, on log un warning explicite (au lieu de signer
+    silencieusement avec la signature de Guillaume) et on retombe sur la
+    signature statique sans personnalisation.
+
+    TODO LOT 4 followup : propager username depuis perform_outlook_action
+    aux 4 call-sites (send_reply, send_new_mail, create_draft_mail,
+    create_reply_draft). Voir docs/etat_complet_chantiers_27avril_nuit.md.
     """
+    if not username:
+        from app.logging_config import get_logger
+        get_logger("raya.outlook").warning(
+            "[A.5] _build_email_html appele sans username - "
+            "signature non personnalisee. Call-site a fixer."
+        )
     from app.email_signature import get_email_signature
-    signature = get_email_signature(username, from_address=from_address)
+    signature = get_email_signature(username or "", from_address=from_address)
     # Convertir les sauts de ligne en <br> — white-space:pre-line est ignore par Gmail/Outlook
     body_html = body.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '<br>\n')
     return f'<div style="font-family:Arial,sans-serif;font-size:14px;color:#222;">{body_html}</div>{signature}'
