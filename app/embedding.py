@@ -88,6 +88,16 @@ def search_similar(
     Recherche sémantique par similarité cosinus.
     Si precomputed_vec est fourni, l'embedding n'est pas recalculé (perf).
     """
+    # F.5 (audit isolation user-user, LOT 1.1 + fix LOT 3) : username
+    # obligatoire. Le check est en TETE de fonction (avant les early
+    # returns) pour qu il s applique TOUJOURS, meme quand OPENAI_API_KEY
+    # est absent (sinon search_similar retournait [] silencieusement
+    # sans valider le scope user).
+    if not username:
+        raise ValueError(
+            "search_similar : username obligatoire "
+            "(defense en profondeur isolation user-user)"
+        )
     query_vec = precomputed_vec if precomputed_vec is not None else embed(query_text)
     if query_vec is None:
         return []
@@ -98,15 +108,7 @@ def search_similar(
         conn = get_pg_conn()
         c = conn.cursor()
 
-        # Filtre de base
-        # F.5 (audit isolation user-user, LOT 1.1) : username obligatoire.
-        # Avant : if username: ... -> si caller passait None, AUCUN filtre
-        # user, fuite massive cross-user silencieuse. Maintenant : raise.
-        if not username:
-            raise ValueError(
-                "search_similar : username obligatoire "
-                "(defense en profondeur isolation user-user)"
-            )
+        # Filtre de base avec username obligatoire (cf. check en tete).
         filters = ["embedding IS NOT NULL", "username = %s"]
         params = [username]
 
