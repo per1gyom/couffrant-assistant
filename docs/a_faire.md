@@ -1,5 +1,4 @@
 # À faire — Roadmap Raya
-
 Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 
 **Dernière MAJ** : 27 avril 2026 nuit.
@@ -8,57 +7,43 @@ Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 
 ## 💡 IDEE 27/04 nuit — Auto-detection des manques par Raya
 
-**Intuition Guillaume** : quand Raya cherche une info et ne trouve rien
-dans son graphe (ex: 'l'adresse de Coullet ?' → vide), pourrait-elle se
-rendre compte du manque et proposer un re-scan cible pour combler le trou ?
+**Intuition Guillaume** : quand Raya cherche une info et ne trouve rien dans son graphe (ex: 'l'adresse de Coullet ?' → vide), pourrait-elle se rendre compte du manque et proposer un re-scan cible pour combler le trou ?
 
 **Faisabilite** : oui, totalement possible. Pas dangereux si :
+
 - Raya **propose** le re-scan (jamais auto-execute)
 - Demande confirmation explicite avant toute ecriture
 - Periming limite a 1 record cible (pas de re-scan global)
 - Pattern aligne sur les actions Odoo existantes
 
-**Quand** : apres stabilisation du systeme actuel. Note ici pour ne pas
-oublier l'idee.
+**Quand** : apres stabilisation du systeme actuel. Note ici pour ne pas oublier l'idee.
 
-**Effort estime** : 4-6h (detecter le manque + nouvel outil Raya
-'request_data_refresh' + UI confirmation + connexion au scanner).
+**Effort estime** : 4-6h (detecter le manque + nouvel outil Raya 'request_data_refresh' + UI confirmation + connexion au scanner).
 
 ---
 
 ## 🧠 IDEE 27/04 nuit (2) — Comportement agentique multi-tour
 
-**Intuition Guillaume** (apres test sur la tournee #449) : Raya voit
-3 stops dans la tournee mais ne fait pas de 2e search pour avoir le
-detail des clients/taches a visiter. Question : ne l a-t-on pas
-bridee a force de couches de prompts ?
+**Intuition Guillaume** (apres test sur la tournee #449) : Raya voit 3 stops dans la tournee mais ne fait pas de 2e search pour avoir le detail des clients/taches a visiter. Question : ne l a-t-on pas bridee a force de couches de prompts ?
 
-**Diagnostic preliminaire (audit code raya_agent_core.py + retrieval.py)** :
-- Le prompt systeme V2 est plutot court (1200 chars) et encourage
-  le multi-tour (regle 2 'cherche spontanement', regle 3 'plusieurs
-  outils si besoin').
-- La detection de boucle (lignes 615-643) injecte des warnings des
-  le 2eme appel identique ou 4eme appel au meme tool. Possible
-  bridage leger pour les enchainements legitimes.
-- Surtout : le format des resultats expose des labels TECHNIQUES
-  ([of.planning.tour#449] puis 🔗 TourStop: of.planning.tour.line#4647).
-  Pas une invitation naturelle a creuser. Raya doit decoder pour
-  comprendre qu il y a du contenu vectorise derriere.
+**Diagnostic preliminaire (audit code raya_agent_core.py + [retrieval.py](http://retrieval.py))** :
 
-**Plan de validation** (pas de modif tant qu on n a pas observe) :
-Mini-test sur 3-4 questions variant le niveau de detail demande :
-  - 'J ai quoi demain ?' -> 1 search suffit
-  - 'Qui je vais voir demain dans ma tournee ?' -> doit creuser
-  - 'Quels documents emmener demain ?' -> doit creuser
-Selon les resultats observes :
-  - Si elle creuse spontanement (cas 2 et 3) -> ne rien toucher
-  - Si elle ne creuse jamais -> retoucher prompt OU formatage
-  - Si elle creuse parfois -> noter le pattern, traiter cible
+- Le prompt systeme V2 est plutot court (1200 chars) et encourage le multi-tour (regle 2 'cherche spontanement', regle 3 'plusieurs outils si besoin').
+- La detection de boucle (lignes 615-643) injecte des warnings des le 2eme appel identique ou 4eme appel au meme tool. Possible bridage leger pour les enchainements legitimes.
+- Surtout : le format des resultats expose des labels TECHNIQUES (\[of.planning.tour#449\] puis 🔗 TourStop: of.planning.tour.line#4647). Pas une invitation naturelle a creuser. Raya doit decoder pour comprendre qu il y a du contenu vectorise derriere.
+
+**Plan de validation** (pas de modif tant qu on n a pas observe) : Mini-test sur 3-4 questions variant le niveau de detail demande :
+
+- 'J ai quoi demain ?' -&gt; 1 search suffit
+- 'Qui je vais voir demain dans ma tournee ?' -&gt; doit creuser
+- 'Quels documents emmener demain ?' -&gt; doit creuser Selon les resultats observes :
+- Si elle creuse spontanement (cas 2 et 3) -&gt; ne rien toucher
+- Si elle ne creuse jamais -&gt; retoucher prompt OU formatage
+- Si elle creuse parfois -&gt; noter le pattern, traiter cible
 
 **Pistes si modification necessaire** :
-1. Renommer les labels techniques en termes parlants
-   ('of.planning.tour' -> 'Tournee chantier',
-   'of.planning.tour.line' -> 'Etape de tournee')
+
+1. Renommer les labels techniques en termes parlants ('of.planning.tour' -&gt; 'Tournee chantier', 'of.planning.tour.line' -&gt; 'Etape de tournee')
 2. Ajouter une regle de raisonnement generique au prompt
    ('si tu vois des entites liees avec labels techniques et que la
    question appelle des details, fais une 2e recherche ciblee')
@@ -440,6 +425,8 @@ Puis tester l'isolation tenant :
 ---
 
 ## 🟠 Priorité 2 — Connexion simplifiée des outils tiers (panel admin tenant)
+
+> 💡 **Sujet voisin (28/04)** : voir `docs/onboarding_decouverte_outils.md` — quand Raya est connectée à un nouvel outil, elle a besoin d'un **tour de découverte guidée** avec le super_admin pour apprendre les conventions métier propres à l'entreprise. Cas réel : confusion planning équipe vs planning Guillaume le 28/04. À traiter dans la même session que les connecteurs.
 
 **Contexte** : aujourd'hui brancher une boîte Outlook/Gmail ou un compte Drive demande des manipulations techniques (OAuth dans la console Azure, configuration Railway, etc.). C'est acceptable pour Guillaume mais impossible à déléguer à Pierre, Sabrina ou un nouveau tenant.
 
