@@ -74,6 +74,62 @@ class MicrosoftConnector(MailboxConnector):
         except Exception as e:
             return {"ok": False, "message": str(e)[:100]}
 
+    def search_mail(self, query: str, max_results: int = 10) -> list[MailMessage]:
+        """Recherche dans la boite Outlook via Microsoft Graph /me/messages.
+
+        Query accepte une syntaxe pseudo-Gmail traduite en filtres Graph :
+          - 'is:unread'              -> $filter=isRead eq false
+          - 'newer_than:5m'          -> $filter=receivedDateTime ge <now-5min>
+          - 'after:2024/01/01'       -> $filter=receivedDateTime ge <date ISO>
+          - 'from:foo@bar.com'       -> $search='from:foo@bar.com'
+          - vide                     -> tous les mails (max_results)
+
+        Plusieurs filtres peuvent etre combines. Retourne list[MailMessage].
+        """
+        try:
+            from datetime import datetime, timezone, timedelta
+            params = {"$top": str(min(max_results, 1000)),
+                      "$select": "id,subject,from,receivedDateTime,bodyPreview",
+                      "$orderby": "receivedDateTime desc"}
+            filters = []
+            search_q = None
+            for token in (query or "").split():
+                if token == "is:unread":
+                    filters.append("isRead eq false")
+                elif token.startswith("newer_than:"):
+                    val = token.split(":", 1)[1]
+                    minutes = int(val[:-1]) if val.endswith("m") else (
+                        int(val[:-1]) * 60 if val.endswith("h") else (
+                        int(val[:-1]) * 1440 if val.endswith("d") else 5))
+                    cutoff = (datetime.now(timezone.utc) -
+                              timedelta(minutes=minutes)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                    filters.append(f"receivedDateTime ge {cutoff}")
+                elif token.startswith("after:"):
+                    date_str = token.split(":", 1)[1].replace("/", "-")
+                    filters.append(f"receivedDateTime ge {date_str}T00:00:00Z")
+                elif token.startswith("from:"):
+                    search_q = (search_q or "") + f' "from:{token.split(":",1)[1]}"'
+            if filters:
+                params["$filter"] = " and ".join(filters)
+            if search_q:
+                params["$search"] = search_q.strip()
+            data = self._get("/me/messages", params)
+            messages = []
+            for m in data.get("value", []):
+                sender = m.get("from", {}).get("emailAddress", {}).get("address", "")
+                messages.append(MailMessage(
+                    id=m.get("id", ""),
+                    subject=m.get("subject", "") or "",
+                    sender=sender,
+                    body=(m.get("bodyPreview", "") or "")[:500],
+                    date=m.get("receivedDateTime", ""),
+                    source="microsoft",
+                ))
+            return messages
+        except Exception as e:
+            logger.warning("[MSConnector] search_mail: %s", e)
+            return []
+
     def get_agenda(self, days: int = 7) -> list[CalendarEvent]:
         try:
             from datetime import datetime, timezone, timedelta

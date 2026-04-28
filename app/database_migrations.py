@@ -968,4 +968,51 @@ MIGRATIONS = [
     "CREATE INDEX IF NOT EXISTS idx_aria_memory_not_indexed "
     "ON aria_memory (indexed_in_graph, id) "
     "WHERE indexed_in_graph = false",
+
+    # -- Phase webhooks Microsoft multi-boites (28/04 soir) --
+    # Decision Guillaume 28/04 : chaque chose qu on connecte est
+    # multipliable par defaut. Outlook ne fait pas exception : il faut
+    # autant d abonnements webhook que de boites Outlook connectees.
+    # Avant cette migration, ensure_all_subscriptions iterait sur 1 token
+    # par user et creait 1 subscription par user. Avec 2 Outlook (Guillaume
+    # + contact@couffrant-solar.fr), seule la derniere connectee recevait
+    # les notifications de nouveaux mails. Bug invisible mais critique.
+
+    # M-W01 : ajouter connection_id pour lier chaque webhook a sa connexion
+    # FK avec ON DELETE CASCADE : si la connexion est supprimee, le
+    # webhook l est aussi (coherent). Nullable au depart pour ne pas
+    # casser la ligne existante.
+    "ALTER TABLE webhook_subscriptions ADD COLUMN IF NOT EXISTS connection_id INTEGER",
+    """DO $$ BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint
+          WHERE conname = 'webhook_subs_connection_id_fkey'
+        ) THEN
+          ALTER TABLE webhook_subscriptions
+            ADD CONSTRAINT webhook_subs_connection_id_fkey
+            FOREIGN KEY (connection_id) REFERENCES tenant_connections(id) ON DELETE CASCADE;
+        END IF;
+    END $$""",
+    "CREATE INDEX IF NOT EXISTS idx_webhook_subs_user_conn "
+    "ON webhook_subscriptions (username, connection_id) "
+    "WHERE connection_id IS NOT NULL",
+
+    # M-W02 : backfill connection_id pour les abonnements existants en
+    # remontant via username + tenant_id la connexion microsoft/outlook
+    # active la plus recente. Heuristique mais c est la seule info qu on
+    # a (le subscription_id Microsoft ne contient pas de ref a notre
+    # connection_id en base).
+    """UPDATE webhook_subscriptions ws
+       SET connection_id = (
+         SELECT tc.id FROM tenant_connections tc
+         JOIN connection_assignments ca ON ca.connection_id = tc.id
+         WHERE ca.username = ws.username
+           AND tc.tenant_id = ws.tenant_id
+           AND tc.tool_type IN ('microsoft', 'outlook')
+           AND tc.status = 'connected'
+           AND ca.enabled = true
+         ORDER BY tc.updated_at DESC
+         LIMIT 1
+       )
+       WHERE ws.connection_id IS NULL""",
 ]

@@ -22,8 +22,13 @@ def get_notification_url() -> str:
     return f"{base}/webhook/microsoft"
 
 
-def create_subscription(token: str, username: str) -> dict | None:
-    """Crée un abonnement Graph pour la boîte inbox d'un utilisateur."""
+def create_subscription(token: str, username: str,
+                        connection_id: int | None = None) -> dict | None:
+    """Cree un abonnement Graph pour la boite inbox d'un utilisateur.
+
+    Multi-boites 28/04 : connection_id optionnel pour lier l abonnement a
+    une connexion specifique (utile quand l user a plusieurs boites Outlook).
+    """
     expiry = (datetime.now(timezone.utc) + timedelta(days=SUBSCRIPTION_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
     client_state = secrets.token_hex(16)
     r = requests.post(
@@ -40,10 +45,11 @@ def create_subscription(token: str, username: str) -> dict | None:
     )
     if r.status_code in (200, 201):
         data = r.json()
-        _save_subscription(username, data["id"], data["expirationDateTime"], client_state)
-        print(f"[Webhook] Abonnement créé pour {username}: {data['id']}")
+        _save_subscription(username, data["id"], data["expirationDateTime"],
+                           client_state, connection_id=connection_id)
+        print(f"[Webhook] Abonnement créé pour {username} (conn#{connection_id}): {data['id']}")
         return data
-    print(f"[Webhook] Erreur création {username}: {r.status_code} {r.text[:200]}")
+    print(f"[Webhook] Erreur création {username} (conn#{connection_id}): {r.status_code} {r.text[:200]}")
     if r.status_code in (401, 403):
         _send_revoked_alert(username)
     return None
@@ -81,16 +87,18 @@ def delete_subscription(token: str, subscription_id: str) -> bool:
 
 # ─── DB ───
 
-def _save_subscription(username: str, subscription_id: str, expires_at: str, client_state: str):
+def _save_subscription(username: str, subscription_id: str, expires_at: str,
+                       client_state: str, connection_id: int | None = None):
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
         expires_dt = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
         c.execute("""
-            INSERT INTO webhook_subscriptions (username, subscription_id, resource, expires_at, client_state)
-            VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (subscription_id) DO UPDATE SET expires_at=EXCLUDED.expires_at, updated_at=NOW()
-        """, (username, subscription_id, "me/mailFolders/inbox/messages", expires_dt, client_state))
+            INSERT INTO webhook_subscriptions (username, subscription_id, resource, expires_at, client_state, connection_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (subscription_id) DO UPDATE SET expires_at=EXCLUDED.expires_at, updated_at=NOW(),
+                                                         connection_id=COALESCE(EXCLUDED.connection_id, webhook_subscriptions.connection_id)
+        """, (username, subscription_id, "me/mailFolders/inbox/messages", expires_dt, client_state, connection_id))
         conn.commit()
     finally:
         if conn: conn.close()
@@ -122,9 +130,12 @@ def get_subscriptions_for_user(username: str) -> list:
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("SELECT subscription_id, expires_at, client_state FROM webhook_subscriptions WHERE username=%s",
+        c.execute("SELECT subscription_id, expires_at, client_state, connection_id "
+                  "FROM webhook_subscriptions WHERE username=%s",
                   (username,))
-        return [{"subscription_id": r[0], "expires_at": r[1], "client_state": r[2]} for r in c.fetchall()]
+        return [{"subscription_id": r[0], "expires_at": r[1],
+                 "client_state": r[2], "connection_id": r[3]}
+                for r in c.fetchall()]
     except Exception:
         return []
     finally:
@@ -149,13 +160,20 @@ def get_subscription_info(subscription_id: str) -> dict | None:
 
 def ensure_all_subscriptions():
     """
-    Appelé au démarrage et toutes les 6h.
-    Pour chaque utilisateur avec token Microsoft V2 valide :
-    - Crée l'abonnement s'il n'existe pas
+    Appele au demarrage et toutes les 6h.
+    Multi-boites 28/04 : pour chaque utilisateur, on itere sur TOUTES ses
+    connexions Microsoft/Outlook (via get_all_user_connections) et on
+    s assure qu UN abonnement par connexion existe et est valide.
+
+    Pour chaque (user, connexion microsoft active) :
+    - Cree l abonnement s il n existe pas pour cette connexion specifique
     - Renouvelle si expiration < 24h
-    - Recrée si renouvellement échoue
+    - Recree si renouvellement echoue
     """
-    from app.connection_token_manager import get_all_users_with_tool_connections
+    from app.connection_token_manager import (
+        get_all_users_with_tool_connections,
+        get_all_user_connections,
+    )
     now = datetime.now(timezone.utc)
 
     try:
@@ -166,25 +184,48 @@ def ensure_all_subscriptions():
 
     for username in users:
         try:
-            from app.connection_token_manager import get_connection_token
-            token = get_connection_token(username, "microsoft")
-            if not token:
+            # Recupere TOUTES les connexions de l user, filtre microsoft/outlook
+            all_conns = get_all_user_connections(username)
+            ms_conns = [c for c in all_conns
+                        if c.get("tool_type", "").lower() in ("microsoft", "outlook")
+                        and c.get("token")]
+            if not ms_conns:
                 continue
-            subs = get_subscriptions_for_user(username)
-            if not subs:
-                create_subscription(token, username)
-            else:
-                for sub in subs:
-                    expires_at = sub["expires_at"]
-                    if expires_at.tzinfo is None:
-                        expires_at = expires_at.replace(tzinfo=timezone.utc)
-                    hours_left = (expires_at - now).total_seconds() / 3600
-                    if hours_left < 24:
-                        ok = renew_subscription(token, sub["subscription_id"], username)
-                        if not ok:
-                            create_subscription(token, username)
+            existing_subs = get_subscriptions_for_user(username)
+            # Index des subs par connection_id pour lookup rapide
+            subs_by_conn = {s["connection_id"]: s for s in existing_subs
+                            if s.get("connection_id") is not None}
+            # Subs sans connection_id : on les considere comme orphelins
+            orphan_subs = [s for s in existing_subs if s.get("connection_id") is None]
+
+            for conn_info in ms_conns:
+                conn_id = conn_info["connection_id"]
+                token = conn_info["token"]
+                email = conn_info.get("email", "?")
+                try:
+                    sub = subs_by_conn.get(conn_id)
+                    if not sub and orphan_subs:
+                        # Adopter un orphelin existant pour cette connexion
+                        # (cas typique apres la migration M-W02 : la ligne
+                        # existante avait connection_id rempli par backfill)
+                        sub = None  # le backfill aura deja matche, sinon on cree
+                    if not sub:
+                        create_subscription(token, username, connection_id=conn_id)
+                    else:
+                        expires_at = sub["expires_at"]
+                        if expires_at.tzinfo is None:
+                            expires_at = expires_at.replace(tzinfo=timezone.utc)
+                        hours_left = (expires_at - now).total_seconds() / 3600
+                        if hours_left < 24:
+                            ok = renew_subscription(
+                                token, sub["subscription_id"], username)
+                            if not ok:
+                                create_subscription(
+                                    token, username, connection_id=conn_id)
+                except Exception as e:
+                    print(f"[Webhook] Erreur ensure {username}/{email}: {e}")
         except Exception as e:
-            print(f"[Webhook] Erreur ensure {username}: {e}")
+            print(f"[Webhook] Erreur ensure user {username}: {e}")
 
 
 # ─── ALERTE TOKEN RÉVOQUÉ ───
