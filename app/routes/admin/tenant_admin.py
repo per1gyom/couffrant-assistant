@@ -16,7 +16,7 @@ from app.app_security import (
     create_user, delete_user, update_user,
     get_users_in_tenant, generate_reset_token, get_user_tools,
     set_user_tool, remove_user_tool,
-    SCOPE_USER, SCOPE_CS, SCOPE_TENANT_ADMIN, DEFAULT_TENANT,
+    SCOPE_TENANT_USER, SCOPE_TENANT_ADMIN, DEFAULT_TENANT,
 )
 from app.routes.deps import require_tenant_admin, get_session_tenant_id, assert_same_tenant
 from app.admin_audit import log_admin_action
@@ -46,7 +46,7 @@ def tenant_create_user(
     from app.seat_counter import assert_seat_available
 
     tenant_id = user["tenant_id"]
-    scope = (payload.get("scope") or SCOPE_USER).strip()
+    scope = (payload.get("scope") or SCOPE_TENANT_USER).strip()
 
     # 1. Validation enum scope
     if scope not in ALL_SCOPES:
@@ -60,9 +60,9 @@ def tenant_create_user(
             403,
             "Le scope super_admin ne peut pas etre attribue par API.",
         )
-    # 3. Garde-fou tenant_admin : limite a SCOPE_USER ou SCOPE_CS
-    if user["scope"] == SCOPE_TENANT_ADMIN and scope not in (SCOPE_USER, SCOPE_CS):
-        scope = SCOPE_USER
+    # 3. Garde-fou tenant_admin : limite a SCOPE_TENANT_USER (SCOPE_CS supprime, legacy)
+    if user["scope"] == SCOPE_TENANT_ADMIN and scope != SCOPE_TENANT_USER:
+        scope = SCOPE_TENANT_USER
 
     # 4. Verification quota seats (refuse 403 si plein)
     assert_seat_available(tenant_id)

@@ -4,17 +4,23 @@ Gestion des outils par utilisateur.
 import json
 from app.database import get_pg_conn
 
-# Scopes
-SCOPE_SUPER_ADMIN  = "super_admin"           # NEW : super admin Raya (hardcode via email)
-SCOPE_ADMIN        = "admin"                 # admin Raya (collaborateur)
-SCOPE_TENANT_ADMIN = "tenant_admin"
-SCOPE_CS           = "couffrant_solar"  # legacy
-SCOPE_USER         = "user"
+# Scopes (renomme 28/04 - LOT 6 audit isolation)
+# - SCOPE_USER renomme en SCOPE_TENANT_USER pour clarifier que tout user
+#   est attache a un tenant (cf docs/etat_complet_chantiers_27avril_nuit.md)
+# - SCOPE_CS supprime (legacy avant multi-tenant, 0 user le portait en DB)
+SCOPE_SUPER_ADMIN  = "super_admin"           # super admin Raya (hardcode via email)
+SCOPE_ADMIN        = "admin"                 # admin Raya (collaborateur, cross-tenant)
+SCOPE_TENANT_ADMIN = "tenant_admin"          # admin de tenant (limite a son tenant)
+SCOPE_TENANT_USER  = "tenant_user"           # user attache a un tenant (anciennement SCOPE_USER)
 DEFAULT_TENANT     = "couffrant_solar"
 SUPER_ADMIN_SCOPES  = (SCOPE_SUPER_ADMIN,)
 TENANT_ADMIN_SCOPES = (SCOPE_SUPER_ADMIN, SCOPE_ADMIN, SCOPE_TENANT_ADMIN)
-USER_SCOPES         = (SCOPE_CS, SCOPE_USER)
-ALL_SCOPES          = (SCOPE_SUPER_ADMIN, SCOPE_ADMIN, SCOPE_TENANT_ADMIN, SCOPE_CS, SCOPE_USER)
+USER_SCOPES         = (SCOPE_TENANT_USER,)
+ALL_SCOPES          = (SCOPE_SUPER_ADMIN, SCOPE_ADMIN, SCOPE_TENANT_ADMIN, SCOPE_TENANT_USER)
+
+# Alias retro-compatibilite (a retirer dans une session future, quand on est sur que
+# plus aucun import ailleurs ne casse).
+SCOPE_USER = SCOPE_TENANT_USER  # DEPRECATED - utiliser SCOPE_TENANT_USER
 
 DEFAULT_TOOLS_ADMIN = [
     {"tool": "outlook", "access_level": "full", "config": {"mailboxes": [], "can_delete_mail": True}},
@@ -32,7 +38,6 @@ DEFAULT_TOOLS_USER = [
     {"tool": "odoo",    "access_level": "read_only", "config": {"shared_user": "sabrina"}},
     {"tool": "drive",   "access_level": "write",     "config": {"can_delete": False}},
 ]
-DEFAULT_TOOLS_CS = DEFAULT_TOOLS_USER
 
 
 def _tools_for_scope(scope: str) -> list:

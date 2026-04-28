@@ -1,6 +1,6 @@
 from fastapi import Request, HTTPException, status, Depends
 from app.app_security import (
-    SCOPE_ADMIN, SCOPE_TENANT_ADMIN, SCOPE_CS, SCOPE_USER,
+    SCOPE_ADMIN, SCOPE_TENANT_ADMIN, SCOPE_TENANT_USER,
     get_tenant_id,
 )
 # Nouveau scope super_admin + hardcoded
@@ -44,7 +44,7 @@ def require_user(request: Request) -> dict:
     # Scope effectif : si l user est dans HARDCODED_SUPER_ADMINS, on force super_admin
     # quelle que soit la valeur en DB ou en session. Empeche toute retrogradation
     # accidentelle ou malveillante.
-    db_scope = request.session.get("scope", SCOPE_USER)
+    db_scope = request.session.get("scope", SCOPE_TENANT_USER)
     email = request.session.get("email") or ""
     effective_scope = get_effective_scope(email, db_scope)
     return {

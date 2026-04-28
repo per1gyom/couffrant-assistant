@@ -10,7 +10,8 @@ from app.security_auth import (  # noqa
 )
 from app.security_tools import (  # noqa
     get_user_tools, set_user_tool, remove_user_tool, init_default_tools,
-    ALL_SCOPES, SCOPE_SUPER_ADMIN, SCOPE_ADMIN, SCOPE_TENANT_ADMIN, SCOPE_CS, SCOPE_USER, DEFAULT_TENANT,
+    ALL_SCOPES, SCOPE_SUPER_ADMIN, SCOPE_ADMIN, SCOPE_TENANT_ADMIN,
+    SCOPE_TENANT_USER, SCOPE_USER, DEFAULT_TENANT,
 )
 from app.security_users import (  # noqa
     authenticate, create_user, update_user, delete_user, list_users,
