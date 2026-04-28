@@ -283,7 +283,7 @@ async function loadConnections(tenantId,idx){
     if(summaryEl){
       const byType={};
       for(const c of conns){
-        const grp = c.tool_type==='gmail'||c.tool_type==='microsoft' ? 'mail'
+        const grp = (c.tool_type==='gmail'||c.tool_type==='microsoft'||c.tool_type==='outlook') ? 'mail'
                   : c.tool_type==='sharepoint'||c.tool_type==='google_drive' ? 'drive' : 'autre';
         if(!byType[grp]) byType[grp]={total:0,connected:0};
         byType[grp].total++;
@@ -320,10 +320,10 @@ async function loadConnections(tenantId,idx){
         :'<span class="badge badge-gray" style="font-size:9px">non connecté</span>';
       let oauthBtn='';
       if(c.status!=='connected'){
-        if(c.tool_type==='microsoft') oauthBtn=`<a href="/admin/connections/${tenantId}/oauth/microsoft/start?connection_id=${c.id}" class="btn btn-primary" style="padding:2px 10px;font-size:10px;text-decoration:none">🔵 Connecter Microsoft</a>`;
+        if(c.tool_type==='microsoft'||c.tool_type==='outlook') oauthBtn=`<a href="/admin/connections/${tenantId}/oauth/microsoft/start?connection_id=${c.id}" class="btn btn-primary" style="padding:2px 10px;font-size:10px;text-decoration:none">🔵 Connecter Microsoft</a>`;
         else if(c.tool_type==='gmail') oauthBtn=`<a href="/admin/connections/${tenantId}/oauth/gmail/start?connection_id=${c.id}" class="btn btn-accent" style="padding:2px 10px;font-size:10px;text-decoration:none">✉️ Connecter Gmail</a>`;
       }else{
-        if(c.tool_type==='microsoft') oauthBtn=`<a href="/admin/connections/${tenantId}/oauth/microsoft/start?connection_id=${c.id}" class="btn btn-ghost" style="padding:2px 10px;font-size:10px;text-decoration:none">🔄 Reconnecter</a>`;
+        if(c.tool_type==='microsoft'||c.tool_type==='outlook') oauthBtn=`<a href="/admin/connections/${tenantId}/oauth/microsoft/start?connection_id=${c.id}" class="btn btn-ghost" style="padding:2px 10px;font-size:10px;text-decoration:none">🔄 Reconnecter</a>`;
         else if(c.tool_type==='gmail') oauthBtn=`<a href="/admin/connections/${tenantId}/oauth/gmail/start?connection_id=${c.id}" class="btn btn-ghost" style="padding:2px 10px;font-size:10px;text-decoration:none">🔄 Reconnecter</a>`;
       }
       const userBadges=c.assignments.map(a=>`<span class="badge ${a.enabled?'badge-blue':'badge-gray'}" style="font-size:9px;cursor:pointer" title="${a.access_level}" onclick="unassignConn(${c.id},'${a.username}','${tenantId}',${idx})">${a.username} ✕</span>`);
@@ -336,8 +336,8 @@ async function loadConnections(tenantId,idx){
           <span style="font-size:16px">${icon}</span>
           <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px;cursor:pointer;border-bottom:1px dashed var(--text3)" onclick="renameConn(${c.id},'${tenantId}',${idx},'${c.label.replace(/'/g,"\\'")}')" title="Cliquer pour renommer">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span>${helpBadge} ${statusBadge}</div>
           ${oauthBtn}
-          ${['microsoft','gmail'].includes(c.tool_type)?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px" onclick="discoverTool('${tenantId}','${c.tool_type}',this)">🔍 Découvrir</button>`:''}
-          ${c.tool_type==='microsoft'?renderMicrosoftActions(tenantId, c.id):''}
+          ${['microsoft','gmail','outlook'].includes(c.tool_type)?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px" onclick="discoverTool('${tenantId}','${c.tool_type}',this)">🔍 Découvrir</button>`:''}
+          ${(c.tool_type==='microsoft'||c.tool_type==='outlook')?renderMicrosoftActions(tenantId, c.id):''}
           ${c.tool_type==='drive'?renderDriveActions(tenantId, c.id):''}
           ${c.tool_type==='odoo'?renderOdooActions(tenantId, c.id):''}
           <button class="btn btn-ghost" style="padding:2px 8px;font-size:10px" onclick="toggleAssignPanel(${c.id},'${tenantId}',${idx})">👥 Gérer accès</button>

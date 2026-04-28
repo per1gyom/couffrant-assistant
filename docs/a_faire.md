@@ -70,6 +70,113 @@ Quand un utilisateur revient sur Raya pour la 1ère fois d'une journée, au lieu
 
 ---
 
+## 🎨 NOTES UX 28/04 soir — Panel super admin + finitions connecteurs
+
+Notes remontées par Guillaume pendant l'onboarding de 4 nouvelles boîtes
+Gmail (SCI Romagui, SCI Gaucherie, SCI MTBR, SAS GPLH) + tentative
+Outlook contact@couffrant-solar.fr le 28/04 19h.
+
+Le panel admin actuel est dense, hérité de la phase test/dev. Plusieurs
+boutons et flux pourraient être simplifiés maintenant que le produit
+arrive à maturité.
+
+### 1. Rester sur la page après validation d'une connexion
+
+**Symptôme** : quand Guillaume clique "✉️ Connecter Gmail" sur une ligne
+de connexion, il fait l'OAuth Google, et au retour sur Raya il atterrit
+sur le menu principal de l'admin (vue "sociétés"). Il doit re-cliquer sur
+"Couffrant Solar" pour revenir à la page connexions et continuer ses
+assignations.
+
+**Attendu** : retour direct sur la page société avec la connexion
+mise en évidence (scroll auto + flash visuel).
+
+**Fichier impliqué** : probablement la route de callback OAuth
+(`/admin/connections/{tenant_id}/oauth/{provider}/callback`) qui redirige
+vers `/admin/panel` sans paramètre de retour. Idée : passer un
+`?return_to=companies&tenant_id=X&conn_id=Y` au moment du start, le
+récupérer au callback, rediriger vers la bonne vue.
+
+**Estimation** : 30 min.
+
+### 2. Boutons inutiles à épurer dans le panel
+
+Plusieurs boutons sont des reliques de la phase test/dev qui ne servent
+plus en usage normal :
+
+- **"🔍 Découvrir"** sur les lignes Gmail/Microsoft : appelle
+  `/admin/discover/{tenant_id}/gmail` qui retourne `error: Type 'gmail'
+  non supporté`. À transformer en "📥 Backfill" quand on aura la
+  Phase B des connecteurs (vectorisation historique mode lite).
+- **"🔍 Découverte des connecteurs"** dans le menu Setup d'Odoo : peuple
+  l'ancienne table `entity_links` (legacy pré-V2). Sert "une fois à la
+  mise en place" puis devient inutile. Probablement à retirer.
+- **Onglet "Découvrir"** général dans la barre supérieure si présent.
+
+**Action** : audit rapide à faire et purge sans pitié des boutons morts.
+**Estimation** : 1-2h.
+
+### 3. Panel super admin trop chargé
+
+Le panel a accumulé des onglets et sections au fil des chantiers. Vu
+d'ensemble : **Mémoire / Utilisateurs / Règles / Insights / Actions /
+Sociétés / Profil + barre d'alertes système + Connexions par société
+(elle-même dense)**.
+
+**Idée** : faire un audit UX du panel, regrouper les sections proches,
+enlever les vues qui ne servent plus à l'usage quotidien (cartographies
+type Profil sont accessibles via /settings côté user).
+
+**Estimation** : 4-6h de design + intégration. À traiter dans une session
+dédiée "refonte panel admin".
+
+### 4. ✅ Bug bouton "Connecter Microsoft" pour tool_type=outlook — FIX 28/04 soir
+
+**Symptôme** : Guillaume crée la connexion "Contact Couffrant Solar" en
+choisissant le type `outlook`. Sur la ligne, **aucun bouton** n'apparaît
+pour lancer l'OAuth Microsoft.
+
+**Cause** : dans `app/static/admin-panel.js`, la condition de rendu du
+bouton OAuth était strictement `c.tool_type === 'microsoft'` alors que
+le backend (mailbox_manager.py) traite déjà `microsoft` et `outlook`
+comme synonymes (mêmes credentials Graph, même MicrosoftConnector).
+
+**Fix** : étendre les conditions à `microsoft || outlook` aux 5
+endroits du JS :
+- Groupage `mail` dans le résumé d'entête
+- Bouton "🔵 Connecter Microsoft" (status non-connecté)
+- Bouton "🔄 Reconnecter" (status connecté)
+- Bouton "🔍 Découvrir" (cosmétique, en attendant fix #2)
+- `renderMicrosoftActions(tenantId, connId)`
+
+**Statut** : ✅ Fixé en local, push prévu dans le commit Phase A finition.
+
+### 5. Filtrer le job `webhook_night_patrol` par deactivated_models
+
+**Symptôme** : alerte récurrente chaque nuit "Ronde de nuit : 80 records
+manquants détectés, 80 rattrapages enqueues" qui revient en warning
+malgré qu'elle soit fausse.
+
+**Diagnostic** : décomposition des 80 records :
+- `of.survey.answers` : 62 (déjà dans `deactivated_models`)
+- `of.survey.user_input.line` : 17 (déjà dans `deactivated_models`)
+- `mail.activity` : 1 (rattrapé sans souci)
+
+Le job de nuit `webhook_night_patrol` ne consulte pas
+`deactivated_models` avant de compter les manquants. Il alerte donc en
+warning sur des modèles qu'on sait pertinent KO (manifests cassés en
+attente OpenFire).
+
+**Fix** : ajouter une jointure ou un filtre sur la table
+`deactivated_models` dans la requête qui détecte les manquants. Les
+modèles documentés comme désactivés sont attendus à 0%, ce n'est pas
+une anomalie.
+
+**Estimation** : 30 min (audit du job nocturne + ajout du filtre +
+acquittement des alertes existantes en DB).
+
+---
+
 ## 💡 IDEE 27/04 nuit — Auto-detection des manques par Raya
 
 **Intuition Guillaume** : quand Raya cherche une info et ne trouve rien dans son graphe (ex: 'l'adresse de Coullet ?' → vide), pourrait-elle se rendre compte du manque et proposer un re-scan cible pour combler le trou ?
