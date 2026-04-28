@@ -4,7 +4,7 @@ Contacts : Google People API
 Mail     : Gmail API
 """
 from __future__ import annotations
-from app.connectors.mailbox_connector import MailboxConnector, Contact, MailMessage
+from app.connectors.mailbox_connector import MailboxConnector, Contact, MailMessage, CalendarEvent
 from app.logging_config import get_logger
 
 logger = get_logger("raya.gmail_connector2")
@@ -95,6 +95,46 @@ class GmailConnector(MailboxConnector):
             return {"ok": True, "message": "Brouillon Gmail créé."}
         except Exception as e:
             return {"ok": False, "message": str(e)[:100]}
+
+    def search_mail(self, query: str, max_results: int = 10) -> list[MailMessage]:
+        """Recherche dans la boite Gmail via l API users/messages/list.
+        Query : syntaxe Gmail standard (ex 'is:unread', 'newer_than:5m',
+        'from:foo@bar.com', 'after:2024/01/01').
+        Retourne list[MailMessage] avec id, subject, sender, body (snippet),
+        date, source. Tronque a max_results (defaut 10, max 500 par appel).
+        """
+        try:
+            data = self._get(f"{_GMAIL}/messages", {
+                "q": query,
+                "maxResults": str(min(max_results, 500)),
+            })
+            message_ids = [m.get("id") for m in data.get("messages", []) if m.get("id")]
+            if not message_ids:
+                return []
+            messages = []
+            for msg_id in message_ids:
+                try:
+                    msg = self._get(f"{_GMAIL}/messages/{msg_id}", {
+                        "format": "metadata",
+                        "metadataHeaders": "From,Subject,Date",
+                    })
+                    headers = {h["name"].lower(): h["value"]
+                               for h in msg.get("payload", {}).get("headers", [])}
+                    messages.append(MailMessage(
+                        id=msg_id,
+                        subject=headers.get("subject", ""),
+                        sender=headers.get("from", ""),
+                        body=msg.get("snippet", "")[:500],
+                        date=headers.get("date", ""),
+                        source="gmail",
+                    ))
+                except Exception as e:
+                    logger.warning("[GmailConnector] search_mail get %s: %s", msg_id, e)
+                    continue
+            return messages
+        except Exception as e:
+            logger.warning("[GmailConnector] search_mail: %s", e)
+            return []
 
     # --- AGENDA (Google Calendar) ---
 
