@@ -1015,4 +1015,36 @@ MIGRATIONS = [
          LIMIT 1
        )
        WHERE ws.connection_id IS NULL""",
+
+    # -- Phase audit isolation user-user LOT 2 (28/04 soir) --
+    # Cf. docs/audit_isolation_user_user_phase2_et_plan.md
+    # Findings U.3-U.6 : 4 contraintes UNIQUE sans tenant_id, pas
+    # multi-tenant safe en cas d homonyme cross-tenant futur.
+    # Verification 28/04 : 0 duplicata sur les 4 tables (mail_memory,
+    # sent_mail_memory, email_signatures, teams_sync_state).
+    # Migration prudente : DROP IF EXISTS puis ADD CONSTRAINT,
+    # idempotente. Ordre du commit : code Python (ON CONFLICT mis a
+    # jour avec tenant_id) + migrations DB. Les 2 sont deployes
+    # ensemble par Railway, l app ne sert pas de requetes pendant
+    # init_postgres() donc pas de fenetre de risque.
+
+    # M-U01 : mail_memory UNIQUE (message_id, username) -> + tenant_id
+    "ALTER TABLE mail_memory DROP CONSTRAINT IF EXISTS mail_memory_msg_user_unique",
+    "ALTER TABLE mail_memory DROP CONSTRAINT IF EXISTS mail_memory_msg_user_tenant_unique",
+    "ALTER TABLE mail_memory ADD CONSTRAINT mail_memory_msg_user_tenant_unique UNIQUE (message_id, username, tenant_id)",
+
+    # M-U02 : sent_mail_memory idem
+    "ALTER TABLE sent_mail_memory DROP CONSTRAINT IF EXISTS sent_mail_msg_user_unique",
+    "ALTER TABLE sent_mail_memory DROP CONSTRAINT IF EXISTS sent_mail_msg_user_tenant_unique",
+    "ALTER TABLE sent_mail_memory ADD CONSTRAINT sent_mail_msg_user_tenant_unique UNIQUE (message_id, username, tenant_id)",
+
+    # M-U03 : email_signatures UNIQUE (username, email_address) -> + tenant_id
+    "ALTER TABLE email_signatures DROP CONSTRAINT IF EXISTS email_signatures_username_email_address_key",
+    "ALTER TABLE email_signatures DROP CONSTRAINT IF EXISTS email_signatures_user_email_tenant_unique",
+    "ALTER TABLE email_signatures ADD CONSTRAINT email_signatures_user_email_tenant_unique UNIQUE (username, email_address, tenant_id)",
+
+    # M-U04 : teams_sync_state UNIQUE (username, chat_id) -> + tenant_id
+    "ALTER TABLE teams_sync_state DROP CONSTRAINT IF EXISTS teams_sync_state_username_chat_id_key",
+    "ALTER TABLE teams_sync_state DROP CONSTRAINT IF EXISTS teams_sync_state_user_chat_tenant_unique",
+    "ALTER TABLE teams_sync_state ADD CONSTRAINT teams_sync_state_user_chat_tenant_unique UNIQUE (username, chat_id, tenant_id)",
 ]

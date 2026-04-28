@@ -85,7 +85,7 @@ def set_teams_marker(username: str, chat_id: str, message_id: str,
             INSERT INTO teams_sync_state
             (username, chat_id, chat_type, chat_label, last_message_id, last_synced_at, notes, tenant_id)
             VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s)
-            ON CONFLICT (username, chat_id) DO UPDATE SET
+            ON CONFLICT (username, chat_id, tenant_id) DO UPDATE SET
                 last_message_id = EXCLUDED.last_message_id,
                 last_synced_at = NOW(),
                 chat_label = COALESCE(EXCLUDED.chat_label, teams_sync_state.chat_label),

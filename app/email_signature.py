@@ -207,7 +207,7 @@ def extract_and_save_signature(username: str, tenant_id: str, token: str) -> dic
             INSERT INTO email_signatures
               (username, tenant_id, email_address, signature_html, extracted_from)
             VALUES (%s, %s, %s, %s, 'microsoft_sent')
-            ON CONFLICT (username, email_address) DO UPDATE
+            ON CONFLICT (username, email_address, tenant_id) DO UPDATE
               SET signature_html = EXCLUDED.signature_html,
                   extracted_from = EXCLUDED.extracted_from
         """, (username, tenant_id, from_address, extracted))
