@@ -16,6 +16,13 @@ Ajout d un nouveau super_admin hardcode : ajouter son email a la liste.
 Retrait : retirer son email. Dans les 2 cas, commit + push + deploy.
 """
 
+# Audit isolation 28/04 (A.6) : utilisation systematique des constantes
+# SCOPE_* au lieu de magic strings pour clarifier l intention et eviter
+# les fautes de frappe silencieuses.
+from app.security_tools import (
+    SCOPE_SUPER_ADMIN, SCOPE_ADMIN, SCOPE_TENANT_ADMIN, SCOPE_USER,
+)
+
 
 # Liste des emails des super_admins hardcodes, normalises en minuscules
 HARDCODED_SUPER_ADMINS_BY_EMAIL = [
@@ -37,15 +44,15 @@ def get_effective_scope(email: str, db_scope: str) -> str:
     Sinon -> le scope en DB (tel quel).
     """
     if is_hardcoded_super_admin(email):
-        return "super_admin"
-    return db_scope or "user"
+        return SCOPE_SUPER_ADMIN
+    return db_scope or SCOPE_USER
 
 
 def is_super_admin(email: str, db_scope: str = None) -> bool:
     """Retourne True si l user est super admin (hardcode OU db_scope='super_admin')."""
     if is_hardcoded_super_admin(email):
         return True
-    return (db_scope or "").strip().lower() == "super_admin"
+    return (db_scope or "").strip().lower() == SCOPE_SUPER_ADMIN
 
 
 def can_modify_user(actor: dict, target: dict) -> tuple:
@@ -67,11 +74,11 @@ def can_modify_user(actor: dict, target: dict) -> tuple:
     5. Personne ne peut modifier son propre scope via UI (empeche retrogradation
        accidentelle).
     """
-    actor_scope = actor.get("scope", "user")
+    actor_scope = actor.get("scope", SCOPE_USER)
     actor_email = actor.get("email", "")
     actor_username = actor.get("username", "")
     actor_tenant = actor.get("tenant_id", "")
-    target_scope = target.get("scope", "user")
+    target_scope = target.get("scope", SCOPE_USER)
     target_email = target.get("email", "")
     target_username = target.get("username", "")
     target_tenant = target.get("tenant_id", "")
@@ -85,20 +92,20 @@ def can_modify_user(actor: dict, target: dict) -> tuple:
         return (True, "ok_hardcoded_self")
 
     # Regle 2 : super_admin peut tout (sauf hardcoded ci-dessus)
-    if actor_scope == "super_admin":
+    if actor_scope == SCOPE_SUPER_ADMIN:
         return (True, "ok_super_admin")
 
     # Regle 3 : admin peut modifier tenant_admin/user/couffrant_solar mais pas super_admin ni autre admin
-    if actor_scope == "admin":
-        if target_scope in ("super_admin", "admin") and actor_username != target_username:
+    if actor_scope == SCOPE_ADMIN:
+        if target_scope in (SCOPE_SUPER_ADMIN, SCOPE_ADMIN) and actor_username != target_username:
             return (False, "Un admin ne peut pas modifier un autre admin ni un super_admin.")
         return (True, "ok_admin")
 
     # Regle 4 : tenant_admin, cloisonnement tenant strict
-    if actor_scope == "tenant_admin":
+    if actor_scope == SCOPE_TENANT_ADMIN:
         if actor_tenant != target_tenant:
             return (False, "Cloisonnement tenant : tu ne peux modifier que les utilisateurs de ton tenant.")
-        if target_scope in ("super_admin", "admin"):
+        if target_scope in (SCOPE_SUPER_ADMIN, SCOPE_ADMIN):
             return (False, "Un tenant_admin ne peut pas modifier un admin Raya ni un super_admin.")
         if actor_username == target_username:
             # Un tenant_admin NE PEUT PAS se modifier lui-meme (empeche auto-retrogradation)
@@ -118,7 +125,7 @@ def can_change_scope(actor: dict, target: dict, new_scope: str) -> tuple:
     - Un admin ne peut pas promouvoir quelqu un en super_admin
     """
     target_email = target.get("email", "")
-    actor_scope = actor.get("scope", "user")
+    actor_scope = actor.get("scope", SCOPE_USER)
     actor_username = actor.get("username", "")
     target_username = target.get("username", "")
 
@@ -131,7 +138,7 @@ def can_change_scope(actor: dict, target: dict, new_scope: str) -> tuple:
         return (False, "Tu ne peux pas modifier ton propre scope. Demande a un autre admin.")
 
     # Seul un super_admin peut nommer un super_admin
-    if new_scope == "super_admin" and actor_scope != "super_admin":
+    if new_scope == SCOPE_SUPER_ADMIN and actor_scope != SCOPE_SUPER_ADMIN:
         return (False, "Seul un super_admin peut promouvoir quelqu un en super_admin.")
 
     # Deleguation standard via can_modify_user
