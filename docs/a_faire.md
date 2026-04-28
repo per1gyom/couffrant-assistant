@@ -175,6 +175,311 @@ une anomalie.
 **Estimation** : 30 min (audit du job nocturne + ajout du filtre +
 acquittement des alertes existantes en DB).
 
+### 6. "Mes sujets" — reprise contextuelle au lieu de "fais le point"
+
+**Symptôme actuel** : quand l'utilisateur clique sur un sujet dans la
+sidebar gauche "Mes sujets", l'action déclenchée envoie automatiquement
+un prompt à Raya équivalent à "fais le point sur ce sujet". Raya répond
+par un topo / récap externe du sujet.
+
+**Comportement voulu** : "Mes sujets" sont des **pense-bêtes** que
+l'utilisateur crée volontairement pour repérer des fils de pensée
+parallèles. Le clic doit déclencher une **reprise contextuelle fluide**,
+pas un topo. Comme rouvrir une discussion mise en pause :
+
+- Au moment de la **création** du sujet : Raya prend conscience du sujet
+  (objet identifié dans son contexte, lié à la conversation en cours).
+- Au moment du **clic** : Raya recharge l'historique et l'état d'avancement
+  de ce fil, puis enchaîne naturellement ("on en était à X, tu veux qu'on
+  continue dans cette direction ou tu ajoutes quelque chose ?").
+
+**Différence clé** :
+- Topo / fais-le-point = vue extérieure imposée, casse la continuité.
+- Reprise contextuelle = continuité interne, comme avoir plusieurs
+  conversations parallèles dans la même session.
+
+**Reformulation simple** : "Mes sujets" = fils de conversation parallèles
+créés volontairement comme repères. Click = "reprends ce fil là où on
+l'avait laissé".
+
+**Fichiers concernés** : probablement `app/static/chat-topics.js` (logique
+de click sur un topic) + endpoint backend qui charge le contexte du
+sujet avant injection dans le prompt.
+
+**Estimation** : 1-2h (revoir le mécanisme de click + adapter le prompt
+système pour que Raya reprenne le fil au lieu de faire un topo +
+quelques tests).
+
+### 7. Menu 3-points côté user — audit & nettoyage
+
+**Audit du fichier `app/templates/raya_chat.html`** (lignes 60-80) : le
+menu 3-points contient 6 entrées dont 2 problématiques pour un user
+lambda.
+
+**Bug visuel** : "Paramètres" (`/settings`) et "Administration" (drawer
+latéral) utilisent **la même icône engrenage** (le SVG path `M19.4 15...`
+est identique aux 2 entrées). D'où la perception de "2 sigles
+identiques" et la confusion utilisateur.
+
+**Bug de scope** : "Administration" est visible pour TOUS les users (pas
+de `display:none` ni de filtrage par scope), alors qu'elle ouvre un
+drawer rempli d'actions techniques inadaptées :
+- 🧠 Mémoire & apprentissage : Reconstruire contexte, Synthèse,
+  Analyser mails non traités, Reconstruire profil de style
+- 📊 État du système : Compteurs, règles actives, bug reports
+- ⚠️ Actions sensibles : Purger vieux mails, **Vider l'historique
+  mails** (destructif !)
+- 🔧 Urgence / Debug : Forcer ingestion inbox/sent, Vérifier base de
+  données, Télécharger backup
+
+Aucune de ces actions ne devrait être accessible à un user normal.
+
+**Bug de redondance** : le drawer mélange les actions techniques
+ci-dessus avec des actions user (Connexions Gmail/Microsoft, Export
+données, Suppression compte, Mentions légales) qui doublonnent déjà
+avec `/settings`.
+
+**Action attendue (4 étapes)** :
+
+1. **Retirer l'entrée "Administration"** du menu user lambda (filtrer
+   par scope pour qu'elle ne s'affiche pas pour `tenant_user`).
+2. **Pour les admin/super_admin** : garder un accès aux actions
+   techniques mais sous un nom plus clair ("Outils admin",
+   "Maintenance" ou similaire) avec une icône différente de Paramètres
+   (pas un engrenage).
+3. **Auditer le drawer** : supprimer toutes les actions doublonnées
+   avec `/settings` (Connexions, Export données, Suppression compte).
+4. **Garder dans `/settings` côté user** : ce qui est utile à un user
+   final (connexions, données personnelles, mentions légales,
+   déconnexion).
+
+**Estimation** : 2-3h (tri du contenu drawer + filtrage scope dans
+template + déplacement éventuel des actions vers /settings + tests).
+
+---
+
+## 🌞 CHANTIER VESTA — analyse 28/04 soir + roadmap multi-phases
+
+> **Contexte** : tour d'horizon de l'API publique Vesta + webhooks le 28/04 soir.
+> Mail envoyé à Maxime (dev Vesta) le 28/04 ~21h30 pour demander la liste
+> des endpoints internes existants. **En attente de sa réponse** avant
+> d'attaquer le code. Sans réponse de Maxime sous 7-10 jours, relancer.
+
+### Vision globale : "single source of truth" Couffrant
+
+Idéalement, les collaborateurs ne saisissent une donnée qu'**une seule
+fois**, et Raya la propage entre Vesta ↔ Odoo ↔ Excel SharePoint ↔ fiches
+de suivi internes. Plus de double saisie, fiabilisation par contrôle
+croisé automatique. Raya joue le rôle de couche de référence + vérification.
+
+C'est le bon framing pour TOUTE intégration future de logiciels métier
+chez Couffrant (Vesta, SolarEdge, Tayl0r/Fox ESS, Excel suivi chantiers).
+
+### Inventaire API publique Vesta — état au 28/04
+
+**6 endpoints REST** (auth par clé API à générer dans `app.vesta.eco/integration`) :
+
+| Méthode | Endpoint | Usage |
+|---|---|---|
+| GET | `/api_v1/users` | Liste collaborateurs orga |
+| **PUT** | `/api_v1/customer` | Créer/maj client (idempotent par `customer_id`) |
+| GET | `/api_v1/customer/{id}` | Lire client (avec `project_ids[]`) |
+| GET | `/api_v1/project/{id}/offers` | Lister offres d'un projet |
+| GET | `/api_v1/estimate/{id}` | Lire devis (montants HT/TTC + `signed_file` URL PDF) |
+| GET | `/api_v1/estimate/{id}/items` | Lignes devis (avec `unit_price` ET `unit_purchase_price` = **calcul de marge possible**) |
+
+**3 webhooks** (POST, réponse <5s, code 2XX, retry 3 fois automatique) :
+
+| Event | Quand | Données clés |
+|---|---|---|
+| `offer.proposal_shared` | Proposition partagée au client | `customer_id`, `project_id`, `proposal_public_url`, `photovoltaic_power_kwc` |
+| `estimate.sent_for_signature` | Devis envoyé en signature | `estimate_id`, `accounting_number`, montants |
+| `estimate.signed` | **Devis signé** ⭐ | tout + `signed_at` + `signed_file` (URL PDF) |
+
+### Limitations identifiées (publique seule)
+
+- ❌ Pas d'endpoint "list all customers" → on dépend des webhooks pour découvrir les clients
+- ❌ Pas d'endpoint create/list project → projet créé implicitement avec customer
+- ❌ **Champs visite technique pas exposés** (pente toit, type de couverture, distances compteur/toit/tableau, type compteur mono/tri, puissance abonnement, nb panneaux planifiés, etc. — ~25-30 champs métier critiques pour Couffrant)
+- ❌ Pas de webhook `customer.created` (sans proposition commerciale, on ne sait pas qu'un client a été créé)
+- ❌ Pas d'accès aux notes client ni aux paramètres d'étude
+- ❌ Pas d'accès aux modèles de documents
+
+### V.1 — Mail envoyé à Maxime (28/04 ~21h30)
+
+**Statut** : ✅ envoyé. Demande de la liste des endpoints internes existants
++ webhooks supplémentaires possibles. Relance prévue à J+10 si pas de réponse.
+
+**Texte du mail conservé pour traçabilité** :
+
+> Salut Maxime,
+> J'espère que tu vas bien. On a connecté l'API publique de Vesta à notre
+> outil interne d'assistance (les 6 endpoints + 3 webhooks documentés). La
+> lecture clients/devis et les events de signature remontent bien, ça nous
+> est déjà utile.
+> On voudrait aller plus loin pour centraliser nos données chantiers entre
+> Vesta, Odoo et nos fiches de suivi internes — éviter à nos collaborateurs
+> de saisir les mêmes infos plusieurs fois et fiabiliser le contrôle croisé.
+> Côté écriture, on aimerait surtout pouvoir alimenter les fiches de visite
+> technique (pente toit, type de couverture, distances compteur/toit/
+> tableau, type de compteur mono/tri, puissance… etc).
+> Côté lecture, on aurait besoin de :
+> - lister l'ensemble des projets (pas uniquement par customer_id)
+> - accéder aux paramètres d'étude
+> - accéder aux notes client
+> Ma question concrète : est-ce que tu peux nous partager la liste des
+> endpoints internes que Vesta utilise déjà pour sa propre interface ? On
+> préfère adapter nos demandes à ce qui existe déjà chez vous plutôt que
+> te demander de développer from scratch. Si certains sont accessibles en
+> l'état moyennant authentification, ça nous irait très bien.
+> Dispo pour un call si c'est plus simple à expliquer de vive voix.
+> Merci d'avance, Guillaume Perrin / Couffrant Solar
+
+### V.2 — Connecteur Vesta lecture (~3h, à coder après réponse Maxime)
+
+**Pré-requis** : clé API Vesta générée par Guillaume + stockée dans
+`tenant_connections.credentials` chiffré (pas en variable env Railway, par
+cohérence multi-tenant comme Odoo).
+
+**Étapes** :
+- V.2a — Migration DB : nouveau `tool_type='vesta'` accepté, structure
+  credentials = `{api_key: "..."}`. (15 min)
+- V.2b — `app/connectors/vesta_connector.py` : 6 méthodes mappées sur les
+  endpoints REST + helper `upsert_customer(payload)`. Auth header
+  `X-API-Key: {key}`. Tests basiques avec mocks. (1h30)
+- V.2c — UI panel : ajouter Vesta dans le catalogue de connexions. Bouton
+  "Ajouter clé API" + champ saisie + test bouton "Tester la connexion"
+  (appel `GET /users`). (1h)
+- V.2d — Tour de découverte (cf. `docs/onboarding_decouverte_outils.md`) :
+  scanner les clients/projets pour vectoriser les noms et permettre à
+  Raya de les retrouver sémantiquement. (30 min)
+
+**Sortie** : Raya peut interroger sa base Vesta via langage naturel
+("Combien j'ai signé en mars sur Vesta ?", "Quelle marge sur le devis
+Dupont ?").
+
+### V.3 — Webhook receiver Vesta (~2h)
+
+**Étapes** :
+- V.3a — Endpoint `POST /webhook/vesta` avec validation client_state (similaire
+  à microsoft_webhook). Stockage event dans nouvelle table `vesta_events` ou
+  réutilisation `vectorization_queue` pour intégration au pipeline existant.
+  Réponse 2XX rapide (<5s) garantie. (1h)
+- V.3b — UI configurer URL webhook côté Vesta + bouton "Tester" depuis
+  Vesta marche en bout-en-bout. (30 min)
+- V.3c — Idempotence : un même `estimate_id` reçu 2 fois ne déclenche pas
+  2 actions Raya. (30 min)
+
+**Sortie** : Vesta peut notifier Raya en temps-réel des 3 events.
+
+### V.4 — Logique métier sur events Vesta (~2-3h)
+
+**Décision Guillaume** : pour le MVP, **mode passif** = Raya stocke
+l'event et c'est Guillaume qui lui demande conversationnellement
+("qu'est-ce qui s'est passé sur Vesta cette semaine ?"). Pas
+d'automatisme prédéfini qui ratera les vrais besoins.
+
+**Évolutions possibles à éprouver après usage réel** :
+- Sur `estimate.signed` → notification Teams aux collaborateurs concernés
+- Sur `estimate.signed` → création automatique du lead Odoo correspondant
+- Sur `estimate.signed` → création événement calendrier "Démarrer
+  chantier X"
+- Comparaison Vesta ↔ Odoo périodique : Raya alerte si un devis est signé
+  côté Vesta sans avoir de lead correspondant dans Odoo
+
+À implémenter au cas par cas selon ce que demandera Guillaume après
+quelques semaines d'usage du V.3.
+
+### V.5 — Playwright pour saisie auto visite technique (~10-15h, chantier dédié)
+
+**Le besoin réel** identifié le 28/04 : éviter la double saisie pour les
+fiches de visite technique (~25-30 champs : pente, type tuiles, distances
+compteur, etc.) qui ne sont **pas exposées dans l'API Vesta**. Si Maxime
+n'ouvre pas ces endpoints, Playwright (RPA) est le plan B.
+
+**Workflow envisagé** (vision Guillaume) :
+1. Sur le terrain, Guillaume parle à Raya en mode vocal : *"Visite tech
+   chez Dupont, pente 35°, exposition sud, tuiles canal, distance
+   compteur-toit 12m..."*
+2. Raya structure dans une fiche standardisée (format JSON défini avec
+   Guillaume), lui lit le récap pour validation
+3. Guillaume valide → Raya appelle son module Playwright en arrière-plan
+4. Playwright se logge à Vesta (credentials chiffrés en DB), navigue
+   jusqu'au client Dupont (déjà créé via `PUT /customer`), trouve le
+   formulaire visite technique, remplit chaque champ, sauvegarde
+5. Confirmation visuelle : Raya prend une capture d'écran de la fiche
+   remplie et l'envoie à Guillaume pour vérification
+
+**Pour Guillaume : 30 secondes de dictée** au lieu de 20 minutes de saisie
+manuelle. Énorme gain de productivité.
+
+**Avantages vs reverse engineering API privée** :
+- ✅ Compatible CGU Vesta (juste un browser qui clique, pas
+  d'exploitation API non documentée)
+- ✅ Couvre 100% des champs visibles dans l'UI
+- ✅ Permet aussi upload de photos (PV de visite, schémas)
+
+**Inconvénients** :
+- 🟠 Plus lent que API : 15-30s par formulaire vs 200ms
+- 🟠 Fragile aux changements UI Vesta : 30 min de fix si refonte CSS
+- 🟠 Demande stockage chiffré identifiants Vesta
+
+**Pré-requis architecture** :
+- Module `app/automation/playwright_runner.py` (lance browser headless,
+  gère sessions, screenshots, retry)
+- Stockage credentials user/password chiffrés dans
+  `tenant_connections.credentials` (en plus de la clé API)
+- Mécanisme de définition des "scripts" Playwright en JSON (sélecteurs +
+  ordre d'actions) pour qu'on puisse ajuster sans redéploiement
+
+**Effort réaliste** : 10-15h pour un questionnaire complet (auth +
+navigation + remplissage + gestion erreurs + tests). Chantier dédié à
+faire d'une traite, pas en bout de session.
+
+**Lien** : voir aussi le chantier "pilotage navigateur" déjà noté pour
+Consuel/Enedis. Mêmes briques techniques, on peut mutualiser.
+
+### V.6 — Transcription audio RDV/visites (~1-2 jours, vision long terme)
+
+**Idée Guillaume 28/04 soir** : utiliser un capteur audio ambient
+(téléphone ou enregistreur dédié) pendant les RDV clients ou visites
+techniques. Transcription auto via Whisper, puis Raya extrait les données
+structurées (info compteur, dimensions toit, attentes client...) et les
+propage automatiquement dans les bons logiciels.
+
+**Outils dispo aujourd'hui** :
+- **Whisper d'OpenAI** : transcription quasi parfaite en français, coût
+  ~0.006€/min (1h d'audio = 36 centimes). API documentée.
+- **Anthropic Claude (Sonnet)** : très bon en extraction de données
+  structurées depuis transcription brute.
+
+**Pipeline complet à coder** :
+1. Endpoint `POST /audio/upload` qui reçoit un fichier audio (mp3/m4a/wav)
+2. Whisper API → transcription brute texte
+3. Sonnet API avec prompt d'extraction sur fiche standardisée
+4. Étape de validation : Raya lit ce qu'elle a compris, Guillaume
+   corrige les 2-3 erreurs (Whisper se trompe parfois sur les chiffres :
+   "9 kVA" peut devenir "neuf kVA" puis "9000 V")
+5. Validation OK → propagation Vesta + Odoo + autres via les V.2/V.5
+
+**Effort estimé** : 1-2 jours dev + tests. **Précision honnête** : c'est
+une vision à moyen terme, à attaquer après V.2/V.3 stables et après
+décision sur Playwright (V.5). Pas un MVP.
+
+### Plan de bataille global Vesta
+
+| Phase | Statut | Pré-requis | Effort |
+|---|---|---|---|
+| V.1 — Mail Maxime | ✅ Envoyé 28/04 | — | — |
+| V.2 — Connecteur lecture | ⏳ Attente clé API + Maxime | clé API Vesta | ~3h |
+| V.3 — Webhook receiver | ⏳ Après V.2 | URL publique Raya | ~2h |
+| V.4 — Logique métier | ⏳ Mode passif d'abord | V.3 stable + 2 semaines d'usage | ~2-3h |
+| V.5 — Playwright visite tech | ⏳ Si Maxime n'ouvre pas API | Réponse négative Maxime | ~10-15h |
+| V.6 — Transcription audio | ⏳ Vision moyen terme | V.2 + V.3 stables | ~1-2j |
+
+**Démarrage probable** : dès retour Maxime (J+1 à J+10). En attendant,
+chantier en pause.
+
 ---
 
 ## 💡 IDEE 27/04 nuit — Auto-detection des manques par Raya
