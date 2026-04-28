@@ -430,3 +430,41 @@ dédiées dans les jours qui viennent.
 3. LOT 4 (~30 min discussion) : intercalé avec le reste
 
 Démarrage idéal : demain en fin de matinée à frais.
+
+---
+
+## ✅ Mise à jour — Décisions LOT 4 actées par Guillaume (28/04 fin de soirée)
+
+Les 3 décisions design sont tranchées :
+
+| # | Question | Décision |
+|---|---|---|
+| **L4.1** | `users.username UNIQUE` : conserver global ou migrer composite ? | ✅ **Conserver UNIQUE(username) global** (statu quo, Option A) |
+| **L4.2** | `aria_onboarding.username UNIQUE` : idem ? | ✅ **Conserver** (cohérent avec L4.1) |
+| **L4.3** | Retirer les branches `else` legacy sans `tenant_id` ? | ✅ **Retirer** après vérif logs |
+
+### Implications concrètes
+
+**Pour L4.1 + L4.2** :
+- Aucune migration DB nécessaire sur ces 2 contraintes UNIQUE
+- Si un jour 2 tenants veulent un user "Charlotte", on préfixe côté UI
+  (`charlotte_juillet`, `charlotte_lambda`)
+- À ré-aborder dans 2-3 mois si on dépasse 50 tenants en prod
+
+**Pour L4.3** :
+- Le LOT 1.8 (`memory_rules.py:51-83` retirer la branche else) est
+  validé pour exécution
+- **Pré-requis** : avant de retirer, vérifier qu'aucun WARNING
+  `[get_aria_rules] Appel SANS tenant_id` n'a été émis en logs Railway
+  depuis le 27/04 (date du HOTFIX qui a ajouté le WARNING)
+- Si WARNING(s) : identifier le(s) caller(s) coupable(s), les durcir
+  d'abord, retirer la branche après
+- Si aucun WARNING : retirer directement la branche, propre
+
+### Recap chantier final
+
+Le LOT 4 est **clos sans modification de code**. Les LOTs 1-2-3 restent
+inchangés. Total restant : **~3h30 de dev (LOTs 1+2+3)**, faisable dans
+les jours qui viennent.
+
+Démarrage idéal : prochaine session à frais (demain matin ou après-midi).
