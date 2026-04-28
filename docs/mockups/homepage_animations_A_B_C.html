@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Mockup page d'accueil Raya — A / B / C</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 32px 24px;
+  }
+  h1 {
+    font-size: 22px;
+    text-align: center;
+    margin-bottom: 6px;
+    font-weight: 600;
+  }
+  .lead {
+    text-align: center;
+    color: #94a3b8;
+    margin-bottom: 36px;
+    font-size: 14px;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+  .card {
+    background: #1e293b;
+    border-radius: 16px;
+    overflow: hidden;
+    border: 1px solid #334155;
+  }
+  .card-label {
+    padding: 14px 20px;
+    background: #0f172a;
+    border-bottom: 1px solid #334155;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .card-label .badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px; height: 28px;
+    background: #3b82f6;
+    color: white;
+    border-radius: 999px;
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .card-label .name {
+    font-weight: 600;
+    font-size: 15px;
+  }
+  .card-label .meta {
+    margin-left: auto;
+    font-size: 11px;
+    color: #94a3b8;
+    font-family: 'SF Mono', Menlo, monospace;
+  }
+  .preview {
+    height: 480px;
+    position: relative;
+    overflow: hidden;
+  }
+  .pros-cons {
+    padding: 14px 20px;
+    background: #0f172a;
+    border-top: 1px solid #334155;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .pros-cons p { margin-bottom: 6px; }
+  .pros-cons p:last-child { margin-bottom: 0; }
+  .pros-cons .pro { color: #4ade80; }
+  .pros-cons .con { color: #f87171; }
+
+  /* ─────────────────────────────────────────────
+     OPTION A — CSS pure : gradient animé + particules
+     ───────────────────────────────────────────── */
+  .opt-a {
+    background: linear-gradient(120deg, #1e3a8a, #5b21b6, #be185d, #1e3a8a);
+    background-size: 300% 300%;
+    animation: gradientShift 18s ease infinite;
+  }
+  @keyframes gradientShift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+  .opt-a .particle {
+    position: absolute;
+    background: rgba(255,255,255,0.4);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  .opt-a .p1 { width: 6px; height: 6px; top: 20%; left: 15%; animation: float 8s ease-in-out infinite; }
+  .opt-a .p2 { width: 4px; height: 4px; top: 60%; left: 75%; animation: float 12s ease-in-out infinite reverse; }
+  .opt-a .p3 { width: 8px; height: 8px; top: 35%; left: 60%; animation: float 10s ease-in-out infinite; }
+  .opt-a .p4 { width: 5px; height: 5px; top: 80%; left: 30%; animation: float 14s ease-in-out infinite; }
+  .opt-a .p5 { width: 3px; height: 3px; top: 15%; left: 85%; animation: float 9s ease-in-out infinite reverse; }
+  @keyframes float {
+    0%, 100% { transform: translate(0, 0); opacity: 0.4; }
+    50% { transform: translate(30px, -40px); opacity: 0.8; }
+  }
+  .opt-a .content {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 32px;
+    text-align: center;
+    color: white;
+    animation: fadeUp 1s ease-out;
+  }
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .opt-a .content .greeting {
+    font-size: 32px;
+    font-weight: 300;
+    letter-spacing: -0.5px;
+    margin-bottom: 8px;
+  }
+  .opt-a .content .name {
+    font-size: 32px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 24px;
+  }
+  .opt-a .content .meta {
+    font-size: 14px;
+    opacity: 0.85;
+    margin-bottom: 32px;
+    line-height: 1.6;
+  }
+  .opt-a .content .question {
+    font-size: 16px;
+    opacity: 0.95;
+    font-style: italic;
+  }
+
+  /* ─────────────────────────────────────────────
+     OPTION B — SVG illustration animée
+     ───────────────────────────────────────────── */
+  .opt-b {
+    background: linear-gradient(180deg, #fef3c7 0%, #fde68a 35%, #fbbf24 100%);
+    position: relative;
+  }
+  .opt-b svg.scene {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  .opt-b .sun {
+    transform-origin: center;
+    animation: pulse 4s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { transform: scale(1); opacity: 0.9; }
+    50% { transform: scale(1.06); opacity: 1; }
+  }
+  .opt-b .ray {
+    transform-origin: 200px 140px;
+    animation: rotateRays 25s linear infinite;
+  }
+  @keyframes rotateRays {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+  .opt-b .cloud {
+    animation: drift 20s ease-in-out infinite;
+  }
+  .opt-b .cloud-2 {
+    animation: drift 26s ease-in-out infinite reverse;
+  }
+  @keyframes drift {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(40px); }
+  }
+  .opt-b .content {
+    position: absolute;
+    bottom: 60px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: #422006;
+    padding: 0 24px;
+    animation: fadeUp 1.2s ease-out;
+  }
+  .opt-b .content .greeting {
+    font-size: 30px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 6px;
+  }
+  .opt-b .content .meta {
+    font-size: 13px;
+    margin-bottom: 16px;
+    color: #78350f;
+  }
+  .opt-b .content .question {
+    font-size: 15px;
+    color: #78350f;
+    font-style: italic;
+  }
+
+  /* ─────────────────────────────────────────────
+     OPTION C — Lottie-like (animation complexe)
+     Note : ici simulé en CSS pour la démo
+     ───────────────────────────────────────────── */
+  .opt-c {
+    background: radial-gradient(ellipse at top, #312e81 0%, #1e1b4b 60%, #0f0f1f 100%);
+    position: relative;
+  }
+  .opt-c .stars {
+    position: absolute;
+    inset: 0;
+  }
+  .opt-c .star {
+    position: absolute;
+    background: white;
+    border-radius: 50%;
+    animation: twinkle 3s ease-in-out infinite;
+  }
+  @keyframes twinkle {
+    0%, 100% { opacity: 0.2; transform: scale(0.8); }
+    50% { opacity: 1; transform: scale(1.2); }
+  }
+  .opt-c .character {
+    position: absolute;
+    bottom: 130px;
+    left: 50%;
+    transform: translateX(-50%);
+    animation: bounce 2.5s ease-in-out infinite;
+  }
+  @keyframes bounce {
+    0%, 100% { transform: translateX(-50%) translateY(0); }
+    50% { transform: translateX(-50%) translateY(-12px); }
+  }
+  .opt-c .character svg {
+    filter: drop-shadow(0 0 24px rgba(99, 102, 241, 0.6));
+  }
+  .opt-c .character .body { animation: breathe 3s ease-in-out infinite; transform-origin: center; }
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.03); }
+  }
+  .opt-c .character .arm-left { animation: wave 2s ease-in-out infinite; transform-origin: 40px 65px; }
+  @keyframes wave {
+    0%, 100% { transform: rotate(-15deg); }
+    50% { transform: rotate(20deg); }
+  }
+  .opt-c .content {
+    position: absolute;
+    top: 32px;
+    left: 0;
+    right: 0;
+    text-align: center;
+    color: #c7d2fe;
+    padding: 0 24px;
+    animation: fadeDown 1s ease-out;
+  }
+  @keyframes fadeDown {
+    from { opacity: 0; transform: translateY(-20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .opt-c .content .greeting {
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+    margin-bottom: 6px;
+    color: #e0e7ff;
+  }
+  .opt-c .content .meta {
+    font-size: 13px;
+    color: #a5b4fc;
+    margin-bottom: 16px;
+  }
+  .opt-c .content .question {
+    font-size: 15px;
+    color: #c7d2fe;
+    font-style: italic;
+  }
+</style>
+</head>
+<body>
+
+<h1>Page d'accueil Raya — 3 options visuelles</h1>
+<p class="lead">Aperçu côte à côte. Bouge la fenêtre / scroll pour voir comment chaque option vit dans le temps.</p>
+
+<div class="grid">
+
+  <!-- OPTION A -->
+  <div class="card">
+    <div class="card-label">
+      <div class="badge">A</div>
+      <div class="name">Animation CSS pure</div>
+      <div class="meta">~1 KB · 0 dépendance</div>
+    </div>
+    <div class="preview opt-a">
+      <div class="particle p1"></div>
+      <div class="particle p2"></div>
+      <div class="particle p3"></div>
+      <div class="particle p4"></div>
+      <div class="particle p5"></div>
+      <div class="content">
+        <div class="greeting">Bonjour</div>
+        <div class="name">Guillaume</div>
+        <div class="meta">
+          mardi 28 avril · 14:35<br>
+          Romorantin-Lanthenay · 14°C, ensoleillé
+        </div>
+        <div class="question">Qu'allons-nous faire aujourd'hui&nbsp;?</div>
+      </div>
+    </div>
+    <div class="pros-cons">
+      <p class="pro">+ Très léger, aucune dépendance externe</p>
+      <p class="pro">+ Facile à modifier (couleurs, vitesse, particules)</p>
+      <p class="pro">+ Sobre, pas "appli mobile"</p>
+      <p class="con">– Visuel "abstrait", pas d'illustration concrète</p>
+    </div>
+  </div>
+
+  <!-- OPTION B -->
+  <div class="card">
+    <div class="card-label">
+      <div class="badge">B</div>
+      <div class="name">Illustration SVG animée</div>
+      <div class="meta">~5 KB · 0 dépendance</div>
+    </div>
+    <div class="preview opt-b">
+      <svg class="scene" viewBox="0 0 400 480" preserveAspectRatio="xMidYMid slice">
+        <!-- Soleil -->
+        <g class="sun">
+          <circle cx="200" cy="140" r="48" fill="#fbbf24" />
+          <circle cx="200" cy="140" r="38" fill="#fcd34d" />
+        </g>
+        <!-- Rayons -->
+        <g class="ray" stroke="#f59e0b" stroke-width="3" stroke-linecap="round" opacity="0.7">
+          <line x1="200" y1="60" x2="200" y2="80" />
+          <line x1="200" y1="200" x2="200" y2="220" />
+          <line x1="120" y1="140" x2="140" y2="140" />
+          <line x1="260" y1="140" x2="280" y2="140" />
+          <line x1="145" y1="85" x2="155" y2="95" />
+          <line x1="245" y1="85" x2="255" y2="95" />
+          <line x1="145" y1="195" x2="155" y2="185" />
+          <line x1="245" y1="195" x2="255" y2="185" />
+        </g>
+        <!-- Nuages -->
+        <g class="cloud" fill="white" opacity="0.85">
+          <ellipse cx="80" cy="190" rx="35" ry="14" />
+          <ellipse cx="100" cy="180" rx="25" ry="13" />
+          <ellipse cx="115" cy="190" rx="22" ry="11" />
+        </g>
+        <g class="cloud-2" fill="white" opacity="0.75">
+          <ellipse cx="320" cy="100" rx="30" ry="12" />
+          <ellipse cx="340" cy="92" rx="22" ry="11" />
+        </g>
+        <!-- Colline en bas -->
+        <path d="M 0 360 Q 100 320 200 350 T 400 340 L 400 480 L 0 480 Z" fill="#84cc16" opacity="0.4" />
+        <path d="M 0 400 Q 120 370 240 395 T 400 388 L 400 480 L 0 480 Z" fill="#65a30d" opacity="0.5" />
+      </svg>
+      <div class="content">
+        <div class="greeting">Bonjour Guillaume</div>
+        <div class="meta">mardi 28 avril · 14:35 · Romorantin · 14°C ☀️</div>
+        <div class="question">Qu'allons-nous faire aujourd'hui&nbsp;?</div>
+      </div>
+    </div>
+    <div class="pros-cons">
+      <p class="pro">+ Joli, "fait main", évoque clairement la météo / le matin</p>
+      <p class="pro">+ Léger (SVG inline, pas de fichier externe)</p>
+      <p class="con">– Demande 2-3h de design pour avoir 3-4 variantes (matin/soir/pluvieux)</p>
+      <p class="con">– Risque de lasser si toujours la même illustration</p>
+    </div>
+  </div>
+
+  <!-- OPTION C -->
+  <div class="card">
+    <div class="card-label">
+      <div class="badge">C</div>
+      <div class="name">Lottie / personnage animé</div>
+      <div class="meta">~250 KB lib + animation</div>
+    </div>
+    <div class="preview opt-c">
+      <div class="stars">
+        <div class="star" style="width: 2px; height: 2px; top: 12%; left: 10%; animation-delay: 0s;"></div>
+        <div class="star" style="width: 3px; height: 3px; top: 20%; left: 80%; animation-delay: 0.5s;"></div>
+        <div class="star" style="width: 2px; height: 2px; top: 35%; left: 45%; animation-delay: 1s;"></div>
+        <div class="star" style="width: 2px; height: 2px; top: 50%; left: 20%; animation-delay: 1.5s;"></div>
+        <div class="star" style="width: 4px; height: 4px; top: 18%; left: 60%; animation-delay: 0.3s;"></div>
+        <div class="star" style="width: 2px; height: 2px; top: 8%; left: 90%; animation-delay: 0.8s;"></div>
+        <div class="star" style="width: 3px; height: 3px; top: 60%; left: 88%; animation-delay: 2s;"></div>
+      </div>
+      <div class="content">
+        <div class="greeting">Bonjour Guillaume</div>
+        <div class="meta">mardi 28 avril · 14:35 · 14°C ☀️</div>
+        <div class="question">Qu'allons-nous faire aujourd'hui&nbsp;?</div>
+      </div>
+      <div class="character">
+        <svg width="120" height="160" viewBox="0 0 120 160" xmlns="http://www.w3.org/2000/svg">
+          <!-- Robot/personnage stylisé -->
+          <g class="body">
+            <!-- corps -->
+            <ellipse cx="60" cy="120" rx="40" ry="28" fill="#6366f1" opacity="0.9" />
+            <!-- tête -->
+            <circle cx="60" cy="60" r="32" fill="#818cf8" />
+            <circle cx="60" cy="60" r="32" fill="url(#glow)" opacity="0.5" />
+            <!-- yeux -->
+            <circle cx="50" cy="58" r="4" fill="white" />
+            <circle cx="70" cy="58" r="4" fill="white" />
+            <circle cx="50" cy="58" r="2" fill="#1e1b4b" />
+            <circle cx="70" cy="58" r="2" fill="#1e1b4b" />
+            <!-- sourire -->
+            <path d="M 50 72 Q 60 80 70 72" stroke="white" stroke-width="2" fill="none" stroke-linecap="round" />
+          </g>
+          <!-- bras gauche (qui salue) -->
+          <g class="arm-left">
+            <ellipse cx="30" cy="80" rx="6" ry="18" fill="#818cf8" />
+            <circle cx="30" cy="62" r="7" fill="#a5b4fc" />
+          </g>
+          <!-- bras droit -->
+          <ellipse cx="90" cy="100" rx="6" ry="18" fill="#818cf8" />
+          <defs>
+            <radialGradient id="glow">
+              <stop offset="0%" stop-color="#c7d2fe" />
+              <stop offset="100%" stop-color="#818cf8" stop-opacity="0" />
+            </radialGradient>
+          </defs>
+        </svg>
+      </div>
+    </div>
+    <div class="pros-cons">
+      <p class="pro">+ Très "moderne", caractère, un peu magique</p>
+      <p class="pro">+ Possibilité d'avatar Raya récurrent (identité visuelle forte)</p>
+      <p class="con">– Vibe "appli mobile / SaaS grand public", peut détonner sur un outil pro</p>
+      <p class="con">– Design pro = +1-2 jours de dev, ou achat sur LottieFiles (50-200€)</p>
+    </div>
+  </div>
+
+</div>
+
+<p style="text-align: center; margin-top: 36px; color: #64748b; font-size: 13px;">
+  Mockup statique · Les 3 versions tournent en boucle. Refresh la page pour revoir l'animation d'apparition.
+</p>
+
+</body>
+</html>

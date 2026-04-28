@@ -8,6 +8,68 @@ Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 
 ---
 
+## 🏠 CHANTIER (validé 28/04 après-midi) — Page d'accueil dynamique
+
+> **Vitrine quotidienne de Raya, personnalisable par chaque utilisateur.** Affichée à la 1ère connexion de chaque journée. Brief précis ci-dessous, prêt à être implémenté.
+
+### Objectif
+Quand un utilisateur revient sur Raya pour la 1ère fois d'une journée, au lieu de tomber directement sur la dernière réponse de la conversation continue, il voit une **page d'accueil** soignée qui le salue, donne le contexte du jour (heure, météo, planning léger, résumé de la veille) et l'invite à commencer.
+
+### Comportement attendu
+
+1. **Détection** : `users.last_login_date != aujourd'hui` → on affiche la page. Sinon on garde le scroll classique.
+2. **Affichage** : overlay pleine page **par-dessus** la conversation. L'historique est au-dessus, hors cadre, scrollable.
+3. **Coupure visuelle datée** : entre la page d'accueil et l'historique, un séparateur avec la date du jour. Permet de retrouver facilement "ce qu'on faisait il y a 3 jours".
+4. **Disparition** : dès que l'utilisateur tape un message, l'overlay se ferme et le chat reprend normalement.
+5. **Rappel** : bouton 🏠 dans la barre d'en-tête + commande naturelle ("rebonjour", "affiche-moi l'accueil"). La page n'est jamais stockée dans `aria_memory`.
+
+### Blocs par défaut au lancement
+
+- ☀️ **Salutation** : "Bonjour [prénom]" + date complète + heure + ville + **icône météo dynamique** (soleil/nuageux/pluie/neige)
+- 📅 **Planning léger** : 3-5 lignes max sur ce qui est prévu aujourd'hui (rendez-vous filtrés par `of_employees_names` cf. règle 230 pour Guillaume)
+- 📝 **Résumé conversation précédente** : "La dernière fois, on a travaillé sur X et Y. Tu en étais à..."
+- 💡 **Suggestion proactive** (optionnel) : 1 alerte ou 1 idée du jour (lien avec `proactive_alerts` existant)
+
+### Personnalisation
+
+- Accessible via **Settings → Page d'accueil**
+- Ouvre une fenêtre de configuration avec **aperçu en direct** + **éditeur conversationnel** avec Raya
+- L'utilisateur peut **activer/désactiver** des blocs, en **ajouter** depuis un catalogue, **réorganiser** l'ordre
+- Validation → ferme la fenêtre, applique les changements
+- Chaque utilisateur a sa propre config (table `homepage_config`)
+
+### Architecture technique
+
+- Nouvelle table `homepage_config(username, tenant_id, blocks_json, updated_at)` — un user, une config
+- API météo : OpenWeatherMap gratuit (60 req/min suffit largement) ou équivalent
+- Catalogue de blocs initialement codé en dur (10-12 blocs), extensible plus tard
+- Frontend : nouveau composant overlay HTML inline dans le chat, animé en CSS pure
+- Detection 1ère connexion : query simple sur `users.last_login_date` au load de la page
+
+### Animation visuelle (cf. mockup `docs/mockups/homepage_animations_A_B_C.html`)
+
+- **Choix retenu : Option A** — gradient animé + particules CSS + fadeUp + typo soignée
+- Léger (~1 KB), 0 dépendance, modifiable facilement
+- **Évolution future possible** : Option C (personnage Raya animé Lottie) si la feature s'avère stratégique pour l'identité produit. Coût : 2-3j de design + intégration. À évaluer après usage réel.
+
+### Étapes proposées
+
+1. **Backend** (3-4h) : table `homepage_config`, endpoint GET/POST `/homepage/config`, query météo, query `last_login_date`
+2. **Composant accueil** (3-4h) : overlay HTML/CSS animé, 4 blocs par défaut codés
+3. **Détection 1ère connexion** (1-2h) : trigger au load + bouton 🏠 + commande naturelle
+4. **Panneau Settings** (3-4h) : modal de personnalisation avec aperçu + éditeur conversationnel
+5. **Tests + finition** (2h)
+
+**Estimation totale** : ~12-15h sur une session dédiée (1 journée complète).
+
+### Liens
+
+- Mockup visuel : `docs/mockups/homepage_animations_A_B_C.html`
+- Lié à : `onboarding_decouverte_outils.md` (pour la suggestion proactive)
+- Lié à : règle 230 `aria_rules` (filtre planning par employee — pour le bloc planning)
+
+---
+
 ## 💡 IDEE 27/04 nuit — Auto-detection des manques par Raya
 
 **Intuition Guillaume** : quand Raya cherche une info et ne trouve rien dans son graphe (ex: 'l'adresse de Coullet ?' → vide), pourrait-elle se rendre compte du manque et proposer un re-scan cible pour combler le trou ?
