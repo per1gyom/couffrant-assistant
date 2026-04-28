@@ -129,7 +129,8 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
         chat_type = match.group(4).strip() or "chat"
         try:
             from app.memory_teams import set_teams_marker
-            res = set_teams_marker(username, chat_id, message_id, label, chat_type)
+            res = set_teams_marker(username, chat_id, message_id, label,
+                                   chat_type, tenant_id=tenant_id)
             confirmed.append(res.get("message", "\u2705 Curseur Teams pose."))
         except Exception as e:
             confirmed.append(f"\u274c Teams mark : {str(e)[:80]}")
@@ -140,11 +141,13 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
         chat_type = match.group(3).strip() or "chat"
         try:
             from app.memory_teams import ingest_and_synthesize, get_teams_markers
-            markers = get_teams_markers(username)
+            markers = get_teams_markers(username, tenant_id=tenant_id)
             marker = next((m for m in markers if m["chat_id"] == chat_id), None)
             since = marker["last_message_id"] if marker else None
             threading.Thread(
-                target=lambda: ingest_and_synthesize(token, username, chat_id, label, chat_type, since),
+                target=lambda: ingest_and_synthesize(
+                    token, username, chat_id, label, chat_type, since,
+                    tenant_id=tenant_id),
                 daemon=True
             ).start()
             confirmed.append(f"\U0001f504 Sync Teams '{label or chat_id[:20]}' lancee en arriere-plan.")
@@ -158,7 +161,9 @@ def _handle_teams_actions(response, token, username, tenant_id, conversation_id)
         try:
             from app.memory_teams import explore_history
             threading.Thread(
-                target=lambda: explore_history(token, username, chat_id, label, chat_type),
+                target=lambda: explore_history(token, username, chat_id,
+                                                label, chat_type,
+                                                tenant_id=tenant_id),
                 daemon=True
             ).start()
             confirmed.append(f"\U0001f50d Exploration historique Teams '{label or chat_id[:20]}' lancee.")

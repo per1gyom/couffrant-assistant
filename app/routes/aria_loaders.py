@@ -124,7 +124,7 @@ def load_teams_context(username: str, tenant_id: str | None = None) -> str:
         return cached
     try:
         from app.memory_teams import get_teams_context_summary
-        markers_summary = get_teams_context_summary(username)
+        markers_summary = get_teams_context_summary(username, tenant_id=tenant_id)
     except Exception:
         markers_summary = ""
     teams_insights = ""

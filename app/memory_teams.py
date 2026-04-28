@@ -18,21 +18,36 @@ from app.config import ANTHROPIC_MODEL_FAST, ANTHROPIC_MODEL_SMART
 
 # ─── MARQUEURS ───
 
-def get_teams_markers(username: str) -> list:
+def get_teams_markers(username: str, tenant_id: str | None = None) -> list:
     """
     Retourne les marqueurs que Raya a posés sur ses chats/canaux Teams.
     Utilisé pour construire le contexte de départ.
+
+    Audit isolation 28/04 (I.7) : ajout tenant_id optionnel pour eviter
+    de melanger les markers d homonymes cross-tenant. Si non fourni,
+    on resout via users (compat ascendante, pas de fuite).
     """
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
+        # Resolution tenant_id si non fourni
+        if not tenant_id:
+            try:
+                c.execute("SELECT tenant_id FROM users WHERE username=%s LIMIT 1", (username,))
+                row = c.fetchone()
+                tenant_id = row[0] if row else None
+            except Exception:
+                tenant_id = None
+            if not tenant_id:
+                return []
         c.execute("""
             SELECT chat_id, chat_type, chat_label, last_message_id,
                    last_synced_at, notes
-            FROM teams_sync_state WHERE username = %s
+            FROM teams_sync_state
+            WHERE username = %s AND tenant_id = %s
             ORDER BY last_synced_at DESC
-        """, (username,))
+        """, (username, tenant_id))
         rows = c.fetchall()
         return [{
             "chat_id": r[0], "type": r[1], "label": r[2] or r[0][:20],
@@ -48,25 +63,35 @@ def get_teams_markers(username: str) -> list:
 
 def set_teams_marker(username: str, chat_id: str, message_id: str,
                      chat_label: str = "", chat_type: str = "chat",
-                     notes: str = "") -> dict:
+                     notes: str = "", tenant_id: str | None = None) -> dict:
     """
     Raya pose un curseur sur un chat ou canal.
     Appelé uniquement par Raya via [ACTION:TEAMS_MARK:...].
+
+    Audit isolation 28/04 (I.7) : tenant_id optionnel, resolu via users
+    si absent. Note : la PK est (username, chat_id) en DB - une migration
+    vers (username, chat_id, tenant_id) serait plus propre mais hors LOT 3.
     """
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
+        # Resolution tenant_id si non fourni
+        if not tenant_id:
+            c.execute("SELECT tenant_id FROM users WHERE username=%s LIMIT 1", (username,))
+            row = c.fetchone()
+            tenant_id = row[0] if row else None
         c.execute("""
             INSERT INTO teams_sync_state
-            (username, chat_id, chat_type, chat_label, last_message_id, last_synced_at, notes)
-            VALUES (%s, %s, %s, %s, %s, NOW(), %s)
+            (username, chat_id, chat_type, chat_label, last_message_id, last_synced_at, notes, tenant_id)
+            VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s)
             ON CONFLICT (username, chat_id) DO UPDATE SET
                 last_message_id = EXCLUDED.last_message_id,
                 last_synced_at = NOW(),
                 chat_label = COALESCE(EXCLUDED.chat_label, teams_sync_state.chat_label),
-                notes = COALESCE(NULLIF(EXCLUDED.notes,''), teams_sync_state.notes)
-        """, (username, chat_id, chat_type, chat_label or "", message_id, notes or ""))
+                notes = COALESCE(NULLIF(EXCLUDED.notes,''), teams_sync_state.notes),
+                tenant_id = COALESCE(EXCLUDED.tenant_id, teams_sync_state.tenant_id)
+        """, (username, chat_id, chat_type, chat_label or "", message_id, notes or "", tenant_id))
         conn.commit()
         label = chat_label or chat_id[:20]
         return {"status": "ok", "message": f"✅ Curseur posé sur '{label}'"}
@@ -76,14 +101,29 @@ def set_teams_marker(username: str, chat_id: str, message_id: str,
         if conn: conn.close()
 
 
-def delete_teams_marker(username: str, chat_id: str) -> dict:
-    """Supprime un marqueur — Raya peut effacer un curseur qu'elle a posé."""
+def delete_teams_marker(username: str, chat_id: str,
+                        tenant_id: str | None = None) -> dict:
+    """Supprime un marqueur — Raya peut effacer un curseur qu'elle a posé.
+
+    Audit isolation 28/04 (I.8) : ajout filtre tenant_id pour eviter
+    qu un homonyme efface le marker d un autre.
+    """
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("DELETE FROM teams_sync_state WHERE username=%s AND chat_id=%s",
-                  (username, chat_id))
+        # Resolution tenant_id si non fourni
+        if not tenant_id:
+            c.execute("SELECT tenant_id FROM users WHERE username=%s LIMIT 1", (username,))
+            row = c.fetchone()
+            tenant_id = row[0] if row else None
+            if not tenant_id:
+                return {"status": "error", "message": "Tenant introuvable."}
+        c.execute(
+            "DELETE FROM teams_sync_state "
+            "WHERE username=%s AND chat_id=%s AND tenant_id=%s",
+            (username, chat_id, tenant_id),
+        )
         conn.commit()
         return {"status": "ok"} if c.rowcount > 0 else {"status": "error", "message": "Marqueur introuvable."}
     except Exception as e:
@@ -92,12 +132,12 @@ def delete_teams_marker(username: str, chat_id: str) -> dict:
         if conn: conn.close()
 
 
-def get_teams_context_summary(username: str) -> str:
+def get_teams_context_summary(username: str, tenant_id: str | None = None) -> str:
     """
     Génère un résumé court des marqueurs Teams actifs pour le prompt.
     Montre à Raya ce qu'elle surveille déjà.
     """
-    markers = get_teams_markers(username)
+    markers = get_teams_markers(username, tenant_id=tenant_id)
     if not markers:
         return ""
     lines = []
@@ -118,6 +158,7 @@ def ingest_and_synthesize(
     chat_type: str = "chat",
     since_message_id: str = None,
     top: int = 30,
+    tenant_id: str | None = None,
 ) -> dict:
     """
     Ingère les messages d'un chat/canal Teams et synthétise les insights.
@@ -130,6 +171,9 @@ def ingest_and_synthesize(
     5. Retourne le résumé
 
     Les messages bruts ne sont PAS stockés en base.
+
+    Audit isolation 28/04 : tenant_id propage a save_insight et
+    set_teams_marker pour eviter melange cross-tenant.
     """
     from app.connectors.teams_connector import read_chat_messages, read_channel_messages
 
@@ -215,13 +259,15 @@ Réponds en JSON strict :
     for item in parsed.get("insights", []):
         if isinstance(item, dict) and item.get("text"):
             topic = f"[Teams/{label}] {item.get('topic', 'info')}"
-            save_insight(topic, item["text"], source="teams", username=username)
+            save_insight(topic, item["text"], source="teams",
+                         username=username, tenant_id=tenant_id)
             stored += 1
 
     # 4. Met à jour le curseur si des messages ont été traités
     last_msg_id = messages[-1]["id"] if messages else since_message_id
     if last_msg_id:
-        set_teams_marker(username, chat_id, last_msg_id, chat_label, chat_type)
+        set_teams_marker(username, chat_id, last_msg_id, chat_label,
+                         chat_type, tenant_id=tenant_id)
 
     summary = parsed.get("summary", "")
     return {
@@ -240,6 +286,7 @@ def explore_history(
     chat_label: str = "",
     chat_type: str = "chat",
     top: int = 50,
+    tenant_id: str | None = None,
 ) -> dict:
     """
     Explore l'historique d'un chat sans tenir compte du curseur.
@@ -249,5 +296,5 @@ def explore_history(
         token=token, username=username, chat_id=chat_id,
         chat_label=chat_label, chat_type=chat_type,
         since_message_id=None,  # Pas de curseur — tout lire
-        top=top,
+        top=top, tenant_id=tenant_id,
     )
