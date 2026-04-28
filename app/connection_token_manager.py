@@ -22,7 +22,8 @@ logger = get_logger("raya.conn_tokens")
 # ─── RÉSOLUTION PUBLIQUE ───────────────────────────────────────────
 
 def get_connection_token(username: str, tool_type: str,
-                         tenant_id: str | None = None) -> str | None:
+                         tenant_id: str | None = None,
+                         email_hint: str | None = None) -> str | None:
     """
     Retourne un access_token valide pour (username, tool_type).
     Ordre : tenant_connections V2 → oauth_tokens legacy.
@@ -30,11 +31,19 @@ def get_connection_token(username: str, tool_type: str,
     Audit isolation 28/04 (I.14) : ajout tenant_id optionnel pour
     proteger contre les homonymes cross-tenant. Si non fourni, on
     resout via users (compat ascendante).
+
+    Audit multi-boites 28/04 : email_hint optionnel pour cibler une
+    boite specifique (ex: 'sci.romagui@gmail.com'). Si non fourni,
+    retourne le token de la derniere boite connectee (legacy).
     """
-    token = _get_v2_token(username, tool_type, tenant_id=tenant_id)
+    token = _get_v2_token(username, tool_type, tenant_id=tenant_id,
+                          email_hint=email_hint)
     if token:
         return token
-    # Fallback legacy
+    # Fallback legacy (uniquement si pas de email_hint - le legacy ne
+    # supporte pas le multi-boites)
+    if email_hint:
+        return None
     if tool_type == "microsoft":
         from app.token_manager import get_valid_microsoft_token
         return get_valid_microsoft_token(username)
@@ -45,17 +54,22 @@ def get_connection_token(username: str, tool_type: str,
 
 
 def get_connection_email(username: str, tool_type: str,
-                         tenant_id: str | None = None) -> str:
+                         tenant_id: str | None = None,
+                         email_hint: str | None = None) -> str:
     """
     Retourne l'email associé à la connexion (boite mail) de l'utilisateur.
     Ordre : tenant_connections V2 → oauth_tokens/users legacy.
 
     Audit isolation 28/04 (I.14) : tenant_id optionnel.
+    Audit multi-boites 28/04 : email_hint optionnel.
     """
-    email = _get_v2_email(username, tool_type, tenant_id=tenant_id)
+    email = _get_v2_email(username, tool_type, tenant_id=tenant_id,
+                          email_hint=email_hint)
     if email:
         return email
-    # Fallback legacy
+    # Fallback legacy (uniquement si pas de email_hint)
+    if email_hint:
+        return ""
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -94,8 +108,13 @@ def _resolve_tenant(username: str) -> str | None:
 def get_user_tool_connections(username: str,
                               tenant_id: str | None = None) -> dict:
     """
-    Retourne un dict {tool_type: {token, email, connection_id, label}} 
+    Retourne un dict {tool_type: {token, email, connection_id, label}}
     pour toutes les connexions actives de l'utilisateur (v2 uniquement).
+
+    ATTENTION : si l user a plusieurs connexions du meme tool_type
+    (ex: 6 Gmail), seule la derniere est retournee (le dict ecrase).
+    Pour le multi-boites, utiliser get_all_user_connections() qui
+    retourne une liste complete.
 
     Audit isolation 28/04 (I.14) : tenant_id optionnel.
     """
@@ -130,6 +149,56 @@ def get_user_tool_connections(username: str,
     except Exception as e:
         logger.warning("[ConnTokens] get_user_tool_connections error: %s", e)
         return {}
+    finally:
+        if conn: conn.close()
+
+
+def get_all_user_connections(username: str,
+                             tenant_id: str | None = None) -> list:
+    """
+    Retourne TOUTES les connexions actives de l user, en LISTE de dicts.
+    Indispensable pour le multi-boites (ex: 6 Gmail differents).
+
+    Chaque dict contient : tool_type, connection_id, label, token, email, status.
+
+    Difference avec get_user_tool_connections (qui retourne dict[tool_type]) :
+    cette fonction n ecrase pas si plusieurs connexions du meme tool_type.
+
+    Audit multi-boites 28/04 : creee pour supporter N gmail/outlook par user.
+    """
+    if not tenant_id:
+        tenant_id = _resolve_tenant(username)
+        if not tenant_id:
+            return []
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("""
+            SELECT tc.id, tc.tool_type, tc.label, tc.credentials,
+                   tc.connected_email, tc.status, tc.updated_at
+            FROM connection_assignments ca
+            JOIN tenant_connections tc ON tc.id = ca.connection_id
+            WHERE ca.username = %s AND ca.enabled = true
+              AND tc.status = 'connected' AND tc.tenant_id = %s
+            ORDER BY tc.tool_type, tc.id
+        """, (username, tenant_id))
+        result = []
+        for row in c.fetchall():
+            cid, tool_type, label, creds_raw, email, status, _ = row
+            creds = creds_raw if isinstance(creds_raw, dict) else (json.loads(creds_raw) if creds_raw else {})
+            token = decrypt_token(creds.get("access_token", "")) if creds.get("access_token") else ""
+            result.append({
+                "connection_id": cid,
+                "tool_type": tool_type,
+                "label": label,
+                "token": token,
+                "email": email or "",
+                "status": status,
+            })
+        return result
+    except Exception as e:
+        logger.warning("[ConnTokens] get_all_user_connections error: %s", e)
+        return []
     finally:
         if conn: conn.close()
 
@@ -174,10 +243,15 @@ def save_connection_oauth_token(
 # ─── INTERNES ──────────────────────────────────────────────────────
 
 def _get_v2_token(username: str, tool_type: str,
-                  tenant_id: str | None = None) -> str | None:
+                  tenant_id: str | None = None,
+                  email_hint: str | None = None) -> str | None:
     """Cherche et rafraîchit le token V2 pour (username, tool_type).
 
     Audit isolation 28/04 (I.14) : ajout filtre tenant_id sur le JOIN.
+    Audit multi-boites 28/04 : email_hint optionnel pour cibler une
+    boite specifique quand l user a plusieurs connexions du meme
+    tool_type (ex: 6 Gmail). Si non fourni, retourne la derniere
+    connectee (ORDER BY updated_at DESC LIMIT 1) - comportement legacy.
     """
     if not tenant_id:
         tenant_id = _resolve_tenant(username)
@@ -186,15 +260,27 @@ def _get_v2_token(username: str, tool_type: str,
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("""
-            SELECT tc.id, tc.credentials, tc.tool_type
-            FROM connection_assignments ca
-            JOIN tenant_connections tc ON tc.id = ca.connection_id
-            WHERE ca.username = %s AND ca.enabled = true
-              AND tc.tool_type = %s AND tc.status = 'connected'
-              AND tc.tenant_id = %s
-            ORDER BY tc.updated_at DESC LIMIT 1
-        """, (username, tool_type, tenant_id))
+        if email_hint:
+            c.execute("""
+                SELECT tc.id, tc.credentials, tc.tool_type
+                FROM connection_assignments ca
+                JOIN tenant_connections tc ON tc.id = ca.connection_id
+                WHERE ca.username = %s AND ca.enabled = true
+                  AND tc.tool_type = %s AND tc.status = 'connected'
+                  AND tc.tenant_id = %s
+                  AND LOWER(tc.connected_email) = LOWER(%s)
+                LIMIT 1
+            """, (username, tool_type, tenant_id, email_hint))
+        else:
+            c.execute("""
+                SELECT tc.id, tc.credentials, tc.tool_type
+                FROM connection_assignments ca
+                JOIN tenant_connections tc ON tc.id = ca.connection_id
+                WHERE ca.username = %s AND ca.enabled = true
+                  AND tc.tool_type = %s AND tc.status = 'connected'
+                  AND tc.tenant_id = %s
+                ORDER BY tc.updated_at DESC LIMIT 1
+            """, (username, tool_type, tenant_id))
         row = c.fetchone()
         if not row:
             return None
@@ -231,8 +317,11 @@ def _get_v2_token(username: str, tool_type: str,
 
 
 def _get_v2_email(username: str, tool_type: str,
-                  tenant_id: str | None = None) -> str:
-    """Audit isolation 28/04 (I.14) : ajout filtre tenant_id sur le JOIN."""
+                  tenant_id: str | None = None,
+                  email_hint: str | None = None) -> str:
+    """Audit isolation 28/04 (I.14) : ajout filtre tenant_id sur le JOIN.
+    Audit multi-boites 28/04 : email_hint optionnel.
+    """
     if not tenant_id:
         tenant_id = _resolve_tenant(username)
         if not tenant_id:
@@ -240,15 +329,27 @@ def _get_v2_email(username: str, tool_type: str,
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("""
-            SELECT tc.connected_email
-            FROM connection_assignments ca
-            JOIN tenant_connections tc ON tc.id = ca.connection_id
-            WHERE ca.username = %s AND ca.enabled = true
-              AND tc.tool_type = %s AND tc.status = 'connected'
-              AND tc.tenant_id = %s
-            ORDER BY tc.updated_at DESC LIMIT 1
-        """, (username, tool_type, tenant_id))
+        if email_hint:
+            c.execute("""
+                SELECT tc.connected_email
+                FROM connection_assignments ca
+                JOIN tenant_connections tc ON tc.id = ca.connection_id
+                WHERE ca.username = %s AND ca.enabled = true
+                  AND tc.tool_type = %s AND tc.status = 'connected'
+                  AND tc.tenant_id = %s
+                  AND LOWER(tc.connected_email) = LOWER(%s)
+                LIMIT 1
+            """, (username, tool_type, tenant_id, email_hint))
+        else:
+            c.execute("""
+                SELECT tc.connected_email
+                FROM connection_assignments ca
+                JOIN tenant_connections tc ON tc.id = ca.connection_id
+                WHERE ca.username = %s AND ca.enabled = true
+                  AND tc.tool_type = %s AND tc.status = 'connected'
+                  AND tc.tenant_id = %s
+                ORDER BY tc.updated_at DESC LIMIT 1
+            """, (username, tool_type, tenant_id))
         row = c.fetchone()
         return row[0] if row and row[0] else ""
     except Exception:

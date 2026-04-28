@@ -44,16 +44,23 @@ def get_user_mailboxes(username: str) -> list[MailboxConnector]:
     Retourne tous les connecteurs actifs pour un utilisateur.
     Auto-détecte les connexions V2 + fallback legacy.
     Aucune modification de code nécessaire pour ajouter une boîte.
+
+    Audit multi-boites 28/04 : utilise get_all_user_connections (LISTE)
+    au lieu de get_user_tool_connections (DICT) pour ne pas ecraser
+    quand l user a plusieurs connexions du meme tool_type (ex: 6 Gmail).
     """
     connectors = []
     seen_emails = set()
     provider_map = _get_provider_map()
 
     # Connexions V2 (tenant_connections) — source de vérité unique
+    # On itere sur la LISTE complete (multi-boites) au lieu du dict
+    # qui ecrasait silencieusement.
     try:
-        from app.connection_token_manager import get_user_tool_connections
-        v2 = get_user_tool_connections(username)
-        for tool_type, info in v2.items():
+        from app.connection_token_manager import get_all_user_connections
+        v2_list = get_all_user_connections(username)
+        for info in v2_list:
+            tool_type = info.get("tool_type", "")
             cls = provider_map.get(tool_type.lower())
             if not cls:
                 continue
@@ -61,9 +68,13 @@ def get_user_mailboxes(username: str) -> list[MailboxConnector]:
             email = info.get("email", "")
             if not token:
                 continue
-            if email in seen_emails:
+            # Dedup par email pour eviter doublons (ex: 2 connexions au meme
+            # gmail recree par erreur). Si pas d'email, on dedup par
+            # connection_id pour ne pas tout fusionner.
+            dedup_key = email.lower() if email else f"conn_{info.get('connection_id')}"
+            if dedup_key in seen_emails:
                 continue
-            seen_emails.add(email)
+            seen_emails.add(dedup_key)
             connectors.append(cls(username=username, email=email, token=token))
             logger.debug("[MailboxMgr] connector: %s (%s)", tool_type, email)
     except Exception as e:
