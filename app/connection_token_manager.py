@@ -21,12 +21,17 @@ logger = get_logger("raya.conn_tokens")
 
 # ─── RÉSOLUTION PUBLIQUE ───────────────────────────────────────────
 
-def get_connection_token(username: str, tool_type: str) -> str | None:
+def get_connection_token(username: str, tool_type: str,
+                         tenant_id: str | None = None) -> str | None:
     """
     Retourne un access_token valide pour (username, tool_type).
     Ordre : tenant_connections V2 → oauth_tokens legacy.
+
+    Audit isolation 28/04 (I.14) : ajout tenant_id optionnel pour
+    proteger contre les homonymes cross-tenant. Si non fourni, on
+    resout via users (compat ascendante).
     """
-    token = _get_v2_token(username, tool_type)
+    token = _get_v2_token(username, tool_type, tenant_id=tenant_id)
     if token:
         return token
     # Fallback legacy
@@ -39,12 +44,15 @@ def get_connection_token(username: str, tool_type: str) -> str | None:
     return None
 
 
-def get_connection_email(username: str, tool_type: str) -> str:
+def get_connection_email(username: str, tool_type: str,
+                         tenant_id: str | None = None) -> str:
     """
     Retourne l'email associé à la connexion (boite mail) de l'utilisateur.
     Ordre : tenant_connections V2 → oauth_tokens/users legacy.
+
+    Audit isolation 28/04 (I.14) : tenant_id optionnel.
     """
-    email = _get_v2_email(username, tool_type)
+    email = _get_v2_email(username, tool_type, tenant_id=tenant_id)
     if email:
         return email
     # Fallback legacy
@@ -68,11 +76,33 @@ def get_connection_email(username: str, tool_type: str) -> str:
     return ""
 
 
-def get_user_tool_connections(username: str) -> dict:
+def _resolve_tenant(username: str) -> str | None:
+    """Helper : resout le tenant_id d un username via users.
+    Utilise comme fallback quand tenant_id n est pas fourni explicitement."""
+    conn = None
+    try:
+        conn = get_pg_conn(); c = conn.cursor()
+        c.execute("SELECT tenant_id FROM users WHERE username=%s LIMIT 1", (username,))
+        row = c.fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+    finally:
+        if conn: conn.close()
+
+
+def get_user_tool_connections(username: str,
+                              tenant_id: str | None = None) -> dict:
     """
     Retourne un dict {tool_type: {token, email, connection_id, label}} 
     pour toutes les connexions actives de l'utilisateur (v2 uniquement).
+
+    Audit isolation 28/04 (I.14) : tenant_id optionnel.
     """
+    if not tenant_id:
+        tenant_id = _resolve_tenant(username)
+        if not tenant_id:
+            return {}
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -80,9 +110,10 @@ def get_user_tool_connections(username: str) -> dict:
             SELECT tc.id, tc.tool_type, tc.label, tc.credentials, tc.connected_email, tc.status
             FROM connection_assignments ca
             JOIN tenant_connections tc ON tc.id = ca.connection_id
-            WHERE ca.username = %s AND ca.enabled = true AND tc.status = 'connected'
+            WHERE ca.username = %s AND ca.enabled = true
+              AND tc.status = 'connected' AND tc.tenant_id = %s
             ORDER BY tc.tool_type
-        """, (username,))
+        """, (username, tenant_id))
         result = {}
         for row in c.fetchall():
             cid, tool_type, label, creds_raw, email, status = row
@@ -142,8 +173,16 @@ def save_connection_oauth_token(
 
 # ─── INTERNES ──────────────────────────────────────────────────────
 
-def _get_v2_token(username: str, tool_type: str) -> str | None:
-    """Cherche et rafraîchit le token V2 pour (username, tool_type)."""
+def _get_v2_token(username: str, tool_type: str,
+                  tenant_id: str | None = None) -> str | None:
+    """Cherche et rafraîchit le token V2 pour (username, tool_type).
+
+    Audit isolation 28/04 (I.14) : ajout filtre tenant_id sur le JOIN.
+    """
+    if not tenant_id:
+        tenant_id = _resolve_tenant(username)
+        if not tenant_id:
+            return None
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -153,8 +192,9 @@ def _get_v2_token(username: str, tool_type: str) -> str | None:
             JOIN tenant_connections tc ON tc.id = ca.connection_id
             WHERE ca.username = %s AND ca.enabled = true
               AND tc.tool_type = %s AND tc.status = 'connected'
+              AND tc.tenant_id = %s
             ORDER BY tc.updated_at DESC LIMIT 1
-        """, (username, tool_type))
+        """, (username, tool_type, tenant_id))
         row = c.fetchone()
         if not row:
             return None
@@ -190,7 +230,13 @@ def _get_v2_token(username: str, tool_type: str) -> str | None:
         if conn: conn.close()
 
 
-def _get_v2_email(username: str, tool_type: str) -> str:
+def _get_v2_email(username: str, tool_type: str,
+                  tenant_id: str | None = None) -> str:
+    """Audit isolation 28/04 (I.14) : ajout filtre tenant_id sur le JOIN."""
+    if not tenant_id:
+        tenant_id = _resolve_tenant(username)
+        if not tenant_id:
+            return ""
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
@@ -200,8 +246,9 @@ def _get_v2_email(username: str, tool_type: str) -> str:
             JOIN tenant_connections tc ON tc.id = ca.connection_id
             WHERE ca.username = %s AND ca.enabled = true
               AND tc.tool_type = %s AND tc.status = 'connected'
+              AND tc.tenant_id = %s
             ORDER BY tc.updated_at DESC LIMIT 1
-        """, (username, tool_type))
+        """, (username, tool_type, tenant_id))
         row = c.fetchone()
         return row[0] if row and row[0] else ""
     except Exception:
