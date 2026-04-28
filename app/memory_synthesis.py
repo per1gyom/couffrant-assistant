@@ -27,7 +27,12 @@ from app.memory_rules import save_rule
 DEFAULT_TENANT = 'couffrant_solar'
 
 
-def get_hot_summary(username: str = 'guillaume', tenant_id: str = None) -> str:
+def get_hot_summary(username: str, tenant_id: str = None) -> str:
+    # F.8 (audit isolation user-user, LOT 1.4) : retire le default
+    # username='guillaume' (anti-pattern multi-user). Aligne sur le
+    # pattern memory_rules.save_rule, token_manager, etc.
+    if not username:
+        raise ValueError("get_hot_summary : username obligatoire")
     conn = None
     try:
         conn = get_pg_conn()
@@ -42,8 +47,12 @@ def get_hot_summary(username: str = 'guillaume', tenant_id: str = None) -> str:
         if conn: conn.close()
 
 
-def get_aria_insights(limit: int = 8, username: str = 'guillaume',
+def get_aria_insights(limit: int = 8, username: str = None,
                       tenant_id: str = None) -> str:
+    # F.8 (audit isolation user-user, LOT 1.4) : retire le default
+    # username='guillaume' (anti-pattern multi-user).
+    if not username:
+        raise ValueError("get_aria_insights : username obligatoire")
     conn = None
     try:
         conn = get_pg_conn()
@@ -247,8 +256,12 @@ Pour rules_learned : ne propose que des regles NOUVELLES. Prefere la qualite a l
     }
 
 
-def purge_old_mails(days: int = None, username: str = 'guillaume',
+def purge_old_mails(days: int = None, username: str = None,
                     tenant_id: str = None) -> int:
+    # F.8 (audit isolation user-user, LOT 1.4) : retire le default
+    # username='guillaume' (anti-pattern multi-user).
+    if not username:
+        raise ValueError("purge_old_mails : username obligatoire")
     if days is None:
         days = get_memoire_param(username, 'purge_days', 90)
     conn = None

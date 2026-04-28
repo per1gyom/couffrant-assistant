@@ -55,7 +55,7 @@ def get_odoo_context(sender_email: str) -> dict:
 
 
 
-def get_style_profile(username: str = 'guillaume', tenant_id: str = None) -> str:
+def get_style_profile(username: str = None, tenant_id: str = None) -> str:
     conn = None
     try:
         conn = get_pg_conn()

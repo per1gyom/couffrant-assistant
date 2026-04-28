@@ -10,7 +10,7 @@ from app.dashboard_service import (
 )
 
 
-def get_dashboard(days: int = 2, username: str = 'guillaume',
+def get_dashboard(days: int = 2, username: str = None,
                   tenant_id: str = None) -> dict:
     conn = get_pg_conn()
     c = conn.cursor()

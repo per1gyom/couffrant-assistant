@@ -1223,7 +1223,7 @@ def _summarize_connection_config(tool_type: str, config: dict) -> dict:
 @router.post("/admin/audit/purge-gmail-legacy")
 def admin_audit_purge_gmail_legacy(
     request: Request,
-    username: str = "guillaume",
+    username: str = None,
     _: dict = Depends(require_admin),
 ):
     """Supprime les entrees gmail_tokens legacy pour un username donne.

@@ -23,7 +23,7 @@ def _vec_str(embedding) -> str | None:
 
 
 
-def rebuild_hot_summary(username: str = 'guillaume',
+def rebuild_hot_summary(username: str = None,
                         tenant_id: str = DEFAULT_TENANT) -> str:
     """
     Reconstruit le resume operationnel chaud (hot_summary).

@@ -15,7 +15,7 @@ from app.rule_engine import (
 )
 
 
-def analyze_single_mail(message: dict, username: str = 'guillaume') -> dict:
+def analyze_single_mail(message: dict, username: str = None) -> dict:
     """
     Classification rapide sans Claude — pilotée par les règles de l'utilisateur.
     Utilisée en fallback ou quand Claude est indisponible.

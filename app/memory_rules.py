@@ -34,45 +34,35 @@ def _embed_rule(rule_text: str, category: str):
 
 # ─── FONCTIONS ACTIVES ───
 
-def get_aria_rules(username: str, tenant_id: str = None) -> str:
+def get_aria_rules(username: str, tenant_id: str) -> str:
     """Retourne les regles aria d'un user.
 
-    HOTFIX 26/04 (etape A.5) : retire le default 'guillaume' et log un
-    WARNING si appele sans tenant_id (la branche else qui ne filtre pas
-    par tenant est conservee pour compat legacy mais signale toute
-    dependance silencieuse). A retirer dans une session future quand
-    tous les callers seront durcis."""
-    from app.logging_config import get_logger
-    logger = get_logger("raya.memory")
+    F.1 (audit isolation user-user, LOT 1.8) : tenant_id est maintenant
+    OBLIGATOIRE. La branche else legacy qui filtrait seulement par
+    username (avec WARNING) est retiree apres verification que tous les
+    callers actifs passent bien tenant_id. Si un nouveau caller oublie,
+    raise au lieu de fuiter."""
+    if not username:
+        raise ValueError("get_aria_rules : username obligatoire")
+    if not tenant_id:
+        raise ValueError(
+            "get_aria_rules : tenant_id obligatoire "
+            "(defense en profondeur isolation user-user)"
+        )
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        if tenant_id:
-            c.execute("""
-                SELECT id, category, rule, confidence, reinforcements
-                FROM aria_rules
-                WHERE active = true
-                  AND username = %s
-                  AND (tenant_id = %s OR tenant_id IS NULL)
-                  AND category != 'memoire'
-                ORDER BY confidence DESC, reinforcements DESC, created_at DESC
-                LIMIT 60
-            """, (username, tenant_id))
-        else:
-            logger.warning(
-                "[get_aria_rules] Appel SANS tenant_id pour user '%s' "
-                "-> branche non isolee (risque fuite cross-tenant en cas "
-                "d homonyme). Caller a durcir.",
-                username,
-            )
-            c.execute("""
-                SELECT id, category, rule, confidence, reinforcements
-                FROM aria_rules
-                WHERE active = true AND username = %s AND category != 'memoire'
-                ORDER BY confidence DESC, reinforcements DESC, created_at DESC
-                LIMIT 60
-            """, (username,))
+        c.execute("""
+            SELECT id, category, rule, confidence, reinforcements
+            FROM aria_rules
+            WHERE active = true
+              AND username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND category != 'memoire'
+            ORDER BY confidence DESC, reinforcements DESC, created_at DESC
+            LIMIT 60
+        """, (username, tenant_id))
         rows = c.fetchall()
         if not rows:
             return ""
@@ -315,6 +305,9 @@ def extract_keywords_from_rule(rule: str) -> list:
     return []
 
 
-def seed_default_rules(username: str = 'guillaume'):
-    """Raya apprend d'elle-meme. Aucune regle par defaut."""
+def seed_default_rules(username: str = None):
+    """Raya apprend d'elle-meme. Aucune regle par defaut.
+    
+    F.X (audit isolation user-user, LOT 1.6) : default 'guillaume' retire.
+    Fonction conservee pour compat retro mais ne fait rien."""
     pass

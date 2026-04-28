@@ -172,7 +172,16 @@ def get_valid_google_token(username: str) -> str | None:
 
         if not row:
             # Fallback lecture seule : migration depuis gmail_tokens (table legacy)
-            c.execute("SELECT access_token, refresh_token FROM gmail_tokens WHERE username = %s LIMIT 1", (username,))
+            # F.9 (audit isolation user-user, LOT 1.5) : ajout filtre tenant_id
+            # pour coherence multi-tenant. La table gmail_tokens a bien
+            # tenant_id (verifie 28/04). Sans ce filtre, en cas d homonyme
+            # futur cross-tenant, le fallback recuperait un token du mauvais
+            # tenant.
+            c.execute(
+                "SELECT access_token, refresh_token FROM gmail_tokens "
+                "WHERE username = %s AND tenant_id = %s LIMIT 1",
+                (username, tenant_id),
+            )
             legacy = c.fetchone()
             if not legacy:
                 return None

@@ -99,12 +99,16 @@ def search_similar(
         c = conn.cursor()
 
         # Filtre de base
-        filters = ["embedding IS NOT NULL"]
-        params = []
-
-        if username:
-            filters.append("username = %s")
-            params.append(username)
+        # F.5 (audit isolation user-user, LOT 1.1) : username obligatoire.
+        # Avant : if username: ... -> si caller passait None, AUCUN filtre
+        # user, fuite massive cross-user silencieuse. Maintenant : raise.
+        if not username:
+            raise ValueError(
+                "search_similar : username obligatoire "
+                "(defense en profondeur isolation user-user)"
+            )
+        filters = ["embedding IS NOT NULL", "username = %s"]
+        params = [username]
 
         # Multi-tenant : tenant_ids prioritaire sur tenant_id
         if tenant_ids:

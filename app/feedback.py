@@ -286,6 +286,10 @@ Format JSON strict (sans backticks) :
         )
 
         # Met à jour les métadonnées
+        # F.2 (audit isolation user-user, LOT 1.7) : ajout filtre
+        # tenant_id pour coherence avec les autres queries du fichier.
+        # Protege deja par aria_memory_id (PK unique) + username, mais
+        # ajoute la defense en profondeur.
         conn = get_pg_conn()
         c = conn.cursor()
         c.execute("""
@@ -294,7 +298,8 @@ Format JSON strict (sans backticks) :
                 feedback_comment   = %s,
                 corrective_rule_id = %s
             WHERE aria_memory_id = %s AND username = %s
-        """, (comment or None, rule_id, aria_memory_id, username))
+              AND (tenant_id = %s OR tenant_id IS NULL)
+        """, (comment or None, rule_id, aria_memory_id, username, tenant_id))
         conn.commit()
         conn.close()
 

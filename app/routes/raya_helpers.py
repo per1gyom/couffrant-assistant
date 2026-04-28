@@ -207,9 +207,15 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     try:
         conn = get_pg_conn()
         c = conn.cursor()
+        # F.7 (audit isolation user-user, LOT 1.3) : ajout tenant_id au
+        # INSERT. Avant : tenant_id IS NULL a la creation, backfille seulement
+        # au prochain redeploiement par database_migrations. Maintenant :
+        # tenant_id correct des l insertion, plus de fenetre de risque
+        # cross-tenant pour conversations naissantes.
         c.execute(
-            "INSERT INTO aria_memory (username, user_input, aria_response) VALUES (%s, %s, %s) RETURNING id",
-            (username, payload.query, clean_response)
+            "INSERT INTO aria_memory (username, tenant_id, user_input, aria_response) "
+            "VALUES (%s, %s, %s, %s) RETURNING id",
+            (username, tenant_id, payload.query, clean_response)
         )
         aria_memory_id = c.fetchone()[0]
         conn.commit()

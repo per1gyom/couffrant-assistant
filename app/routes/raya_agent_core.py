@@ -698,6 +698,7 @@ def _raya_core_agent(
     # Sauvegarde dans aria_memory
     aria_memory_id = _save_conversation(
         username=username,
+        tenant_id=tenant_id,
         user_input=payload.query or "",
         aria_response=_strip_action_tags(final_text),
     )
@@ -877,15 +878,20 @@ def _raya_core_agent(
     }
 
 
-def _save_conversation(username: str, user_input: str, aria_response: str) -> int | None:
-    """Persiste l echange dans aria_memory. Retourne l ID cree."""
+def _save_conversation(username: str, tenant_id: str, user_input: str, aria_response: str) -> int | None:
+    """Persiste l echange dans aria_memory. Retourne l ID cree.
+
+    F.6 (audit isolation user-user, LOT 1.2) : ajout tenant_id obligatoire.
+    Avant : tenant_id IS NULL a la creation, backfille seulement au prochain
+    redeploiement par database_migrations. Maintenant : tenant_id correct
+    des l insertion."""
     conn = get_pg_conn()
     try:
         c = conn.cursor()
         c.execute(
-            "INSERT INTO aria_memory (username, user_input, aria_response) "
-            "VALUES (%s, %s, %s) RETURNING id",
-            (username, user_input, aria_response),
+            "INSERT INTO aria_memory (username, tenant_id, user_input, aria_response) "
+            "VALUES (%s, %s, %s, %s) RETURNING id",
+            (username, tenant_id, user_input, aria_response),
         )
         row = c.fetchone()
         conn.commit()

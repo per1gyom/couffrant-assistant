@@ -57,7 +57,7 @@ def _seed_default_categories(username: str):
 
 # ─── CONTEXTE ET PROFIL ───
 
-def get_learning_examples(category: str, username: str = 'guillaume', limit: int = 3,
+def get_learning_examples(category: str, username: str = None, limit: int = 3,
                           tenant_id: str = None) -> list[dict]:
     """Exemples de corrections passées pour le few-shot learning."""
     conn = None
@@ -113,7 +113,7 @@ _REPLY_HINTS = ["?", "merci de", "pouvez-vous", "peux-tu", "svp", "s'il vous pla
 def analyze_single_mail_with_ai(
     message: dict,
     instructions: list[str] | None = None,
-    username: str = 'guillaume'
+    username: str = None
 ) -> dict:
     instructions = instructions or []
     sender_email = message.get("from", {}).get("emailAddress", {}).get("address", "Expéditeur inconnu")
@@ -205,7 +205,7 @@ Catégories valides : {categories_str}{odoo_block}{style_block}{examples_block}{
 def summarize_messages(
     messages: list[dict],
     instructions: list[str] | None = None,
-    username: str = 'guillaume'
+    username: str = None
 ) -> dict:
     items = []
     for msg in messages:

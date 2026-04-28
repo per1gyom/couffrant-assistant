@@ -8,7 +8,7 @@ def init_mail_db():
     init_postgres()
 
 
-def mail_exists(message_id: str, username: str = 'guillaume',
+def mail_exists(message_id: str, username: str = None,
                 tenant_id: str = None) -> bool:
     conn = get_pg_conn()
     c = conn.cursor()

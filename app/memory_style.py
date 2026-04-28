@@ -5,7 +5,7 @@ from app.database import get_pg_conn
 from app.llm_client import llm_complete
 
 
-def get_style_examples(context: str = "", username: str = 'guillaume',
+def get_style_examples(context: str = "", username: str = None,
                        tenant_id: str = None) -> str:
     conn = None
     try:
@@ -34,7 +34,7 @@ def get_style_examples(context: str = "", username: str = 'guillaume',
 
 
 def save_style_example(situation: str, example_text: str, tags: str = "",
-                       quality_score: float = 1.0, username: str = 'guillaume'):
+                       quality_score: float = 1.0, username: str = None):
     conn = None
     try:
         conn = get_pg_conn()
@@ -83,7 +83,7 @@ def learn_from_correction(original: str, corrected: str,
                        tags=context, quality_score=1.5, username=username)
 
 
-def load_sent_mails_to_style(limit: int = 50, username: str = 'guillaume',
+def load_sent_mails_to_style(limit: int = 50, username: str = None,
                              tenant_id: str = None) -> int:
     conn = None
     try:
@@ -111,7 +111,7 @@ def load_sent_mails_to_style(limit: int = 50, username: str = 'guillaume',
 def save_reply_learning(
     mail_subject: str = "", mail_from: str = "", mail_body_preview: str = "",
     category: str = "autre", ai_reply: str = "", final_reply: str = "",
-    username: str = 'guillaume'
+    username: str = None
 ) -> int:
     if not final_reply:
         return 0
