@@ -69,7 +69,7 @@ def admin_costs(
     days: int = 30,
     user: dict = Depends(require_admin),
 ):
-    tenant_filter = None if user.get("scope") == "super_admin" else user.get("tenant_id")
+    tenant_filter = None if user.get("scope") in (SCOPE_ADMIN, SCOPE_SUPER_ADMIN) else user.get("tenant_id")
     return get_costs_dashboard(tenant_id=tenant_filter, days=days)
 
 
@@ -654,7 +654,7 @@ def admin_suspend_user(
     payload: dict = Body(default={}),
     user: dict = Depends(require_tenant_admin),
 ):
-    if user["scope"] != "admin":
+    if user["scope"] not in (SCOPE_ADMIN, SCOPE_SUPER_ADMIN):
         assert_same_tenant(request, target)
     from app.suspension import suspend_user
     reason = payload.get("reason", "")
@@ -667,7 +667,7 @@ def admin_unsuspend_user(
     target: str,
     user: dict = Depends(require_tenant_admin),
 ):
-    if user["scope"] != "admin":
+    if user["scope"] not in (SCOPE_ADMIN, SCOPE_SUPER_ADMIN):
         assert_same_tenant(request, target)
     from app.suspension import unsuspend_user
     return unsuspend_user(target)
@@ -704,7 +704,7 @@ def admin_toggle_tenant_direct_actions(
     payload: dict = Body(default={}),
     user: dict = Depends(require_tenant_admin),
 ):
-    if user["scope"] != "admin" and user["tenant_id"] != tenant_id:
+    if user["scope"] not in (SCOPE_ADMIN, SCOPE_SUPER_ADMIN) and user["tenant_id"] != tenant_id:
         raise HTTPException(status_code=403, detail="Pas autorisé pour ce tenant.")
     from app.direct_actions import set_tenant_direct_actions
     enabled = bool(payload.get("enabled", False))
@@ -718,7 +718,7 @@ def admin_toggle_user_direct_actions(
     payload: dict = Body(default={}),
     user: dict = Depends(require_tenant_admin),
 ):
-    if user["scope"] != "admin":
+    if user["scope"] not in (SCOPE_ADMIN, SCOPE_SUPER_ADMIN):
         assert_same_tenant(request, username)
     from app.direct_actions import set_user_direct_actions
     enabled = payload.get("enabled")

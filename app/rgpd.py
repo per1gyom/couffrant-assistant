@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Request, Body
 from fastapi.responses import StreamingResponse
 
 from app.routes.deps import require_user
+from app.app_security import SCOPE_ADMIN, SCOPE_SUPER_ADMIN
 from app.logging_config import get_logger
 
 logger = get_logger("raya.rgpd")
@@ -147,7 +148,7 @@ def delete_account(
     Suppression directe — réservée au super admin (auto-suppression via panel admin).
     Les utilisateurs classiques passent par /account/delete/request.
     """
-    if user.get("scope") != "admin":
+    if user.get("scope") not in (SCOPE_ADMIN, SCOPE_SUPER_ADMIN):
         return {"ok": False, "message": "Utilisez la procédure de demande de suppression."}
     if confirm.lower() != "yes":
         return {"ok": False, "message": "Ajoute ?confirm=yes pour confirmer."}
