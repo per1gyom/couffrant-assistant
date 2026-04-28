@@ -95,7 +95,7 @@
     <div class="form-group"><label>Email *</label><input type="email" id="new-email" placeholder="prenom@societe.fr" required></div>
     <div class="form-group"><label>Téléphone</label><input type="tel" id="new-phone" placeholder="+33 6 12 34 56 78"></div>
     <div class="form-group"><label>Mot de passe temporaire</label><input type="password" id="new-password-user" placeholder="8 caractères min"></div>
-    <div class="form-group"><label>Rôle</label><select id="new-scope"><option value="user">Utilisateur</option><option value="tenant_admin">Admin société</option></select></div>
+    <div class="form-group"><label>Rôle</label><select id="new-scope"><option value="tenant_user">Utilisateur</option><option value="tenant_admin">Admin société</option></select></div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeModal('create-user')">Annuler</button>
       <button class="btn btn-primary" onclick="createUser()">Créer</button>
@@ -111,7 +111,7 @@
     <div class="form-group"><label>Email</label><input type="email" id="edit-email"></div>
     <div class="form-group"><label>Nom d'affichage</label><input type="text" id="edit-display-name" maxlength="80"></div>
     <div class="form-group"><label>Téléphone</label><input type="tel" id="edit-phone"></div>
-    <div class="form-group" id="edit-scope-wrapper"><label>Rôle</label><select id="edit-scope"><option value="user">Utilisateur</option><option value="tenant_admin">Admin société</option></select></div>
+    <div class="form-group" id="edit-scope-wrapper"><label>Rôle</label><select id="edit-scope"><option value="tenant_user">Utilisateur</option><option value="tenant_admin">Admin société</option></select></div>
     <hr class="divider">
     <button class="btn btn-warn" style="width:100%" onclick="resetPassword()">Réinitialiser le mot de passe</button>
     <div id="reset-result"></div>
@@ -285,7 +285,7 @@ async function loadCompany(){
       html+=`<tr>
         <td><strong>${u.username}</strong>${u.suspended?' <span style="color:var(--red)">⏸</span>':''}</td>
         <td>${u.email||'—'}</td>
-        <td><span class="badge ${u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope||'user'}</span></td>
+        <td><span class="badge ${u.scope==='tenant_admin'?'badge-green':'badge-gray'}">${u.scope||'tenant_user'}</span></td>
         <td style="font-family:var(--mono);font-size:11px">${u.last_login?u.last_login.split('T')[0]:'jamais'}</td>
         <td>
           <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick='editUser(${JSON.stringify(u)})'>Modifier</button>
@@ -340,7 +340,7 @@ function editUser(u){
     scopeWrapper.appendChild(badge);
   } else {
     scopeSelect.style.display = '';
-    scopeSelect.value = u.scope || 'user';
+    scopeSelect.value = u.scope || 'tenant_user';
     scopeWrapper.querySelector('.badge-protected')?.remove();
   }
   openModal('edit-user');

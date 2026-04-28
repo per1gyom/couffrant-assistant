@@ -1189,8 +1189,7 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
       <div class="field">
         <label class="field-label">Rôle</label>
         <select class="field-input" id="teamCuScope">
-          <option value="user">Utilisateur standard</option>
-          <option value="cs">Chargé de support (CS)</option>
+          <option value="tenant_user">Utilisateur standard</option>
           <option value="tenant_admin">Administrateur du tenant</option>
         </select>
       </div>
@@ -3664,7 +3663,7 @@ function renderUserCard(u, isDeleted) {
   if (isMe) {
     badges.push('<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:#e0e7ff;color:#3730a3;font-weight:600">VOUS</span>');
   }
-  const scopeBadge = '<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:#f3f4f6;color:#374151;font-weight:500">' + (u.scope || 'user') + '</span>';
+  const scopeBadge = '<span style="padding:2px 8px;border-radius:10px;font-size:11px;background:#f3f4f6;color:#374151;font-weight:500">' + (u.scope || 'tenant_user') + '</span>';
   // Actions
   const actions = [];
   if (!isDeleted && !isMe) {
