@@ -54,10 +54,17 @@ def admin_oauth_microsoft_start(
     from app.config import GRAPH_SCOPES
     redirect_uri = f"{_RETURN_URL}/auth/connection/microsoft/callback"
     msal_app = build_msal_app()
+    # prompt="select_account" force l ecran de choix de compte Microsoft.
+    # Sans ce parametre, Microsoft reutilise silencieusement la session SSO
+    # active dans le navigateur (cookie de l admin) et stocke un token
+    # pointant vers la mauvaise boite. Bug constate le 28/04 sur la
+    # tentative de connexion contact@couffrant-solar.fr (la boite Guillaume
+    # etait deja loggee, le flow a abouti silencieusement avec son token).
     auth_url = msal_app.get_authorization_request_url(
         scopes=GRAPH_SCOPES,
         redirect_uri=redirect_uri,
         state=str(connection_id),
+        prompt="select_account",
     )
     return RedirectResponse(auth_url)
 
