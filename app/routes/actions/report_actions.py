@@ -10,18 +10,39 @@ from app.logging_config import get_logger
 logger = get_logger("raya.report")
 
 
-def get_today_report(username: str) -> dict | None:
-    """Retourne le rapport du jour s'il existe."""
+def get_today_report(username: str, tenant_id: str | None = None) -> dict | None:
+    """Retourne le rapport du jour s'il existe.
+
+    Audit isolation 28/04 (I.10) : ajout du filtre tenant_id pour eviter
+    de retourner le rapport d un homonyme cross-tenant. tenant_id reste
+    optionnel pour compat ascendante : si non fourni, on resout via la
+    table users (lookup interne, pas de fuite possible).
+    """
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
+        # Resolution tenant_id si non fourni (compat ascendante)
+        if not tenant_id:
+            try:
+                c.execute(
+                    "SELECT tenant_id FROM users WHERE username = %s LIMIT 1",
+                    (username,),
+                )
+                row = c.fetchone()
+                tenant_id = row[0] if row else None
+            except Exception:
+                tenant_id = None
+            if not tenant_id:
+                # Pas de tenant resolu : refus silencieux (defense en profondeur)
+                return None
         c.execute("""
             SELECT id, content, sections, delivered, delivered_via, created_at
             FROM daily_reports
-            WHERE username = %s AND report_date = CURRENT_DATE
+            WHERE username = %s AND tenant_id = %s
+              AND report_date = CURRENT_DATE
             LIMIT 1
-        """, (username,))
+        """, (username, tenant_id))
         row = c.fetchone()
         if not row:
             return None

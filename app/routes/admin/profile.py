@@ -229,8 +229,13 @@ def get_data_stats(request: Request, user: dict = Depends(require_user)):
 
     Retourne les compteurs pour l'onglet Mes donnees, utilises dans le
     bloc 'Ce que Raya a collecte sur toi'.
+
+    Audit isolation 28/04 : ajout du filtre tenant_id sur toutes les
+    requetes pour proteger contre une eventuelle homonymie cross-tenant
+    (findings I.1-I.4).
     """
     username = user["username"]
+    tenant_id = user["tenant_id"]
     stats = {
         "rules": 0,
         "mails_analyzed": 0,
@@ -245,19 +250,28 @@ def get_data_stats(request: Request, user: dict = Depends(require_user)):
         c = conn.cursor()
         # Regles apprises
         try:
-            c.execute("SELECT COUNT(*) FROM aria_rules WHERE username=%s", (username,))
+            c.execute(
+                "SELECT COUNT(*) FROM aria_rules WHERE username=%s AND tenant_id=%s",
+                (username, tenant_id),
+            )
             stats["rules"] = c.fetchone()[0] or 0
         except Exception:
             pass
         # Mails analyses (sent + received)
         try:
-            c.execute("SELECT COUNT(*) FROM sent_mail_memory WHERE username=%s", (username,))
+            c.execute(
+                "SELECT COUNT(*) FROM sent_mail_memory WHERE username=%s AND tenant_id=%s",
+                (username, tenant_id),
+            )
             stats["mails_analyzed"] = c.fetchone()[0] or 0
         except Exception:
             pass
         # Conversations (sessions distinctes de chat avec Raya)
         try:
-            c.execute("SELECT COUNT(*) FROM aria_session_digests WHERE username=%s", (username,))
+            c.execute(
+                "SELECT COUNT(*) FROM aria_session_digests WHERE username=%s AND tenant_id=%s",
+                (username, tenant_id),
+            )
             stats["conversations"] = c.fetchone()[0] or 0
         except Exception:
             pass
@@ -265,8 +279,8 @@ def get_data_stats(request: Request, user: dict = Depends(require_user)):
         try:
             c.execute(
                 "SELECT COUNT(DISTINCT LOWER(to_email)) FROM sent_mail_memory "
-                "WHERE username=%s AND to_email IS NOT NULL",
-                (username,)
+                "WHERE username=%s AND tenant_id=%s AND to_email IS NOT NULL",
+                (username, tenant_id),
             )
             stats["contacts"] = c.fetchone()[0] or 0
         except Exception:
@@ -300,6 +314,7 @@ def get_connections(request: Request, user: dict = Depends(require_user)):
     automatique tant qu'il n'est pas revoque cote fournisseur.
     """
     username = user["username"]
+    tenant_id = user["tenant_id"]
     conn = None
     try:
         conn = get_pg_conn()
@@ -309,10 +324,10 @@ def get_connections(request: Request, user: dict = Depends(require_user)):
             SELECT provider, expires_at, updated_at,
                    (refresh_token IS NOT NULL) AS has_refresh_token
             FROM oauth_tokens
-            WHERE username = %s
+            WHERE username = %s AND tenant_id = %s
             ORDER BY provider
             """,
-            (username,)
+            (username, tenant_id)
         )
         rows = c.fetchall()
         from datetime import datetime, timedelta
@@ -415,6 +430,7 @@ def get_usage_me(request: Request, user: dict = Depends(require_user)):
                + repartition par modele + par origine (purpose)
     """
     username = user["username"]
+    tenant_id = user["tenant_id"]
     conn = None
     try:
         conn = get_pg_conn()
@@ -425,10 +441,11 @@ def get_usage_me(request: Request, user: dict = Depends(require_user)):
             """
             SELECT created_at, model, input_tokens, output_tokens, purpose
             FROM llm_usage
-            WHERE username = %s AND created_at > NOW() - INTERVAL '365 days'
+            WHERE username = %s AND tenant_id = %s
+              AND created_at > NOW() - INTERVAL '365 days'
             ORDER BY created_at DESC
             """,
-            (username,)
+            (username, tenant_id)
         )
         rows = c.fetchall()
         from datetime import datetime, timedelta

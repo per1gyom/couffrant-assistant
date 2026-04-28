@@ -168,7 +168,13 @@ Factuel, direct, sans blabla. N'invente rien — base-toi uniquement sur les don
         if vec:
             conn2 = get_pg_conn()
             c2 = conn2.cursor()
-            c2.execute("UPDATE aria_hot_summary SET embedding = %s::vector WHERE username = %s", (vec, username))
+            # Audit isolation 28/04 (I.9) : ajout filtre tenant_id pour
+            # eviter d ecraser le hot_summary d un homonyme cross-tenant.
+            c2.execute(
+                "UPDATE aria_hot_summary SET embedding = %s::vector "
+                "WHERE username = %s AND tenant_id = %s",
+                (vec, username, tenant_id),
+            )
             conn2.commit()
             conn2.close()
     except Exception as e:

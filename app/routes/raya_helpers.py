@@ -323,7 +323,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     # 10c. Marquage rapport livre si l'utilisateur le demande dans le chat (7-6D)
     try:
         from app.routes.actions.report_actions import get_today_report, mark_report_delivered
-        report = get_today_report(username)
+        report = get_today_report(username, tenant_id=tenant_id)
         if report and not report["delivered"] and len(clean_response) > 200:
             query_lower = (payload.query or "").lower()
             if "rapport" in query_lower or "resume" in query_lower:
