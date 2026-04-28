@@ -2,9 +2,126 @@
 
 Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 
-**Dernière MAJ** : 28 avril 2026 midi.
+**Dernière MAJ** : 28 avril 2026 fin de soirée — note ici les 3 chantiers urgents identifiés en fin de session 28/04 soir avant déploiement version d'essai.
 
 > **📌 Doc d'état le plus à jour** : voir `docs/etat_28avril_midi.md` pour la vue synthétique des chantiers TERMINÉS / EN COURS / À FAIRE après la session 28/04 matin.
+
+---
+
+## 🚨 CHANTIERS URGENTS — avant déploiement version d'essai (identifiés 28/04 soir)
+
+> **Contexte** : Guillaume veut déployer une version d'essai d'ici quelques jours
+> à Charlotte (déjà créée, tenant `juillet`) + 2-3 personnes supplémentaires.
+> Verdict audit fait le 28/04 soir : 3 chantiers bloquants à traiter avant.
+
+### 🏗️ Modèle commercial — Forfait sur mesure par tenant
+
+**Vision Guillaume (28/04 soir)** : pas d'UI self-service côté tenant pour
+connecter ses outils. Le **super_admin** onboarde chaque tenant individuellement :
+
+1. Échange initial avec le nouveau client : quels outils il a (Gmail, Outlook,
+   Drive, Vesta, SolarEdge, etc.)
+2. Construction d'un **forfait sur mesure** en fonction de ces besoins
+3. Le super_admin connecte lui-même les outils via le panel admin
+4. Création des users du tenant — **aucun user n'est créé sans au moins
+   une connexion attribuée**
+
+**Implications techniques** :
+
+- Le chantier "UI simplifiée connexion outils tiers (panel admin tenant)"
+  qui était noté en P2 n'est PAS nécessaire dans ce modèle. Le super_admin
+  reste le seul à connecter via le panel super_admin existant. À déprécier
+  dans la roadmap.
+- En revanche, un **système de forfaits par tenant** sera nécessaire à terme
+  (table `tenant_plans`, limites par plan, UI super_admin pour assigner) —
+  pas urgent tant qu'on est en mode "essai gratuit", mais à concevoir avant
+  de basculer en payant.
+- Le panel super_admin actuel doit rester **fluide pour onboarder** un
+  nouveau tenant rapidement (création tenant + users + connexions en
+  quelques clics). Voir si nettoyage UX du panel admin (cf. notes UX 28/04
+  point 3) facilite cet onboarding.
+
+**Pas un chantier urgent en soi**, mais clarification du modèle qui
+recadre certains autres chantiers. À noter pour la cohérence future.
+
+### 🔐 Audit isolation user↔user intra-tenant — URGENT
+
+**Contexte** : l'audit isolation 25/04 (33 findings tous traités) s'est
+focalisé sur l'isolation **tenant↔tenant** (couffrant_solar vs juillet).
+Excellent travail. Mais l'isolation **user↔user dans un même tenant**
+(Guillaume vs Pierre vs Sabrina dans couffrant_solar) n'a JAMAIS eu
+d'audit dédié sérieux.
+
+**Pourquoi c'est urgent** : avant de déployer Pierre/Sabrina/Benoît dans
+le tenant couffrant_solar (ou de créer un 2e user dans le tenant juillet
+plus tard), il FAUT s'assurer que :
+
+- Les règles apprises par Guillaume ne polluent pas les réponses à Pierre
+- Pierre ne voit pas les conversations privées de Guillaume
+- Pierre ne voit pas les mails de Guillaume (sa boîte Outlook/Gmail)
+- Le feedback 👍/👎 de Pierre n'affecte pas les règles de Guillaume
+- Etc.
+
+**Décision Guillaume 24/04** déjà prise : pas de mutualisation des
+règles/conversations/mails entre users d'un même tenant. Reste à valider
+en code que cette décision est bien implémentée partout.
+
+**Plan d'audit en 4 phases** :
+
+- **Phase 1 — Cartographie** (~1h) : lister toutes les tables sensibles,
+  classer "filtrage sur username obligatoire" vs "partagé tenant" vs
+  "ambigu, à décider". Identifier les fichiers Python qui touchent à ces
+  tables.
+- **Phase 2 — Audit code** (~2-3h) : passer en revue les 10-15 fichiers
+  les plus critiques. Pour chaque SELECT/INSERT/UPDATE qui touche les
+  tables "username obligatoire", vérifier que le filtre est bien posé.
+  Documenter chaque finding (CRITIQUE / IMPORTANT / ATTENTION) comme
+  pour l'audit du 25/04.
+- **Phase 3 — Remédiation** (~1-3h selon findings) : fixer les trous
+  trouvés en LOTs commitables séparément.
+- **Phase 4 — Tests bout-en-bout `pierre_test`** (~1h) : créer un user
+  fictif Pierre dans couffrant_solar, simuler des actions, vérifier
+  qu'il ne voit pas les données de Guillaume. Plan déjà rédigé dans
+  `docs/plan_tests_isolation_pierre_test.md`.
+
+**Estimation totale** : 5-8h, étalé sur 1-2 sessions dédiées.
+
+**Démarrage** : Phase 1 lancée le 28/04 fin de soirée. Phases 2-4 dans
+les jours qui viennent.
+
+### 🛡️ Plan résilience & sécurité — PROMOTION en priorité haute
+
+**Existait déjà en Priorité 6** mais devient maintenant priorité 1 avant
+tout déploiement version d'essai.
+
+**Détaillé dans** `docs/plan_resilience_et_securite.md`.
+
+3 actions :
+- 2FA sur 6 services critiques (GitHub, Railway, Anthropic, OpenAI,
+  Microsoft 365, Google) — 30 min
+- Backups auto nocturnes (AWS S3 + Backblaze B2) avec chiffrement —
+  1h30
+- UptimeRobot pour monitoring externe — 15 min
+
+**Estimation totale** : 2h15.
+
+**Pourquoi maintenant** : si la DB Railway plante avant que Charlotte ou
+les versions d'essai aient été backupées, on perd irrémédiablement leurs
+conversations + règles + mémoires. Coût d'un soir de panne = mois de
+travail utilisateur perdu.
+
+### 📋 Récap des bloquants avant déploiement version d'essai
+
+| Bloquant | Effort | Statut | Note |
+|---|---|---|---|
+| Audit isolation user↔user intra-tenant | 5-8h | 🟡 Phase 1 lancée 28/04 soir | Critique |
+| Plan résilience (2FA + backups + monitoring) | 2h15 | 🔴 À faire | Critique |
+| Note UX #7 (retirer "Administration" menu user) | 2-3h | 🔴 À faire | Cf. section UX 28/04 soir |
+| Tests bout-en-bout pierre_test | 1h | 🔴 À faire | Inclus dans audit Phase 4 |
+| Followup A.5 (perform_outlook_action username) | 30 min | 🟡 Partiel (signature OK, call-sites à vérifier) | Inclus dans audit Phase 2 |
+
+**Total estimé** : 10-14h sur 2-3 sessions dédiées dans les jours qui
+viennent. Faisable d'ici fin de semaine.
 
 ---
 
