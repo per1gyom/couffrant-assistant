@@ -1047,4 +1047,73 @@ MIGRATIONS = [
     "ALTER TABLE teams_sync_state DROP CONSTRAINT IF EXISTS teams_sync_state_username_chat_id_key",
     "ALTER TABLE teams_sync_state DROP CONSTRAINT IF EXISTS teams_sync_state_user_chat_tenant_unique",
     "ALTER TABLE teams_sync_state ADD CONSTRAINT teams_sync_state_user_chat_tenant_unique UNIQUE (username, chat_id, tenant_id)",
+
+    # -- Phase 2FA Niveau 2 — LOT 0 (29/04/2026 minuit) --
+    # Cf. plan d'attaque 2FA en 7 LOTs valide par Guillaume.
+    # Decisions Q1-Q7 actees : super_admin + tenant_admin obligatoires,
+    # 8 codes recup, fenetre TOTP +-1 (90s), session admin 4h, super 1h.
+    # Ce LOT 0 est purement additif : aucun code Python ne lit encore
+    # ces colonnes/tables, le login continue de marcher comme avant.
+
+    # M-2FA-01 : 4 colonnes 2FA sur users
+    # totp_secret_encrypted : secret base32 chiffre via ENCRYPTION_KEY
+    # (utilise app/crypto.py, pas crypto_backup.py qui est pour les backups)
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret_encrypted TEXT",
+    # totp_enabled_at : NULL = 2FA pas encore activee. Date = activation reussie
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled_at TIMESTAMP",
+    # recovery_codes_hashes : array de 8 hashes pbkdf2-sha256 des codes recup
+    # (jamais stocker les codes en clair). Quand un code est utilise, on le retire.
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_codes_hashes JSONB DEFAULT '[]'::jsonb",
+    # recovery_codes_used_count : compteur d'utilisations (info pour le user
+    # type "il vous reste 5 codes sur 8")
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS recovery_codes_used_count INTEGER DEFAULT 0",
+
+    # M-2FA-02 : table user_devices (appareils connus pour skip 2FA)
+    # Permet d eviter de redemander 2FA a chaque login si :
+    #  - le navigateur a deja un cookie raya_device_id signe
+    #  - last_2fa_validated_at est < 30 jours
+    #  - l IP de connexion est dans known_ips
+    # known_ips est un array JSONB de {ip, country?, first_seen, last_seen}
+    # pour Q4 et Q7 declencheur 3 (IP suspecte/pays different).
+    """CREATE TABLE IF NOT EXISTS user_devices (
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL,
+        tenant_id TEXT NOT NULL,
+        device_fingerprint TEXT NOT NULL,
+        device_label TEXT,
+        ip_first_seen TEXT,
+        ip_last_seen TEXT,
+        country TEXT,
+        known_ips JSONB DEFAULT '[]'::jsonb,
+        last_2fa_validated_at TIMESTAMP,
+        expires_at TIMESTAMP NOT NULL DEFAULT (NOW() + INTERVAL '30 days'),
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (username, tenant_id, device_fingerprint)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_user_devices_lookup ON user_devices (username, tenant_id, expires_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_user_devices_cleanup ON user_devices (expires_at) WHERE expires_at < NOW()",
+
+    # M-2FA-03 : table auth_events (audit log des events 2FA)
+    # event_type :
+    #   login_success, login_failure
+    #   2fa_setup_started, 2fa_setup_completed
+    #   2fa_success, 2fa_failure
+    #   recovery_code_used, recovery_codes_regenerated
+    #   2fa_reset_by_admin, 2fa_disabled
+    #   device_trusted, device_revoked
+    # metadata : payload libre (raison echec, qui a reset, etc.)
+    """CREATE TABLE IF NOT EXISTS auth_events (
+        id SERIAL PRIMARY KEY,
+        username TEXT NOT NULL,
+        tenant_id TEXT,
+        event_type TEXT NOT NULL,
+        ip TEXT,
+        user_agent TEXT,
+        country TEXT,
+        metadata JSONB DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_auth_events_user_time ON auth_events (username, tenant_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_auth_events_type_time ON auth_events (event_type, created_at DESC)",
 ]

@@ -24,3 +24,7 @@ openpyxl
 pdfplumber
 
 python-docx
+
+# -- 2FA (TOTP RFC 6238) — chantier 29/04 LOT 0 --
+pyotp>=2.9.0
+qrcode[pil]>=7.4.2
