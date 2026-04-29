@@ -64,4 +64,9 @@ COPY . .
 
 # Railway injecte $PORT a runtime, fallback 8080 en local
 EXPOSE 8080
-CMD sh -c "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"
+
+# IMPORTANT : exec form JSON ["sh", "-c", "..."] pour que la substitution
+# de variables ${PORT:-8080} se fasse bien au RUNTIME et non au build.
+# Avec la shell form (sans crochets), Docker n interprete pas correctement
+# les variables et $PORT serait passe litteralement a uvicorn.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
