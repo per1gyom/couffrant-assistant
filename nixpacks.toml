@@ -1,0 +1,22 @@
+# Nixpacks configuration for Raya - 29 avril 2026
+#
+# Ajoute postgresql_18 (incluant pg_dump) au container Railway pour permettre
+# au job backup_external de generer un dump SQL natif au lieu du fallback CSV.
+#
+# Pourquoi postgresql_18 specifiquement :
+# - Le serveur Postgres Railway tourne en 18.3 (verifie via SELECT version())
+# - pg_dump doit avoir la meme version majeure que le serveur (sinon erreur
+#   "server version mismatch") - regle stricte de PostgreSQL
+# - postgresql_18 est disponible dans Nixpkgs (verifie 29/04 sur GitHub)
+#
+# La syntaxe '...' fait heriter Nixpacks de la liste de packages auto-detectee
+# (Python, etc.). Sans elle, on perd Python et l'app ne build plus.
+#
+# Effet attendu sur le job backup_external :
+# - Avant : 9 min 39 (fallback CSV via COPY TO STDOUT)
+# - Apres : ~30-60 sec (pg_dump natif streame)
+# - Le code dans app/backup_external.py essaie pg_dump en premier puis bascule
+#   sur CSV en cas d echec, donc aucune modification de code n est necessaire.
+
+[phases.setup]
+nixPkgs = ["...", "postgresql_18"]
