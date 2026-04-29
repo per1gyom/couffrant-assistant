@@ -1,0 +1,55 @@
+# Git
+.git
+.gitignore
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+*.egg-info
+.coverage
+
+# Virtual envs locaux
+venv/
+.venv/
+env/
+
+# Editor configs
+.vscode
+.idea
+*.swp
+.DS_Store
+
+# Local secrets (ne JAMAIS coller dans le container)
+.env
+.env.local
+*.key
+raya-secrets/
+
+# Tests
+tests/
+test_*.py
+
+# Documentation (n est pas dans l image runtime)
+docs/
+*.md
+README*
+
+# Logs locaux
+*.log
+logs/
+
+# Files temp
+tmp/
+temp/
+
+# Anciens fichiers de config (remplaces par Dockerfile)
+nixpacks.toml
+railpack.json
+
+# Backups locaux
+*.tar.gz
+*.tar.gz.enc
+*.sql
