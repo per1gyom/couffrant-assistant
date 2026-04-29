@@ -4,13 +4,14 @@ Backup externe Raya vers Google Drive Saiyan Backups.
 Phase 2 du plan_backups_29avril.md.
 
 Architecture :
-1. _generate_pg_dump()    : pg_dump complet (fallback CSV si indisponible)
-2. _collect_secrets()     : exporte les env vars Railway (denylist explicite)
-3. _create_archive()      : tar.gz avec dump.sql + secrets.env + manifest.json
-4. _encrypt_archive()     : Fernet via app.crypto_backup
-5. _upload_to_drive()     : upload resumable vers Shared Drive Saiyan Backups
-6. _rotate_old_backups()  : garde les 30 derniers jours, supprime au-dela
-7. run_backup_external()  : orchestrateur
+1. _generate_pg_dump()         : pg_dump format custom -Fc (fallback CSV si indispo)
+2. _collect_secrets()          : exporte les env vars Railway (denylist explicite)
+3. _create_archive()           : tar.gz avec dump.* + secrets.env + manifest.json
+4. _encrypt_archive()          : Fernet via app.crypto_backup
+5. _upload_to_drive()          : upload resumable vers Shared Drive Saiyan Backups
+6. _rotate_old_backups()       : garde les 30 derniers jours, supprime au-dela
+7. _run_backup_external_inner(): orchestrateur (sans timeout, ne pas appeler direct)
+8. run_backup_external()       : wrapper avec timeout 10 min via ThreadPoolExecutor
 
 Variables Railway requises :
 - GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON : contenu JSON du service account
@@ -81,26 +82,40 @@ def _get_drive_service():
         return None
 
 
-def _generate_pg_dump() -> bytes:
+def _generate_pg_dump() -> tuple[bytes, str]:
     """
-    Genere un pg_dump complet de la DB.
+    Genere un pg_dump complet de la DB en format custom compresse (-Fc).
+
+    Le format custom (-Fc) :
+    - Compresse automatiquement (gzip level 6) => fichier ~3-4x plus petit
+      qu un dump SQL plain text non compresse
+    - Restoration via pg_restore (parallel jobs possible, restore selectif
+      table par table, etc.)
+    - Format binaire (pas lisible texte mais c est OK)
+
     Fallback CSV via COPY TO STDOUT si pg_dump indisponible.
-    Retourne les bytes du dump (peut etre gros, ~600 MB en SQL pour 2 GB DB).
+
+    Retourne (bytes_dump, format_name) ou format_name est :
+    - "custom"       : pg_dump -Fc reussi (preferent, ~250 MB pour 2 GB DB)
+    - "csv_fallback" : pg_dump indispo ou erreur, retombe sur CSV (~1.5 GB)
     """
     db_url = os.getenv("DATABASE_URL", "")
     if not db_url:
         raise RuntimeError("DATABASE_URL absente, impossible de dumper")
 
-    # Tentative pg_dump (mode prefere : SQL natif restoreable via psql)
+    # Tentative pg_dump format custom (-Fc) compresse
     try:
         result = subprocess.run(
-            ["pg_dump", "--no-password", "--no-owner", "--no-acl", db_url],
+            ["pg_dump", "--no-password", "--no-owner", "--no-acl", "-Fc", db_url],
             capture_output=True,
             timeout=600,  # 10 min max pour 2 GB
         )
         if result.returncode == 0 and result.stdout:
-            logger.info(f"[BackupExt] pg_dump OK : {len(result.stdout):,} bytes")
-            return result.stdout
+            logger.info(
+                f"[BackupExt] pg_dump OK (format custom -Fc) : "
+                f"{len(result.stdout):,} bytes"
+            )
+            return (result.stdout, "custom")
         logger.warning(
             f"[BackupExt] pg_dump exit {result.returncode}: "
             f"{result.stderr[:200].decode(errors='replace')}"
@@ -112,8 +127,8 @@ def _generate_pg_dump() -> bytes:
     except Exception as e:
         logger.error(f"[BackupExt] pg_dump erreur: {e}, fallback CSV.")
 
-    # Fallback : exporter toutes les tables publiques en CSV via COPY TO STDOUT
-    return _generate_csv_fallback()
+    # Fallback : CSV via COPY TO STDOUT
+    return (_generate_csv_fallback(), "csv_fallback")
 
 
 def _generate_csv_fallback() -> bytes:
@@ -194,23 +209,36 @@ def _format_secrets_env(secrets: dict) -> bytes:
     return "".join(lines).encode("utf-8")
 
 
-def _create_archive(dump_bytes: bytes, secrets: dict) -> tuple[bytes, dict]:
+def _create_archive(dump_bytes: bytes, secrets: dict, dump_format: str) -> tuple[bytes, dict]:
     """
     Cree une archive tar.gz contenant :
-    - dump.sql      (le pg_dump complet)
-    - secrets.env   (les variables d environnement filtrees)
-    - manifest.json (metadonnees : date, taille, hash, version)
+    - dump.pgcustom ou dump.sql (selon format), le pg_dump complet
+    - secrets.env, les variables d environnement filtrees
+    - manifest.json, metadonnees : date, taille, hash, version, format
+
+    dump_format determine le nom du fichier dans l archive et la procedure
+    de restauration :
+    - "custom"       => dump.pgcustom, restorer via 'pg_restore'
+    - "csv_fallback" => dump.sql, restorer via script custom (cf docs)
 
     Retourne (archive_bytes, manifest_dict).
     """
     ts_iso = datetime.now(timezone.utc).isoformat()
     secrets_bytes = _format_secrets_env(secrets)
 
-    # Manifest
+    # Nom du fichier dump selon le format (= indication claire pour la restoration)
+    if dump_format == "custom":
+        dump_filename = "dump.pgcustom"
+    else:
+        dump_filename = "dump.sql"
+
+    # Manifest (avec dump_format pour orienter la restoration)
     manifest = {
-        "version": "1.0",
+        "version": "1.1",  # bump : ajout dump_format + dump_filename
         "created_at_utc": ts_iso,
         "source": "Raya production (Railway)",
+        "dump_format": dump_format,
+        "dump_filename": dump_filename,
         "dump_size_bytes": len(dump_bytes),
         "dump_sha256": hashlib.sha256(dump_bytes).hexdigest(),
         "secrets_count_included": len(secrets["included"]),
@@ -223,7 +251,7 @@ def _create_archive(dump_bytes: bytes, secrets: dict) -> tuple[bytes, dict]:
     archive_buf = io.BytesIO()
     with tarfile.open(fileobj=archive_buf, mode="w:gz") as tar:
         for filename, content in [
-            ("dump.sql", dump_bytes),
+            (dump_filename, dump_bytes),
             ("secrets.env", secrets_bytes),
             ("manifest.json", manifest_bytes),
         ]:
@@ -365,10 +393,12 @@ def _send_alert_mail(subject: str, body: str) -> None:
         logger.error(f"[BackupExt] Echec envoi alerte mail: {e}")
 
 
-def run_backup_external(force: bool = False) -> dict:
+def _run_backup_external_inner(force: bool = False) -> dict:
     """
-    Orchestrateur principal du backup externe.
-    Appele par le scheduler nocturne et par /admin/backup/external/run.
+    Implementation interne de l orchestrateur du backup externe.
+
+    NE PAS APPELER DIRECTEMENT depuis le scheduler ou les endpoints.
+    Utiliser run_backup_external() (le wrapper avec timeout) a la place.
 
     force=True : ignore le check de configuration et tente quand meme.
                  (utile pour debug)
@@ -387,15 +417,15 @@ def run_backup_external(force: bool = False) -> dict:
         return {"ok": False, "error": "Drive client non disponible (SA JSON ?)"}
 
     try:
-        # 1. pg_dump
+        # 1. pg_dump (retourne tuple bytes + format pour le manifest)
         logger.info("[BackupExt] 1/5 Generation pg_dump...")
-        dump_bytes = _generate_pg_dump()
+        dump_bytes, dump_format = _generate_pg_dump()
         # 2. Secrets
         logger.info("[BackupExt] 2/5 Collecte secrets...")
         secrets = _collect_secrets()
-        # 3. Archive
+        # 3. Archive (le format guide le nom du fichier dump dans le tar.gz)
         logger.info("[BackupExt] 3/5 Creation archive tar.gz...")
-        archive_bytes, manifest = _create_archive(dump_bytes, secrets)
+        archive_bytes, manifest = _create_archive(dump_bytes, secrets, dump_format)
         # 4. Chiffrement
         logger.info("[BackupExt] 4/5 Chiffrement Fernet...")
         from app.crypto_backup import encrypt_bytes
@@ -421,6 +451,7 @@ def run_backup_external(force: bool = False) -> dict:
             "drive_file_id": upload_result.get("id"),
             "encrypted_size_bytes": len(encrypted),
             "dump_size_bytes": manifest["dump_size_bytes"],
+            "dump_format": dump_format,
             "elapsed_seconds": round(elapsed, 1),
             "rotation": rotation,
             "manifest": manifest,
@@ -439,6 +470,69 @@ def run_backup_external(force: bool = False) -> dict:
             )
         return {"ok": False, "error": str(e)[:500],
                 "consecutive_failures": _consecutive_failures}
+
+
+def run_backup_external(force: bool = False, timeout_sec: int = 600) -> dict:
+    """
+    Orchestrateur principal du backup externe AVEC TIMEOUT.
+
+    Wrapper autour de _run_backup_external_inner qui ajoute un timeout
+    global pour eviter qu un backup bug ne reste bloque indefiniment
+    (typiquement si Drive ou DB ne repond pas).
+
+    timeout_sec : duree maxi du backup en secondes (def 600 = 10 min).
+                  Si depasse, on cancel proprement, on incremente le compteur
+                  d echecs, et on alerte par mail si 2 echecs consecutifs.
+
+    Pourquoi ThreadPoolExecutor plutot que signal.alarm :
+    - signal.alarm marche QUE dans le thread principal (KO car APScheduler
+      tourne les jobs dans des threads workers)
+    - ThreadPoolExecutor est le pattern Python standard pour timeout, marche
+      partout, propre, ne s embete pas avec APScheduler.
+
+    Note importante : un thread Python ne peut pas etre kill de force
+    (limitation de l interpreteur). Donc en cas de timeout, le thread du
+    backup continue a tourner en arriere-plan jusqu a ce qu il termine ou
+    plante. Mais on a deja rendu la main au scheduler avec un resultat
+    d echec, et le compteur d echecs est correctement incremente.
+
+    Appele par le scheduler nocturne et par /admin/backup/external/run.
+
+    Retourne {ok: bool, ...details} comme _run_backup_external_inner, plus :
+    - Si timeout : {ok: false, error: "timeout XXXs", consecutive_failures: N}
+    """
+    import concurrent.futures
+
+    global _consecutive_failures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_run_backup_external_inner, force=force)
+        try:
+            return future.result(timeout=timeout_sec)
+        except concurrent.futures.TimeoutError:
+            _consecutive_failures += 1
+            logger.error(
+                f"[BackupExt] TIMEOUT apres {timeout_sec}s "
+                f"(echec #{_consecutive_failures})"
+            )
+            if _consecutive_failures >= 2:
+                _send_alert_mail(
+                    subject=f"[Raya] ALERTE backup externe TIMEOUT - "
+                            f"{_consecutive_failures} echecs consecutifs",
+                    body=f"Backup nocturne externe a TIMEOUT apres "
+                         f"{timeout_sec} secondes.\n\n"
+                         f"Causes possibles :\n"
+                         f"- Drive ou DB ne repond pas\n"
+                         f"- DB devenue trop grosse\n"
+                         f"- Reseau Railway sature\n"
+                         f"- Bug recent dans le code\n\n"
+                         f"Verifier Railway logs + Drive Saiyan Backups."
+                )
+            return {
+                "ok": False,
+                "error": f"timeout {timeout_sec}s",
+                "consecutive_failures": _consecutive_failures,
+            }
 
 
 # ─── ENDPOINTS ADMIN ───
