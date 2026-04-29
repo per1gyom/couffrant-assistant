@@ -252,3 +252,23 @@ def _register_jobs(scheduler: BackgroundScheduler):
     # raya_agent_core._raya_core_agent apres _save_conversation.
     # Plus precis (lien explicite a la source, confidence 1.0) et plus
     # rapide (pas de batch 3 min). Pattern aligne sur Odoo et Drive.
+
+    # Backup externe nocturne vers Google Drive Saiyan Backups (Phase 2 du
+    # plan_backups_29avril.md). Tourne tous les jours a 3h UTC (= 5h Paris).
+    # Dump pg_dump + secrets Railway + manifest, archive tar.gz, chiffre
+    # Fernet (BACKUP_ENCRYPTION_KEY), upload resumable vers Shared Drive
+    # 0ADHBMHnIH-dvUk9PVA. Rotation 30 jours par defaut.
+    # En cas de 2 echecs consecutifs, alerte mail a admin@raya-ia.fr.
+    if _job_enabled("SCHEDULER_BACKUP_EXTERNAL_ENABLED", True):
+        try:
+            from app.backup_external import run_backup_external
+            scheduler.add_job(func=run_backup_external,
+                              trigger=CronTrigger(hour=3, minute=0),
+                              id="backup_external",
+                              name="Backup nocturne externe Drive (3h UTC)",
+                              replace_existing=True)
+            logger.info("[Scheduler] Job enregistre : backup_external (3h UTC)")
+        except Exception as e:
+            logger.error(f"[Scheduler] Import echoue pour backup_external: {e}")
+    else:
+        logger.info("[Scheduler] Job DESACTIVE : backup_external (activer via SCHEDULER_BACKUP_EXTERNAL_ENABLED=true)")
