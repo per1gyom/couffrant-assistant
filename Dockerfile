@@ -60,13 +60,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copie de tout le code applicatif (.dockerignore exclut les non-pertinents)
 COPY . .
 
+# Garantie que entrypoint.sh est executable (au cas ou le bit + serait perdu
+# par certains systemes de fichiers entre Mac et Linux)
+RUN chmod +x /app/entrypoint.sh
+
 # ===== ETAPE 3 : Lancement =====
 
 # Railway injecte $PORT a runtime, fallback 8080 en local
 EXPOSE 8080
 
-# IMPORTANT : exec form JSON ["sh", "-c", "..."] pour que la substitution
-# de variables ${PORT:-8080} se fasse bien au RUNTIME et non au build.
-# Avec la shell form (sans crochets), Docker n interprete pas correctement
-# les variables et $PORT serait passe litteralement a uvicorn.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+# On utilise un script externe pour la substitution de variables.
+# La syntaxe CMD ["sh", "-c", "..."] ne marche pas sur Railway car la
+# variable ${PORT} n est pas substituee correctement (raison inconnue,
+# probablement un wrapper Railway). Un script .sh externe garantit la
+# bonne resolution.
+CMD ["/app/entrypoint.sh"]
