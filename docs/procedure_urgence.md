@@ -3,7 +3,8 @@
 > **À garder sous la main.** Document à consulter en cas d'incident
 > majeur. Toutes les commandes sont validées et testées.
 > 
-> **Dernière mise à jour** : 29 avril 2026
+> **Dernière mise à jour** : 29 avril 2026 (soir, après déploiement
+> backup externe Phase 2 + 3 améliorations)
 
 ## ⚡ Décision rapide selon l'incident
 
@@ -75,47 +76,145 @@ réattache le volume.
 ## §4 — Railway en panne complète
 
 Si Railway down > 2h sans communication ni ETA, plan B = remonter
-ailleurs.
+ailleurs en utilisant un backup externe chiffré sur Google Drive
+Saiyan Backups.
 
 ### Pré-requis
 
-- Code : disponible sur **github.com/per1gyom/couffrant-assistant** →
+- **Code** : disponible sur **github.com/per1gyom/couffrant-assistant** →
   rien à faire, c'est intact
-- DB : récupérer le **dernier backup externe chiffré** depuis
-  OneDrive pro (chemin : `/Backups Raya/raya_backup_<date>.tar.gz.enc`)
-- Clé : `BACKUP_ENCRYPTION_KEY` stockée dans la note Apple verrouillée
-  de Guillaume
+- **DB** : récupérer le **dernier backup externe chiffré** depuis le
+  Drive partagé `Saiyan Backups` (compte Workspace `admin@raya-ia.fr`)
+  - Fichier : `raya_backup_<YYYY-MM-DD_HH-MM>.tar.gz.enc`
+  - Taille : ~250-600 MB selon le format (custom ou CSV fallback)
+- **Clé** : `BACKUP_ENCRYPTION_KEY` stockée dans la note Apple verrouillée
+  de Guillaume (clé Fernet 32 bytes base64)
+- **Mac avec Python 3** + `pip install cryptography` (pour déchiffrer)
+- **PostgreSQL client 18** sur le Mac (pour restaurer) :
+  `brew install postgresql@18` ou via Postgres.app
 
-### Étapes
+### Étape 1 — Récupérer et déchiffrer le backup
 
-1. Créer un compte sur un hébergeur alternatif :
-   - **Render.com** (recommandé, le plus proche de Railway)
-   - **Fly.io** (gratuit jusqu'à un volume)
-   - **OVH Cloud** (français, plus de paramétrage)
-2. Connecter le repo GitHub (deploy auto)
-3. Provisionner une base Postgres
-4. Récupérer le backup externe sur le Mac de Guillaume
-5. Déchiffrer le backup :
-   ```bash
-   openssl enc -d -aes-256-cbc -pbkdf2 \
-     -in raya_backup_<date>.tar.gz.enc \
-     -out raya_backup_<date>.tar.gz \
-     -k <BACKUP_ENCRYPTION_KEY>
-   tar -xzf raya_backup_<date>.tar.gz
-   ```
-6. Importer la DB :
-   ```bash
-   psql <NOUVELLE_DATABASE_URL> < raya_backup_<date>.sql
-   ```
-7. Restaurer les variables d'environnement (depuis le bundle
-   `secrets.env` du backup) dans le nouveau service
-8. Redémarrer l'app, vérifier que ça marche
-9. Mettre à jour le DNS de **app.raya-ia.fr** pour pointer vers le
+Sur le Mac de Guillaume, terminal :
+
+```bash
+# 1. Telecharger le backup depuis Drive (manuel via le navigateur ou
+#    via gcloud cli si configure). Le fichier arrive dans ~/Downloads.
+ENC_FILE="$HOME/Downloads/raya_backup_<YYYY-MM-DD_HH-MM>.tar.gz.enc"
+
+# 2. Creer un dossier de travail
+mkdir -p /tmp/raya_restore && cd /tmp/raya_restore
+
+# 3. Dechiffrer avec Python (cryptography Fernet)
+python3 << 'PYEOF'
+from cryptography.fernet import Fernet
+import os
+
+# Coller la cle depuis la note Apple verrouillee :
+KEY = "<BACKUP_ENCRYPTION_KEY>"
+ENC = os.path.expanduser("~/Downloads/raya_backup_<YYYY-MM-DD_HH-MM>.tar.gz.enc")
+
+with open(ENC, "rb") as f:
+    encrypted = f.read()
+decrypted = Fernet(KEY.encode()).decrypt(encrypted)
+with open("/tmp/raya_restore/backup.tar.gz", "wb") as f:
+    f.write(decrypted)
+print(f"Dechiffre : {len(decrypted):,} bytes")
+PYEOF
+
+# 4. Extraire l archive tar.gz
+tar -xzf /tmp/raya_restore/backup.tar.gz -C /tmp/raya_restore/
+ls -lh /tmp/raya_restore/
+# Doit montrer : dump.pgcustom (ou dump.sql), secrets.env, manifest.json
+```
+
+### Étape 2 — Lire le manifest pour connaître le format
+
+```bash
+cat /tmp/raya_restore/manifest.json
+```
+
+Le champ **`dump_format`** indique la procédure de restoration :
+
+- `"custom"` → fichier `dump.pgcustom`, restoration via **`pg_restore`**
+- `"csv_fallback"` → fichier `dump.sql`, restoration via script custom
+  (cas rare, seulement si pg_dump n'était pas dispo lors du backup)
+
+### Étape 3 — Provisionner une base Postgres ailleurs
+
+Choisir un nouvel hébergeur :
+- **Render.com** (recommandé, le plus proche de Railway)
+- **Fly.io** (gratuit jusqu'à un volume)
+- **OVH Cloud** (français, plus de paramétrage)
+- **Postgres local** sur le Mac (pour tester avant prod)
+
+Récupérer la nouvelle `DATABASE_URL` au format
+`postgresql://user:pass@host:port/dbname`.
+
+### Étape 4a — Restoration depuis format `custom` (cas normal)
+
+```bash
+# pg_restore (PostgreSQL client 18 requis - matche le serveur)
+pg_restore --no-owner --no-acl --clean --if-exists \
+           --dbname "<NOUVELLE_DATABASE_URL>" \
+           /tmp/raya_restore/dump.pgcustom
+
+# Optionnel : restoration parallele plus rapide (--jobs N CPU cores)
+# pg_restore --no-owner --no-acl --clean --if-exists --jobs 4 \
+#            --dbname "<NOUVELLE_DATABASE_URL>" \
+#            /tmp/raya_restore/dump.pgcustom
+```
+
+### Étape 4b — Restoration depuis format `csv_fallback` (cas dégradé)
+
+⚠️ Le CSV fallback n'est PAS du SQL standard. Il contient des
+`COPY ... FROM STDIN WITH CSV HEADER` concaténés. Pour restaurer :
+
+1. Reconstruire le schéma DB depuis le code Raya en bootant l'app
+   contre la nouvelle DATABASE_URL (les migrations idempotentes
+   recréeront les tables)
+2. Importer manuellement les CSV depuis `dump.sql` table par table via
+   `psql` (procédure complexe, à éviter si possible)
+
+🛑 Si jamais on en arrive là, contacter le support — c'est un cas
+exceptionnel.
+
+### Étape 5 — Restaurer les secrets dans le nouveau service
+
+Le fichier `secrets.env` contient toutes les variables Railway non
+exclues par la denylist (47 variables typiquement) :
+
+```bash
+cat /tmp/raya_restore/secrets.env
+```
+
+Copier ces variables dans le nouveau service (Render/Fly/OVH/local).
+
+🛑 **À régénérer manuellement** (PAS dans le backup pour des raisons de
+sécurité) :
+- `BACKUP_ENCRYPTION_KEY` (auto-référentielle, exclue par la denylist
+  pour éviter qu'une fuite de backup expose la clé qui le déchiffre)
+
+### Étape 6 — Redémarrer l'app + vérifier
+
+1. Lancer le service avec la nouvelle DATABASE_URL + variables restorées
+2. Tester `/health` → doit répondre HTTP 200
+3. Se connecter en super_admin → vérifier données récentes
+4. Tester les connexions Gmail/Outlook (peuvent nécessiter ré-OAuth si
+   `ENCRYPTION_KEY` est différente)
+5. Mettre à jour le DNS de **app.raya-ia.fr** pour pointer vers le
    nouvel hébergeur
-10. Communiquer aux users que ça marche ailleurs maintenant
+6. Communiquer aux users que ça remarche
 
-🛑 Cette procédure est **À TESTER au moins une fois** avant la prod
-réelle. Sinon on découvre les bugs en pleine crise.
+### Étape 7 — Cleanup
+
+```bash
+rm -rf /tmp/raya_restore
+```
+
+🛑 Cette procédure est **À TESTER au moins une fois par semestre**
+avant qu'une vraie crise arrive. Sinon on découvre les bugs en pleine
+panique.
 
 ## §5 — Compte piraté (Railway, GitHub, Microsoft, Google)
 
@@ -240,7 +339,9 @@ Créer un fichier `docs/incident_<date>_<sujet>.md` avec :
 | `SMTP_HOST`, `SMTP_USER`, `SMTP_PASS` | Envoi mails | Pas d'alertes mail |
 | `APP_USERNAME`, `APP_PASSWORD` | Boot legacy | App ne démarre pas |
 | `APP_BASE_URL` | URL canonical | Liens reset password cassés |
-| `BACKUP_ENCRYPTION_KEY` (à venir) | Chiffre les backups externes | Backups inutilisables sans cette clé |
+| `BACKUP_ENCRYPTION_KEY` | Chiffre les backups externes Drive | Backups inutilisables (récupération possible si la clé est dans la note Apple verrouillée Guillaume) |
+| `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` | Service account pour upload Drive | Backups nocturnes échouent (alerte mail après 2 nuits) |
+| `GOOGLE_DRIVE_BACKUP_FOLDER_ID` | ID du Shared Drive Saiyan Backups | Idem |
 
 ## 🗒️ Historique des incidents
 

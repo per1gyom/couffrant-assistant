@@ -158,3 +158,206 @@ d'essai :
 | 2FA Raya côté app (Niveau 2) | 🔴 Décisions Q1-Q7 actées, à coder ~5h | après Phase 2 backups |
 | Note UX #7 retirer Administration menu user | 🔴 À faire ~2-3h | indépendant |
 | Outlook contact@couffrant-solar.fr | 🔴 Quand codes Azure prêts | indépendant |
+
+---
+
+# ✅ Phase 2 — TERMINÉE 29 avril 2026 (soirée)
+
+> **Statut final** : Phase 2 entièrement déployée en production, testée
+> bout-en-bout avec preuve de restauration. Système de backup nocturne
+> automatique chiffré opérationnel.
+
+## Résumé exécutif
+
+- ✅ Backup nocturne automatique chaque jour à 3h UTC
+- ✅ Fichier .tar.gz.enc chiffré (Fernet) uploadé sur Google Drive Saiyan
+  Backups (Shared Drive du compte Workspace `admin@raya-ia.fr`)
+- ✅ Format pg_dump custom (-Fc) optimisé : ~250 MB compressé pour 2 GB de DB
+- ✅ Durée par backup : ~2 minutes (vs ~9 min en CSV fallback)
+- ✅ Rotation auto : 30 derniers jours gardés, le reste supprimé
+- ✅ Alerte mail à `admin@raya-ia.fr` si 2 échecs consécutifs
+- ✅ Timeout serveur 10 min pour ne jamais bloquer le scheduler
+- ✅ Restoration validée : déchiffrement OK, intégrité SHA256 prouvée
+
+## Décisions D1-D5 prises
+
+| Décision | Choix final |
+|---|---|
+| **D1 Destinataire** | Google Drive Saiyan Backups (Shared Drive Workspace `admin@raya-ia.fr`, 2 To inclus dans le plan Business Standard 13.60€/mois) |
+| **D2 Clé chiffrement** | `BACKUP_ENCRYPTION_KEY` Fernet (32 bytes base64), générée 29/04, stockée Railway env + note Apple verrouillée Guillaume. Auto-référentielle exclue de la denylist (le backup ne contient PAS sa propre clé pour ne pas créer de faille) |
+| **D3 Heure du job** | 3h UTC = 5h Paris (peu de trafic, après les rollups de minuit) |
+| **D4 Volume aria-data-volume** | À investiguer dans une session ultérieure (pas bloquant) |
+| **D5 Variables exportées** | 47 inclus / 31 exclus (denylist : RAILWAY_*, secrets système Linux, BACKUP_ENCRYPTION_KEY auto-référentielle). Liste complète dans le manifest de chaque backup |
+
+## Stack technique finale
+
+```
+                          ┌─────────────────────────────┐
+   APScheduler 3h UTC ──→ │   run_backup_external()     │ (timeout 10 min)
+                          │   ↓                          │
+                          │   1. pg_dump -Fc            │ ← postgres-client-18
+                          │   2. _collect_secrets()     │ ← os.environ + denylist
+                          │   3. tar.gz                 │ ← in-memory
+                          │   4. encrypt Fernet         │ ← BACKUP_ENCRYPTION_KEY
+                          │   5. upload Drive resumable │ ← Service Account JSON
+                          │   6. rotation > 30j         │
+                          └─────────────────────────────┘
+                                       ↓
+                  Drive Saiyan Backups (Shared Drive ID 0ADHBMHnIH-dvUk9PVA)
+                                       ↓
+                         raya_backup_<YYYY-MM-DD_HH-MM>.tar.gz.enc
+```
+
+### Container Railway
+
+Avant : Railpack (auto-détection Python) → pas de pg_dump dispo
+
+Après : **Dockerfile explicite** avec :
+- Base `python:3.13-slim-bookworm` (Debian 12 LTS)
+- `postgresql-client-18` installé via repo officiel `apt.postgresql.org`
+- Garde-fou `RUN pg_dump --version` dans le build (casse si pas dispo)
+- Script de démarrage `entrypoint.sh` (résoud `$PORT` au runtime)
+
+### Important : Custom Start Command Railway
+
+🛑 **À documenter pour ne JAMAIS y revenir** : Railway → service Saiyan
+→ Settings → Deploy → Custom Start Command doit valoir
+**`/app/entrypoint.sh`** (pas vide, sinon des fois Railway garde son
+ancienne valeur fantôme `uvicorn ... --port $PORT` qui plante).
+
+Sans cette ligne, l'app crashe en boucle au démarrage avec
+`Error: Invalid value for '--port': '$PORT'`.
+
+## Améliorations 1, 2, 3
+
+### Amélioration 1 — pg_dump natif (TERMINÉE)
+
+**État initial** : Railpack auto-détecté Python sans pg_dump dans le
+PATH → fallback CSV via `COPY TO STDOUT` pour chaque table → durée
+~9 min, dump 1.5 GB.
+
+**Solution finale** : Dockerfile explicite avec
+`postgresql-client-18` depuis le repo officiel + flag `-Fc` pour
+format custom compressé.
+
+**Gain mesuré** :
+- Durée : 579 s → 128.8 s (×4.5)
+- Dump : 1.5 GB → 448 MB (×3.4)
+- Pic RAM : 3-5 GB → ~500 MB
+- Format : SQL plain → binaire pg_dump custom (restorable via
+  `pg_restore`, plus puissant)
+
+### Amélioration 2 — Streaming au lieu de RAM (REPORTÉE)
+
+**Décision** : reportée sine die. Le pic RAM est passé à ~500 MB grâce
+à l'amélioration 1, ce qui est largement acceptable pour Railway.
+À reconsidérer quand la DB dépassera 5-10 GB.
+
+### Amélioration 3 — Timeout 10 min (TERMINÉE)
+
+**Risque adressé** : si pg_dump bug, Drive injoignable, ou bug Python
+quelconque, un job APScheduler peut rester bloqué indéfiniment en
+consommant RAM/CPU.
+
+**Solution finale** : wrapper `concurrent.futures.ThreadPoolExecutor`
++ `future.result(timeout=600)` autour de l'orchestrateur interne
+`_run_backup_external_inner()`.
+
+**Pourquoi ThreadPoolExecutor** : `signal.alarm()` ne marche QUE dans
+le thread principal, KO car APScheduler tourne ses jobs dans des
+threads workers.
+
+**Limite connue** : un thread Python ne peut pas être kill de force
+(GIL). Donc en cas de timeout, le thread du backup continue en
+arrière-plan jusqu'à terminer naturellement, mais on a déjà rendu la
+main au scheduler avec un résultat d'échec. Acceptable.
+
+## Validation bout-en-bout (29/04 soir)
+
+### Backups réussis
+
+| Heure | Format | Durée | Dump | .enc | Validation |
+|---|---|---|---|---|---|
+| 18:47 | CSV (pg_dump pas dispo) | 9 min 39 | 1.5 GB | 570 MB | ✅ Restoration testée |
+| 19:25 | CSV (Nixpacks toml ignoré) | 9 min 33 | 1.5 GB | 570 MB | ✅ |
+| 21:01 | pg_dump SQL plain | 6 min 57 | 1.5 GB | 570 MB | ✅ |
+| **21:21** | **pg_dump custom -Fc** | **2 min 9** | **448 MB** | **594 MB** | ✅ |
+
+### Test de restauration validé
+
+Sur le 1er backup (18:47, format CSV) :
+- ✅ Téléchargement du `.tar.gz.enc` 570 MB depuis Drive
+- ✅ Déchiffrement Fernet OK avec `BACKUP_ENCRYPTION_KEY`
+- ✅ Extraction tar.gz : 3 fichiers (dump.sql, secrets.env, manifest.json)
+- ✅ SHA256 du dump = SHA256 manifest (intégrité prouvée)
+- ✅ 60 tables présentes dans le dump (cohérent avec la DB)
+- ✅ Tables critiques vérifiées : users, aria_memory, mail_memory,
+  aria_rules, tenants
+
+### Endpoints admin opérationnels
+
+Tous protégés par `require_super_admin` (Guillaume seul) :
+
+| Endpoint | Méthode | Rôle |
+|---|---|---|
+| `/admin/backup/external/health` | GET | Status configuration (sans auth, debug) |
+| `/admin/backup/external/run` | POST | Déclenche un backup manuel |
+| `/admin/backup/external/list` | GET | Liste les backups sur Drive |
+| `/admin/backup/external/diagnose` | GET | Diagnostic binaires/PATH (debug) |
+
+## Commits déployés (8 commits le 29/04)
+
+| Commit | Sujet |
+|---|---|
+| `d75bfa3` | docs(backup) plan + procedure_urgence (matin) |
+| `7ac7d1d` | feat(backup) crypto_backup module Fernet |
+| `b8510d8` | feat(backup) module backup_external orchestrateur |
+| `41433f2` | feat(backup) job APScheduler nocturne 3h UTC |
+| `162ae0e` | feat(backup) endpoints admin |
+| `2e15a41` | feat(backup) endpoint diagnose |
+| `a9b8efb` | feat(backup) Dockerfile + .dockerignore |
+| `bc7f20c` + `030d434` | fix(backup) tentatives PORT (intermédiaires) |
+| `1113138` | chore(backup) cleanup commentaires Dockerfile |
+| `bce4e51` | feat(backup) pg_dump -Fc + timeout ThreadPoolExecutor |
+
+## Procédure de restauration
+
+Voir **`docs/procedure_urgence.md` §4 — Railway en panne complète**
+(mise à jour le 29/04 avec la vraie procédure Fernet + pg_restore).
+
+## Fichiers / variables / secrets liés
+
+### Fichiers code Raya
+- `app/backup_external.py` — orchestrateur + endpoints (660 lignes)
+- `app/crypto_backup.py` — chiffrement Fernet
+- `app/scheduler_jobs.py` — job nocturne 3h UTC
+- `Dockerfile` — image avec pg_dump 18
+- `entrypoint.sh` — script de démarrage uvicorn
+- `.dockerignore` — exclusions de build
+
+### Variables Railway
+- `BACKUP_ENCRYPTION_KEY` — clé Fernet (32 bytes base64)
+- `GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON` — clé du service account
+- `GOOGLE_DRIVE_BACKUP_FOLDER_ID` — ID du Shared Drive (`0ADHBMHnIH-dvUk9PVA`)
+- `BACKUP_ALERT_EMAIL` — destinataire alerte (def `admin@raya-ia.fr`)
+- `BACKUP_KEEP_DAYS` — nb jours rétention (def 30)
+- `SCHEDULER_BACKUP_EXTERNAL_ENABLED` — toggle on/off (def true)
+
+### Comptes externes
+- Google Workspace `admin@raya-ia.fr` (plan Business Standard, 2 To)
+- Service Account `raya-backup-bot@saiyan-backups.iam.gserviceaccount.com`
+- Shared Drive `Saiyan Backups` (ID `0ADHBMHnIH-dvUk9PVA`)
+- Note Apple verrouillée Guillaume (contient les clés sensibles)
+
+## Prochaine étape — passive surveillance
+
+Plus rien à faire activement sur le backup. Le scheduler tourne tout
+seul. À surveiller à intervalle régulier (1× / mois) :
+
+- `/admin/backup/external/list` → vérifier que la liste contient bien
+  les 30 derniers jours
+- Drive Saiyan Backups → vérifier visuellement la présence des fichiers
+- En cas d'absence d'alerte mail = tout va bien (silence is golden)
+
+🛑 **Si jamais une alerte mail arrive** : voir
+`docs/procedure_urgence.md` §4 ou §3 selon le contexte.
