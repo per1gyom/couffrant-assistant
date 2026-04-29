@@ -439,3 +439,69 @@ def run_backup_external(force: bool = False) -> dict:
             )
         return {"ok": False, "error": str(e)[:500],
                 "consecutive_failures": _consecutive_failures}
+
+
+# ─── ENDPOINTS ADMIN ───
+# Pattern calque sur app/backup.py : router dans le meme fichier que la logique.
+# Tous les endpoints sont proteges par require_super_admin (Guillaume seul).
+
+from fastapi import APIRouter, Depends, HTTPException
+from app.routes.deps import require_super_admin
+
+router = APIRouter(tags=["backup_external"])
+
+
+@router.get("/admin/backup/external/health")
+def backup_external_health():
+    """
+    Verifie la configuration sans rien declencher.
+    Utile pour valider qu apres deploiement les variables Railway sont OK.
+    Pas de require_super_admin pour pouvoir le ping depuis curl en debug.
+    Reponse safe : pas de valeur sensible exposee.
+    """
+    from app.crypto_backup import is_configured as backup_crypto_ok
+    drive = _get_drive_service()
+    folder_id = os.getenv("GOOGLE_DRIVE_BACKUP_FOLDER_ID", "").strip()
+    return {
+        "backup_encryption_key_configured": backup_crypto_ok(),
+        "drive_service_account_configured": drive is not None,
+        "drive_folder_id_configured": bool(folder_id),
+        "drive_folder_id_prefix": folder_id[:6] + "..." if folder_id else None,
+        "alert_email": os.getenv("BACKUP_ALERT_EMAIL", "admin@raya-ia.fr"),
+        "keep_days": int(os.getenv("BACKUP_KEEP_DAYS", str(DEFAULT_KEEP_DAYS))),
+        "scheduler_enabled": os.getenv("SCHEDULER_BACKUP_EXTERNAL_ENABLED", "true"),
+    }
+
+
+@router.post("/admin/backup/external/run")
+def backup_external_run_manual(user: dict = Depends(require_super_admin)):
+    """
+    Declenche un backup externe manuel. Reserve super_admin (Guillaume).
+
+    Utile pour :
+    - Test apres deploiement
+    - Backup ponctuel avant operation risquee (migration, refacto)
+    - Verification que tout marche sans attendre 3h du matin
+
+    Reponse : dict avec ok, filename, drive_file_id, sizes, manifest, etc.
+    """
+    result = run_backup_external(force=False)
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=500,
+            detail=f"Backup echec : {result.get('error', 'unknown')}",
+        )
+    return result
+
+
+@router.get("/admin/backup/external/list")
+def backup_external_list(user: dict = Depends(require_super_admin)):
+    """
+    Liste les backups presents sur le Shared Drive Saiyan Backups.
+    Reserve super_admin. Utile pour audit visuel + verifier rotation.
+    """
+    try:
+        backups = list_backups_on_drive()
+        return {"ok": True, "count": len(backups), "backups": backups}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur liste : {e}")

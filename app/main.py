@@ -36,6 +36,7 @@ from app.routes.downloads import router as downloads_router
 from app.routes.chat_history import router as chat_history_router
 from app.bug_reports import router as bug_reports_router
 from app.backup import router as backup_router
+from app.backup_external import router as backup_external_router
 from app.email_signature import router as signature_router
 from app.rgpd import router as rgpd_router
 from app.topics import router as topics_router
@@ -117,6 +118,7 @@ app.include_router(downloads_router)
 app.include_router(chat_history_router)
 app.include_router(bug_reports_router)
 app.include_router(backup_router)
+app.include_router(backup_external_router)
 app.include_router(signature_router)
 app.include_router(rgpd_router)
 app.include_router(topics_router)
