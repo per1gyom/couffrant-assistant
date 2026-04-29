@@ -69,9 +69,18 @@ RUN chmod +x /app/entrypoint.sh
 # Railway injecte $PORT a runtime, fallback 8080 en local
 EXPOSE 8080
 
-# On utilise un script externe pour la substitution de variables.
-# La syntaxe CMD ["sh", "-c", "..."] ne marche pas sur Railway car la
-# variable ${PORT} n est pas substituee correctement (raison inconnue,
-# probablement un wrapper Railway). Un script .sh externe garantit la
-# bonne resolution.
+# IMPORTANT - lien entre ce CMD et Railway Settings :
+# Railway permet de definir une "Custom Start Command" dans les Settings
+# du service qui OVERRIDE le CMD du Dockerfile. Lors du diagnostic du
+# 29/04/2026, on a decouvert qu une Custom Start Command venant de
+# l auto-detection Railpack etait active, ce qui faisait que ce CMD
+# n etait jamais execute.
+#
+# Pour que ce CMD prenne effet : la Custom Start Command Railway doit
+# etre VIDE (Saiyan service > Settings > Deploy > Custom Start Command).
+#
+# Pourquoi un script externe (entrypoint.sh) plutot que CMD inline :
+# - Lisibilite : la logique de demarrage tient en 3 lignes claires
+# - Debug : le script log le port utilise, utile pour les logs Railway
+# - Maintenabilite : modifier le demarrage = editer un .sh, pas le Dockerfile
 CMD ["/app/entrypoint.sh"]
