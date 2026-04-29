@@ -505,3 +505,61 @@ def backup_external_list(user: dict = Depends(require_super_admin)):
         return {"ok": True, "count": len(backups), "backups": backups}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur liste : {e}")
+
+
+@router.get("/admin/backup/external/diagnose")
+def backup_external_diagnose(user: dict = Depends(require_super_admin)):
+    """
+    Endpoint de diagnostic pour debug pg_dump et autres binaires Nix.
+    Reserve super_admin (Guillaume).
+
+    Utile pour comprendre :
+    - Si pg_dump est dans le PATH (shutil.which)
+    - Quelle est la version de pg_dump si dispo
+    - Quel est le PATH du process Python
+    - Quelles entrees /nix/store contiennent "postgresql"
+
+    A garder car utile pour debug futur de tout binaire externe.
+    """
+    import shutil
+    import sys
+
+    out = {
+        "python_version": sys.version,
+        "path_env": os.environ.get("PATH", ""),
+        "which_pg_dump": shutil.which("pg_dump"),
+        "which_psql": shutil.which("psql"),
+        "pg_dump_version": None,
+        "pg_dump_error": None,
+        "nix_store_postgresql": None,
+        "nix_store_error": None,
+        "nix_store_total_entries": None,
+    }
+
+    # 1. Tenter pg_dump --version si binaire trouve
+    if out["which_pg_dump"]:
+        try:
+            r = subprocess.run(
+                [out["which_pg_dump"], "--version"],
+                capture_output=True,
+                timeout=5,
+            )
+            out["pg_dump_version"] = r.stdout.decode(errors="replace").strip()
+        except Exception as e:
+            out["pg_dump_error"] = str(e)
+
+    # 2. Lister /nix/store pour voir si postgresql est installe
+    try:
+        if os.path.isdir("/nix/store"):
+            all_entries = os.listdir("/nix/store")
+            out["nix_store_total_entries"] = len(all_entries)
+            pg_entries = [
+                e for e in all_entries if "postgresql" in e.lower()
+            ]
+            out["nix_store_postgresql"] = sorted(pg_entries)[:30]
+        else:
+            out["nix_store_postgresql"] = "not_a_directory"
+    except Exception as e:
+        out["nix_store_error"] = str(e)
+
+    return out
