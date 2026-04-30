@@ -112,7 +112,7 @@ async function loadUsers(){
       <td class="mono" style="font-size:11px;color:var(--text2)">${fmtDateShort(u.last_login)}</td>
       <td class="mono" style="font-size:11px;color:var(--text3)">${fmtDate(u.created_at)}</td>
       <td style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="showTools('${u.username}')">Outils</button>
+        <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="showTools('${u.username}')">Outils</button><button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" title="Gerer la 2FA / PIN / Devices" onclick="open2FAModal('${u.username}', '${u.tenant_id||''}')">🔐</button>
         <button class="btn btn-accent" style="padding:4px 9px;font-size:11px" onclick="editUser('${u.username}','${u.email||''}','${u.scope||'tenant_user'}','${u.phone||''}')">Modifier</button>
         <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px" onclick="seedUser('${u.username}')">🌱</button>
         ${u.suspended?`<button class="btn btn-unlock" style="padding:4px 9px;font-size:11px" onclick="unsuspendUser('${u.username}')">▶️ Réactiver</button>`:`<button class="btn btn-ghost" style="padding:4px 9px;font-size:11px;color:var(--yellow)" onclick="suspendUser('${u.username}')">⏸️</button>`}
