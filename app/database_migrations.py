@@ -1116,4 +1116,20 @@ MIGRATIONS = [
     )""",
     "CREATE INDEX IF NOT EXISTS idx_auth_events_user_time ON auth_events (username, tenant_id, created_at DESC)",
     "CREATE INDEX IF NOT EXISTS idx_auth_events_type_time ON auth_events (event_type, created_at DESC)",
+
+    # -- LOT 5 du chantier 2FA (30/04/2026) --
+    # PIN court (4-6 chiffres) demande a chaque entree dans /admin et
+    # /super_admin. Different du mot de passe principal et des codes 2FA.
+    # Decision Guillaume : protege contre session laissee ouverte sans
+    # surveillance. 3 essais rates -> escalade vers 2FA Authenticator
+    # complete pour debloquer.
+
+    # M-2FA-04 : 3 colonnes PIN sur users
+    # pin_hash : pbkdf2-sha256 + salt 16B (meme pattern que password_hash)
+    # pin_attempts_count : compteur essais rates dans la fenetre courante
+    # pin_locked_until : timestamp fin de blocage (NULL = pas bloque)
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_hash TEXT",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_attempts_count INTEGER DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_locked_until TIMESTAMP",
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_set_at TIMESTAMP",
 ]

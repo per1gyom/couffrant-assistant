@@ -546,6 +546,31 @@ _SETUP_HTML = """<!DOCTYPE html>
     <p style="color: #64748b; font-size: 0.9em; margin-top: 16px;">Pour desactiver la 2FA, demande a ton super_admin.</p>
   </div>
 
+  <!-- BLOC 5 : PIN admin (LOT 5 du chantier 2FA) -->
+  <div id="block-pin" class="card hidden">
+    <h2>🔐 Code PIN admin (4-6 chiffres)</h2>
+    <p style="color: #64748b; font-size: 0.95em; margin-bottom: 12px;">
+      Le PIN est demande a CHAQUE entree dans le panel admin / super admin.
+      Il protege contre une session laissee ouverte sans surveillance.
+      Different du mot de passe et du code 2FA.
+    </p>
+    <div id="pin-status-block" style="margin: 16px 0;"></div>
+
+    <div id="pin-form-block" class="hidden">
+      <input type="password" id="pin-input"
+             placeholder="••••"
+             maxlength="6" minlength="4"
+             inputmode="numeric"
+             pattern="\d*"
+             style="font-family: ui-monospace, monospace; font-size: 22px; text-align: center; letter-spacing: 0.5em; width: 220px;">
+      <button onclick="submitPin()" id="pin-submit-btn">Enregistrer</button>
+      <button onclick="cancelPinForm()" class="secondary">Annuler</button>
+      <p style="color: #94a3b8; font-size: 12px; margin-top: 8px;">
+        4 a 6 chiffres. Pas de PIN trivial (1234, 0000, etc.).
+      </p>
+    </div>
+  </div>
+
   <div id="msg-block"></div>
 
   <script>
@@ -672,7 +697,81 @@ _SETUP_HTML = """<!DOCTYPE html>
       setTimeout(function() { el.innerHTML = ''; }, 5000);
     }
 
+    // ─── Gestion PIN (LOT 5) ───────────────────────────────────────────
+    async function loadPinStatus() {
+      try {
+        const r = await fetch('/admin/pin/status');
+        if (!r.ok) {
+          // 401 si pas admin = ne pas afficher la section PIN
+          document.getElementById('block-pin').classList.add('hidden');
+          return;
+        }
+        const d = await r.json();
+        document.getElementById('block-pin').classList.remove('hidden');
+        const sb = document.getElementById('pin-status-block');
+        if (d.configured) {
+          sb.innerHTML = '<div class="success">PIN configure depuis ' +
+            (d.set_at ? new Date(d.set_at).toLocaleDateString('fr-FR') : '?') + '. ' +
+            (d.locked ? '<b style="color:#ef4444">⚠️ PIN bloque actuellement.</b>' :
+                        'Demande a chaque entree dans le panel.') + '</div>' +
+            '<button onclick="showPinForm()" class="secondary">Changer mon PIN</button>';
+        } else {
+          sb.innerHTML = '<div class="warning"><b>PIN non configure.</b> ' +
+            'Vous devez configurer un PIN pour acceder au panel admin.</div>' +
+            '<button onclick="showPinForm()">Configurer mon PIN</button>';
+        }
+        // Si on est arrive avec ?need_pin=1, ouvrir directement le form
+        if (window.location.search.includes('need_pin=1') && !d.configured) {
+          showPinForm();
+        }
+      } catch (e) {
+        console.error('loadPinStatus:', e);
+      }
+    }
+
+    function showPinForm() {
+      document.getElementById('pin-form-block').classList.remove('hidden');
+      document.getElementById('pin-input').value = '';
+      document.getElementById('pin-input').focus();
+    }
+
+    function cancelPinForm() {
+      document.getElementById('pin-form-block').classList.add('hidden');
+    }
+
+    async function submitPin() {
+      const pin = document.getElementById('pin-input').value.trim();
+      if (!/^\d{4,6}$/.test(pin)) {
+        showMsg('error', 'PIN : 4 a 6 chiffres uniquement.');
+        return;
+      }
+      const btn = document.getElementById('pin-submit-btn');
+      btn.disabled = true;
+      btn.textContent = 'Configuration...';
+      try {
+        const r = await fetch('/admin/pin/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin })
+        });
+        const d = await r.json();
+        if (r.ok && d.success) {
+          showMsg('success', d.message);
+          await loadPinStatus();
+          document.getElementById('pin-form-block').classList.add('hidden');
+        } else {
+          throw new Error(d.detail || d.message || 'Erreur');
+        }
+      } catch (e) {
+        showMsg('error', 'Erreur PIN : ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Enregistrer';
+      }
+    }
+
     loadStatus();
+    loadPinStatus();
   </script>
 </body>
 </html>

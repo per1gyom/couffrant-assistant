@@ -221,14 +221,40 @@ def require_admin_2fa_validated(request: Request):
         if is_trusted:
             # On valide la session admin sans demander le code
             mark_admin_2fa_validated(request)
-            return user
+            # Continue vers le check PIN ci-dessous
+        else:
+            # Pas trusted -> sauve URL d origine et redirect challenge
+            request.session["pending_admin_path"] = str(request.url.path)
+            raise HTTPException(
+                status_code=_status.HTTP_303_SEE_OTHER,
+                detail="2FA challenge required",
+                headers={"Location": "/admin/2fa-challenge"},
+            )
 
-        # Pas trusted -> sauve URL d origine et redirect challenge
+    # 6. LOT 5 : Verification PIN admin (a CHAQUE entree dans le panel)
+    # Different de la 2FA hebdo : le PIN protege contre une session laissee
+    # ouverte. Demande tant que la fenetre est ouverte (cookie de session).
+    from app.admin_pin import (
+        has_pin_set,
+        is_pin_validated_in_session,
+    )
+    if has_pin_set(username):
+        if not is_pin_validated_in_session(request):
+            # Sauve URL pour redirect apres validation PIN
+            request.session["pending_admin_path"] = str(request.url.path)
+            raise HTTPException(
+                status_code=_status.HTTP_303_SEE_OTHER,
+                detail="PIN challenge required",
+                headers={"Location": "/admin/pin-challenge"},
+            )
+    else:
+        # User admin sans PIN configure : redirect setup pour le creer
+        # Cas qui arrive UNE FOIS pour chaque admin existant apres deploiement LOT 5.
         request.session["pending_admin_path"] = str(request.url.path)
         raise HTTPException(
             status_code=_status.HTTP_303_SEE_OTHER,
-            detail="2FA challenge required",
-            headers={"Location": "/admin/2fa-challenge"},
+            detail="PIN setup required",
+            headers={"Location": "/admin/2fa/setup?need_pin=1"},
         )
 
     return user

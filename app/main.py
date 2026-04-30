@@ -51,6 +51,7 @@ from app.routes.user_settings import router as user_settings_router
 from app.routes.user_rules import router as user_rules_router
 from app.routes.two_factor import router as two_factor_router
 from app.routes.admin_2fa_challenge import router as admin_2fa_challenge_router
+from app.routes.admin_pin_routes import router as admin_pin_routes_router
 
 SESSION_INACTIVITY_TIMEOUT = int(os.getenv("SESSION_INACTIVITY_TIMEOUT", "7200"))
 
@@ -135,6 +136,7 @@ app.include_router(user_settings_router)
 app.include_router(user_rules_router)
 app.include_router(two_factor_router)
 app.include_router(admin_2fa_challenge_router)
+app.include_router(admin_pin_routes_router)
 
 
 @app.get("/")
