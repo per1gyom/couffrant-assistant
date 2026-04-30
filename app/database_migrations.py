@@ -1213,4 +1213,51 @@ MIGRATIONS = [
        FROM tenants t
        CROSS JOIN feature_registry f
        ON CONFLICT (tenant_id, feature_key) DO NOTHING""",
+
+    # M-FF-05 (30/04 nuit) : NETTOYAGE CATALOGUE FEATURES
+    # Decision Guillaume : 18 features initiales etaient mal pensees.
+    # Ce sont en fait soit des comportements coeur de Raya (toujours actifs),
+    # soit des connexions (gerees via tenant_connections), soit de l UX.
+    # On les marque deprecated=TRUE pour qu elles disparaissent de l UI.
+    """UPDATE feature_registry SET deprecated = TRUE, updated_at = NOW()
+       WHERE feature_key IN (
+         'chat_basic', 'chat_voice',
+         'memory_rules', 'memory_insights', 'memory_topics', 'feedback_learning',
+         'event_rules', 'proactive_alerts', 'mail_diff_learning',
+         'mail_outlook', 'mail_gmail', 'mail_signatures',
+         'drive_sharepoint', 'drive_google',
+         'odoo_connector', 'vesta_connector',
+         'homepage_dynamic', 'topics_continuation',
+         'admin_audit_panel'
+       )""",
+
+    # M-FF-06 : ajout des 4 vraies features modules optionnels
+    # Ces features sont des fonctionnalites logicielles independantes des
+    # connexions, qui peuvent etre incluses ou non dans le forfait.
+    # Toutes activees par defaut (zero impact retrocompat).
+    """INSERT INTO feature_registry (feature_key, label, description, category, default_enabled) VALUES
+        ('audio_capture', 'Capture audio',
+         'Module de capture et transcription audio (Plaud, TapeACall). Permet d uploader des enregistrements de RDV/visites pour transcription automatique et extraction de donnees structurees.',
+         'modules', TRUE),
+        ('pdf_editor', 'Editeur PDF',
+         'Creation, modification et signature de PDF directement depuis Raya. Pratique pour devis, contrats, attestations.',
+         'modules', TRUE),
+        ('image_editor', 'Editeur d images',
+         'Creation et modification d images (annotations, redimensionnement, signatures, watermarks). Pratique pour photos chantier, schemas, plans.',
+         'modules', TRUE),
+        ('accounting_engine', 'Base de comptabilite',
+         'Module de comptabilite integre (a definir avec Guillaume). Saisie factures/depenses, classement, exports comptable.',
+         'modules', TRUE)
+       ON CONFLICT (feature_key) DO NOTHING""",
+
+    # M-FF-07 : backfill des nouvelles features pour tenants existants
+    # Toutes activees par defaut (les tenants Couffrant Solar et Juillet
+    # auront les 4 modules ON, modifiable ensuite via le panel par tenant).
+    """INSERT INTO tenant_features (tenant_id, feature_key, enabled, updated_by, notes)
+       SELECT t.id, f.feature_key, TRUE, 'system_backfill_30avril_nuit',
+              'Backfill modules - 4 vraies features ajoutees au catalogue'
+       FROM tenants t
+       CROSS JOIN feature_registry f
+       WHERE f.feature_key IN ('audio_capture', 'pdf_editor', 'image_editor', 'accounting_engine')
+       ON CONFLICT (tenant_id, feature_key) DO NOTHING""",
 ]

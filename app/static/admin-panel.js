@@ -1536,6 +1536,11 @@ async function loadCompanies(){
               <div id="conn-list-${i}" style="font-family:var(--mono);font-size:11px;color:var(--text3)">Chargement...</div>
             </div>
             <div style="margin-top:20px">
+              <div class="sp-config-title" style="margin-bottom:10px">🎛️ Modules activés</div>
+              <div id="features-list-${i}" style="font-family:var(--mono);font-size:11px;color:var(--text3)">Chargement...</div>
+              <div style="font-size:10px;color:var(--text3);margin-top:6px;font-style:italic">Modules logiciels du forfait. Toggle ON/OFF avec re-validation 2FA.</div>
+            </div>
+            <div style="margin-top:20px">
               <div class="sp-config-title" style="margin-bottom:10px">🔐 Permissions des connexions (plafond super admin)</div>
               <div id="perms-list-${i}" style="font-family:var(--mono);font-size:11px;color:var(--text3)">Chargement...</div>
               <div style="font-size:10px;color:var(--text3);margin-top:6px;font-style:italic">Le plafond super admin definit le maximum que le tenant admin peut appliquer.</div>
@@ -1553,6 +1558,8 @@ async function loadCompanies(){
   openCards.forEach(i=>toggleTenant(i));
   // Charger les connexions pour chaque tenant
   if(typeof _lastTenants!=='undefined') _lastTenants.forEach((t,i)=>loadConnections(t.tenant_id,i));
+  // Charger les features (modules) de chaque tenant
+  if(typeof _lastTenants!=='undefined') _lastTenants.forEach((t,i)=>loadFeatures(t.tenant_id,i));
   // Charger l etat de verrouillage (🔒/🔓) de chaque tenant — Fix 2 du plan
   if(typeof _lastTenants!=='undefined') _lastTenants.forEach((t,i)=>updateLockButtonState(t.tenant_id,i));
   // Charger les permissions par connexion — Fix 3 du plan
@@ -2574,5 +2581,118 @@ async function driveGraphMigrate(btn){
   }finally{
     btn.disabled = false;
     btn.innerHTML = orig;
+  }
+}
+
+
+// ─── FEATURES (Modules) PAR TENANT — refonte 30/04/2026 nuit ───
+// Decision Guillaume : les features (modules optionnels payants) sont
+// integrees dans la card societe, a cote des connexions et collaborateurs.
+// Plus d onglet separe : tout est centralise par tenant.
+// Liste fixe des 4 modules au demarrage. Si on en ajoute, il suffit de
+// les rajouter dans MODULES_LIST ci-dessous (ou dynamiser via /admin/features).
+
+const MODULES_LIST = [
+  { key: 'audio_capture',     label: 'Capture audio',          icon: '🎙️', desc: 'Plaud / TapeACall — transcription audio + extraction structuree' },
+  { key: 'pdf_editor',        label: 'Editeur PDF',            icon: '📄', desc: 'Creation/modification PDF (devis, contrats, attestations)' },
+  { key: 'image_editor',      label: 'Editeur images',         icon: '🖼️', desc: 'Annotations photos chantier, schemas, watermarks' },
+  { key: 'accounting_engine', label: 'Base de comptabilite',   icon: '📊', desc: 'Module de comptabilite integre (a definir)' },
+];
+
+async function loadFeatures(tenantId, idx){
+  const el = document.getElementById('features-list-'+idx);
+  if(!el) return;
+  try{
+    const r = await fetch(`/admin/tenants/${encodeURIComponent(tenantId)}/features`);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    const d = await r.json();
+    const features = d.features || {};
+
+    // Compteur ON / TOTAL
+    const onCount = MODULES_LIST.filter(m => features[m.key] !== false).length;
+
+    el.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="font-size:10px;color:var(--text3);margin-bottom:4px">
+          ${onCount}/${MODULES_LIST.length} modules activés
+        </div>
+        ${MODULES_LIST.map(m => {
+          // Si la feature n est pas dans la reponse -> default true (registry)
+          const enabled = features[m.key] !== false;
+          const onColor = 'var(--green)';
+          const offColor = 'var(--text3)';
+          return `<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg1);border:1px solid var(--border);border-radius:8px">
+            <span style="font-size:18px">${m.icon}</span>
+            <div style="flex:1;min-width:0">
+              <div style="font-size:12px;font-weight:600;color:var(--text1)">${m.label}</div>
+              <div style="font-size:10px;color:var(--text3);margin-top:2px">${m.desc}</div>
+            </div>
+            <label style="display:inline-flex;align-items:center;gap:6px;cursor:pointer">
+              <input type="checkbox" ${enabled?'checked':''}
+                     onchange="toggleTenantFeature('${tenantId}', '${m.key}', this.checked, this, ${idx})"
+                     style="cursor:pointer">
+              <span style="font-family:var(--mono);font-size:10px;color:${enabled?onColor:offColor};font-weight:600;min-width:28px;text-align:center">${enabled?'ON':'OFF'}</span>
+            </label>
+          </div>`;
+        }).join('')}
+      </div>`;
+  }catch(e){
+    el.innerHTML = `<span style="color:var(--red);font-size:11px">❌ Erreur de chargement : ${e.message}</span>`;
+  }
+}
+
+async function toggleTenantFeature(tenantId, featureKey, newEnabled, checkboxEl, idx){
+  const prevState = !newEnabled;
+  checkboxEl.disabled = true;
+
+  try{
+    // Step-up 2FA obligatoire (utilise le helper expose par admin-stepup.js)
+    const stepupOk = await ensureStepUp();
+    if(!stepupOk){
+      checkboxEl.checked = prevState;
+      checkboxEl.disabled = false;
+      setAlert('companies-alert', '❌ Action annulee : 2FA non validee.', 'err');
+      return;
+    }
+
+    const r = await fetch(
+      `/admin/tenants/${encodeURIComponent(tenantId)}/features/${encodeURIComponent(featureKey)}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: newEnabled }),
+      }
+    );
+    const d = await r.json();
+    if(!r.ok){
+      const errMsg = d.detail?.message || d.detail || d.message || ('HTTP '+r.status);
+      throw new Error(errMsg);
+    }
+
+    // Maj label visuel ON/OFF
+    const labelSpan = checkboxEl.parentElement.querySelector('span');
+    if(labelSpan){
+      labelSpan.textContent = newEnabled ? 'ON' : 'OFF';
+      labelSpan.style.color = newEnabled ? 'var(--green)' : 'var(--text3)';
+    }
+
+    setAlert(
+      'companies-alert',
+      `✅ Module ${featureKey} ${newEnabled?'activé':'désactivé'} pour ${tenantId}`,
+      'ok'
+    );
+    setTimeout(() => {
+      const el = document.getElementById('companies-alert');
+      if(el) el.className = 'alert';
+    }, 3000);
+
+    // Recharger la card pour avoir le compteur ON/TOTAL a jour
+    if(typeof idx !== 'undefined') loadFeatures(tenantId, idx);
+
+  }catch(e){
+    checkboxEl.checked = prevState;
+    setAlert('companies-alert', '❌ Erreur : '+e.message, 'err');
+  }finally{
+    checkboxEl.disabled = false;
   }
 }
