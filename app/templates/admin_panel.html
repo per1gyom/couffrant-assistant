@@ -31,6 +31,7 @@
   <div class="tab" onclick="switchTab('usage')">Utilisation</div>
   <div class="tab" onclick="switchTab('actions')">Actions</div>
   <div class="tab" onclick="switchTab('companies')">Sociétés</div>
+  <div class="tab" onclick="switchTab('features')">🎛️ Features</div>
   <div class="tab" onclick="switchTab('profile')">Mon profil</div>
   <div class="tab" onclick="switchTab('maintenance')">Maintenance</div>
   <div class="tab" onclick="switchTab('trash')">🗑️ Corbeille</div>
@@ -185,6 +186,15 @@
     </div>
   </div>
   <div id="companies-list"><div style="color:var(--text3);font-family:var(--mono);font-size:12px">Chargement...</div></div>
+</section>
+
+<!-- FEATURES -->
+<section id="tab-features" class="section">
+  <div id="features-content">
+    <div style="padding:20px;color:var(--text3);font-size:13px">
+      Cliquez sur l'onglet <strong>🎛️ Features</strong> pour charger les feature flags par tenant.
+    </div>
+  </div>
 </section>
 
 <!-- MON PROFIL -->
@@ -447,8 +457,9 @@
   </div>
 </div>
 
-<script src="/static/admin-panel.js?v=72"></script>
+<script src="/static/admin-panel.js?v=73"></script>
 <script src="/static/admin-stepup.js?v=1"></script>
+<script src="/static/admin-features.js?v=1"></script>
 <script src="/static/admin-trash.js?v=3"></script>
 <script src="/static/admin-2fa-mgmt.js?v=2"></script>
 <script>
