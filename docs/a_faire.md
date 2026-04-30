@@ -1,5 +1,38 @@
 # À faire — Roadmap Raya
 
+---
+
+## ✅ État chantier 2FA — 30/04/2026
+
+**Sécurité Niveau 2 100% en prod** depuis le 30/04. Détails dans [`docs/chantier_2fa_recap.md`](chantier_2fa_recap.md).
+
+| LOT | Statut | Commit |
+|---|---|---|
+| 0 — Migrations DB + auth_events | ✅ | `774ddb2` |
+| 1 — Module totp.py | ✅ | `c60f093` |
+| 2 — Endpoints setup 2FA | ✅ | `ec3a4b4` |
+| 3 — Login flow 2 étapes (challenge) | ✅ | `90acaec` + `ba546dd` |
+| 4 — Device trusted 30j + GeoLite2 | ✅ | `c3d13d6` |
+| 5 — PIN admin 4-6 chiffres | ✅ | `4c31473` |
+| 6 — Reset par super_admin | ✅ | `435dd55` |
+| 7 — Tests + doc | ✅ | (en cours) |
+| 8 — WebAuthn / Face ID / Touch ID | 💡 reporté | 10-15h |
+| 5b — 2FA pour actions critiques | ⏭️ futur | 1h |
+
+**Stack actuelle** :
+- Login chat : password seul (zero changement)
+- Login admin : password + 2FA Authenticator (validée 30j par device) + PIN 4-6 chiffres (à chaque entrée)
+- Codes recovery uniquement pour super_admin (Charlotte/users → contactent super_admin si problème)
+- Filet d'urgence : `DISABLE_2FA_ENFORCEMENT=true` sur Railway
+
+**Prochaines actions** :
+- Charlotte doit activer sa 2FA avant le 7 mai 2026 (grace period 7j reset le 30/04)
+- LOT 5b à faire avant les premières utilisations massives (1h)
+
+---
+
+
+
 Document de suivi des chantiers ouverts. Mis à jour au fil de l'eau.
 
 **Dernière MAJ** : 28 avril 2026 fin de soirée — note ici les 3 chantiers urgents identifiés en fin de session 28/04 soir avant déploiement version d'essai.
