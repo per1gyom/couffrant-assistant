@@ -28,3 +28,7 @@ python-docx
 # -- 2FA (TOTP RFC 6238) — chantier 29/04 LOT 0 --
 pyotp>=2.9.0
 qrcode[pil]>=7.4.2
+
+# -- GeoIP (lookup IP -> pays) — chantier 30/04 LOT 4 --
+# Lit la base GeoLite2 City telechargee dans le Dockerfile (/opt/geoip/)
+geoip2>=4.8.0

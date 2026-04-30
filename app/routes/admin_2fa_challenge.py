@@ -35,6 +35,7 @@ from app.totp import (
     decrypt_totp_secret,
     verify_totp_code,
 )
+from app.device_fingerprint import issue_device_cookie
 
 logger = get_logger("raya.admin_2fa_challenge")
 
@@ -355,7 +356,26 @@ def post_2fa_challenge(request: Request, code: str = Form(...)):
         )
         # Restaure l URL d origine sauvegardee, ou /admin/panel par defaut
         next_url = request.session.pop("pending_admin_path", None) or "/admin/panel"
-        return RedirectResponse(next_url, status_code=303)
+        # LOT 4 : poser un cookie device persistent pour skipper la 2FA
+        # pendant les 30 prochains jours sur ce navigateur (si meme pays/IP).
+        # On extrait le User-Agent pour un label lisible cote panel admin.
+        ua = _user_agent(request)
+        ua_label = ua.split(")")[0][:80] if ua else "unknown"
+        response = RedirectResponse(next_url, status_code=303)
+        try:
+            issue_device_cookie(
+                response=response,
+                username=username,
+                tenant_id=tenant_id,
+                request=request,
+                user_agent_label=ua_label,
+            )
+        except Exception as e:
+            # Si le cookie ne peut pas etre pose (ex: SESSION_SECRET absent),
+            # on log mais on continue — l user est quand meme connecte (juste
+            # la 2FA sera redemandee la prochaine fois).
+            logger.error("[2FA Challenge] Echec pose cookie device : %s", str(e)[:200])
+        return response
 
     # Echec
     log_auth_event(

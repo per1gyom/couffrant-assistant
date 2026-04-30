@@ -47,6 +47,37 @@ RUN apt-get update \
 # au lieu de silently passer et avoir un bug en prod.
 RUN pg_dump --version
 
+# ===== ETAPE 1bis : Telecharger GeoLite2 City (LOT 4 du chantier 2FA - 30/04) =====
+# Base de donnees IP -> pays utilisee pour detecter les connexions depuis
+# des pays inhabituels et redemander la 2FA dans ces cas.
+# Telechargee gratuitement chez MaxMind, ~70 MB compresse en .tar.gz.
+# Decompressee dans /opt/geoip/GeoLite2-City.mmdb (chemin lu par le module
+# Python app/geoip_lookup.py).
+#
+# La cle MAXMIND_LICENSE_KEY doit etre injectee au build :
+# - Railway : Variables (Build) > MAXMIND_LICENSE_KEY = <ta cle>
+# - Build local : docker build --build-arg MAXMIND_LICENSE_KEY=xxx
+#
+# Si la cle est absente ou invalide, ce step echoue -> le build casse
+# immediatement (pas de surprise en prod avec une base GeoLite2 manquante).
+
+ARG MAXMIND_LICENSE_KEY
+
+RUN if [ -n "$MAXMIND_LICENSE_KEY" ]; then \
+        echo "[GeoLite2] Telechargement de la base IP -> pays..." \
+        && mkdir -p /opt/geoip \
+        && curl -fsSL -o /tmp/GeoLite2-City.tar.gz \
+            "https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-City&license_key=$MAXMIND_LICENSE_KEY&suffix=tar.gz" \
+        && tar -xzf /tmp/GeoLite2-City.tar.gz -C /tmp \
+        && find /tmp -name 'GeoLite2-City.mmdb' -exec mv {} /opt/geoip/GeoLite2-City.mmdb \; \
+        && rm -rf /tmp/GeoLite2-City* \
+        && ls -lh /opt/geoip/GeoLite2-City.mmdb \
+        && echo "[GeoLite2] OK" ; \
+    else \
+        echo "[GeoLite2] MAXMIND_LICENSE_KEY non defini - skip telechargement" \
+        && echo "[GeoLite2] L application demarrera sans detection pays" ; \
+    fi
+
 # ===== ETAPE 2 : Code Python =====
 
 WORKDIR /app

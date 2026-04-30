@@ -211,9 +211,19 @@ def require_admin_2fa_validated(request: Request):
                 headers={"Location": "/admin/2fa/setup?required=1"},
             )
 
-    # 5. 2FA active : verifier la validite
+    # 5. 2FA active : verifier la validite session
     if needs_admin_2fa(request, user):
-        # Sauve l URL d origine pour la restorer apres validation
+        # AVANT de redirect : verifier si l appareil est deja trusted (LOT 4)
+        # Si oui (cookie valide + DB OK + IP/pays match), on skip la 2FA.
+        from app.device_fingerprint import check_device_trusted
+        from app.admin_2fa_session import mark_admin_2fa_validated
+        is_trusted, reason = check_device_trusted(request, username, user["tenant_id"])
+        if is_trusted:
+            # On valide la session admin sans demander le code
+            mark_admin_2fa_validated(request)
+            return user
+
+        # Pas trusted -> sauve URL d origine et redirect challenge
         request.session["pending_admin_path"] = str(request.url.path)
         raise HTTPException(
             status_code=_status.HTTP_303_SEE_OTHER,
