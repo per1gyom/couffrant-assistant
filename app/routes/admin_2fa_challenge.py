@@ -195,7 +195,7 @@ CHALLENGE_PAGE_HTML = """<!DOCTYPE html>
       et saisissez le code a 6 chiffres affiche.
     </div>
 
-    {error_block}
+    __ERROR_BLOCK__
 
     <form method="POST" action="/admin/2fa-challenge">
       <label>Code de verification</label>
@@ -208,7 +208,7 @@ CHALLENGE_PAGE_HTML = """<!DOCTYPE html>
       <button type="submit">Valider</button>
     </form>
 
-    {recovery_hint}
+    __RECOVERY_HINT__
 
     <div class="links">
       <a href="/chat">&#8592; Retour au chat</a>
@@ -258,10 +258,11 @@ def get_2fa_challenge(request: Request):
     show_recovery_hint = scope == "super_admin"
     recovery_block = RECOVERY_HINT_HTML if show_recovery_hint else ""
 
-    return HTMLResponse(CHALLENGE_PAGE_HTML.format(
-        error_block="",
-        recovery_hint=recovery_block,
-    ))
+    return HTMLResponse(
+        CHALLENGE_PAGE_HTML
+        .replace("__ERROR_BLOCK__", "")
+        .replace("__RECOVERY_HINT__", recovery_block)
+    )
 
 
 # ============================================================================
@@ -290,10 +291,11 @@ def post_2fa_challenge(request: Request, code: str = Form(...)):
 
     code_clean = (code or "").strip()
     if not code_clean:
-        return HTMLResponse(CHALLENGE_PAGE_HTML.format(
-            error_block='<div class="error">Code requis.</div>',
-            recovery_hint=recovery_block,
-        ))
+        return HTMLResponse(
+            CHALLENGE_PAGE_HTML
+            .replace("__ERROR_BLOCK__", '<div class="error">Code requis.</div>')
+            .replace("__RECOVERY_HINT__", recovery_block)
+        )
 
     # Charger les donnees 2FA du user
     data = _fetch_user_2fa_data(username, tenant_id)
@@ -317,10 +319,12 @@ def post_2fa_challenge(request: Request, code: str = Form(...)):
                 method_used = "totp"
         except RuntimeError as e:
             logger.error("[2FA Challenge] Echec dechiffrement: %s", e)
-            return HTMLResponse(CHALLENGE_PAGE_HTML.format(
-                error_block='<div class="error">Erreur de configuration serveur. Contactez le support.</div>',
-                recovery_hint=recovery_block,
-            ), status_code=500)
+            return HTMLResponse(
+                CHALLENGE_PAGE_HTML
+                .replace("__ERROR_BLOCK__", '<div class="error">Erreur de configuration serveur. Contactez le support.</div>')
+                .replace("__RECOVERY_HINT__", recovery_block),
+                status_code=500,
+            )
         except Exception as e:
             logger.error("[2FA Challenge] verify_totp_code error: %s", str(e)[:200])
 
@@ -362,7 +366,9 @@ def post_2fa_challenge(request: Request, code: str = Form(...)):
         user_agent=_user_agent(request),
         metadata={"context": "admin_access"},
     )
-    return HTMLResponse(CHALLENGE_PAGE_HTML.format(
-        error_block='<div class="error">Code invalide. Reessayez.</div>',
-        recovery_hint=recovery_block,
-    ), status_code=401)
+    return HTMLResponse(
+        CHALLENGE_PAGE_HTML
+        .replace("__ERROR_BLOCK__", '<div class="error">Code invalide. Reessayez.</div>')
+        .replace("__RECOVERY_HINT__", recovery_block),
+        status_code=401,
+    )
