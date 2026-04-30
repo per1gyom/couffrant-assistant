@@ -76,7 +76,7 @@ function normalizeTenantId(value){
 
 async function loadMemoryStatus(){
   try{
-  const data=await(await fetch('/admin/memory-status')).json();
+  const data=await(await fetch('/admin/memory-status?_='+Date.now(),{cache:'no-store'})).json();
   const tot=k=>data.reduce((s,u)=>s+(u[k]||0),0);
   document.getElementById('memory-stats').innerHTML=`
     <div class="stat-card"><div class="stat-label">Utilisateurs</div><div class="stat-value accent">${data.length}</div></div>
@@ -99,7 +99,7 @@ async function loadMemoryStatus(){
 
 async function loadUsers(){
   document.getElementById('users-tbody').innerHTML='<tr class="loading-row"><td colspan="6"><span class="loader"></span> Chargement...</td></tr>';
-  const data=await(await fetch('/admin/users')).json();
+  const data=await(await fetch('/admin/users?_='+Date.now(),{cache:'no-store'})).json();
   const locked=data.filter(u=>u.account_locked).length;
   const lcEl=document.getElementById('locked-count');
   lcEl.textContent=locked>0?`⚠️ ${locked} compte(s) bloqué(s)`:'';
@@ -1472,7 +1472,7 @@ async function loadCompanies(){
   document.getElementById('companies-list').innerHTML='<div style="color:var(--text3);font-family:var(--mono);font-size:12px"><span class="loader"></span> Chargement...</div>';
   document.getElementById('companies-alert').className='alert';
   try{
-    const url=isSuperAdmin?'/admin/tenants-overview':'/tenant/my-overview';
+    const ts=Date.now(); const url=isSuperAdmin?`/admin/tenants-overview?_=${ts}`:`/tenant/my-overview?_=${ts}`;
     const tenants=await(await fetch(url)).json();
     document.getElementById('companies-count').textContent=`${tenants.length} société(s)`;
     _lastTenants=tenants;
