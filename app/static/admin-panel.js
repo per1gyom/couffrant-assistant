@@ -62,6 +62,7 @@ function switchTab(name){
   if(name==='usage') loadUsage();
   if(name==='companies'){ loadCompanies(); loadSystemAlerts(); }
   if(name==='profile') loadProfile();
+  if(name==='trash' && typeof loadTrash === 'function') loadTrash();
 }
 
 const fmt=n=>(n||0).toLocaleString('fr-FR');

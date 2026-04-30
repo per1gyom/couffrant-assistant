@@ -33,6 +33,7 @@
   <div class="tab" onclick="switchTab('companies')">Sociétés</div>
   <div class="tab" onclick="switchTab('profile')">Mon profil</div>
   <div class="tab" onclick="switchTab('maintenance')">Maintenance</div>
+  <div class="tab" onclick="switchTab('trash')">🗑️ Corbeille</div>
 </nav>
 
 <main class="main">
@@ -266,6 +267,39 @@
   </div>
 </section>
 
+<!-- CORBEILLE — comptes soft-deletés -->
+<section id="tab-trash" class="section">
+  <div class="actions-row">
+    <button class="btn btn-ghost" onclick="loadTrash()">&#8635; Actualiser</button>
+    <span id="trash-count" style="font-family:var(--mono);font-size:12px;color:var(--text3)"></span>
+  </div>
+  <div id="trash-alert" class="alert"></div>
+  <div style="margin-bottom:12px;padding:12px 14px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;font-size:13px;color:var(--text2);line-height:1.6">
+    <strong style="color:var(--red)">🗑️ Corbeille des comptes supprimés</strong><br>
+    Liste les utilisateurs en soft-delete (deleted_at posé). Deux actions disponibles :<br>
+    🔄 <strong>Restaurer</strong> : remet le compte en service, ses règles et conversations sont récupérées.<br>
+    🔥 <strong>Purger définitivement</strong> : supprime irréversiblement les données personnelles et anonymise les données collectives.
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Identifiant</th>
+          <th>Email</th>
+          <th>Rôle</th>
+          <th>Tenant</th>
+          <th>Supprimé le</th>
+          <th>Par</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="trash-tbody">
+        <tr class="loading-row"><td colspan="7"><span class="loader"></span> Chargement...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
 </main>
 
 <!-- MODAL CRÉATION USER — USER-PHONE : email obligatoire + champ téléphone -->
@@ -414,6 +448,7 @@
 </div>
 
 <script src="/static/admin-panel.js?v=70"></script>
+<script src="/static/admin-trash.js?v=1"></script>
 <script>
 // display_name patch v25
 (function(){
