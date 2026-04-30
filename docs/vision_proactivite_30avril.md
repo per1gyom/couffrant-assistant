@@ -10,17 +10,73 @@ respectée quand on codera, dans 1 semaine ou 1 mois.
 
 ## 🎯 Thèse fondamentale (insight Guillaume)
 
-> "Quand j'imagine une journée idéale avec Raya, en fait, j'imagine
-> que je travaille avec quelqu'un. Il faut que j'imagine que ce soit
-> une personne."
+### La métaphore de la "personne"
 
-Et plus important encore :
+> "Je voudrais que Raya fonctionne comme une personne POUR QUE
+> l'utilisateur lui apprenne comme il apprendrait à une personne.
+> Demain si j'embauche une assistante, je vais lui dire :
+> 'Quand tu réponds pour moi sur boîte mail, c'est telle signature,
+> tu mets telle image, voilà tu utilises cette signature.'
+> Et : 'Si tu as un mail qui arrive d'un client urgent, et que tu
+> sens que c'est vraiment important, passe-moi un coup de fil et
+> on traite le problème tout de suite. Si tu sens que c'est
+> moyennement important, mets juste un message.'"
+
+**La nuance importante** : ce n'est pas Raya qui doit "être humaine".
+C'est le **mode d'apprentissage** qui doit fonctionner **comme avec
+un humain**. L'utilisateur apprend à Raya comme il apprendrait à
+une nouvelle assistante embauchée.
+
+```
+Tu n'écris pas un cahier des charges pour ta nouvelle assistante.
+Tu lui dis dans le contexte, au fil du temps :
+  "Quand tu réponds pour moi, signature X, image Y."
+  "Si tu sens un mail urgent client, appelle-moi."
+  "Si c'est moyen, juste un message."
+
+Elle apprend par exposition, par feedback, par règles évolutives.
+Raya doit fonctionner pareil.
+```
+
+### Le corollaire central
 
 > "Raya devient ce que son utilisateur attend d'elle. Non pas qu'elle
 > impose ses capacités à son utilisateur."
 
 **Ces 2 phrases sont la thèse Raya tout entière.** Pas juste pour la
 proactivité — pour TOUT le produit.
+
+### Stratégie long terme : LLM swappable, graphe pérenne
+
+> "Dans le futur les IA vont évoluer et si mon outil reste avec les
+> mêmes mémoires, les mêmes graphes et qu'on les améliore au fur
+> et à mesure, le jour où il y a une IA beaucoup plus performante
+> qui sort que Opus, on pourra la connecter facilement à l'outil et
+> alors mon outil prendra encore une autre dimension. Si les graphes
+> sont efficaces et que l'IA devient encore plus performante avec
+> des prompts plus gros absorbables, on pourra lui donner des choses
+> encore plus précises avec une connaissance encore plus profonde
+> de son utilisateur."
+
+**Vision stratégique majeure** :
+
+```
+LLM = consommable interchangeable
+  Opus aujourd'hui, Opus 5 demain, ou GPT-5, ou Gemini 3 Ultra
+  Le LLM se swap quand mieux sort
+
+Graphe + mémoire + apprentissage = ACTIF qui se valorise
+  Plus le graphe vit longtemps avec l'utilisateur, plus il devient
+  riche, plus le next LLM (encore plus puissant) sera redoutable.
+  
+→ L'investissement pérenne = le graphe et la mémoire.
+→ Raya est antifragile face aux évolutions des LLM.
+→ Plus le temps passe, plus chaque tenant devient valuable.
+```
+
+C'est exactement la stratégie qui rend Raya **antifragile** : pas
+de dépendance à Anthropic. Si OpenAI sort GPT-5 qui écrase Opus,
+on swap — et le graphe utilisateur fait encore plus de magie.
 
 ---
 
@@ -99,7 +155,8 @@ Décision Guillaume : **différents canaux pour différents niveaux**.
 ```
 
 **Important :** Aucun canal n'est imposé. L'utilisateur DIT à Raya
-quel canal il veut pour quel type de message.
+quel canal il veut pour quel type de message, comme il dirait à
+une assistante humaine.
 
 ---
 
@@ -169,7 +226,7 @@ Règle "Récap matin Teams"
   trigger: tous les jours à 8h00 sauf week-end
   action: envoyer Teams avec résumé mails + RDV du jour
   niveau: 2
-  
+
 Règle "Mail urgent → Teams"
   trigger: nouveau mail dans inbox + score urgence > 0.7
   action: envoyer Teams avec lien vers mail
@@ -179,7 +236,7 @@ Règle "Mail urgent → Teams"
 Règle "Silence week-end"
   trigger: jour = samedi ou dimanche
   action: désactiver tous niveaux >= 1 (sauf urgences niveau 3+)
-  
+
 Règle "Silence soirée"
   trigger: heure entre 20h et 7h
   action: même chose, sauf appel niveau 4
@@ -188,7 +245,7 @@ Règle "Silence soirée"
 ### Étape 4 — Vie permanente
 
 Raya commence à fonctionner avec ces règles. À chaque interaction,
-elle apprend :
+elle apprend (comme une assistante humaine apprend) :
 - Tu réponds vite → règle valide, score augmente
 - Tu ignores ou tu corriges → règle ajustée
 - Tu dis explicitement "fais ça maintenant" → nouvelle règle
@@ -221,11 +278,36 @@ au-dessus pour ce cas".
 
 ---
 
-## ⚙️ Configuration utilisateur
+## ⚙️ Configuration à 2 niveaux (CORRECTION 30/04 tard)
 
-### La proactivité est un toggle USER (pas tenant)
+**Décision révisée Guillaume** : la proactivité doit être un module
+qu'on peut **donner ou non au tenant**, ET que chaque user peut
+ensuite activer/désactiver pour lui.
 
-C'est une **préférence personnelle**, pas un module premium.
+### Niveau 1 — TENANT (feature_flag)
+
+La proactivité est une **feature** dans le catalogue tenant, comme
+audio_capture / pdf_editor / etc.
+
+```
+feature_registry :
+  - feature_key: 'proactivity_engine'
+  - label: 'Moteur de proactivité'
+  - description: 'Permet à Raya de notifier les users sur Teams,
+                  WhatsApp, email selon des règles apprises.'
+  - category: 'modules'
+  - default_enabled: TRUE (pour les tenants existants)
+```
+
+Le super_admin (Guillaume) peut activer ou désactiver le module
+pour un tenant via le panel "🎛️ Modules" dans la card société.
+
+→ Permet une **tarification future** (forfait avec/sans proactivité).
+
+### Niveau 2 — USER (préférence personnelle)
+
+Si la feature est ON pour le tenant, chaque user dans le tenant peut
+décider de l'activer pour lui ou pas.
 
 ```
 user.settings.proactivity = {
@@ -250,6 +332,29 @@ user.settings.proactivity = {
 
 → Tout ça géré via conversation chat, pas un panneau de réglages.
 
+### Logique combinée
+
+```
+Si feature OFF au tenant :
+  → la proactivité n'est dispo pour PERSONNE dans le tenant
+  → l'option n'apparaît même pas pour les users
+
+Si feature ON au tenant :
+  → chaque user voit l'option "activer la proactivité"
+  → user activé → onboarding conversationnel + règles
+  → user pas activé → Raya reste en mode "questionnement uniquement"
+
+Si feature ON au tenant ET user désactive sa proactivité plus tard :
+  → Raya garde les règles en mémoire
+  → mais ne les applique plus
+  → l'user peut réactiver et retrouver sa config
+
+Si feature OFF au tenant alors qu'un user était activé :
+  → la proactivité s'arrête pour cet user
+  → règles conservées en base
+  → réactivation feature → user retrouve son état
+```
+
 ### La désactivation est facile
 
 Un utilisateur qui ne veut plus de proactivité dit simplement :
@@ -270,13 +375,19 @@ ou
 ### Tables existantes à exploiter
 
 ```
+feature_registry (déjà existant)
+  + nouvelle entrée 'proactivity_engine'
+
+tenant_features (déjà existant)
+  + override par tenant (toggle ON/OFF tenant-level)
+
 aria_rules (déjà existant)
   + nouvelle catégorie 'proactivité'
   + colonnes existantes suffisent (rule, confidence, level, reinforcements)
-  
+
 user.settings (déjà JSONB)
   + clé "proactivity" pour stocker la config user
-  
+
 auth_events / system_alerts (déjà existant)
   + log de chaque notification envoyée pour analytics
 ```
@@ -317,13 +428,20 @@ CREATE TABLE proactivity_log (
 ## 🎯 Plan progression
 
 ```
+PHASE 0 — Pré-requis (3-5h)
+   • Réparation préalable du bug connexions invisibles
+     Voir docs/audit_connexions_invisibles_30avril.md
+
 PHASE 1 — Fondations (1 semaine)
-   • Réparation préalable du bug connexions invisibles (3-5h dédiées)
+   • Ajout 'proactivity_engine' dans feature_registry
+   • Backfill tenant_features (ON par défaut couffrant_solar et juillet)
+   • Toggle dans card société du panel super_admin (déjà en place
+     depuis le commit c51db88, juste ajouter la 5ème entry)
    • Table proactivity_log
    • Catégorie 'proactivité' dans aria_rules
    • Endpoint /me/proactivity/settings (lecture/écriture conversation)
    • Hook dans pipeline mail entrant pour matcher les règles
-   • Toggle on/off niveau user
+   • Toggle on/off niveau user dans user.settings
 
 PHASE 2 — Onboarding conversationnel (1 semaine)
    • Détection "tu actives la proactivité"
@@ -352,7 +470,7 @@ PHASE 5 — Niveau 4 Appel (1 semaine, optionnel)
    • Confirmation explicite user à l'activation
 
 PHASE 6 — Apprentissage adaptatif (continu)
-   • Analyse des reactions utilisateur
+   • Analyse des réactions utilisateur
    • Score d'efficacité par règle
    • Suggestions de Raya basées sur observation
    • Auto-ajustement des seuils
@@ -394,19 +512,59 @@ Donc Raya peut **PROPOSER d'elle-même** des règles d'éveil :
 → C'est ÇA la vraie proactivité Raya : **un dialogue continu** sur ce
 qui mérite ton attention. Pas un système de règles figées.
 
+Et c'est exactement comme ça qu'une **bonne assistante humaine**
+travaille : elle observe, propose, ajuste. Elle ne se contente pas
+d'attendre des ordres, elle anticipe — mais sans imposer.
+
+---
+
+## 🎯 Vision long terme : graphe pérenne, LLM swappable
+
+Insight stratégique de Guillaume :
+
+> "Si mon outil reste avec les mêmes mémoires, les mêmes graphes
+> et qu'on les améliore au fur et à mesure, le jour où il y a une
+> IA beaucoup plus performante qui sort que Opus, on pourra la
+> connecter facilement à l'outil et alors mon outil prendra encore
+> une autre dimension."
+
+**Ce que ça signifie pour le design** :
+
+1. **Le graphe doit être maximalement riche dès le début**
+   Chaque interaction enrichit la mémoire. Tout est mémorisé,
+   structuré, vectorisé. Plus le graphe est dense, plus le LLM
+   du futur sera puissant dessus.
+
+2. **Les prompts doivent être agnostiques au LLM précis**
+   Aujourd'hui Opus, demain GPT-5, après-demain autre chose.
+   Le code de Raya ne doit pas dépendre des spécificités d'un
+   LLM particulier. Abstraire les appels.
+
+3. **Le graphe a une valeur PROPRE qui croît avec le temps**
+   Une fois qu'un tenant a 2 ans de mémoire dans Raya,
+   c'est un actif difficile à reproduire. Effet de réseau
+   par utilisateur. Lock-in positif (pas par contrainte
+   technique mais par valeur accumulée).
+
+4. **La proactivité bénéficie spécifiquement de cette vision**
+   Plus le graphe est riche, plus Raya peut proposer d'elle-même
+   des règles intelligentes. Les premières propositions seront
+   moyennes, les 100èmes seront brillantes.
+
 ---
 
 ## 📎 Décisions actées le 30/04/2026
 
 ```
-P1 - Philosophie : Raya = personne qui s'adapte, pas outil qui impose
+P1 - Philosophie : Raya = personne qu'on apprend, pas système qu'on configure
 P2 - Onboarding : conversationnel, pas formulaire
 P3 - Canaux : 5 niveaux (annotation → email → Teams → WhatsApp → appel)
-P4 - Configuration : préférence USER, toggle on/off
+P4 - Configuration : DOUBLE niveau (tenant feature + user préférence)
 P5 - Apprentissage : règles évolutives via aria_rules existant
 P6 - Comportement par défaut : DOUCE (pas WhatsApp d'office)
 P7 - Fail-safe : toujours corriger via langage naturel
-P8 - Disponibilité : pour TOUS les users, pas un module premium
+P8 - Disponibilité : feature_flag tenant + activable user
+P9 - Stratégie LT : graphe pérenne, LLM swappable
 ```
 
 ---
@@ -436,6 +594,8 @@ Pas maintenant, mais à clarifier avant de coder Phase 4 (WhatsApp) :
    été lu ? (dépend des canaux)
 6. **Réponse depuis WhatsApp** : si Guillaume répond "OK je m'en
    occupe" sur WhatsApp, Raya doit-elle le détecter et logger ?
+7. **Tarification** : la proactivité fait-elle partie du forfait
+   de base ou est-ce un module premium ? (à décider commercialement)
 
 ---
 
@@ -460,17 +620,21 @@ d'essai et après réparation bug connexions) :
 La thèse Raya validée par cette discussion :
 
 ```
-Raya = graphe + vectorisation + outils + prompts + Claude
-Raya s'adapte, n'impose pas
-Raya apprend, ne configure pas
+Raya = graphe + vectorisation + outils + prompts + Claude (swappable)
+Raya s'apprend, ne se configure pas
 Raya converse, ne pilote pas par menu
+Le graphe est l'actif. Le LLM est le consommable.
 ```
 
 La proactivité est le test ultime de cette thèse. Si Raya peut
-être proactive en restant adaptative, alors le produit a trouvé
-son ADN propre, distinct de tous les concurrents.
+être proactive en restant adaptative et en s'apprenant comme une
+nouvelle assistante embauchée, alors le produit a trouvé son ADN
+propre, distinct de tous les concurrents.
 
 ---
 
 *Vision propre, à respecter quand on codera.*
 *Dernière itération : 30/04/2026 nuit, conversation Guillaume au coucher.*
+*Mises à jour 30/04 tard : nuance "personne qu'on apprend" + double*
+*niveau de configuration (tenant feature + user préférence) + vision*
+*long terme graphe pérenne / LLM swappable.*
