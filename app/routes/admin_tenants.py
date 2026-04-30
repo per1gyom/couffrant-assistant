@@ -107,12 +107,15 @@ def admin_tenants_overview(request: Request, _: dict = Depends(require_admin)):
         c = conn.cursor()
         c.execute("SELECT id, name, settings FROM tenants ORDER BY name")
         tenants_raw = c.fetchall()
+        # HOTFIX 30/04 : ne pas afficher les soft-deletes dans la vue Societes
         c.execute("""
             SELECT u.username, u.email, u.scope, u.tenant_id, u.last_login,
                    u.created_at, COALESCE(u.account_locked, false),
                    COALESCE(u.must_reset_password, false),
                    COALESCE(u.suspended, false), u.settings
-            FROM users u ORDER BY u.tenant_id, u.created_at
+            FROM users u
+            WHERE u.deleted_at IS NULL
+            ORDER BY u.tenant_id, u.created_at
         """)
         users_raw = c.fetchall()
         stats = {}
@@ -197,12 +200,13 @@ def tenant_my_overview(request: Request, user: dict = Depends(require_tenant_adm
         if not tenant_row:
             return []
         t_id, t_name, t_settings = tenant_row
+        # HOTFIX 30/04 : ne pas afficher les soft-deletes dans la vue tenant_admin
         c.execute("""
             SELECT u.username, u.email, u.scope, u.tenant_id, u.last_login,
                    u.created_at, COALESCE(u.account_locked, false),
                    COALESCE(u.must_reset_password, false),
                    COALESCE(u.suspended, false), u.settings
-            FROM users u WHERE u.tenant_id = %s ORDER BY u.created_at
+            FROM users u WHERE u.tenant_id = %s AND u.deleted_at IS NULL ORDER BY u.created_at
         """, (tenant_id,))
         users_raw = c.fetchall()
         stats = {}
@@ -261,35 +265,8 @@ def tenant_my_overview(request: Request, user: dict = Depends(require_tenant_adm
     }]
 
 
-# ─── MEMORY STATUS ───
-
-
-@router.get("/admin/memory-status")
-def admin_memory_status(request: Request, _: dict = Depends(require_admin)):
-    conn = None
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        c.execute("SELECT username,email,scope,tenant_id FROM users")
-        meta = {r[0]: {"email": r[1], "scope": r[2], "tenant_id": r[3]} for r in c.fetchall()}
-        agg = {}
-        for table, key in [
-            ("aria_memory", "conv"),
-            ("aria_rules", "rules"),
-            ("aria_insights", "insights"),
-            ("mail_memory", "mails"),
-        ]:
-            c.execute(f"SELECT username, COUNT(*) FROM {table} GROUP BY username")
-            for u, cnt in c.fetchall():
-                agg.setdefault(u, {})[key] = cnt
-        return [
-            {
-                "username": u,
-                **meta.get(u, {}),
-                **agg.get(u, {"conv": 0, "rules": 0, "insights": 0, "mails": 0}),
-            }
-            for u in sorted(set(list(meta) + list(agg)))
-        ]
-    finally:
-        if conn:
-            conn.close()
+# ─── MEMORY STATUS — DOUBLON SUPPRIME 30/04 ───
+# L endpoint /admin/memory-status existe deja dans super_admin_users.py
+# (ligne 296) avec le filtre deleted_at IS NULL applique. Le supprimer ici
+# evite le conflit de routing FastAPI (l ordre d enregistrement determinait
+# laquelle des deux versions etait active).
