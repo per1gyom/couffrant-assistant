@@ -29,6 +29,7 @@ from app.auth_events import log_auth_event
 from app.database import get_pg_conn
 from app.logging_config import get_logger
 from app.routes.deps import require_super_admin
+from app.admin_2fa_stepup import require_recent_stepup
 
 logger = get_logger("raya.admin_2fa_mgmt")
 
@@ -123,6 +124,7 @@ def reset_user_2fa(
     username: str,
     payload: dict = Body(...),
     admin: dict = Depends(require_super_admin),
+    _stepup: dict = Depends(require_recent_stepup),
 ):
     """Reset complet de la 2FA d un user.
 
@@ -260,6 +262,7 @@ def reset_user_pin(
     username: str,
     payload: dict = Body(...),
     admin: dict = Depends(require_super_admin),
+    _stepup: dict = Depends(require_recent_stepup),
 ):
     """Reset SEUL le PIN d un user (sans toucher a la 2FA Authenticator).
 
@@ -342,6 +345,7 @@ def reset_user_devices(
     username: str,
     payload: dict = Body(...),
     admin: dict = Depends(require_super_admin),
+    _stepup: dict = Depends(require_recent_stepup),
 ):
     """Vide les devices trusted d un user (sans toucher 2FA ni PIN).
 

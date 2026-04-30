@@ -96,6 +96,12 @@ async function trashPurge(username, tenantId) {
     '🔥 OUI, PURGER', 'Annuler'
   );
   if (!confirm) return;
+  // LOT 5b : step-up 2FA obligatoire avant action irreversible
+  const stepupOk = await ensureStepUp();
+  if (!stepupOk) {
+    setAlert('trash-alert', 'Action annulée : verification 2FA non effectuée.', 'err');
+    return;
+  }
   try {
     const r = await fetch(`/admin/users/${encodeURIComponent(username)}/confirm-permanent-deletion`, {
       method: 'POST',

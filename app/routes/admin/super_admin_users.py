@@ -41,6 +41,7 @@ from app.app_security import (
 )
 from app.security_auth import unlock_account
 from app.routes.deps import require_admin, require_tenant_admin, require_super_admin, assert_same_tenant
+from app.admin_2fa_stepup import require_recent_stepup
 from app.admin_audit import log_admin_action
 from app.dashboard_service import get_costs_dashboard
 
@@ -579,6 +580,7 @@ def admin_confirm_permanent_deletion(
     username: str,
     payload: dict = Body(default={}),
     admin: dict = Depends(require_super_admin),
+    _stepup: dict = Depends(require_recent_stepup),
 ):
     """Le super_admin valide une demande de purge definitive ou execute
     une purge directe (mode force). Execute le hard-delete via

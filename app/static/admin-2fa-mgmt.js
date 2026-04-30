@@ -118,6 +118,10 @@ async function resetUser2FA(username, tenantId) {
     return;
   }
 
+  // LOT 5b : step-up 2FA obligatoire
+  const stepupOk = await ensureStepUp();
+  if (!stepupOk) { alert("Action annulée : 2FA non validée."); return; }
+
   try {
     const r = await fetch(`/admin/users/${encodeURIComponent(username)}/reset-2fa`, {
       method: 'POST',
@@ -149,6 +153,10 @@ async function resetUserPin(username, tenantId) {
     alert('❌ Motivation obligatoire (10 caracteres min)');
     return;
   }
+  // LOT 5b : step-up 2FA obligatoire
+  const stepupOk = await ensureStepUp();
+  if (!stepupOk) { alert("Action annulée : 2FA non validée."); return; }
+
   try {
     const r = await fetch(`/admin/users/${encodeURIComponent(username)}/reset-pin`, {
       method: 'POST',
@@ -181,6 +189,10 @@ async function resetUserDevices(username, tenantId) {
     alert('❌ Motivation obligatoire (10 caracteres min)');
     return;
   }
+  // LOT 5b : step-up 2FA obligatoire
+  const stepupOk = await ensureStepUp();
+  if (!stepupOk) { alert("Action annulée : 2FA non validée."); return; }
+
   try {
     const r = await fetch(`/admin/users/${encodeURIComponent(username)}/reset-trusted-devices`, {
       method: 'POST',

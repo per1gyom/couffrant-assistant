@@ -36,6 +36,7 @@ from app.totp import (
     verify_totp_code,
 )
 from app.device_fingerprint import issue_device_cookie
+from app.admin_2fa_stepup import verify_stepup_code, mark_stepup_validated, STEPUP_VALIDITY_SECONDS
 
 logger = get_logger("raya.admin_2fa_challenge")
 
@@ -392,3 +393,72 @@ def post_2fa_challenge(request: Request, code: str = Form(...)):
         .replace("__RECOVERY_HINT__", recovery_block),
         status_code=401,
     )
+
+
+
+# ============================================================================
+# POST /admin/2fa/step-up-verify  (LOT 5b - 30/04)
+# ============================================================================
+# Pour les actions critiques (purge user, reset 2FA d un autre, etc).
+# Appele par le front AVANT l action critique.
+# Si OK : pose stepup_validated_at en session (valide 5 min).
+# Le front peut alors retenter l action critique qui sera autorisee par
+# require_recent_stepup().
+# Different du POST /admin/2fa-challenge :
+# - Reponse JSON (pas HTML) car appele en AJAX par les modals
+# - Pas de pose de cookie device (le step-up est volatile et lie a la session)
+# - Pas de redirect, juste {success: bool}
+# - Pas d acceptation de code recovery (TOTP frais obligatoire)
+
+
+@router.post("/admin/2fa/step-up-verify")
+async def stepup_verify(request: Request):
+    """Valide un code TOTP pour un step-up. Reponse JSON.
+
+    Body JSON : {"code": "123456"}
+    """
+    from fastapi.responses import JSONResponse
+
+    username = request.session.get("user")
+    if not username:
+        return JSONResponse({"success": False, "error": "not_authenticated"}, status_code=401)
+
+    scope = request.session.get("scope", "")
+    tenant_id = request.session.get("tenant_id", "")
+
+    if scope not in SCOPES_REQUIRING_2FA:
+        return JSONResponse({"success": False, "error": "scope_forbidden"}, status_code=403)
+
+    try:
+        body = await request.json()
+        code = (body.get("code") or "").strip()
+    except Exception:
+        return JSONResponse({"success": False, "error": "invalid_body"}, status_code=400)
+
+    success, error_msg = verify_stepup_code(username, tenant_id, code)
+
+    if success:
+        mark_stepup_validated(request)
+        log_auth_event(
+            username=username,
+            tenant_id=tenant_id,
+            event_type="stepup_success",
+            ip=_client_ip(request),
+            user_agent=_user_agent(request),
+            metadata={"context": "critical_action"},
+        )
+        return JSONResponse({
+            "success": True,
+            "validity_seconds": STEPUP_VALIDITY_SECONDS,
+            "message": f"Step-up valide. Vous avez {STEPUP_VALIDITY_SECONDS // 60} minutes pour effectuer l action.",
+        })
+
+    log_auth_event(
+        username=username,
+        tenant_id=tenant_id,
+        event_type="stepup_failure",
+        ip=_client_ip(request),
+        user_agent=_user_agent(request),
+        metadata={"context": "critical_action", "error": error_msg},
+    )
+    return JSONResponse({"success": False, "error": error_msg}, status_code=401)
