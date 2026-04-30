@@ -432,7 +432,7 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
         <svg class="tab-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
         Mes connexions
       </div>
-      <div class="tab" data-tab="signatures">
+      <div class="tab" data-tab="signatures" data-feature="mail_signatures">
         <svg class="tab-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7l7 0 0 7"/><path d="M3 21h18"/></svg>
         Mes signatures
       </div>
@@ -800,7 +800,7 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
       </div><!-- fin panel connexions -->
 
       <!-- ============ PANEL : MES SIGNATURES ============ -->
-      <div class="tab-panel" data-panel="signatures">
+      <div class="tab-panel" data-panel="signatures" data-feature="mail_signatures">
         <div class="content-title">Mes signatures</div>
         <div class="content-desc">Gère les signatures que Raya ajoute automatiquement à tes mails. Tu peux en créer plusieurs et définir laquelle s'applique à chaque boîte mail.</div>
 
@@ -3841,6 +3841,7 @@ async function submitTeamCreateUser() {
   }
 }
 </script>
+<script src="/static/raya-features.js?v=1"></script>
 <script src="/static/_modal_system.js?v=1"></script>
 </body>
 </html>

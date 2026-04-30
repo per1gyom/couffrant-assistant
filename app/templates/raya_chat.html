@@ -46,7 +46,7 @@ if ('serviceWorker' in navigator) {
           </button>
         </div>
       </div>
-      <details class="sidebar-details" id="topicsSidebarSection" open>
+      <details class="sidebar-details" id="topicsSidebarSection" open data-feature="memory_topics">
         <summary class="sidebar-section-title">Mes sujets</summary>
         <div id="topicsSidebarList"></div>
       </details>
@@ -229,6 +229,7 @@ if ('serviceWorker' in navigator) {
   </div>
 </div>
 
+<script src="/static/raya-features.js?v=1"></script>
 <script src="/static/chat-onboarding.js?v=80"></script>
 <script src="/static/chat-shortcuts.js?v=80"></script>
 <script src="/static/chat-voice.js?v=80"></script>

@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from typing import Optional
 from app.database import get_pg_conn
 from app.routes.deps import require_user
+from app.feature_flags import is_feature_enabled
 from app.logging_config import get_logger
 
 logger = get_logger("raya.topics")
@@ -29,8 +30,32 @@ class SectionTitleUpdate(BaseModel):
     section_title: str
 
 
+# ─── FEATURE FLAG GUARD ────────────────────────────────────────────────
+# LOT Phase 3 (30/04/2026) : la feature 'memory_topics' peut etre desactivee
+# par tenant via le panel super_admin. Si OFF, tous les endpoints /topics
+# repondent 403 avec un message clair.
+
+def _check_topics_feature(user: dict) -> None:
+    """Leve HTTPException 403 si memory_topics est desactivee pour le tenant."""
+    from fastapi import HTTPException
+    tenant_id = user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(401, "tenant_id manquant en session")
+    if not is_feature_enabled(tenant_id, "memory_topics"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "feature_disabled",
+                "feature_key": "memory_topics",
+                "message": "La fonctionnalite 'Mes sujets' n est pas activee sur votre forfait. "
+                           "Contactez votre administrateur Raya pour l activer.",
+            },
+        )
+
+
 @router.get("/topics")
 def list_topics(user: dict = Depends(require_user)):
+    _check_topics_feature(user)
     username = user["username"]
     tenant_id = user["tenant_id"]
     conn = None
@@ -76,6 +101,7 @@ def list_topics(user: dict = Depends(require_user)):
 
 @router.post("/topics")
 def create_topic(payload: TopicCreate, user: dict = Depends(require_user)):
+    _check_topics_feature(user)
     username = user["username"]
     tenant_id = user["tenant_id"]
     conn = None
@@ -105,6 +131,7 @@ def create_topic(payload: TopicCreate, user: dict = Depends(require_user)):
 
 @router.patch("/topics/{topic_id}")
 def update_topic(topic_id: int, payload: TopicUpdate, user: dict = Depends(require_user)):
+    _check_topics_feature(user)
     username = user["username"]
     tenant_id = user["tenant_id"]
     conn = None
@@ -156,6 +183,7 @@ def update_topic(topic_id: int, payload: TopicUpdate, user: dict = Depends(requi
 
 @router.delete("/topics/{topic_id}")
 def delete_topic(topic_id: int, user: dict = Depends(require_user)):
+    _check_topics_feature(user)
     username = user["username"]
     tenant_id = user["tenant_id"]
     conn = None
@@ -182,6 +210,7 @@ def delete_topic(topic_id: int, user: dict = Depends(require_user)):
 
 @router.patch("/topics/settings")
 def update_section_title(payload: SectionTitleUpdate, user: dict = Depends(require_user)):
+    _check_topics_feature(user)
     username = user["username"]
     conn = None
     try:

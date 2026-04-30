@@ -9,6 +9,7 @@ GET  /signatures/mailboxes    → boîtes mail disponibles
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse
 from app.routes.deps import require_user
+from app.feature_flags import is_feature_enabled
 from app.logging_config import get_logger
 
 logger = get_logger("raya.signatures")
@@ -20,8 +21,32 @@ def _get_conn():
     return get_pg_conn()
 
 
+# ─── FEATURE FLAG GUARD ────────────────────────────────────────────────
+# LOT Phase 3 (30/04/2026) : la feature 'mail_signatures' peut etre
+# desactivee par tenant. NE protege PAS /signatures/mailboxes (utilise
+# par d autres endpoints internes pour lister les boites mail).
+
+def _check_signatures_feature(user: dict) -> None:
+    """Leve HTTPException 403 si mail_signatures est desactivee."""
+    from fastapi import HTTPException
+    tenant_id = user.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(401, "tenant_id manquant en session")
+    if not is_feature_enabled(tenant_id, "mail_signatures"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "feature_disabled",
+                "feature_key": "mail_signatures",
+                "message": "L editeur de signatures email n est pas active sur votre forfait. "
+                           "Contactez votre administrateur Raya pour l activer.",
+            },
+        )
+
+
 @router.get("/signatures")
 def list_signatures(user: dict = Depends(require_user)):
+    _check_signatures_feature(user)
     username = user["username"]
     tenant_id = user["tenant_id"]
     conn = None
@@ -47,6 +72,7 @@ def list_signatures(user: dict = Depends(require_user)):
 
 @router.post("/signatures")
 async def create_signature(request: Request, user: dict = Depends(require_user)):
+    _check_signatures_feature(user)
     username = user["username"]
     tenant_id = user.get("tenant_id", "couffrant_solar")
     data = await request.json()
@@ -93,6 +119,7 @@ async def create_signature(request: Request, user: dict = Depends(require_user))
 
 @router.patch("/signatures/{sig_id}")
 async def update_signature(sig_id: int, request: Request, user: dict = Depends(require_user)):
+    _check_signatures_feature(user)
     username = user["username"]
     tenant_id = user["tenant_id"]
     data = await request.json()
@@ -144,6 +171,7 @@ async def update_signature(sig_id: int, request: Request, user: dict = Depends(r
 
 @router.delete("/signatures/{sig_id}")
 def delete_signature(sig_id: int, user: dict = Depends(require_user)):
+    _check_signatures_feature(user)
     username = user["username"]
     tenant_id = user["tenant_id"]
     conn = None
