@@ -18,7 +18,7 @@ from app.app_security import (
     set_user_tool, remove_user_tool,
     SCOPE_TENANT_USER, SCOPE_TENANT_ADMIN, DEFAULT_TENANT,
 )
-from app.routes.deps import require_tenant_admin, get_session_tenant_id, assert_same_tenant, require_admin_2fa_validated
+from app.routes.deps import require_tenant_admin, require_super_admin, get_session_tenant_id, assert_same_tenant, require_admin_2fa_validated
 from app.admin_audit import log_admin_action
 
 router = APIRouter()
@@ -209,27 +209,65 @@ def tenant_list_connections(request: Request, user: dict = Depends(require_tenan
     from app.connections import list_connections
     return list_connections(user["tenant_id"])
 
+# LOT B 30/04 : tenant_admin ne peut PAS creer de nouvelle connexion.
+# Connecter un nouvel outil = travail technique du super_admin (mise en
+# graphe semantique, OAuth flow, configuration credentials) effectue lors
+# de l onboarding commercial. Le tenant_admin gere ensuite les ATTRIBUTIONS
+# (qui de son equipe a acces a quoi) via /tenant/connections/{id}/assign.
 @router.post("/tenant/connections")
-def tenant_create_connection(request: Request, payload: dict = Body(...), user: dict = Depends(require_tenant_admin)):
+def tenant_create_connection(request: Request, payload: dict = Body(...), user: dict = Depends(require_super_admin)):
     from app.connections import create_connection
-    return create_connection(user["tenant_id"], payload.get("tool_type", ""), payload.get("label", ""),
+    # Si super_admin ET tenant_id explicite dans payload : l utiliser. Sinon
+    # tenant courant (cas usage typique : super_admin agit dans le tenant
+    # de la session courante). Le super_admin global peut connecter dans
+    # n importe quel tenant.
+    target_tenant = (payload.get("tenant_id") or user["tenant_id"]).strip()
+    return create_connection(target_tenant, payload.get("tool_type", ""), payload.get("label", ""),
         auth_type=payload.get("auth_type", "manual"), config=payload.get("config", {}),
         credentials={}, created_by=user["username"], status="not_configured")
 
+# LOT B 30/04 : tenant_admin peut modifier UNIQUEMENT le label.
+# Les champs auth_type, config, status, tool_type, credentials sont
+# techniques et reserves au super_admin.
 @router.put("/tenant/connections/{connection_id}")
 def tenant_update_connection(request: Request, connection_id: int, payload: dict = Body(...), user: dict = Depends(require_tenant_admin)):
     from app.connections import assert_connection_tenant
     if not assert_connection_tenant(connection_id, user["tenant_id"]):
         raise HTTPException(status_code=403, detail="Connexion hors de votre tenant.")
     from app.connections import update_connection
-    safe = {k: v for k, v in payload.items() if k not in ("credentials", "tenant_id")}
+    from app.app_security import SCOPE_SUPER_ADMIN
+    # Si super_admin : tous les champs (sauf credentials/tenant_id) modifiables
+    # Si tenant_admin : SEULEMENT le label (renommer une connexion sans
+    # toucher a sa configuration technique)
+    if user.get("scope") == SCOPE_SUPER_ADMIN:
+        safe = {k: v for k, v in payload.items() if k not in ("credentials", "tenant_id")}
+    else:
+        # tenant_admin : whitelist stricte du label uniquement
+        safe = {k: v for k, v in payload.items() if k in ("label",)}
+        if not safe:
+            raise HTTPException(
+                status_code=403,
+                detail="Le tenant_admin peut seulement modifier le label d une connexion. "
+                       "Les autres champs sont reserves au super_admin.",
+            )
     return update_connection(connection_id, **safe)
 
+# LOT B 30/04 : tenant_admin ne peut PAS supprimer une connexion.
+# La suppression d une connexion = effacement des donnees mises en graphe.
+# Acte irreversible reserve au super_admin (cas de retrait de tenant ou
+# de migration d outil).
 @router.delete("/tenant/connections/{connection_id}")
-def tenant_delete_connection(request: Request, connection_id: int, user: dict = Depends(require_tenant_admin)):
+def tenant_delete_connection(request: Request, connection_id: int, user: dict = Depends(require_super_admin)):
     from app.connections import assert_connection_tenant, delete_connection
-    if not assert_connection_tenant(connection_id, user["tenant_id"]):
-        raise HTTPException(status_code=403, detail="Connexion hors de votre tenant.")
+    # Garde-fou cross-tenant : si pas super_admin global, le super_admin
+    # local ne peut delete que dans son tenant (cas peu probable, mais on
+    # garde la verif par securite).
+    target_tenant = user["tenant_id"]
+    if not assert_connection_tenant(connection_id, target_tenant):
+        # Si super_admin global, on peut delete cross-tenant (acces total)
+        from app.app_security import SCOPE_SUPER_ADMIN
+        if user.get("scope") != SCOPE_SUPER_ADMIN:
+            raise HTTPException(status_code=403, detail="Connexion hors de votre tenant.")
     return delete_connection(connection_id)
 
 @router.post("/tenant/connections/{connection_id}/assign")
