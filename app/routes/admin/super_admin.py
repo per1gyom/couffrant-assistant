@@ -120,6 +120,9 @@ def _build_tenants_overview(tenant_filter=None):
         else:
             c.execute("SELECT id, name, settings FROM tenants ORDER BY name")
         tenants_raw = c.fetchall()
+        # HOTFIX 30/04 : ne JAMAIS afficher les soft-deletes dans la vue Societes
+        # (ni en mode super_admin, ni en mode tenant_admin via my-overview).
+        # Pour les voir, l onglet Corbeille utilise /admin/users?include_deleted=true.
         q_users = """
             SELECT u.username, u.email, u.scope, u.tenant_id, u.last_login, u.created_at,
                    COALESCE(u.account_locked, false), COALESCE(u.must_reset_password, false),
@@ -128,9 +131,9 @@ def _build_tenants_overview(tenant_filter=None):
             FROM users u {} ORDER BY u.tenant_id, u.created_at
         """
         if tenant_filter:
-            c.execute(q_users.format("WHERE u.tenant_id = %s"), (tenant_filter,))
+            c.execute(q_users.format("WHERE u.tenant_id = %s AND u.deleted_at IS NULL"), (tenant_filter,))
         else:
-            c.execute(q_users.format(""))
+            c.execute(q_users.format("WHERE u.deleted_at IS NULL"))
         users_raw = c.fetchall()
         stats = {}
         for table, key in [
