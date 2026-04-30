@@ -77,13 +77,28 @@ connecter ses outils. Le **super_admin** onboarde chaque tenant individuellement
 **Pas un chantier urgent en soi**, mais clarification du modèle qui
 recadre certains autres chantiers. À noter pour la cohérence future.
 
-### 🔐 Audit isolation user↔user intra-tenant — URGENT
+### ✅ Audit isolation user↔user intra-tenant — TERMINÉ 28/04
 
-**Contexte** : l'audit isolation 25/04 (33 findings tous traités) s'est
+> **STATUT** : ✅ TERMINÉ et validé en prod le 28/04 fin de soirée.
+> Détails dans `docs/audit_isolation_user_user_phase3_tests.md`.
+>
+> | Phase | Statut |
+> |---|---|
+> | Phase 1 — Cartographie 53 tables | ✅ |
+> | Phase 2 — Audit code 10 findings | ✅ |
+> | LOT 1 — 8 fixes structurels | ✅ commit `d7f1e7d` |
+> | LOT 2 — 4 migrations UNIQUE | ✅ commit `96b4c48` |
+> | LOT 3 — Tests pierre_test | ✅ |
+> | LOT 4 — Décisions design | ✅ commit `1b429e8` |
+>
+> **Raya est prête à accueillir Pierre, Sabrina, Benoît dans `couffrant_solar`
+> sans risque d'isolation user↔user.**
+
+**Contexte historique** : l'audit isolation 25/04 (33 findings tous traités) s'est
 focalisé sur l'isolation **tenant↔tenant** (couffrant_solar vs juillet).
 Excellent travail. Mais l'isolation **user↔user dans un même tenant**
-(Guillaume vs Pierre vs Sabrina dans couffrant_solar) n'a JAMAIS eu
-d'audit dédié sérieux.
+(Guillaume vs Pierre vs Sabrina dans couffrant_solar) n'avait pas eu
+d'audit dédié — fait depuis le 28/04.
 
 **Pourquoi c'est urgent** : avant de déployer Pierre/Sabrina/Benoît dans
 le tenant couffrant_solar (ou de créer un 2e user dans le tenant juillet
@@ -147,11 +162,15 @@ travail utilisateur perdu.
 
 | Bloquant | Effort | Statut | Note |
 |---|---|---|---|
-| Audit isolation user↔user intra-tenant | 5-8h | 🟡 Phase 1 lancée 28/04 soir | Critique |
-| Plan résilience (2FA + backups + monitoring) | 2h15 | 🔴 À faire | Critique |
+| Audit isolation user↔user intra-tenant | 5-8h | ✅ TERMINÉ 28/04 | Phase 1+2+3+LOTs 1-4 OK |
+| 2FA Raya app (LOT 0-7 + 5b) | ~12h | ✅ TERMINÉ 29-30/04 | Niveau 2+3 complet |
+| Restriction tenant_admin sur connexions | 30 min | ✅ TERMINÉ 30/04 | LOT B commit `ac5f8fd` |
+| 2FA externes (GitHub, Railway, Anthropic, OpenAI, M365, Google) | 30 min | 🔴 À faire | Hors app Raya |
+| Backups auto nocturnes externes | 1h30 | 🟡 À vérifier | Plan défini, vérifier statut |
+| UptimeRobot monitoring | 15 min | 🔴 À faire | |
+| Système feature flags par tenant | ~2h Phase 1 | 🔴 À faire | Vrai bloquant business |
 | Note UX #7 (retirer "Administration" menu user) | 2-3h | 🔴 À faire | Cf. section UX 28/04 soir |
-| Tests bout-en-bout pierre_test | 1h | 🔴 À faire | Inclus dans audit Phase 4 |
-| Followup A.5 (perform_outlook_action username) | 30 min | 🟡 Partiel (signature OK, call-sites à vérifier) | Inclus dans audit Phase 2 |
+| Outlook contact@couffrant-solar.fr | 15 min | 🟡 Attente codes Azure | |
 
 **Total estimé** : 10-14h sur 2-3 sessions dédiées dans les jours qui
 viennent. Faisable d'ici fin de semaine.

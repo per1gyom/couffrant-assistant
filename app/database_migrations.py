@@ -1132,4 +1132,85 @@ MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_attempts_count INTEGER DEFAULT 0",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_locked_until TIMESTAMP",
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS pin_set_at TIMESTAMP",
+
+    # -- Phase Feature Flags Phase 1 (30/04/2026 nuit) --
+    # Decision Guillaume : permettre d activer/desactiver des features
+    # logicielles (capture audio, moteur regles, insights, vesta, page
+    # accueil, etc.) tenant par tenant. La granularite est tenant-level
+    # uniquement (pas user-level) car les fonctionnalites s appliquent
+    # a tout le tenant. Pour les CONNEXIONS (outils tiers), c est gere
+    # separement par connection_assignments qui a deja la granularite
+    # par user.
+    #
+    # Garantie zero regression : toutes les features sont activees par
+    # defaut sur les tenants existants (couffrant_solar et juillet).
+    # Phase 2 = UI super_admin pour toggle. Phase 3 = application aux
+    # endpoints existants. Phase 4 = packages/forfaits prets a l emploi.
+
+    # M-FF-01 : feature_registry — catalogue des features disponibles
+    """CREATE TABLE IF NOT EXISTS feature_registry (
+        feature_key TEXT PRIMARY KEY,
+        label TEXT NOT NULL,
+        description TEXT,
+        category TEXT NOT NULL DEFAULT 'core',
+        default_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        deprecated BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_feature_registry_category ON feature_registry (category, deprecated)",
+
+    # M-FF-02 : tenant_features — overrides par tenant
+    # Si pas de ligne pour (tenant_id, feature_key) -> on prend le
+    # default_enabled du registry. Si ligne presente -> sa valeur enabled.
+    # CASCADE : si on supprime une feature du registry, les overrides tombent.
+    # CASCADE : si on supprime un tenant, ses overrides tombent aussi.
+    """CREATE TABLE IF NOT EXISTS tenant_features (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        feature_key TEXT NOT NULL REFERENCES feature_registry(feature_key) ON DELETE CASCADE,
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        updated_at TIMESTAMP DEFAULT NOW(),
+        updated_by TEXT,
+        notes TEXT,
+        UNIQUE (tenant_id, feature_key)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_tenant_features_lookup ON tenant_features (tenant_id, feature_key)",
+
+    # M-FF-03 : seed du catalogue ~20 features actuelles de Raya
+    # Toutes activees par defaut. Categories : core / mail / outils / ux / ai
+    # Les features seront utilisees par require_feature() / is_feature_enabled().
+    """INSERT INTO feature_registry (feature_key, label, description, category, default_enabled) VALUES
+        ('chat_basic', 'Chat Raya', 'Conversation de base avec Raya', 'core', TRUE),
+        ('chat_voice', 'Voix (TTS)', 'Lecture audio des reponses Raya', 'core', TRUE),
+        ('memory_rules', 'Regles apprises', 'Apprentissage et stockage des regles personnelles (aria_rules)', 'ai', TRUE),
+        ('memory_insights', 'Insights', 'Insights et synthesis automatiques (aria_insights)', 'ai', TRUE),
+        ('memory_topics', 'Mes sujets', 'Sujets parallels (user_topics)', 'ai', TRUE),
+        ('feedback_learning', 'Apprentissage par feedback 👍/👎', 'Renforcement des regles via feedback utilisateur', 'ai', TRUE),
+        ('audio_capture', 'Capture audio Plaud/TapeACall', 'Transcription audio + extraction structuree', 'ai', TRUE),
+        ('mail_outlook', 'Outlook / Microsoft 365', 'Connexion mail Outlook + lecture/envoi', 'mail', TRUE),
+        ('mail_gmail', 'Gmail / Google Workspace', 'Connexion mail Gmail + lecture/envoi', 'mail', TRUE),
+        ('mail_signatures', 'Signatures email multi-boites', 'Editeur WYSIWYG + signature par defaut par boite', 'mail', TRUE),
+        ('drive_sharepoint', 'SharePoint / OneDrive', 'Connexion Drive Microsoft + scan documents', 'outils', TRUE),
+        ('drive_google', 'Google Drive', 'Connexion Drive Google + scan documents', 'outils', TRUE),
+        ('odoo_connector', 'Odoo (CRM/ERP)', 'Connexion Odoo lecture + ecriture', 'outils', TRUE),
+        ('vesta_connector', 'Vesta (devis PV)', 'Connexion Vesta lecture devis et clients', 'outils', TRUE),
+        ('event_rules', 'Regles d evenement', 'Regles automatiques sur evenements externes', 'ai', TRUE),
+        ('proactive_alerts', 'Alertes proactives', 'Notifications Raya proactives a l utilisateur', 'ai', TRUE),
+        ('homepage_dynamic', 'Page accueil dynamique', 'Vitrine quotidienne personnalisable', 'ux', TRUE),
+        ('topics_continuation', 'Reprise contextuelle Mes Sujets', 'Click sur sujet -> reprise fil au lieu de topo', 'ux', TRUE),
+        ('admin_audit_panel', 'Panel audit super_admin', 'Acces aux logs d audit + connexions detaillees', 'core', TRUE),
+        ('mail_diff_learning', 'Apprentissage par diff mails', 'Capture des modifs utilisateur sur brouillons mails', 'ai', TRUE)
+       ON CONFLICT (feature_key) DO NOTHING""",
+
+    # M-FF-04 : backfill - toutes les features activees pour les tenants existants
+    # On insere une ligne par (tenant, feature) avec enabled=true.
+    # ON CONFLICT DO NOTHING : si l override existe deja, on ne touche pas.
+    # Ca permet de relancer la migration sans casser les configurations
+    # eventuellement deja modifiees par le super_admin via l UI Phase 2.
+    """INSERT INTO tenant_features (tenant_id, feature_key, enabled, updated_by, notes)
+       SELECT t.id, f.feature_key, TRUE, 'system_backfill_30avril', 'Backfill initial - toutes les features activees par defaut'
+       FROM tenants t
+       CROSS JOIN feature_registry f
+       ON CONFLICT (tenant_id, feature_key) DO NOTHING""",
 ]
