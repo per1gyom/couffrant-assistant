@@ -50,6 +50,7 @@ from app.routes.raya_deepen import router as raya_deepen_router
 from app.routes.user_settings import router as user_settings_router
 from app.routes.user_rules import router as user_rules_router
 from app.routes.two_factor import router as two_factor_router
+from app.routes.admin_2fa_challenge import router as admin_2fa_challenge_router
 
 SESSION_INACTIVITY_TIMEOUT = int(os.getenv("SESSION_INACTIVITY_TIMEOUT", "7200"))
 
@@ -133,6 +134,7 @@ app.include_router(raya_deepen_router)
 app.include_router(user_settings_router)
 app.include_router(user_rules_router)
 app.include_router(two_factor_router)
+app.include_router(admin_2fa_challenge_router)
 
 
 @app.get("/")
@@ -294,3 +296,34 @@ def shutdown_event():
         stop_worker()
     except Exception as e:
         logger.error(f"[WebhookQueue] Erreur arret worker: {e}")
+
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Exception handler 303 pour redirections depuis dependances
+# ──────────────────────────────────────────────────────────────────────────
+# Decision Guillaume 30/04 (LOT 3 chantier 2FA) :
+# Le guard require_admin_2fa_validated() lance HTTPException(303) avec un
+# header Location quand la 2FA admin est expiree. FastAPI par defaut
+# transforme ca en 303 vide (sans suivre la redirection cote browser).
+# Cet handler convertit en RedirectResponse pour que Safari/Chrome suivent.
+# ──────────────────────────────────────────────────────────────────────────
+
+from fastapi import HTTPException
+from fastapi.responses import RedirectResponse
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request, exc: HTTPException):
+    """Convertit HTTPException 303 + header Location en vraie RedirectResponse.
+
+    Toutes les autres HTTPException sont traitees normalement (JSON par defaut).
+    """
+    if exc.status_code == 303 and exc.headers and exc.headers.get("Location"):
+        return RedirectResponse(
+            url=exc.headers["Location"],
+            status_code=303,
+        )
+    # Fallback : comportement par defaut FastAPI
+    from fastapi.exception_handlers import http_exception_handler as default_handler
+    return await default_handler(request, exc)

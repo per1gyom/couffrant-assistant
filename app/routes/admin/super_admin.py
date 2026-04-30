@@ -39,7 +39,7 @@ from app.app_security import (
     SCOPE_USER, SCOPE_ADMIN, SCOPE_SUPER_ADMIN, DEFAULT_TENANT,
 )
 from app.security_auth import unlock_account
-from app.routes.deps import require_admin, require_super_admin, require_tenant_admin, assert_same_tenant
+from app.routes.deps import require_admin, require_super_admin, require_tenant_admin, require_admin_2fa_validated, assert_same_tenant
 from app.admin_audit import log_admin_action
 from app.dashboard_service import get_costs_dashboard
 
@@ -442,9 +442,16 @@ def admin_panel(request: Request):
         # Si tenant_admin, rediriger vers son panel dédié
         try:
             require_tenant_admin(request)
+            # tenant_admin doit aussi passer la 2FA pour son panel
+            require_admin_2fa_validated(request)
             return RedirectResponse("/tenant/panel")
-        except HTTPException:
+        except HTTPException as e:
+            # Si exception est 303 redirect (2FA challenge), la propager
+            if e.status_code == 303:
+                raise
             return RedirectResponse("/login-app")
+    # Admin authentifie : verifier 2FA admin (peut raise 303 vers /admin/2fa-challenge)
+    require_admin_2fa_validated(request)
     with open("app/templates/admin_panel.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 

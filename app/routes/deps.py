@@ -132,3 +132,93 @@ def assert_same_tenant(request: Request, target_username: str) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"L'utilisateur '{target_username}' n'appartient pas à votre tenant",
         )
+
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# require_admin_2fa_validated — guard specifique pages HTML /admin
+# ──────────────────────────────────────────────────────────────────────────
+# Decision Guillaume 30/04 (LOT 3 du chantier 2FA) :
+#  - 2FA Authenticator demandee 1x par semaine pour acces /admin
+#  - Ne touche pas le login chat (Niveau 1 = password seul)
+#  - Filet de secours : env var DISABLE_2FA_ENFORCEMENT=true
+#
+# Different de require_admin() (utilise pour les endpoints API qui
+# repondent JSON) car ce guard RENVOIE des HTMLResponse (redirection vers
+# /admin/2fa-challenge ou /admin/2fa/setup).
+# ──────────────────────────────────────────────────────────────────────────
+
+def require_admin_2fa_validated(request: Request):
+    """Verifie que le user est admin ET que sa 2FA admin est validee < 7j.
+
+    Utilise sur les routes HTML qui servent un panel admin (ex: /admin/panel,
+    /admin/connexions). PAS sur les endpoints API qui doivent repondre 401/403.
+
+    Comportement :
+    1. Si pas authentifie -> redirige /login-app (HTMLResponse RedirectResponse)
+    2. Si pas admin -> 403
+    3. Si DISABLE_2FA_ENFORCEMENT=true -> on passe (filet d urgence)
+    4. Si user n a pas active sa 2FA :
+       - Si encore en grace 7j -> on laisse passer (warning sera affiche par UI)
+       - Si grace expiree -> redirige vers /admin/2fa/setup?required=1
+    5. Si user a active sa 2FA :
+       - Si validation < 7j -> on laisse passer
+       - Si validation > 7j ou jamais -> redirige vers /admin/2fa-challenge
+
+    Returns le dict user{} si tout OK. Sinon leve HTTPException avec une
+    RedirectResponse en detail (capture par un exception_handler dans main).
+
+    NB: Comme FastAPI ne supporte pas nativement le retour d une RedirectResponse
+    depuis une dependance, on utilise un trick : on raise une HTTPException avec
+    un header Location, et un middleware ou exception_handler la transforme en 303.
+    """
+    from fastapi.responses import RedirectResponse
+    from fastapi import HTTPException, status as _status
+    from app.admin_2fa_session import (
+        is_2fa_enforcement_disabled,
+        has_user_activated_2fa,
+        is_user_in_grace_period,
+        needs_admin_2fa,
+        SCOPES_REQUIRING_2FA,
+    )
+
+    # 1. Authentification (lance HTTPException 401 si pas connecte)
+    user = require_user(request)
+
+    # 2. Scope admin requis
+    if user["scope"] not in SCOPES_REQUIRING_2FA:
+        raise HTTPException(
+            status_code=_status.HTTP_403_FORBIDDEN,
+            detail="Privileges administrateur requis",
+        )
+
+    # 3. Bypass urgence
+    if is_2fa_enforcement_disabled():
+        return user
+
+    username = user["username"]
+
+    # 4. User n a pas encore active sa 2FA
+    if not has_user_activated_2fa(username):
+        if is_user_in_grace_period(username):
+            # Grace : laisser passer, warning visible dans le panel
+            return user
+        else:
+            # Grace expiree : forcer setup
+            raise HTTPException(
+                status_code=_status.HTTP_303_SEE_OTHER,
+                detail="2FA setup required",
+                headers={"Location": "/admin/2fa/setup?required=1"},
+            )
+
+    # 5. 2FA active : verifier la validite
+    if needs_admin_2fa(request, user):
+        # Sauve l URL d origine pour la restorer apres validation
+        request.session["pending_admin_path"] = str(request.url.path)
+        raise HTTPException(
+            status_code=_status.HTTP_303_SEE_OTHER,
+            detail="2FA challenge required",
+            headers={"Location": "/admin/2fa-challenge"},
+        )
+
+    return user

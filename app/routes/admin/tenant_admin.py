@@ -18,7 +18,7 @@ from app.app_security import (
     set_user_tool, remove_user_tool,
     SCOPE_TENANT_USER, SCOPE_TENANT_ADMIN, DEFAULT_TENANT,
 )
-from app.routes.deps import require_tenant_admin, get_session_tenant_id, assert_same_tenant
+from app.routes.deps import require_tenant_admin, get_session_tenant_id, assert_same_tenant, require_admin_2fa_validated
 from app.admin_audit import log_admin_action
 
 router = APIRouter()
@@ -281,6 +281,8 @@ def tenant_panel(request: Request):
     except HTTPException:
         from fastapi.responses import RedirectResponse
         return RedirectResponse("/login-app")
+    # Niveau 2 : 2FA admin requise pour acceder au panel (LOT 3 30/04)
+    require_admin_2fa_validated(request)
     with open("app/templates/tenant_panel.html", "r", encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
 
