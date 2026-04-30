@@ -25,8 +25,18 @@ router = APIRouter()
 
 
 @router.get("/tenant/users")
-def tenant_list_users(request: Request, _: dict = Depends(require_tenant_admin)):
-    return get_users_in_tenant(get_session_tenant_id(request))
+def tenant_list_users(
+    request: Request,
+    include_deleted: bool = False,
+    _: dict = Depends(require_tenant_admin),
+):
+    """Liste les users du tenant courant.
+
+    HOTFIX 30/04 : par defaut include_deleted=False pour ne pas afficher
+    les soft-deletes dans le panel principal. Pour la vue 'Comptes
+    supprimes' (UI a venir), passer ?include_deleted=true.
+    """
+    return get_users_in_tenant(get_session_tenant_id(request), include_deleted=include_deleted)
 
 
 @router.post("/tenant/create-user")

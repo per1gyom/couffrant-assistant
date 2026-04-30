@@ -51,8 +51,18 @@ router = APIRouter()
 
 
 @router.get("/admin/users")
-def admin_list_users(request: Request, _: dict = Depends(require_admin)):
-    return list_users()
+def admin_list_users(
+    request: Request,
+    include_deleted: bool = False,
+    _: dict = Depends(require_admin),
+):
+    """Liste les users de tous les tenants.
+
+    HOTFIX 30/04 : expose explicitement le param include_deleted (deja
+    a False par defaut dans list_users) pour permettre la vue 'Comptes
+    supprimes' avec ?include_deleted=true. Comportement defaut inchange.
+    """
+    return list_users(include_deleted=include_deleted)
 
 
 @router.post("/admin/create-user")
@@ -317,7 +327,7 @@ def admin_memory_status(request: Request, _: dict = Depends(require_admin)):
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        c.execute("SELECT username,email,scope,tenant_id FROM users")
+        c.execute("SELECT username,email,scope,tenant_id FROM users WHERE deleted_at IS NULL")
         meta = {r[0]: {"email": r[1], "scope": r[2], "tenant_id": r[3]} for r in c.fetchall()}
         agg = {}
         for table, key in [
