@@ -1426,4 +1426,28 @@ MIGRATIONS = [
         updated_at TIMESTAMP DEFAULT NOW()
     )""",
     "CREATE INDEX IF NOT EXISTS idx_attach_rules_tenant ON tenant_attachment_rules (tenant_id, enabled, rule_priority)",
+
+    # M-S3-CLEANUP : nettoyage des doublons mail_memory crees par le polling
+    # delta Outlook (Etape 3.4) avant le fix des bugs mail_exists/insert_mail
+    # (commit 2aba00d, 01/05/2026).
+    #
+    # Contexte : entre 14h et 14h20 le 01/05, le polling delta Outlook actif
+    # avec un mail_exists() bugge (filtre tenant_id casse en SQL) et un
+    # insert_mail() qui n inserait pas tenant_id, a re-insere des mails deja
+    # presents. Les doublons sont identifiables sans ambiguite : meme
+    # (message_id, username) avec tenant_id NULL d un cote et tenant_id
+    # rempli de l autre.
+    #
+    # Cette migration supprime les doublons NULL et garde les originaux qui
+    # ont tenant_id rempli. Idempotente : si pas de doublon (cas normal),
+    # le DELETE ne fait rien.
+    """DELETE FROM mail_memory m1
+       WHERE m1.tenant_id IS NULL
+         AND EXISTS (
+             SELECT 1 FROM mail_memory m2
+             WHERE m2.message_id = m1.message_id
+               AND m2.username = m1.username
+               AND m2.tenant_id IS NOT NULL
+               AND m2.id != m1.id
+         )""",
 ]
