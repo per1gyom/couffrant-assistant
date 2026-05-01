@@ -353,3 +353,89 @@ def send_gmail_message(username: str, to_email: str, subject: str, html_body: st
                 "error": "Permissions insuffisantes — reconnecte ta boîte Gmail pour autoriser l'envoi (/login/gmail)."
             }
         return {"ok": False, "error": f"Erreur envoi Gmail : {err_str[:150]}"}
+
+
+
+def refresh_gmail_token(refresh_token: str) -> str | None:
+    """Rafraichit l access_token Gmail via le refresh_token.
+
+    Appel POST a https://oauth2.googleapis.com/token avec
+    grant_type=refresh_token (flow OAuth standard).
+
+    Cette fonction est appelee par
+    connection_token_manager._refresh_v2_token quand l access_token
+    est expire (verifie via le champ expires_at en DB).
+
+    Args:
+        refresh_token: le refresh_token Gmail dechiffre.
+
+    Returns:
+        Le nouveau access_token (str), ou None en cas d echec
+        (refresh_token revoke, credentials manquants, network error).
+
+    Bug fix 01/05/2026 soir :
+    ─────────────────────────
+    Cette fonction etait IMPORTEE par _refresh_v2_token mais n existait
+    pas dans le code. ImportError silencieux a chaque tentative de
+    refresh -> return None -> token jamais rafraichi -> 401 systematique
+    apres ~1h de vie de l access_token.
+
+    Symptomes : les boites Gmail passaient en 'connected' apres
+    reconnexion, puis 1h plus tard repassaient en 401 sans qu aucun
+    refresh ne se declenche. Visible dans les logs Railway uniquement
+    si on grep ImportError.
+    """
+    if not refresh_token:
+        logger.warning(
+            "[Gmail] refresh_gmail_token : pas de refresh_token fourni",
+        )
+        return None
+    if not GMAIL_CLIENT_ID or not GMAIL_CLIENT_SECRET:
+        logger.error(
+            "[Gmail] refresh_gmail_token : GMAIL_CLIENT_ID ou _SECRET "
+            "manquant dans les variables d environnement",
+        )
+        return None
+    try:
+        response = http_requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "client_id": GMAIL_CLIENT_ID,
+                "client_secret": GMAIL_CLIENT_SECRET,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+            },
+            timeout=20,
+        )
+        if response.status_code != 200:
+            # Cas typique d echec :
+            #   400 invalid_grant : refresh_token revoke ou expire
+            #     -> l user doit reconnecter sa boite
+            #   401 invalid_client : client_id/secret faux
+            #   network 5xx : Google a un souci, retry au prochain cycle
+            logger.error(
+                "[Gmail] refresh_gmail_token : HTTP %d - %s",
+                response.status_code, (response.text or "")[:300],
+            )
+            return None
+        data = response.json()
+        new_access = data.get("access_token")
+        if not new_access:
+            logger.error(
+                "[Gmail] refresh_gmail_token : pas d access_token "
+                "dans la reponse Google : %s",
+                str(data)[:200],
+            )
+            return None
+        logger.info(
+            "[Gmail] refresh_gmail_token : OK (nouvel access_token "
+            "obtenu, expire_in=%s)",
+            data.get("expires_in", "?"),
+        )
+        return new_access
+    except Exception as e:
+        logger.error(
+            "[Gmail] refresh_gmail_token crash : %s",
+            str(e)[:200],
+        )
+        return None
