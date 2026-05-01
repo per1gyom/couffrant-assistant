@@ -272,3 +272,22 @@ def _register_jobs(scheduler: BackgroundScheduler):
             logger.error(f"[Scheduler] Import echoue pour backup_external: {e}")
     else:
         logger.info("[Scheduler] Job DESACTIVE : backup_external (activer via SCHEDULER_BACKUP_EXTERNAL_ENABLED=true)")
+
+    # Liveness check des connexions (Phase Connexions Universelles, 1er mai 2026).
+    # Tourne toutes les 60s. Lit connection_health, identifie les connexions
+    # silencieuses depuis trop longtemps (> alert_threshold_seconds), delegue
+    # a alert_dispatcher pour notification. Pattern industriel standard
+    # (Stripe/Datadog/AWS). Voir docs/vision_connexions_universelles_01mai.md.
+    if _job_enabled("SCHEDULER_CONNECTION_HEALTH_ENABLED", True):
+        try:
+            from app.jobs.connection_health_check import _job_connection_health_check
+            scheduler.add_job(func=_job_connection_health_check,
+                              trigger=IntervalTrigger(seconds=60),
+                              id="connection_health_check",
+                              name="Liveness check des connexions (60s)",
+                              replace_existing=True)
+            logger.info("[Scheduler] Job enregistre : connection_health_check (60s)")
+        except Exception as e:
+            logger.error(f"[Scheduler] Import echoue pour connection_health_check: {e}")
+    else:
+        logger.info("[Scheduler] Job DESACTIVE : connection_health_check")

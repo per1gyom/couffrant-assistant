@@ -1260,4 +1260,170 @@ MIGRATIONS = [
        CROSS JOIN feature_registry f
        WHERE f.feature_key IN ('audio_capture', 'pdf_editor', 'image_editor', 'accounting_engine')
        ON CONFLICT (tenant_id, feature_key) DO NOTHING""",
+
+    # -- Phase Connexions Universelles (1er mai 2026) --
+    # Voir docs/vision_connexions_universelles_01mai.md
+    #
+    # Cette phase pose les FONDATIONS de l architecture commune a TOUTES
+    # les connexions Raya (mails, drive, odoo, whatsapp, vesta, teams).
+    # 18 questions ont ete tranchees avec Guillaume + 9 enrichissements
+    # techniques issus de l audit standards industriels.
+    #
+    # 7 nouvelles tables creees ici. Les modules Python (connection_health,
+    # connection_resilience, alert_dispatcher, couche comprehension) seront
+    # ajoutes dans les commits suivants (Etapes 1.2 a 1.5).
+    #
+    # NOTE : on REUTILISE les tables system_heartbeat et system_alerts qui
+    # existent deja (depuis 18/04/2026). connection_health complete sans
+    # remplacer (granularite par connection_id, pas par component string).
+
+    # M-CU01 : connection_health
+    # Une ligne par connexion (mail, drive, odoo, whatsapp, vesta, teams...)
+    # Mise a jour a CHAQUE poll, succes ou echec. La regle d alerte est :
+    # "Si last_successful_poll_at est plus vieux que alert_threshold_seconds,
+    #  emettre une alerte." (= liveness check, decision Q15-D Guillaume)
+    """CREATE TABLE IF NOT EXISTS connection_health (
+        id SERIAL PRIMARY KEY,
+        connection_id INTEGER NOT NULL REFERENCES tenant_connections(id) ON DELETE CASCADE,
+        tenant_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        connection_type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'unknown',
+        last_successful_poll_at TIMESTAMP,
+        last_poll_attempt_at TIMESTAMP,
+        consecutive_failures INT DEFAULT 0,
+        current_delta_token TEXT,
+        expected_poll_interval_seconds INT,
+        alert_threshold_seconds INT,
+        metadata JSONB DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (connection_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_conn_health_status ON connection_health (status) WHERE status != 'healthy'",
+    "CREATE INDEX IF NOT EXISTS idx_conn_health_tenant ON connection_health (tenant_id, connection_type)",
+
+    # M-CU02 : connection_health_events
+    # Log de chaque tentative de poll. C est la SOURCE DE VERITE pour le
+    # liveness check : "le dernier event ok est-il assez recent ?"
+    # Garde l historique des 90 derniers jours par connexion (purge prevue
+    # dans un job nocturne ulterieur). Volume estime : ~30k events / jour
+    # toutes connexions confondues.
+    """CREATE TABLE IF NOT EXISTS connection_health_events (
+        id BIGSERIAL PRIMARY KEY,
+        connection_id INTEGER NOT NULL,
+        poll_started_at TIMESTAMP NOT NULL,
+        poll_ended_at TIMESTAMP,
+        status TEXT NOT NULL,
+        items_seen INT DEFAULT 0,
+        items_new INT DEFAULT 0,
+        next_delta_token TEXT,
+        duration_ms INT,
+        error_detail TEXT,
+        created_at TIMESTAMP DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_conn_events_lookup ON connection_health_events (connection_id, created_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_conn_events_failures ON connection_health_events (connection_id, status, created_at DESC) WHERE status != 'ok'",
+
+    # M-CU03 : attachment_index
+    # Index unifie de toutes les pieces jointes (mail) + fichiers (drive).
+    # Source unique de verite pour la recherche de documents par contenu.
+    # Le pipeline de comprehension (extraction + Vision IA + tagging) ecrit
+    # ici. Cf decisions Q2 (texte par defaut + Vision si pertinent), Q14
+    # (texte + resume + tags structures).
+    """CREATE TABLE IF NOT EXISTS attachment_index (
+        id BIGSERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        source_type TEXT NOT NULL,
+        source_ref TEXT NOT NULL,
+        connection_id INTEGER,
+        file_name TEXT,
+        file_size BIGINT,
+        mime_type TEXT,
+        text_content TEXT,
+        summary_content TEXT,
+        tags JSONB,
+        embedding_global vector(1536),
+        vision_processed BOOLEAN DEFAULT FALSE,
+        deleted_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (source_type, source_ref)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_attachment_tenant ON attachment_index (tenant_id, deleted_at) WHERE deleted_at IS NULL",
+    "CREATE INDEX IF NOT EXISTS idx_attachment_tags ON attachment_index USING gin (tags)",
+    "CREATE INDEX IF NOT EXISTS idx_attachment_embedding ON attachment_index USING hnsw (embedding_global vector_cosine_ops)",
+
+    # M-CU04 : attachment_chunks
+    # Embeddings 2 niveaux (ENRICHISSEMENT Q14) : un embedding par
+    # paragraphe en plus de l embedding global. Permet la recherche fine
+    # ("trouve la phrase qui mentionne 9 kWc") en plus de la recherche
+    # large ("trouve tous les devis solaires").
+    """CREATE TABLE IF NOT EXISTS attachment_chunks (
+        id BIGSERIAL PRIMARY KEY,
+        attachment_id BIGINT NOT NULL REFERENCES attachment_index(id) ON DELETE CASCADE,
+        chunk_index INT NOT NULL,
+        content TEXT NOT NULL,
+        embedding vector(1536),
+        metadata JSONB,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (attachment_id, chunk_index)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_chunks_attachment ON attachment_chunks (attachment_id)",
+    "CREATE INDEX IF NOT EXISTS idx_chunks_embedding ON attachment_chunks USING hnsw (embedding vector_cosine_ops)",
+
+    # M-CU05 : tenant_drive_blacklist
+    # Dossiers Drive/SharePoint exclus de l indexation par tenant.
+    # Decision Q8 : tout par defaut + blacklist. La table drive_folders
+    # existante (depuis 20/04) liste les dossiers SURVEILLES, ici on liste
+    # les dossiers EXCLUS (deux concepts complementaires).
+    """CREATE TABLE IF NOT EXISTS tenant_drive_blacklist (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        connection_id INTEGER NOT NULL,
+        folder_path TEXT NOT NULL,
+        reason TEXT,
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (connection_id, folder_path)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_drive_blacklist_tenant ON tenant_drive_blacklist (tenant_id, connection_id)",
+
+    # M-CU06 : tenant_whatsapp_whitelist
+    # Conversations WhatsApp autorisees a l indexation. Inverse logique
+    # par rapport a Drive : sur WhatsApp on est en LISTE BLANCHE par defaut
+    # (decision Q6, principe de souverainete). Aucun message non-whitelist
+    # n est jamais indexe.
+    """CREATE TABLE IF NOT EXISTS tenant_whatsapp_whitelist (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        connection_id INTEGER NOT NULL,
+        conversation_type TEXT NOT NULL,
+        conversation_id TEXT NOT NULL,
+        conversation_label TEXT,
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT NOW(),
+        UNIQUE (connection_id, conversation_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_whatsapp_whitelist_tenant ON tenant_whatsapp_whitelist (tenant_id, connection_id)",
+
+    # M-CU07 : tenant_attachment_rules
+    # Regles metier paramatrables par tenant pour la couche comprehension.
+    # Permet a chaque tenant d AJOUTER des regles specifiques a son metier
+    # sans modifier le code (ex: un commerçant ajoute "force_vision si nom
+    # contient 'commande_fournisseur'"). Note Guillaume Q13 : regles
+    # universelles dans le code, regles metier ici.
+    """CREATE TABLE IF NOT EXISTS tenant_attachment_rules (
+        id SERIAL PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
+        rule_name TEXT NOT NULL,
+        rule_pattern TEXT,
+        rule_action TEXT NOT NULL,
+        rule_priority INT DEFAULT 0,
+        enabled BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+    )""",
+    "CREATE INDEX IF NOT EXISTS idx_attach_rules_tenant ON tenant_attachment_rules (tenant_id, enabled, rule_priority)",
 ]
