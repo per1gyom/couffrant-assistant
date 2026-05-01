@@ -430,3 +430,32 @@ def _register_jobs(scheduler: BackgroundScheduler):
             logger.error(f"[Scheduler] Import echoue pour gmail_reconciliation: {e}")
     else:
         logger.info("[Scheduler] Job DESACTIVE : gmail_reconciliation (activer via SCHEDULER_GMAIL_RECONCILIATION_ENABLED=true)")
+
+    # Gmail watch renewal (Phase Connexions Universelles - Semaine 4, Etape 4.5).
+    # Tous les jours a 6h00 UTC (apres la reconciliation a 5h), renouvelle
+    # le watch Pub/Sub Gmail pour les boites dont le watch expire dans
+    # moins de 2 jours. Le watch Gmail dure 7 jours max donc on a 5 jours
+    # de marge si ce job lui-meme echoue.
+    #
+    # Variable d activation : SCHEDULER_GMAIL_WATCH_RENEWAL_ENABLED
+    # Variable d env requise : GMAIL_PUBSUB_TOPIC
+    #
+    # Setup manuel Console GCP avant activation :
+    # 1. Creer un topic Pub/Sub (ex: gmail-notifications)
+    # 2. Donner role Pub/Sub Publisher au service account
+    #    gmail-api-push@system.gserviceaccount.com
+    # 3. Creer une Push Subscription qui POST sur
+    #    https://app.raya-ia.fr/webhook/gmail/pubsub?token=<SECRET>
+    if _job_enabled("SCHEDULER_GMAIL_WATCH_RENEWAL_ENABLED", default=False):
+        try:
+            from app.jobs.mail_gmail_watch import run_gmail_watch_renewal
+            scheduler.add_job(func=run_gmail_watch_renewal,
+                              trigger=CronTrigger(hour=6, minute=0),
+                              id="gmail_watch_renewal",
+                              name="Gmail watch Pub/Sub renewal (6h00)",
+                              replace_existing=True)
+            logger.info("[Scheduler] Job enregistre : gmail_watch_renewal (6h00)")
+        except Exception as e:
+            logger.error(f"[Scheduler] Import echoue pour gmail_watch_renewal: {e}")
+    else:
+        logger.info("[Scheduler] Job DESACTIVE : gmail_watch_renewal (activer via SCHEDULER_GMAIL_WATCH_RENEWAL_ENABLED=true)")

@@ -116,6 +116,13 @@ app.include_router(mail_router)
 app.include_router(reset_router)
 app.include_router(webhook_router)
 app.include_router(webhook_odoo_router)
+# Phase Connexions Universelles - Etape 4.5 (1er mai 2026 soir)
+# Endpoint POST /webhook/gmail/pubsub recevant les push Pub/Sub Gmail
+try:
+    from app.routes.webhook_gmail_pubsub import router as webhook_gmail_pubsub_router
+    app.include_router(webhook_gmail_pubsub_router)
+except Exception as e:
+    print(f"[Main] Import webhook_gmail_pubsub echec : {e}")
 app.include_router(forced_reset_router)
 app.include_router(onboarding_router)
 app.include_router(elicitation_router)
