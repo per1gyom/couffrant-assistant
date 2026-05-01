@@ -153,16 +153,30 @@ def _gmail_get(token: str, path: str, params: dict = None) -> dict:
                 "_detail": str(e)[:300]}
 
 
-def _bootstrap_history_id(token: str) -> Optional[str]:
+def _bootstrap_history_id(token: str) -> tuple[Optional[str], Optional[str]]:
     """Premier run : pas de historyId stocke, on appelle /profile pour
     en avoir un de depart. Tous les mails ANTERIEURS a ce historyId
     ne seront PAS vus par le polling delta — c est le scan de rattrapage
     qui se chargera de les indexer (NIVEAU 5 du pattern).
+
+    Returns:
+      (history_id, error_detail)
+      - history_id si succes, None sinon
+      - error_detail si echec, None sinon (pour debug : code HTTP + message Google)
     """
     response = _gmail_get(token, "/profile")
     if response.get("_error"):
-        return None
-    return response.get("historyId")
+        # Construit un detail d erreur explicite avec le code HTTP et le
+        # message Google brut, pour pouvoir distinguer rapidement :
+        #   - 401 invalid_grant (token revoke par changement Production)
+        #   - 401 invalid_token (token expire et refresh casse)
+        #   - 403 access_denied (scopes manquants)
+        #   - autre
+        err = (f"/profile {response.get('_error')} "
+                f"HTTP {response.get('_status_code')} : "
+                f"{(response.get('_detail') or '')[:200]}")
+        return None, err
+    return response.get("historyId"), None
 
 
 def _poll_history(token: str, connection_id: int,
@@ -179,13 +193,16 @@ def _poll_history(token: str, connection_id: int,
 
     # Premier run : bootstrap depuis /profile
     if not history_id:
-        bootstrap_id = _bootstrap_history_id(token)
+        bootstrap_id, bootstrap_err = _bootstrap_history_id(token)
         if not bootstrap_id:
             return {
                 "status": "auth_error",
                 "items_seen": 0, "items_new": 0, "items_modified": 0,
                 "new_history_id": None, "message_ids": [],
-                "error_detail": "Impossible de bootstrap le historyId via /profile",
+                "error_detail": (
+                    bootstrap_err
+                    or "Impossible de bootstrap le historyId via /profile"
+                ),
             }
         # Le tout premier cycle ne traite rien - intentionnel
         # (les mails passes sont du ressort du scan de rattrapage)
