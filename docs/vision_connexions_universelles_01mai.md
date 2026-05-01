@@ -2068,6 +2068,137 @@ de connexions devra :
 
 ---
 
+## 📌 ADDENDUM 01/05 SOIR — Scan de rattrapage et onboarding historique
+
+**Statut :** non implémenté — à faire après Semaine 4 (Gmail), avant
+mise en usage productif par Guillaume.
+
+### Le besoin
+
+Demande Guillaume (1er mai vers 16h, après validation Semaine 3
+en prod) :
+
+> "Une fois que tout ça marche, faire un scan de mes boîtes mail pour
+> mettre en graphe tous les mails qui sont passés au travers pendant
+> les pauses, les pannes de mises à jour, ou alors les historiques
+> plus anciens. Il faudra prévoir de mettre ça au propre avant que
+> je l'utilise correctement."
+
+### Pourquoi c'est nécessaire
+
+Le polling delta (Niveau 1 du pattern delta sync) garantit la
+complétude FUTURE, mais pas la complétude PASSEE. Concrètement :
+
+```
+PERIODE A RATTRAPER :
+  Bug 17 jours : 14/04 -> 01/05
+  Pendant cette periode, le webhook plantait silencieusement.
+  Le polling delta n existait pas encore.
+  Microsoft retient ~30 jours de delta_history par defaut, donc
+  on peut PARTIELLEMENT rattraper via le delta_link initial, mais
+  pas garanti.
+
+HISTORIQUES PLUS ANCIENS :
+  Mails de 2024, 2025, etc. potentiellement non indexes ou
+  partiellement indexes selon les versions du connecteur a l epoque.
+
+PAUSES FUTURES :
+  Maintenance Railway, redeploys longs, panne ponctuelle, etc.
+  Le filet de reconciliation (Niveau 4) detecte en 24h, mais le
+  rattrapage automatique n est pas implemente.
+```
+
+### Architecture cible
+
+#### 1. Scan de rattrapage (post-incident, ad-hoc)
+
+```
+ENDPOINT /admin/sync/{connection_type}/{connection_id}
+  Parametres :
+    - period_start : date debut rattrapage (ex: 2026-04-14)
+    - period_end : date fin rattrapage (ex: 2026-05-01)
+    - dry_run : si true, compte juste ce qui manque
+  
+  Pour Outlook :
+    GET /me/messages?$filter=receivedDateTime ge {start}
+                              and receivedDateTime le {end}
+                     &$select=id,subject,from,...
+                     &$top=100
+                     (paginate via @odata.nextLink)
+    Pour chaque mail :
+      Si mail_exists -> skip
+      Sinon : process_incoming_mail (passe par le pipeline standard)
+  
+  Pour Gmail (apres Semaine 4) :
+    Idem avec Gmail API messages.list + filter date
+
+  Pour Drive (apres Semaine 5) :
+    Pour chaque file modifie sur la periode -> compare avec
+    drive_semantic_content. Reindex si manquant.
+```
+
+#### 2. Onboarding historique (a la connexion d'une nouvelle source)
+
+```
+Quand un user connecte une nouvelle boite (apres OAuth) :
+  
+  UI Raya demande :
+    "Profondeur d historique a indexer ?"
+    [ ] 3 mois     [ ] 6 mois     [x] 12 mois     [ ] tout
+    
+  Si selection != "rien" :
+    Job de fond declanche (apscheduler one-shot ou queue dediee)
+    Pagination par batch de 50-100 mails
+    Insertion progressive
+    Curseur sauvegarde dans connection_health.metadata
+      -> "history_import_cursor" : date du dernier mail traite
+      -> "history_import_status" : 'in_progress' / 'complete' / 'failed'
+    Resume si interrompu (Railway redeploy, crash, etc.)
+    Progress bar visible dans /admin/health/connection/{id}
+
+POUR GUILLAUME (decision tracee) :
+  Profondeur = "tout" (sans limite)
+  Pour les boites mail Outlook + Gmail
+  Pour Drive : tout aussi (apres definition de la blacklist)
+
+POUR LES FUTURS CLIENTS :
+  Defaut = 12 mois
+  Modifiable lors de l onboarding
+```
+
+#### 3. Bouton "rattrapage automatique" sur les alertes WARNING
+
+```
+Quand la reconciliation nocturne (Niveau 4) detecte une fuite :
+  Alerte WARNING via alert_dispatcher contient maintenant :
+    - Le delta detecte (X mails manquants)
+    - Un BOUTON "Lancer le rattrapage automatique"
+    - Bouton declenche le scan de rattrapage sur la periode
+      (typiquement les 24-48h precedentes)
+  
+  Avantage : le user n a pas besoin de comprendre la cause technique,
+  il clique et le rattrapage se fait.
+```
+
+### Statut d'avancement
+
+```
+NON IMPLEMENTE encore au 01/05/2026 soir.
+
+A FAIRE APRES Semaine 4 (Gmail) :
+  - Avant que Guillaume bascule en usage productif
+  - Sera la premiere chose a faire en Semaine 5 ou 6
+  - OU pourrait etre fait en parallele si on a du temps
+
+NOTE TECHNIQUE :
+  Le mecanisme doit etre UNIVERSEL (pas un endpoint par source) :
+  meme architecture pour Outlook, Gmail, Drive, et toute future
+  connexion. Le scan de rattrapage est conceptuellement le NIVEAU 5
+  du pattern delta sync (au-dela des 4 niveaux deja documentes).
+```
+
+---
+
 *Document de référence pour le chantier Connexions Universelles.*
 *Dernière itération : 01/05/2026 matin, après audit + 18 questions/réponses*
 *+ audit "creuse les standards" sur 14 premières questions.*
