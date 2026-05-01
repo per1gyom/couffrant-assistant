@@ -1058,6 +1058,43 @@ PARTICULARITÉS :
   Validation utilisateur obligatoire avant écriture (cohérent Q7).
 ```
 
+**Mise à jour 01/05/2026 — retour Maxime AMRAM (cofondateur Vesta) :**
+
+```
+Demande Guillaume du 28/04 :
+  • Liste complète des projets (pas uniquement par customer_id)
+  • Accès aux paramètres d'étude
+  • Accès aux notes client
+  • Écriture des fiches de visite technique (pente, couverture, 
+    distances compteur, type compteur mono/tri, puissance, etc.)
+  • Demande d'accès aux endpoints internes Vesta
+
+Réponse Maxime du 01/05 :
+  • REFUS d'exposer les endpoints internes 
+    Raison : stabilité (pas envie de garantir des contrats sur des 
+    endpoints qui peuvent évoluer côté Vesta)
+  • CONFIRMATION qu'ils prévoient d'enrichir l'API publique existante
+  • DÉLÉGATION au support Vesta pour réponse plus complète
+    → On attend une 2e réponse, plus détaillée
+
+Conséquence pour Raya :
+  • Vesta reste bloqué côté Vesta — pas de chemin alternatif
+  • Le scénario "visite technique vocale → import auto Vesta" est 
+    toujours sur l'étagère, en attendant l'enrichissement de l'API 
+    publique
+  • Pas de timing communiqué par Maxime
+  • Pas d'action Raya à mener tant que le support Vesta n'a pas 
+    précisé quels endpoints seront ajoutés et quand
+
+À faire quand le support Vesta aura répondu :
+  1. Inventorier les nouveaux endpoints disponibles
+  2. Vérifier si l'écriture des fiches visite technique est dans 
+     le périmètre
+  3. Si oui : reprendre la section 3.7 architecture cible
+  4. Si non : laisser Vesta en attente prolongée et déprioriser
+     le scénario "visite technique vocale" en conséquence
+```
+
 **Priorité dans la roadmap :**
 
 ```
