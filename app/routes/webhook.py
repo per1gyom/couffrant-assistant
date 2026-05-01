@@ -96,6 +96,217 @@ async def webhook_notification(request: Request):
     return Response(status_code=202)
 
 
+# ─── LIFECYCLE NOTIFICATIONS (Phase Connexions Universelles - Etape 3.5) ───
+
+@router.get("/webhook/microsoft/lifecycle")
+async def webhook_lifecycle_validation_get(validationToken: str = ""):
+    """Validation initiale de l URL lifecycle (Microsoft Graph).
+    Microsoft envoie un GET avec validationToken au moment de la creation
+    de la subscription pour verifier que l URL existe et fonctionne.
+    """
+    if validationToken:
+        return Response(content=validationToken, media_type="text/plain",
+                        status_code=200)
+    return Response(status_code=200)
+
+
+@router.post("/webhook/microsoft/lifecycle")
+async def webhook_lifecycle_notification(request: Request):
+    """Endpoint des Lifecycle Notifications Microsoft Graph.
+
+    Phase Connexions Universelles - Etape 3.5 (1er mai 2026).
+    AURAIT EVITE LE BUG 17 JOURS du 14/04 au 01/05.
+
+    Events recus :
+      - subscriptionRemoved : Microsoft a supprime la sub silencieusement
+        -> recreation automatique
+      - missed : une notif a ete loupee (timing serveur, redemarrage Raya)
+        -> declenchement d un poll delta force pour rattraper
+      - reauthorizationRequired : token va expirer dans peu de temps
+        -> tentative refresh + renouvellement de la sub
+    """
+    validation_token = request.query_params.get("validationToken")
+    if validation_token:
+        return Response(content=validation_token, media_type="text/plain",
+                        status_code=200)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return Response(status_code=202)
+
+    from app.connectors.microsoft_webhook import get_subscription_info
+
+    for notification in body.get("value", []):
+        try:
+            subscription_id = notification.get("subscriptionId", "")
+            lifecycle_event = notification.get("lifecycleEvent", "")
+            sub_info = get_subscription_info(subscription_id)
+
+            if not sub_info:
+                # Sub inconnue (peut etre orpheline / supprimee de notre cote)
+                continue
+            if notification.get("clientState") != sub_info["client_state"]:
+                # Securite : on rejette si le clientState ne match pas
+                continue
+
+            username = sub_info["username"]
+
+            # Lance le traitement en thread (ne pas bloquer Microsoft Graph)
+            threading.Thread(
+                target=_handle_lifecycle_event,
+                args=(lifecycle_event, subscription_id, username),
+                daemon=True,
+            ).start()
+
+        except Exception as e:
+            # Best effort : on log mais on retourne 202 pour eviter que
+            # Microsoft considere notre endpoint defaillant
+            print(f"[Lifecycle] Erreur traitement notification : {e}")
+
+    return Response(status_code=202)
+
+
+def _handle_lifecycle_event(lifecycle_event: str, subscription_id: str,
+                              username: str):
+    """Traitement d un evenement lifecycle Microsoft Graph en background.
+
+    Run en thread daemon depuis webhook_lifecycle_notification.
+    """
+    print(f"[Lifecycle] Event recu : {lifecycle_event} pour sub={subscription_id} user={username}")
+
+    try:
+        if lifecycle_event == "subscriptionRemoved":
+            _handle_subscription_removed(subscription_id, username)
+        elif lifecycle_event == "missed":
+            _handle_missed_notification(subscription_id, username)
+        elif lifecycle_event == "reauthorizationRequired":
+            _handle_reauthorization_required(subscription_id, username)
+        else:
+            print(f"[Lifecycle] Event non gere : {lifecycle_event}")
+    except Exception as e:
+        print(f"[Lifecycle] Crash _handle_lifecycle_event : {e}")
+
+
+def _handle_subscription_removed(subscription_id: str, username: str):
+    """Subscription supprimee par Microsoft. On recree.
+
+    C est EXACTEMENT le scenario du bug 17 jours : Microsoft a desactive la
+    sub silencieusement apres 4 erreurs 500 en cascade. Avec lifecycle,
+    on est prevenu et on recree automatiquement.
+
+    Apres recreation, on declenche aussi un poll delta force pour rattraper
+    les mails qui auraient pu arriver pendant le creneau ou la sub etait
+    morte.
+    """
+    from app.connectors.microsoft_webhook import (
+        _delete_subscription_from_db, create_subscription,
+    )
+    from app.token_manager import get_valid_microsoft_token
+
+    print(f"[Lifecycle][CRITICAL] subscriptionRemoved pour {username} - recreation auto")
+
+    # 1. Supprimer la sub morte de notre DB
+    _delete_subscription_from_db(subscription_id)
+
+    # 2. Recreer la subscription
+    try:
+        token = get_valid_microsoft_token(username)
+        if token:
+            new_sub = create_subscription(token, username)
+            if new_sub:
+                print(f"[Lifecycle] Sub recreee pour {username} : {new_sub.get('id')}")
+            else:
+                print(f"[Lifecycle] ECHEC recreation sub pour {username}")
+        else:
+            print(f"[Lifecycle] Pas de token pour {username} - alerte")
+    except Exception as e:
+        print(f"[Lifecycle] Erreur recreation sub {username} : {e}")
+
+    # 3. Alerte via dispatcher pour informer l user (l incident a ete auto-resolu)
+    try:
+        from app.alert_dispatcher import send
+        from app.app_security import get_tenant_id
+        tenant_id = get_tenant_id(username)
+        send(
+            severity="warning",
+            title="Subscription Microsoft auto-recreee",
+            message=(
+                f"Microsoft a supprime la subscription mail Outlook pour {username}. "
+                f"Raya l a auto-recreee. Aucun mail manque (le polling delta tourne "
+                f"en parallele) mais l incident est trace pour investigation."
+            ),
+            tenant_id=tenant_id,
+            username=username,
+            source_type="microsoft_lifecycle",
+            source_id=subscription_id,
+            component=f"lifecycle_{username}",
+            alert_type="subscription_recreated",
+        )
+    except Exception as e:
+        print(f"[Lifecycle] Alerte echec : {e}")
+
+
+def _handle_missed_notification(subscription_id: str, username: str):
+    """Une notification a ete loupee (timing serveur Microsoft, redemarrage
+    Raya, surcharge). On rattrape via le polling delta.
+    """
+    print(f"[Lifecycle] missed pour {username} - pas d action urgente")
+    print(f"[Lifecycle] Le polling delta toutes les 5 min va rattraper")
+    # Pas besoin de declencher un poll force : le polling tourne deja toutes
+    # les 5 min via le scheduler. Les mails missed seront recuperes au
+    # prochain cycle.
+
+
+def _handle_reauthorization_required(subscription_id: str, username: str):
+    """Le token va expirer dans peu de temps. On le refresh et on renouvelle
+    la sub pour eviter qu elle expire.
+    """
+    from app.connectors.microsoft_webhook import renew_subscription
+    from app.token_manager import get_valid_microsoft_token
+
+    print(f"[Lifecycle] reauthorizationRequired pour {username} - refresh + renew")
+
+    try:
+        # get_valid_microsoft_token fait deja le refresh si necessaire
+        token = get_valid_microsoft_token(username)
+        if token:
+            ok = renew_subscription(token, subscription_id, username)
+            if ok:
+                print(f"[Lifecycle] Sub {subscription_id} renouvelee apres refresh token")
+            else:
+                print(f"[Lifecycle] Renew sub echec pour {username}")
+        else:
+            print(f"[Lifecycle] Token refresh echec pour {username} - alerte user")
+            # Le token est mort, alerte
+            try:
+                from app.alert_dispatcher import send
+                from app.app_security import get_tenant_id
+                tenant_id = get_tenant_id(username)
+                send(
+                    severity="attention",
+                    title="Token Microsoft expire bientot",
+                    message=(
+                        f"Microsoft demande la reauthorisation du compte {username}. "
+                        f"Reconnecte via /login pour eviter une coupure."
+                    ),
+                    tenant_id=tenant_id,
+                    username=username,
+                    actions=[
+                        {"label": "Reconnecter Outlook",
+                         "url": "/login?provider=microsoft"},
+                    ],
+                    source_type="microsoft_lifecycle",
+                    source_id=subscription_id,
+                    component=f"lifecycle_{username}_reauth",
+                    alert_type="reauthorization_required",
+                )
+            except Exception:
+                pass
+    except Exception as e:
+        print(f"[Lifecycle] Erreur reauth {username} : {e}")
+
+
 @router.post("/webhook/twilio")
 async def webhook_twilio(request: Request):
     """

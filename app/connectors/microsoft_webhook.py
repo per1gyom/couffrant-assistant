@@ -22,12 +22,30 @@ def get_notification_url() -> str:
     return f"{base}/webhook/microsoft"
 
 
+def get_lifecycle_notification_url() -> str:
+    """URL endpoint pour les Lifecycle Notifications Microsoft Graph.
+    
+    Phase Connexions Universelles - Etape 3.5 (1er mai 2026).
+    Microsoft envoie sur cet URL des evenements speciaux (subscriptionRemoved,
+    missed, reauthorizationRequired) qui permettent de reagir avant que la
+    subscription ne meurt silencieusement.
+    
+    AURAIT EVITE LE BUG 17 JOURS du 14/04 au 01/05.
+    """
+    base = os.getenv("APP_BASE_URL", "https://couffrant-assistant-production.up.railway.app")
+    return f"{base}/webhook/microsoft/lifecycle"
+
+
 def create_subscription(token: str, username: str,
                         connection_id: int | None = None) -> dict | None:
     """Cree un abonnement Graph pour la boite inbox d'un utilisateur.
 
     Multi-boites 28/04 : connection_id optionnel pour lier l abonnement a
     une connexion specifique (utile quand l user a plusieurs boites Outlook).
+    
+    Lifecycle Notifications (Etape 3.5, 01/05) : on ajoute lifecycleNotificationUrl
+    pour recevoir les evenements speciaux (subscriptionRemoved, missed,
+    reauthorizationRequired). Le bug 17 jours d avril aurait ete evite avec ca.
     """
     expiry = (datetime.now(timezone.utc) + timedelta(days=SUBSCRIPTION_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
     client_state = secrets.token_hex(16)
@@ -37,6 +55,7 @@ def create_subscription(token: str, username: str,
         json={
             "changeType": "created",
             "notificationUrl": get_notification_url(),
+            "lifecycleNotificationUrl": get_lifecycle_notification_url(),
             "resource": "me/mailFolders/inbox/messages",
             "expirationDateTime": expiry,
             "clientState": client_state,
@@ -47,7 +66,7 @@ def create_subscription(token: str, username: str,
         data = r.json()
         _save_subscription(username, data["id"], data["expirationDateTime"],
                            client_state, connection_id=connection_id)
-        print(f"[Webhook] Abonnement créé pour {username} (conn#{connection_id}): {data['id']}")
+        print(f"[Webhook] Abonnement créé pour {username} (conn#{connection_id}): {data['id']} (avec lifecycle)")
         return data
     print(f"[Webhook] Erreur création {username} (conn#{connection_id}): {r.status_code} {r.text[:200]}")
     if r.status_code in (401, 403):

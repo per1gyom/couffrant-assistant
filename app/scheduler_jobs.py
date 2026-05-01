@@ -316,11 +316,10 @@ def _register_jobs(scheduler: BackgroundScheduler):
     # - Stocke le delta_link par folder dans connection_health.metadata
     # - Inscrit dans connection_health + log dans connection_health_events
     #
-    # ⚠️ SHADOW MODE : ne traite PAS les messages, log juste les compteurs.
-    # Permet de valider le polling delta avant de basculer vraiment.
+    # ⚠️ SHADOW MODE par defaut : ne traite PAS les messages, log juste les compteurs.
+    # ⚠️ MODE WRITE : OUTLOOK_DELTA_SYNC_WRITE_MODE=true pour activer
     #
     # DESACTIVE PAR DEFAUT (SCHEDULER_OUTLOOK_DELTA_SYNC_ENABLED=true requis).
-    # Activer uniquement quand Etape 3.3 est validee (au moins 1 cycle reussi).
     # Voir docs/vision_connexions_universelles_01mai.md.
     if _job_enabled("SCHEDULER_OUTLOOK_DELTA_SYNC_ENABLED", default=False):
         try:
@@ -328,10 +327,29 @@ def _register_jobs(scheduler: BackgroundScheduler):
             scheduler.add_job(func=run_outlook_delta_sync,
                               trigger=IntervalTrigger(minutes=5),
                               id="outlook_delta_sync",
-                              name="Outlook delta sync (SHADOW MODE - 5 min)",
+                              name="Outlook delta sync (5 min)",
                               replace_existing=True)
-            logger.info("[Scheduler] Job enregistre : outlook_delta_sync (5 min, SHADOW MODE)")
+            logger.info("[Scheduler] Job enregistre : outlook_delta_sync (5 min)")
         except Exception as e:
             logger.error(f"[Scheduler] Import echoue pour outlook_delta_sync: {e}")
     else:
         logger.info("[Scheduler] Job DESACTIVE : outlook_delta_sync (activer via SCHEDULER_OUTLOOK_DELTA_SYNC_ENABLED=true)")
+
+    # Reconciliation nocturne mail Outlook (Phase Connexions Universelles - Etape 3.7).
+    # Tourne tous les jours a 4h30 du matin (decale d Odoo a 4h00).
+    # Compare count Microsoft vs count Raya pour chaque connexion Outlook.
+    # Si delta > 1% et > 50 mails : alerte WARNING via dispatcher.
+    # Filet ULTIME contre les fuites silencieuses (niveau 4 du pattern).
+    if _job_enabled("SCHEDULER_OUTLOOK_RECONCILIATION_ENABLED", default=True):
+        try:
+            from app.jobs.mail_outlook_reconciliation import run_outlook_reconciliation
+            scheduler.add_job(func=run_outlook_reconciliation,
+                              trigger=CronTrigger(hour=4, minute=30),
+                              id="outlook_reconciliation",
+                              name="Reconciliation nocturne Outlook (4h30)",
+                              replace_existing=True)
+            logger.info("[Scheduler] Job enregistre : outlook_reconciliation (4h30)")
+        except Exception as e:
+            logger.error(f"[Scheduler] Import echoue pour outlook_reconciliation: {e}")
+    else:
+        logger.info("[Scheduler] Job DESACTIVE : outlook_reconciliation")

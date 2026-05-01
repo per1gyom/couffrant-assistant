@@ -12,7 +12,7 @@ avec ce qui est fait pour Odoo Semaine 2.
 
 ARCHITECTURE (4 niveaux du doc vision section 2 - Pattern delta sync) :
   NIVEAU 1 - polling delta toutes les 5 min          ← CE MODULE
-  NIVEAU 2 - webhook accelerateur (Etape 3.6)
+  NIVEAU 2 - webhook accelerateur (Etape 3.6 future)
   NIVEAU 3 - Lifecycle Notifications (Etape 3.5)
   NIVEAU 4 - reconciliation nocturne (Etape 3.7)
 
@@ -20,34 +20,45 @@ FOLDERS SURVEILLES (decision Q1 + bug 17 jours) :
   - Inbox       : mails entrants
   - SentItems   : mails sortants (INVISIBLE dans le webhook actuel !)
   - JunkEmail   : rattrapage spam mal classe
-  - DeletedItems : mails supprimes (trace pour le graphe)
-  - Custom folders : auto-discovery via list mailFolders
 
-⚠️ ATTENTION : SHADOW MODE (Etape 3.3) ⚠️
+DEUX MODES DE FONCTIONNEMENT (variables Railway) :
 ─────────────────────────────────────────────────────────────
-Pour cette etape, le module fait LE POLLING DELTA mais :
-  - NE TRAITE PAS les messages (pas d appel a process_incoming_mail)
-  - NE STOCKE PAS dans mail_memory
-  - LOG juste dans connection_health_events (items_seen, items_new)
 
-Le but est de VERIFIER que :
-  1. Le delta query Microsoft fonctionne pour cet user/folder
-  2. Le delta_link est correctement stocke et reutilise au cycle suivant
-  3. Le nombre d items detectes est COHERENT avec ce que le webhook
-     actuel ingere dans la meme periode
-  4. Aucune erreur d API, de token, de format
+  MODE 1 : ACTIVATION DU JOB
+    Variable : SCHEDULER_OUTLOOK_DELTA_SYNC_ENABLED
+    Defaut : FALSE (job pas execute)
+    Si TRUE : le job tourne toutes les 5 min
 
-Une fois shadow mode valide (1-2 cycles complets reussis), on passe en
-mode actif (Etape 3.4) en activant le traitement des messages.
+  MODE 2 : COMPORTEMENT (shadow vs write)
+    Variable : OUTLOOK_DELTA_SYNC_WRITE_MODE
+    Defaut : FALSE (shadow mode = pas d ecriture dans mail_memory)
+    Si TRUE : appelle process_incoming_mail pour chaque message
+              -> ecrit dans mail_memory comme le webhook
+              -> coexistence avec le webhook (UPSERT via mail_exists)
 
-ACTIVATION :
-  Variable Railway : SCHEDULER_OUTLOOK_DELTA_SYNC_ENABLED=true
-  Par defaut FALSE pour ne pas perturber la prod actuelle.
+PROTOCOLE DE BASCULE PROPRE (decision doc vision) :
+─────────────────────────────────────────────────────────────
+Etape A : Activer SCHEDULER_OUTLOOK_DELTA_SYNC_ENABLED=true
+          -> Le job tourne en SHADOW MODE
+          -> Verifier dans /admin/health/page que Outlook apparait healthy
+          -> Verifier dans connection_health_events que items_seen > 0
+          -> Comparer items_new avec ce que le webhook ingere
+          -> Si tout concordant : etape suivante
+
+Etape B : Activer OUTLOOK_DELTA_SYNC_WRITE_MODE=true
+          -> Le job traite les messages en parallele du webhook
+          -> mail_exists() empeche les doublons
+          -> Les sortants apparaissent (avant invisibles)
+          -> Les modifications (lu/deplace) sont detectees
+          -> Observation 24-48h
+
+Etape C : Une fois validee, on peut desactiver le webhook actuel
+          en decommissionnant la subscription Microsoft (Etape 3.6)
 """
 
 import json
 import logging
-import time
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -56,23 +67,25 @@ from app.database import get_pg_conn
 logger = logging.getLogger("raya.outlook_delta_sync")
 
 # Folders surveilles. Microsoft Graph utilise des "well-known names".
-# Reference : https://learn.microsoft.com/en-us/graph/api/resources/mailfolder
 WELL_KNOWN_FOLDERS = [
     "Inbox",
     "SentItems",
     "JunkEmail",
-    # NOTE: "DeletedItems" pas inclus pour eviter spam (peut etre activable
-    # par config tenant plus tard si besoin de tracer les suppressions)
 ]
 
 # Limite de safety : max records a traiter par tick par folder
 MAX_MESSAGES_PER_TICK_PER_FOLDER = 500
 
 
+def _is_write_mode_enabled() -> bool:
+    """Lit la variable Railway OUTLOOK_DELTA_SYNC_WRITE_MODE."""
+    val = os.getenv("OUTLOOK_DELTA_SYNC_WRITE_MODE", "").strip().lower()
+    return val in ("1", "true", "yes", "on")
+
+
 def _get_folder_delta_link(connection_id: int, folder_name: str) -> Optional[str]:
     """Lit le delta_link stocke pour ce (connection_id, folder).
-    Stocke dans connection_health.metadata (JSONB) sous la clef
-    'folder_delta_links' qui est un dict {folder_name: delta_link}.
+    Stocke dans connection_health.metadata (JSONB).
     """
     conn = None
     try:
@@ -96,8 +109,7 @@ def _get_folder_delta_link(connection_id: int, folder_name: str) -> Optional[str
 
 def _set_folder_delta_link(connection_id: int, folder_name: str,
                             delta_link: str) -> bool:
-    """Stocke le nouveau delta_link pour ce folder. UPSERT du JSONB
-    metadata.folder_delta_links."""
+    """Stocke le nouveau delta_link pour ce folder."""
     conn = None
     try:
         conn = get_pg_conn()
@@ -124,7 +136,7 @@ def _set_folder_delta_link(connection_id: int, folder_name: str,
 
 def _ensure_health_registered(connection_id: int, tenant_id: str,
                                 username: str) -> None:
-    """Inscription idempotente dans connection_health (comme Odoo Semaine 2).
+    """Inscription idempotente dans connection_health.
     Polling toutes les 5 min, seuil alerte = 3x = 15 min.
     """
     try:
@@ -142,14 +154,13 @@ def _ensure_health_registered(connection_id: int, tenant_id: str,
 
 
 def _poll_folder_delta(token: str, folder_name: str,
-                        connection_id: int) -> dict:
+                        connection_id: int,
+                        write_mode: bool) -> dict:
     """Execute le delta query pour un folder donne.
 
-    Logique :
-      - Si on a un delta_link stocke : l utiliser pour ne recuperer que
-        les changements depuis la derniere fois
-      - Sinon : initialiser le delta query (1er passage = retourne tout
-        l historique recent + delta_link initial)
+    Args:
+        write_mode: si True, le $select inclut body pour pouvoir traiter
+                    les messages. Sinon, on minimise la bande passante.
 
     Returns:
         Dict avec keys:
@@ -157,33 +168,33 @@ def _poll_folder_delta(token: str, folder_name: str,
           - items_seen: nb total de messages retournes par l API
           - items_new: nb de NOUVEAUX messages (creation/modification)
           - new_delta_link: nouveau delta_link a stocker
+          - messages: liste des messages bruts (pour traitement WRITE_MODE)
           - error_detail: si status != 'ok'
     """
     from app.graph_client import graph_get
 
-    # Construction de l URL initiale ou reuse du delta_link
     delta_link = _get_folder_delta_link(connection_id, folder_name)
 
+    # Choix des champs selon le mode
+    if write_mode:
+        # Mode WRITE : on a besoin de tous les champs pour appeler process_incoming_mail
+        select_fields = "id,subject,from,receivedDateTime,bodyPreview,body,isRead,parentFolderId"
+    else:
+        # Mode SHADOW : minimum pour reduire la bande passante
+        select_fields = "id,subject,from,receivedDateTime,bodyPreview,isRead,parentFolderId"
+
     if delta_link:
-        # On reuse le delta_link complet (qui contient deja les params)
-        # Microsoft retourne un URL absolu, on appelle directement
         url = delta_link
-        # graph_get accepte des URL completes ou des paths relatifs
-        # On appelle directement via requests pour les URLs absolus
         params = None
     else:
-        # 1er passage : initialiser le delta query
         url = f"/me/mailFolders/{folder_name}/messages/delta"
-        # Limiter les fields pour reduire la bande passante en shadow mode
         params = {
-            "$select": "id,subject,from,receivedDateTime,bodyPreview,isRead,parentFolderId",
+            "$select": select_fields,
             "$top": MAX_MESSAGES_PER_TICK_PER_FOLDER,
         }
 
     try:
-        # Appel API
         if delta_link:
-            # Pour les delta_links absolus, on doit appeler directement requests
             import requests
             r = requests.get(
                 url,
@@ -196,11 +207,10 @@ def _poll_folder_delta(token: str, folder_name: str,
                 return {
                     "status": "auth_error",
                     "items_seen": 0, "items_new": 0,
-                    "new_delta_link": None,
+                    "new_delta_link": None, "messages": [],
                     "error_detail": f"HTTP {r.status_code} : token expire ou revoque",
                 }
             elif r.status_code == 410:
-                # delta_link expire (limite 30 jours), on doit reinitialiser
                 logger.warning(
                     "[OutlookDelta] delta_link expire pour folder=%s, reinit",
                     folder_name,
@@ -209,46 +219,33 @@ def _poll_folder_delta(token: str, folder_name: str,
                 return {
                     "status": "internal_error",
                     "items_seen": 0, "items_new": 0,
-                    "new_delta_link": None,
+                    "new_delta_link": None, "messages": [],
                     "error_detail": "delta_link expire, reinit au prochain cycle",
                 }
             else:
                 return {
                     "status": "network_error",
                     "items_seen": 0, "items_new": 0,
-                    "new_delta_link": None,
+                    "new_delta_link": None, "messages": [],
                     "error_detail": f"HTTP {r.status_code} : {r.text[:200]}",
                 }
         else:
-            # 1er passage : appel via graph_get
             response = graph_get(token, url, params=params)
     except Exception as e:
         return {
             "status": "network_error",
             "items_seen": 0, "items_new": 0,
-            "new_delta_link": None,
+            "new_delta_link": None, "messages": [],
             "error_detail": str(e)[:300],
         }
 
-    # Parse la reponse
     messages = response.get("value", [])
     items_seen = len(messages)
-
-    # Compter les NOUVEAUX (pas @removed = creation/modification)
     items_new = sum(1 for m in messages if "@removed" not in m)
     items_removed = items_seen - items_new
 
-    # Recuperer le nouveau delta_link
-    # Microsoft envoie soit @odata.deltaLink (fin du delta) soit
-    # @odata.nextLink (page suivante a fetcher)
     new_delta_link = response.get("@odata.deltaLink")
     next_link = response.get("@odata.nextLink")
-
-    # NOTE : pour cette etape shadow mode, on NE pagine PAS via nextLink
-    # On fait un seul appel par cycle. Si plus de MAX_MESSAGES_PER_TICK
-    # de messages a traiter, on les recuperera au cycle suivant.
-    # Si pas de deltaLink mais un nextLink : on stocke le nextLink pour
-    # poursuivre au cycle suivant.
     delta_link_to_store = new_delta_link or next_link
 
     return {
@@ -257,8 +254,105 @@ def _poll_folder_delta(token: str, folder_name: str,
         "items_new": items_new,
         "items_removed": items_removed,
         "new_delta_link": delta_link_to_store,
+        "messages": messages,
         "has_more": next_link is not None,
         "error_detail": None,
+    }
+
+
+def _process_messages_via_pipeline(messages: list, username: str,
+                                     folder_name: str) -> dict:
+    """Mode WRITE : traite chaque message via process_incoming_mail.
+
+    Reutilise le pipeline source-agnostic existant qui :
+      - Verifie mail_exists (anti-doublon avec le webhook actuel)
+      - Filtre whitelist/blacklist/anti-spam
+      - Triage Haiku
+      - Analyse IA si demande
+      - Insert dans mail_memory
+      - Heartbeat + scoring urgence
+
+    Returns:
+        Dict {processed: int, skipped: int, errors: int}
+    """
+    from app.routes.webhook_ms_handlers import process_incoming_mail
+    from app.mail_memory_store import mail_exists
+
+    processed = 0
+    skipped_existing = 0
+    skipped_removed = 0
+    errors = 0
+
+    for msg in messages:
+        try:
+            # Skip les messages supprimes (delta peut retourner @removed)
+            if "@removed" in msg:
+                skipped_removed += 1
+                continue
+
+            message_id = msg.get("id")
+            if not message_id:
+                continue
+
+            # Anti-doublon : si le mail existe deja, on skip
+            # (le webhook actuel l a peut-etre deja traite, ou un cycle precedent)
+            if mail_exists(message_id, username):
+                skipped_existing += 1
+                continue
+
+            # Extraction des champs pour process_incoming_mail
+            sender_obj = msg.get("from", {}) or {}
+            email_addr = sender_obj.get("emailAddress", {}) or {}
+            sender = email_addr.get("address", "") or ""
+            subject = msg.get("subject", "") or ""
+            preview = msg.get("bodyPreview", "") or ""
+            received_at = msg.get("receivedDateTime", "")
+            body_obj = msg.get("body", {}) or {}
+            raw_body = body_obj.get("content", "") or preview
+
+            # Traitement via le pipeline source-agnostic
+            result = process_incoming_mail(
+                username=username,
+                sender=sender,
+                subject=subject,
+                preview=preview,
+                message_id=message_id,
+                received_at=received_at,
+                mailbox_source="outlook",
+                raw_body=raw_body,
+            )
+
+            if result in ("done_ai", "stored_simple", "fallback"):
+                processed += 1
+            elif result in ("duplicate",):
+                skipped_existing += 1
+            elif result in ("ignored",):
+                # Ignore par les filtres : ce n est pas une erreur
+                pass
+            elif result == "error":
+                errors += 1
+
+        except Exception as e:
+            errors += 1
+            logger.error(
+                "[OutlookDelta][WRITE] %s/%s/%s erreur : %s",
+                username, folder_name,
+                msg.get("id", "?")[:40], str(e)[:200],
+            )
+
+    if processed > 0 or errors > 0:
+        logger.info(
+            "[OutlookDelta][WRITE] %s/%s : %d traites, %d existants, "
+            "%d removed, %d erreurs",
+            username, folder_name,
+            processed, skipped_existing, skipped_removed, errors,
+        )
+
+    return {
+        "processed": processed,
+        "skipped_existing": skipped_existing,
+        "skipped_removed": skipped_removed,
+        "errors": errors,
     }
 
 
@@ -266,13 +360,14 @@ def _poll_user_outlook(connection_id: int, tenant_id: str,
                         username: str) -> dict:
     """Polle tous les folders surveilles pour un user donne.
 
-    NOTE shadow mode : NE TRAITE PAS les messages (pas d appel a
-    process_incoming_mail). On compte juste les items pour comparaison
-    avec le webhook actuel.
+    Mode dependant de OUTLOOK_DELTA_SYNC_WRITE_MODE :
+      - shadow : ne traite PAS les messages (default)
+      - write  : appelle process_incoming_mail pour chaque message
     """
     from app.token_manager import get_valid_microsoft_token
 
     poll_started = datetime.now()
+    write_mode = _is_write_mode_enabled()
 
     # Recupere le token utilisateur
     try:
@@ -285,7 +380,6 @@ def _poll_user_outlook(connection_id: int, tenant_id: str,
         token = None
 
     if not token:
-        # Pas de token : on log l event mais avec status auth_error
         try:
             from app.connection_health import record_poll_attempt
             record_poll_attempt(
@@ -306,13 +400,16 @@ def _poll_user_outlook(connection_id: int, tenant_id: str,
     # Poll de chaque folder
     total_seen = 0
     total_new = 0
+    total_processed = 0
+    total_skipped = 0
     folders_ok = 0
     folders_failed = 0
     per_folder_stats = {}
 
     for folder_name in WELL_KNOWN_FOLDERS:
         try:
-            result = _poll_folder_delta(token, folder_name, connection_id)
+            result = _poll_folder_delta(token, folder_name,
+                                         connection_id, write_mode)
             per_folder_stats[folder_name] = result
 
             if result["status"] == "ok":
@@ -320,21 +417,27 @@ def _poll_user_outlook(connection_id: int, tenant_id: str,
                 total_seen += result["items_seen"]
                 total_new += result["items_new"]
 
-                # Stockage du nouveau delta_link
                 if result["new_delta_link"]:
                     _set_folder_delta_link(
                         connection_id, folder_name, result["new_delta_link"],
                     )
 
-                # SHADOW MODE : on log mais on ne traite PAS les messages
-                if result["items_new"] > 0:
-                    logger.info(
-                        "[OutlookDelta][SHADOW] %s/%s/%s : %d items detectes "
-                        "(NON TRAITES, shadow mode)",
-                        username, folder_name,
-                        "init" if not _get_folder_delta_link(connection_id, folder_name) else "delta",
-                        result["items_new"],
+                # MODE WRITE : on traite les messages via le pipeline
+                if write_mode and result["messages"]:
+                    process_result = _process_messages_via_pipeline(
+                        result["messages"], username, folder_name,
                     )
+                    total_processed += process_result["processed"]
+                    total_skipped += process_result["skipped_existing"]
+                    per_folder_stats[folder_name]["process_result"] = process_result
+                else:
+                    # MODE SHADOW : on log juste les compteurs
+                    if result["items_new"] > 0:
+                        logger.info(
+                            "[OutlookDelta][SHADOW] %s/%s : %d items detectes "
+                            "(NON TRAITES, shadow mode)",
+                            username, folder_name, result["items_new"],
+                        )
             else:
                 folders_failed += 1
                 logger.warning(
@@ -358,23 +461,30 @@ def _poll_user_outlook(connection_id: int, tenant_id: str,
     try:
         from app.connection_health import record_poll_attempt
 
-        # Status global : ok si majorite des folders ok
         if folders_failed >= len(WELL_KNOWN_FOLDERS) / 2:
             global_status = "internal_error"
             error_detail = f"{folders_failed}/{len(WELL_KNOWN_FOLDERS)} folders en erreur"
         else:
             global_status = "ok"
-            error_detail = (
-                f"SHADOW MODE - {folders_ok}/{len(WELL_KNOWN_FOLDERS)} folders OK, "
-                f"items_new={total_new} (NON TRAITES)"
-            )
+            mode_label = "WRITE" if write_mode else "SHADOW"
+            if write_mode:
+                error_detail = (
+                    f"WRITE MODE - {folders_ok}/{len(WELL_KNOWN_FOLDERS)} folders OK, "
+                    f"items_new={total_new}, processed={total_processed}, "
+                    f"skipped={total_skipped}"
+                )
+            else:
+                error_detail = (
+                    f"SHADOW MODE - {folders_ok}/{len(WELL_KNOWN_FOLDERS)} folders OK, "
+                    f"items_new={total_new} (NON TRAITES)"
+                )
 
         duration_ms = int((datetime.now() - poll_started).total_seconds() * 1000)
         record_poll_attempt(
             connection_id=connection_id,
             status=global_status,
             items_seen=total_seen,
-            items_new=total_new,
+            items_new=total_processed if write_mode else total_new,
             duration_ms=duration_ms,
             error_detail=error_detail,
             poll_started_at=poll_started,
@@ -389,24 +499,18 @@ def _poll_user_outlook(connection_id: int, tenant_id: str,
         "folders_failed": folders_failed,
         "total_items_seen": total_seen,
         "total_items_new": total_new,
+        "total_processed": total_processed,
+        "write_mode": write_mode,
         "per_folder": per_folder_stats,
     }
 
 
 def _get_outlook_connections() -> list:
-    """Retourne la liste des connexions Outlook actives (multi-user, multi-tenant).
-
-    Format retourne :
-      [
-        {"connection_id": int, "tenant_id": str, "username": str, "email": str},
-        ...
-      ]
-    """
+    """Retourne la liste des connexions Outlook actives (multi-user, multi-tenant)."""
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        # On filtre sur tool_type = 'microsoft' ou 'outlook' et statut 'connected'
         c.execute("""
             SELECT id, tenant_id, username, label, status, tool_type
             FROM tenant_connections
@@ -430,15 +534,9 @@ def _get_outlook_connections() -> list:
 
 
 def run_outlook_delta_sync():
-    """Fonction principale appellee par APScheduler toutes les 5 min.
-
-    Pour chaque connexion Outlook active :
-      - Recupere le token Microsoft
-      - Polle chaque folder (Inbox, SentItems, JunkEmail) via delta query
-      - Log dans connection_health_events
-      - SHADOW MODE : ne traite PAS les messages
-    """
+    """Fonction principale appellee par APScheduler toutes les 5 min."""
     started_at = datetime.now()
+    write_mode = _is_write_mode_enabled()
     connections = _get_outlook_connections()
 
     if not connections:
@@ -447,6 +545,7 @@ def run_outlook_delta_sync():
 
     total_seen = 0
     total_new = 0
+    total_processed = 0
     users_ok = 0
     users_failed = 0
 
@@ -463,6 +562,7 @@ def run_outlook_delta_sync():
                 users_failed += 1
             total_seen += result.get("total_items_seen", 0)
             total_new += result.get("total_items_new", 0)
+            total_processed += result.get("total_processed", 0)
         except Exception as e:
             users_failed += 1
             logger.error(
@@ -472,8 +572,10 @@ def run_outlook_delta_sync():
 
     duration = (datetime.now() - started_at).total_seconds()
     if total_new > 0 or users_failed > 0:
+        mode_label = "WRITE" if write_mode else "SHADOW"
         logger.info(
-            "[OutlookDelta] Cycle termine en %.1fs : %d connexions OK, "
-            "%d echec, %d items vus, %d nouveaux (SHADOW MODE - non traites)",
-            duration, users_ok, users_failed, total_seen, total_new,
+            "[OutlookDelta][%s] Cycle termine en %.1fs : %d connexions OK, "
+            "%d echec, %d items vus, %d nouveaux, %d traites",
+            mode_label, duration, users_ok, users_failed,
+            total_seen, total_new, total_processed,
         )
