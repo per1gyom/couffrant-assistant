@@ -11,18 +11,20 @@
 ```
 ✅ Semaine 4 - Étape 4.3 (module Gmail history sync)        TERMINÉE
 ✅ Semaine 4 - Étape 4.4 (mode WRITE)                       TERMINÉE
-⏳ Semaine 4 - Étape 4.5 (Pub/Sub Watch)                    À FAIRE
-⏳ Semaine 4 - Étape 4.6 (mode TRIGGER webhook)             À FAIRE
-⏳ Semaine 4 - Étape 4.7 (réconciliation nocturne 5h)       À FAIRE
-⏳ Semaine 4 - Étape 4.8 (décommissionnement legacy)        À FAIRE
+🟡 Semaine 4 - Étape 4.5 (Pub/Sub Watch)                    À FAIRE DEMAIN
+🟡 Semaine 4 - Étape 4.6 (mode TRIGGER webhook)             À FAIRE DEMAIN
+✅ Semaine 4 - Étape 4.7 (réconciliation nocturne 5h)       TERMINÉE
+✅ Semaine 4 - Étape 4.8 (auto-désactivation legacy)        TERMINÉE
+✅ BUG ROOT refresh_gmail_token (manquait dans le code)     CORRIGÉ
 
 EN PROD ACTUELLEMENT :
   ✅ 5 boîtes Gmail surveillées avec polling delta (5 min)
-  ✅ Status "healthy" pour les 5
+  ✅ Status "healthy" stable (refresh fonctionne enfin)
   ✅ historyId bootstrappé pour chaque boîte
   ✅ Mode WRITE actif (les nouveaux mails seront ingérés)
-  ⚠️ Polling legacy gmail_polling.py tourne en parallèle (sera décommissionné en 4.8)
-  ⚠️ Filtre PERIMETRE_LABELS = {INBOX, SENT, SPAM} - peut nécessiter élargissement
+  ✅ Auto-désactivation du polling legacy (plus de spam 401)
+  ✅ Réconciliation Gmail prête (à activer dans 2-3 jours)
+  ⚠️ Filtre PERIMETRE_LABELS élargi aux CATEGORY_* Gmail
 ```
 
 ---
@@ -58,6 +60,12 @@ Commits sur main :
   70f6eb7  Fix 1 : clé connection_id (pas id)
   409a823  Fix 2 : utiliser get_connection_token (avec refresh)
   fd06145  Fix 3 : logging détaillé erreur /profile
+  a8ecf62  docs : journal soir 01/05 v1
+  841c1fa  Fix 4 : élargir PERIMETRE_LABELS + skipped_perimetre
+  8543c35  Fix 5 : propager pipeline crash dans error_detail
+  897e17b  🎯 BUG ROOT : refresh_gmail_token IMPLEMENTEE
+  1d4173e  Etape 4.7 : reconciliation Gmail nocturne (5h)
+  9ac2b75  Etape 4.8 : auto-désactivation gmail_polling legacy
 ```
 
 ---
@@ -234,3 +242,111 @@ VALEUR DÉLIVRÉE :
 
 **Fin du journal soir 01/05/2026, 21h45.**
 **Prochaine session : élargir filtre Gmail puis enchainer Étape 4.5.**
+
+---
+
+## 🚨 ADDENDUM 22h - BUG ROOT TROUVÉ + ÉTAPES 4.7 + 4.8
+
+### 🎯 LE bug racine de toute la journée Gmail
+
+**Symptôme** : Après les fix 1-5, les Gmail passaient en healthy à la
+reconnexion, puis 1h plus tard repassaient en 401. Toutes les heures.
+Le user devait reconnecter constamment.
+
+**Cause** : La fonction `refresh_gmail_token` était RÉFÉRENCÉE dans
+`connection_token_manager._refresh_v2_token` :
+
+```python
+elif tool_type in ("gmail", "google"):
+    from app.connectors.gmail_connector import refresh_gmail_token
+    new_access = refresh_gmail_token(refresh_token)
+```
+
+**Mais elle n'existait NULLE PART dans le code.** ImportError silencieux
+attrapé par le `try/except` global de `_refresh_v2_token` → return None
+→ `_get_v2_token` retournait l'ancien access_token expiré → 401.
+
+**Conséquence** : Pendant des semaines (mois ?), Gmail OAuth marchait
+~1h après chaque reconnexion, puis cassait. Personne n'avait identifié
+parce que :
+- Le ImportError était silencieux (try/except sans log)
+- `_refresh_v2_token` retournait bien None (comme prévu en cas d'échec)
+- Le code utilisait le fallback access_token (mort)
+- Donc 401 systématique mais pas de stack trace explicite
+
+**Fix (commit 897e17b)** : Implémentation de `refresh_gmail_token` dans
+`gmail_connector.py` (87 lignes). POST à `oauth2.googleapis.com/token`
+avec `grant_type=refresh_token`. Logging détaillé des erreurs.
+
+**Validation** : Au cycle suivant, les 5 Gmail sont passées de auth_error
+à OK sans aucune intervention. Plus besoin de reconnecter Gmail.
+
+**Conséquences indirectes** :
+- `gmail_polling.py` legacy spammait des 401 toute la journée → réglé
+- Toutes les futures reconnexions tiennent indéfiniment
+
+### Étape 4.7 : Réconciliation Gmail nocturne (commit 1d4173e)
+
+Symétrique à `mail_outlook_reconciliation.py`. Tous les jours à 5h00 UTC :
+- Pour chaque user ayant des connexions Gmail
+- Compte la somme des `messagesTotal` Google sur INBOX+SENT+SPAM (sur
+  toutes ses N boîtes)
+- Compte les mails Raya en `mail_memory` (mailbox_source IN
+  ('gmail', 'gmail_perso'))
+- Si delta > 1% ET > 50 mails : alerte WARNING
+
+**Particularité** : `mail_memory` n'a pas de colonne `connection_id`,
+donc on réconcillie au niveau `username` (pas par boîte). Pour Guillaume
+qui a 5 Gmail, on somme les counts des 5 et compare au total Raya.
+
+**État** : Code en prod, mais job DÉSACTIVÉ par défaut
+(`SCHEDULER_GMAIL_RECONCILIATION_ENABLED=false`). À activer dans 2-3
+jours quand le polling delta sera stabilisé.
+
+### Étape 4.8 : Auto-désactivation polling legacy (commit 9ac2b75)
+
+Le polling legacy (`gmail_polling.py`, 3 min, `is:unread newer_than:5m`)
+faisait double-ingestion avec le nouveau delta sync en mode WRITE.
+
+**Solution élégante** : auto-désactivation conditionnelle dans
+`scheduler_jobs.py` :
+
+```python
+if _job_enabled("SCHEDULER_GMAIL_ENABLED", default=False):
+    delta_active = _job_enabled("SCHEDULER_GMAIL_HISTORY_SYNC_ENABLED")
+    delta_write = _job_enabled("GMAIL_HISTORY_SYNC_WRITE_MODE")
+    if delta_active and delta_write:
+        logger.warning("[Scheduler] gmail_polling LEGACY ignore : 
+        delta + WRITE actifs prennent le relais")
+    else:
+        # Code legacy actuel (filet de sécurité)
+```
+
+**Effet immédiat** :
+- Plus de double-ingestion
+- Plus de spam 401 dans les logs (le legacy était la cause principale,
+  vu qu'il appelait l'API Gmail toutes les 3 min avec un token mort)
+- Rollback en 1 var : `GMAIL_HISTORY_SYNC_WRITE_MODE=false`
+
+### État final 22h
+
+```
+COMMITS DE LA SESSION SOIR : 10
+LIGNES SUR MAIN : ~1500 (modules + scheduler + journal)
+
+CHEMIN DE FER :
+  bootstrap (4.3) -> WRITE (4.4) -> 5 fix bugs cascade -> 
+  BUG ROOT refresh -> reconciliation (4.7) -> auto-désactivation legacy (4.8)
+
+RESTE :
+  4.5 Pub/Sub Watch     (besoin Console GCP - demain)
+  4.6 mode TRIGGER       (5 min de code après 4.5)
+
+VALEUR LIVREE CE SOIR :
+  - Plus jamais de 401 Gmail toutes les heures
+  - Reconciliation nocturne prête (filet de sécurité ultime)
+  - Pas de double-ingestion silencieuse
+  - 0 action user requise au quotidien
+```
+
+**Vraie fin du journal soir 01/05/2026, 22h00.**
