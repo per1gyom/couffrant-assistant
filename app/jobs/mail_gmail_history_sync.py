@@ -41,9 +41,33 @@ _GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
 # Limite de safety : max records a traiter par tick
 MAX_MESSAGES_PER_TICK = 500
 
-# Labels Gmail consideres comme dans le perimetre (similaire aux
-# folders Outlook). Tout label hors liste = skip cote pipeline.
-PERIMETRE_LABELS = {"INBOX", "SENT", "SPAM"}
+# Labels Gmail consideres comme dans le perimetre.
+#
+# Logique : Gmail attribue TOUJOURS un label "container" (INBOX, SENT,
+# SPAM, TRASH) ET potentiellement une CATEGORY_* (Promotions, Social,
+# Updates, Forums, Personal) en plus pour les mails en INBOX.
+#
+# On indexe tous les mails qui sont dans :
+#   - INBOX (boite de reception, toutes categories Gmail incluses)
+#   - SENT (mails envoyes)
+#   - SPAM (spam mal classe par Gmail, on veut quand meme les voir)
+#
+# Les CATEGORY_* sont AJOUTEES car Gmail peut PARFOIS classer un mail
+# en categorie SANS le label INBOX (cas rares, ex : mails archives auto
+# ou dans certains dossiers tries). Pour etre exhaustif, on les inclut.
+#
+# Exclus volontairement : TRASH (corbeille), DRAFT (brouillons),
+# CHAT (messages chat Google).
+#
+# Note Etape 4.4 (01/05/2026 soir) : initialement {INBOX, SENT, SPAM}
+# uniquement. Elargi suite a observation : un mail test detecte
+# (items_new=1) mais skip silencieux (processed=0, skipped=0) car
+# probablement classe en categorie sans label INBOX dans le history feed.
+PERIMETRE_LABELS = {
+    "INBOX", "SENT", "SPAM",
+    "CATEGORY_PERSONAL", "CATEGORY_PROMOTIONS", "CATEGORY_SOCIAL",
+    "CATEGORY_UPDATES", "CATEGORY_FORUMS",
+}
 
 
 def _is_write_mode_enabled() -> bool:
@@ -339,6 +363,7 @@ def _process_messages_via_pipeline(token: str, messages_meta: list,
 
     processed = 0
     skipped_existing = 0
+    skipped_perimetre = 0
     errors = 0
     fetched = 0
 
@@ -374,9 +399,17 @@ def _process_messages_via_pipeline(token: str, messages_meta: list,
             snippet = full_msg.get("snippet", "") or ""
 
             # Filtre par labels : si pas dans le perimetre, skip
+            # avec un log explicite (avant : continue silencieux)
             label_ids = full_msg.get("labelIds", [])
             in_perimetre = any(lid in PERIMETRE_LABELS for lid in label_ids)
             if not in_perimetre:
+                logger.info(
+                    "[GmailHistory][WRITE] Skip hors perimetre %s/%s : "
+                    "labels=%s (sujet=%s)",
+                    username, message_id[:30],
+                    label_ids, subject[:50],
+                )
+                skipped_perimetre += 1
                 continue
 
             # Pipeline source-agnostic
@@ -406,16 +439,18 @@ def _process_messages_via_pipeline(token: str, messages_meta: list,
                 username, msg_meta.get("id", "?")[:30], str(e)[:200],
             )
 
-    if processed > 0 or errors > 0:
+    if processed > 0 or errors > 0 or skipped_perimetre > 0:
         logger.info(
             "[GmailHistory][WRITE] %s : %d traites, %d existants, "
-            "%d fetches, %d erreurs",
-            username, processed, skipped_existing, fetched, errors,
+            "%d hors perimetre, %d fetches, %d erreurs",
+            username, processed, skipped_existing, skipped_perimetre,
+            fetched, errors,
         )
 
     return {
         "processed": processed,
         "skipped_existing": skipped_existing,
+        "skipped_perimetre": skipped_perimetre,
         "errors": errors,
         "fetched": fetched,
     }
@@ -461,6 +496,8 @@ def _poll_user_gmail(connection_id: int, tenant_id: str,
     items_modified = result.get("items_modified", 0)
     processed = 0
     skipped = 0
+    skipped_perimetre = 0
+    errors_pipeline = 0
 
     # Stockage du nouveau historyId si succes
     if result["status"] == "ok" and result.get("new_history_id"):
@@ -474,6 +511,8 @@ def _poll_user_gmail(connection_id: int, tenant_id: str,
             )
             processed = process_result["processed"]
             skipped = process_result["skipped_existing"]
+            skipped_perimetre = process_result.get("skipped_perimetre", 0)
+            errors_pipeline = process_result.get("errors", 0)
         except Exception as e:
             logger.error(
                 "[GmailHistory][WRITE] %s/%s pipeline crash : %s",
@@ -498,7 +537,9 @@ def _poll_user_gmail(connection_id: int, tenant_id: str,
                 error_detail = (
                     f"WRITE MODE - items_seen={items_seen}, "
                     f"items_new={items_new}, items_modified={items_modified}, "
-                    f"processed={processed}, skipped={skipped}"
+                    f"processed={processed}, skipped_existing={skipped}, "
+                    f"skipped_perimetre={skipped_perimetre}, "
+                    f"errors={errors_pipeline}"
                 )
             else:
                 error_detail = (
