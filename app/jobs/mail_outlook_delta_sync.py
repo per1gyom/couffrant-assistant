@@ -511,8 +511,11 @@ def _get_outlook_connections() -> list:
     try:
         conn = get_pg_conn()
         c = conn.cursor()
+        # FIX 01/05/2026 : la colonne est 'created_by', pas 'username'.
+        # tenant_connections.created_by stocke le username de l'utilisateur
+        # qui possede la connexion.
         c.execute("""
-            SELECT id, tenant_id, username, label, status, tool_type
+            SELECT id, tenant_id, created_by, label, status, tool_type
             FROM tenant_connections
             WHERE tool_type IN ('microsoft', 'outlook')
               AND status = 'connected'
