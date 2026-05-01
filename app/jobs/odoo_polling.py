@@ -15,6 +15,15 @@ dashboard, ronde de nuit 5h) reste valable et s applique a ces jobs enqueues.
 
 Le jour ou OpenFire livre le module custom, on desactive ce polling et les
 vrais webhooks prennent le relais sans autre modification.
+
+INSTRUMENTATION CONNEXIONS UNIVERSELLES (1er mai 2026, Semaine 2) :
+─────────────────────────────────────────────────────────────────────
+A chaque tick, on log dans connection_health_events pour le liveness check
+universel. Voir docs/vision_connexions_universelles_01mai.md.
+
+Le polling Odoo est ainsi visible dans /admin/health/page comme toutes les
+autres connexions Raya, et beneficie du meme filet d alerte (silence
+detecte > 6 min = alerte automatique).
 """
 
 import logging
@@ -187,26 +196,115 @@ def _get_tenants_to_poll() -> list:
     return sorted(tenants)
 
 
+def _get_odoo_connection_id(tenant_id: str) -> Optional[int]:
+    """Retourne l id de la connexion Odoo dans tenant_connections pour ce tenant.
+    Cherche tool_type='odoo'. Retourne None si pas trouve (ne devrait pas
+    arriver car la connexion Odoo est creee a la connexion initiale du tenant).
+    """
+    from app.database import get_pg_conn
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id FROM tenant_connections
+            WHERE tenant_id = %s AND tool_type = 'odoo'
+            ORDER BY id LIMIT 1
+        """, (tenant_id,))
+        row = c.fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        logger.debug("[OdooPolling] _get_odoo_connection_id echec : %s", str(e)[:200])
+        return None
+    finally:
+        if conn: conn.close()
+
+
+def _ensure_health_registered(tenant_id: str, connection_id: int) -> None:
+    """Inscrit la connexion Odoo dans connection_health (idempotent).
+    Appele au demarrage de chaque cycle. Si deja inscrit, ne fait rien
+    grace a UPSERT.
+    """
+    try:
+        from app.connection_health import register_connection
+        # Polling toutes les 2 min, seuil alerte = 3x = 6 min
+        register_connection(
+            connection_id=connection_id,
+            tenant_id=tenant_id,
+            username="system",  # le polling est cross-user, pas attache a un user
+            connection_type="odoo",
+            expected_poll_interval_seconds=120,
+            alert_threshold_seconds=360,
+        )
+    except Exception as e:
+        logger.debug("[OdooPolling] register_connection echec : %s", str(e)[:200])
+
+
 def run_odoo_polling():
     """Fonction principale declenchee par APScheduler toutes les 2 min.
     Parcourt les modeles webhookes pour chaque tenant et enqueue les
-    changements depuis le dernier poll."""
+    changements depuis le dernier poll.
+
+    INSTRUMENTATION CONNEXIONS UNIVERSELLES :
+    A chaque tick, on log un event dans connection_health_events.
+    - Si tout marche : status='ok' (meme si 0 records, c est OK)
+    - Si fetch_error sur >50% des modeles : status='internal_error'
+    """
+    from datetime import datetime as _dt
+    poll_started = _dt.now()
+
     tenants = _get_tenants_to_poll()
     if not tenants:
         logger.debug("[OdooPolling] Aucun tenant configure, skip")
         return
 
     for tenant_id in tenants:
+        # Inscription dans connection_health (idempotent)
+        connection_id = _get_odoo_connection_id(tenant_id)
+        if connection_id:
+            _ensure_health_registered(tenant_id, connection_id)
+
         total_new = 0
         total_enq = 0
+        errors = 0
+        models_polled = 0
         for model in POLLED_MODELS:
+            models_polled += 1
             try:
                 result = _poll_model(tenant_id, model)
                 total_new += result.get("new_records", 0)
                 total_enq += result.get("enqueued", 0)
+                if result.get("status") == "fetch_error":
+                    errors += 1
             except Exception as e:
+                errors += 1
                 logger.error("[OdooPolling] %s/%s crash : %s",
                              tenant_id, model, str(e)[:200])
         if total_new > 0:
             logger.info("[OdooPolling] tenant=%s : %d records vus, %d enqueues (14 modeles)",
                         tenant_id, total_new, total_enq)
+
+        # LIVENESS CHECK : log de la tentative dans connection_health_events
+        if connection_id:
+            try:
+                from app.connection_health import record_poll_attempt
+                duration_ms = int((_dt.now() - poll_started).total_seconds() * 1000)
+                # Status global : ok si <50% des modeles ont echoue, sinon internal_error
+                if errors >= models_polled / 2:
+                    status = "internal_error"
+                    error_detail = f"{errors}/{models_polled} modeles en erreur"
+                else:
+                    status = "ok"
+                    error_detail = None if errors == 0 else f"{errors} modele(s) en erreur (non bloquant)"
+
+                record_poll_attempt(
+                    connection_id=connection_id,
+                    status=status,
+                    items_seen=total_new,
+                    items_new=total_enq,
+                    duration_ms=duration_ms,
+                    error_detail=error_detail,
+                    poll_started_at=poll_started,
+                )
+            except Exception as e:
+                logger.debug("[OdooPolling] record_poll_attempt echec : %s", str(e)[:200])
