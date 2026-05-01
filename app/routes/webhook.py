@@ -12,6 +12,12 @@ Pipeline Microsoft Graph (5 niveaux) :
 
 process_incoming_mail() est source-agnostic (7-1b) :
 consommé par le webhook Microsoft ET le polling Gmail.
+Definition dans app/routes/webhook_ms_handlers.py.
+
+Patterns statiques (_NOREPLY_PREFIXES, _BULK_DOMAINS, _BULK_SUBJECT_KEYWORDS)
+sont definis dans webhook_microsoft.py, ou ils sont reellement utilises par
+_is_bulk_heuristic(). Ils etaient ici (resilience SPLIT-R3) mais morts.
+Deplaces le 01/05/2026 dans le cadre du fix import circulaire.
 
 7-7 : heartbeat webhook_microsoft après traitement réussi.
 7-8 : endpoint POST /webhook/twilio (WhatsApp entrant).
@@ -24,44 +30,14 @@ import re
 import threading
 from fastapi import APIRouter, Request, Response
 
-# Note : _process_mail est importe dans webhook_notification en lazy
-# (pas au top-level) pour eviter un import circulaire via
-# webhook_ms_handlers -> webhook_microsoft -> webhook_ms_handlers.
+# NOTE 01/05/2026 : l import circulaire entre webhook_ms_handlers et
+# webhook_microsoft a ete corrige (suppression de la ligne morte
+# "from app.routes.webhook_ms_handlers import process_incoming_mail,
+# _process_mail" dans webhook_microsoft.py). L import lazy ci-dessous
+# n est donc plus une protection contre un cycle, juste un import
+# tardif normal.
 
 router = APIRouter(tags=["webhook"])
-
-
-# ─── PATTERNS STATIQUES (filet de base) ───
-
-_NOREPLY_PREFIXES = (
-    "noreply@", "no-reply@", "no_reply@", "donotreply@",
-    "do-not-reply@", "mailer-daemon@", "postmaster@",
-    "bounce@", "bounces@", "notifications@", "notification@",
-    "newsletter@", "newsletters@", "alerts@", "alert@",
-    "automated@", "auto@", "system@", "support-noreply@",
-    "info@noreply.", "reply@",
-)
-
-_BULK_DOMAINS = (
-    "sendgrid.net", "sendgrid.com", "mailchimp.com", "mandrillapp.com",
-    "mailgun.org", "hubspot.com", "salesforce.com", "marketo.com",
-    "constantcontact.com", "campaign-monitor.com", "klaviyo.com",
-    "brevo.com", "sendinblue.com", "mailjet.com",
-    "amazonses.com", "bounce.linkedin.com", "facebookmail.com",
-    "twitter.com", "notifications.google.com",
-)
-
-_BULK_SUBJECT_KEYWORDS = (
-    "unsubscribe", "se désabonner", "newsletter", "digest",
-    "weekly recap", "rapport hebdomadaire", "monthly report",
-    "invoice #", "facture n°", "receipt for", "reçu de",
-    "your order", "votre commande", "order confirmation",
-    "confirmation de commande", "tracking", "livraison",
-    "automated message", "message automatique",
-    "do not reply", "ne pas répondre",
-    "verification code", "code de vérification",
-    "one-time password", "mot de passe à usage unique",
-)
 
 
 # ─── RÈGLES RAYA (mail_filter) ───
@@ -105,8 +81,10 @@ async def webhook_notification(request: Request):
         if not message_id or mail_exists(message_id, username):
             continue
 
-        # Import lazy pour eviter un import circulaire au demarrage
-        # (webhook_ms_handlers <-> webhook_microsoft s importent mutuellement).
+        # Import lazy : tardif mais plus pour eviter un cycle (le cycle a
+        # ete corrige le 01/05/2026 dans webhook_microsoft.py). Maintenu
+        # car ce module charge de nombreuses dependances IA / DB / etc,
+        # pas la peine de le charger au demarrage.
         from app.routes.webhook_ms_handlers import _process_mail
 
         threading.Thread(

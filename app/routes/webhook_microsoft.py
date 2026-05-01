@@ -1,14 +1,80 @@
 """
-Handler Microsoft Graph mail + filtres.
+Handler Microsoft Graph mail + filtres (helpers de filtrage uniquement).
 Extrait de webhook.py -- SPLIT-R3.
+
+NOTE 01/05/2026 : ce module ne contient QUE des helpers de filtrage
+(_get_mail_filter_rules, _matches_filter, _is_bulk_heuristic,
+_is_spam_by_rules) et leurs constantes (_NOREPLY_PREFIXES,
+_BULK_DOMAINS, _BULK_SUBJECT_KEYWORDS).
+
+DEUX BUGS HISTORIQUES corriges le 01/05/2026 :
+
+  Bug 1 — Import circulaire mortel
+    L import top-level vers webhook_ms_handlers (process_incoming_mail,
+    _process_mail) qui existait ici a ete supprime. Il etait vestigial
+    (re-exposition de noms apres SPLIT-F7), aucun code du repo ne
+    l utilisait. Mais il provoquait un import circulaire fatal :
+        webhook.py lazy-import webhook_ms_handlers
+          -> webhook_ms_handlers top-level import webhook_microsoft
+            -> webhook_microsoft top-level import webhook_ms_handlers
+              -> ImportError: cannot import name process_incoming_mail
+                 from partially initialized module
+    Cet import circulaire causait un 500 sur CHAQUE notification
+    Microsoft Graph recue, donc ZERO mail Outlook ingere depuis
+    ~17 jours.
+
+  Bug 2 — Constantes dans le mauvais module
+    _NOREPLY_PREFIXES, _BULK_DOMAINS, _BULK_SUBJECT_KEYWORDS sont
+    utilisees par _is_bulk_heuristic() ci-dessous, mais etaient
+    definies dans webhook.py (residu de la meme migration SPLIT-R3).
+    Resultat : meme si le 500 n existait pas, l ingestion plantait
+    avec NameError des qu un mail arrivait. Les constantes sont
+    maintenant au bon endroit, juste avant les fonctions qui les
+    utilisent.
 """
 import json,re,threading
 from datetime import datetime
 from app.database import get_pg_conn
 from app.token_manager import get_valid_microsoft_token
 from app.logging_config import get_logger
-from app.routes.webhook_ms_handlers import process_incoming_mail,_process_mail  # noqa
 logger=get_logger("raya.webhook.ms")
+
+
+# ─── PATTERNS STATIQUES (filet de base) ───
+# Deplaces depuis webhook.py le 01/05/2026 : ces constantes sont utilisees
+# par _is_bulk_heuristic() ci-dessous, mais etaient definies dans webhook.py
+# (residu de la migration SPLIT-R3). Les fonctions levaient donc NameError
+# a chaque appel. Maintenant elles sont au bon endroit.
+
+_NOREPLY_PREFIXES = (
+    "noreply@", "no-reply@", "no_reply@", "donotreply@",
+    "do-not-reply@", "mailer-daemon@", "postmaster@",
+    "bounce@", "bounces@", "notifications@", "notification@",
+    "newsletter@", "newsletters@", "alerts@", "alert@",
+    "automated@", "auto@", "system@", "support-noreply@",
+    "info@noreply.", "reply@",
+)
+
+_BULK_DOMAINS = (
+    "sendgrid.net", "sendgrid.com", "mailchimp.com", "mandrillapp.com",
+    "mailgun.org", "hubspot.com", "salesforce.com", "marketo.com",
+    "constantcontact.com", "campaign-monitor.com", "klaviyo.com",
+    "brevo.com", "sendinblue.com", "mailjet.com",
+    "amazonses.com", "bounce.linkedin.com", "facebookmail.com",
+    "twitter.com", "notifications.google.com",
+)
+
+_BULK_SUBJECT_KEYWORDS = (
+    "unsubscribe", "se désabonner", "newsletter", "digest",
+    "weekly recap", "rapport hebdomadaire", "monthly report",
+    "invoice #", "facture n°", "receipt for", "reçu de",
+    "your order", "votre commande", "order confirmation",
+    "confirmation de commande", "tracking", "livraison",
+    "automated message", "message automatique",
+    "do not reply", "ne pas répondre",
+    "verification code", "code de vérification",
+    "one-time password", "mot de passe à usage unique",
+)
 
 
 def _get_mail_filter_rules(username: str) -> tuple:
