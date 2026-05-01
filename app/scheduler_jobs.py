@@ -309,3 +309,29 @@ def _register_jobs(scheduler: BackgroundScheduler):
             logger.error(f"[Scheduler] Import echoue pour odoo_reconciliation: {e}")
     else:
         logger.info("[Scheduler] Job DESACTIVE : odoo_reconciliation")
+
+    # Outlook delta sync (Phase Connexions Universelles - Semaine 3, Etape 3.3).
+    # Tourne toutes les 5 min. Pour chaque connexion Outlook active :
+    # - Polle Inbox + SentItems + JunkEmail via Microsoft Graph delta query
+    # - Stocke le delta_link par folder dans connection_health.metadata
+    # - Inscrit dans connection_health + log dans connection_health_events
+    #
+    # ⚠️ SHADOW MODE : ne traite PAS les messages, log juste les compteurs.
+    # Permet de valider le polling delta avant de basculer vraiment.
+    #
+    # DESACTIVE PAR DEFAUT (SCHEDULER_OUTLOOK_DELTA_SYNC_ENABLED=true requis).
+    # Activer uniquement quand Etape 3.3 est validee (au moins 1 cycle reussi).
+    # Voir docs/vision_connexions_universelles_01mai.md.
+    if _job_enabled("SCHEDULER_OUTLOOK_DELTA_SYNC_ENABLED", default=False):
+        try:
+            from app.jobs.mail_outlook_delta_sync import run_outlook_delta_sync
+            scheduler.add_job(func=run_outlook_delta_sync,
+                              trigger=IntervalTrigger(minutes=5),
+                              id="outlook_delta_sync",
+                              name="Outlook delta sync (SHADOW MODE - 5 min)",
+                              replace_existing=True)
+            logger.info("[Scheduler] Job enregistre : outlook_delta_sync (5 min, SHADOW MODE)")
+        except Exception as e:
+            logger.error(f"[Scheduler] Import echoue pour outlook_delta_sync: {e}")
+    else:
+        logger.info("[Scheduler] Job DESACTIVE : outlook_delta_sync (activer via SCHEDULER_OUTLOOK_DELTA_SYNC_ENABLED=true)")
