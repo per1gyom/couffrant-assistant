@@ -107,7 +107,16 @@ def _set_last_seen(tenant_id: str, model: str, last_seen: datetime, count: int):
 
 def _poll_model(tenant_id: str, model: str) -> dict:
     """Interroge Odoo pour ce modele, enqueue les records modifies depuis
-    last_seen. Retourne un dict avec les stats."""
+    last_seen. Retourne un dict avec les stats.
+
+    RESILIENCE (Semaine 2 - Etape 2.4) : l appel XML-RPC est wrappe par
+    @protected pour gerer automatiquement les micro-coupures (retry
+    immediat) et le rate limiting. Le circuit breaker n est pas active
+    sur _poll_model car la granularite est par modele : on prefere que
+    record_poll_attempt() agrege les erreurs au niveau du tenant et que
+    le seuil consecutive_failures de connection_health declenche le
+    circuit breaker au bon niveau.
+    """
     from app.connectors.odoo_connector import odoo_call
     from app.webhook_queue import enqueue
     import secrets
@@ -121,16 +130,43 @@ def _poll_model(tenant_id: str, model: str) -> dict:
         last_seen = datetime.now(timezone.utc) - timedelta(minutes=10)
 
     since = last_seen.strftime("%Y-%m-%d %H:%M:%S")
+
+    # Wrap l appel XML-RPC avec resilience (retry immediat + classification)
+    connection_id = _get_odoo_connection_id(tenant_id)
     try:
-        records = odoo_call(
-            model=model, method="search_read",
-            kwargs={
-                "domain": [["write_date", ">", since]],
-                "fields": ["id", "write_date"],
-                "limit": MAX_RECORDS_PER_TICK,
-                "order": "write_date asc",
-            },
-        )
+        if connection_id:
+            from app.connection_resilience import protected
+            # On cree une fonction locale decoree juste pour cet appel.
+            # record_in_health=False car on ecrit nous-memes l event au niveau
+            # du cycle complet (pas par modele).
+            @protected(
+                connection_id=connection_id,
+                max_immediate_retries=2,   # 2 retries au lieu de 3 (par modele)
+                max_backoff_retries=0,      # pas de backoff (le scheduler retentera dans 2 min)
+                record_in_health=False,
+            )
+            def _do_search_read():
+                return odoo_call(
+                    model=model, method="search_read",
+                    kwargs={
+                        "domain": [["write_date", ">", since]],
+                        "fields": ["id", "write_date"],
+                        "limit": MAX_RECORDS_PER_TICK,
+                        "order": "write_date asc",
+                    },
+                )
+            records = _do_search_read()
+        else:
+            # Fallback sans resilience si pas de connection_id (ne devrait pas arriver)
+            records = odoo_call(
+                model=model, method="search_read",
+                kwargs={
+                    "domain": [["write_date", ">", since]],
+                    "fields": ["id", "write_date"],
+                    "limit": MAX_RECORDS_PER_TICK,
+                    "order": "write_date asc",
+                },
+            )
     except Exception as e:
         logger.warning("[OdooPolling] %s fetch failed : %s", model, str(e)[:200])
         return {"model": model, "status": "fetch_error", "error": str(e)[:200]}
