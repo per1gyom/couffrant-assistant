@@ -162,13 +162,26 @@ def get_subscriptions_for_user(username: str) -> list:
 
 
 def get_subscription_info(subscription_id: str) -> dict | None:
+    """Retourne les infos d une subscription Microsoft Graph.
+    
+    Utilise par le webhook handler pour valider le clientState et router
+    la notification vers le bon user.
+    
+    Etape 3.6 (01/05/2026) : ajout de connection_id au retour pour permettre
+    au webhook trigger mode de declencher un poll delta sur la bonne connexion.
+    """
     conn = None
     try:
         conn = get_pg_conn(); c = conn.cursor()
-        c.execute("SELECT client_state, username FROM webhook_subscriptions WHERE subscription_id=%s",
+        c.execute("SELECT client_state, username, connection_id "
+                  "FROM webhook_subscriptions WHERE subscription_id=%s",
                   (subscription_id,))
         row = c.fetchone()
-        return {"client_state": row[0], "username": row[1]} if row else None
+        return {
+            "client_state": row[0],
+            "username": row[1],
+            "connection_id": row[2],
+        } if row else None
     except Exception:
         return None
     finally:

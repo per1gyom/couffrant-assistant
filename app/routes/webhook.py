@@ -62,6 +62,25 @@ async def webhook_notification(request: Request):
 
     from app.connectors.microsoft_webhook import get_subscription_info
     from app.mail_memory_store import mail_exists
+    import os
+
+    # Etape 3.6 (01/05/2026) : mode TRIGGER vs FETCH (legacy)
+    # 
+    # MODE LEGACY (defaut) : pour chaque notif, fetch direct du mail via
+    #   Graph API et ingestion immediate via process_incoming_mail.
+    #
+    # MODE TRIGGER : pour chaque notif, le webhook ne fait QUE declencher
+    #   un poll delta sur la connexion concernee. Le polling delta voit
+    #   le nouveau mail et l ingere (en mode WRITE).
+    #   Avantage : un seul code path d ingestion. Si le webhook plante,
+    #   le poll automatique toutes les 5 min rattrape.
+    #
+    # Activable via Railway : OUTLOOK_WEBHOOK_TRIGGER_MODE=true
+    trigger_mode = os.getenv("OUTLOOK_WEBHOOK_TRIGGER_MODE", "").strip().lower() in ("1", "true", "yes", "on")
+
+    # Dedup : on ne declenche qu un seul poll par connexion meme si Microsoft
+    # envoie plusieurs notifs en meme temps (evite N polls inutiles).
+    triggered_connections = set()
 
     for notification in body.get("value", []):
         subscription_id = notification.get("subscriptionId", "")
@@ -72,6 +91,22 @@ async def webhook_notification(request: Request):
             continue
 
         username = sub_info["username"]
+        connection_id = sub_info.get("connection_id")
+
+        if trigger_mode:
+            # MODE TRIGGER (Etape 3.6) : declenchement d un poll delta
+            # sur la connexion. Le poll delta s occupe de tout le pipeline
+            # d ingestion (mail_exists, filtrage, analyse, stockage).
+            if connection_id and connection_id not in triggered_connections:
+                triggered_connections.add(connection_id)
+                threading.Thread(
+                    target=_trigger_outlook_delta_poll,
+                    args=(connection_id, username),
+                    daemon=True,
+                ).start()
+            continue
+
+        # MODE LEGACY : fetch direct + ingest
         resource = notification.get("resource", "")
         resource_data = notification.get("resourceData") or {}
         message_id = resource_data.get("id") or ""
@@ -94,6 +129,46 @@ async def webhook_notification(request: Request):
         ).start()
 
     return Response(status_code=202)
+
+
+def _trigger_outlook_delta_poll(connection_id: int, username: str):
+    """Mode TRIGGER (Etape 3.6) : declenche un poll delta immediat sur une
+    connexion specifique apres reception d une notification Microsoft.
+
+    Reutilise _poll_user_outlook du module mail_outlook_delta_sync (Etape 3.3)
+    qui fait deja tout le boulot : delta query Microsoft, traitement via
+    process_incoming_mail (mode WRITE), stockage delta_link, log dans
+    connection_health_events.
+
+    Beneficie automatiquement de :
+      - Anti-doublon (mail_exists)
+      - Resilience (retries, gestion erreurs)
+      - Multi-folder (Inbox + SentItems + JunkEmail)
+      - Inscription dans connection_health
+      - Fix tenant_id (insert_mail corrige)
+
+    Run en thread daemon depuis webhook_notification.
+    """
+    from app.app_security import get_tenant_id
+    from app.jobs.mail_outlook_delta_sync import _poll_user_outlook
+
+    try:
+        tenant_id = get_tenant_id(username)
+        if not tenant_id:
+            print(f"[Webhook][Trigger] tenant_id introuvable pour {username}")
+            return
+
+        result = _poll_user_outlook(
+            connection_id=connection_id,
+            tenant_id=tenant_id,
+            username=username,
+        )
+        print(f"[Webhook][Trigger] Poll delta conn#{connection_id} ({username}) : "
+              f"status={result.get('status')}, "
+              f"items_new={result.get('total_items_new', 0)}, "
+              f"processed={result.get('total_processed', 0)}")
+    except Exception as e:
+        print(f"[Webhook][Trigger] Echec poll delta conn#{connection_id} : {e}")
 
 
 # ─── LIFECYCLE NOTIFICATIONS (Phase Connexions Universelles - Etape 3.5) ───
