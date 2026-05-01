@@ -19,7 +19,13 @@ def _job_gmail_polling():
             get_all_users_with_tool_connections,
             get_all_user_connections,
         )
-        from app.routes.webhook import process_incoming_mail
+        # FIX 01/05/2026 : process_incoming_mail n est PAS dans webhook.py
+        # mais dans webhook_ms_handlers.py (split SPLIT-F7). L import
+        # incorrect faisait planter le polling Gmail a CHAQUE execution
+        # depuis ~3 semaines (vu dans les logs Railway :
+        # "[Gmail] ERREUR polling: cannot import name 'process_incoming_mail'
+        # from 'app.routes.webhook'").
+        from app.routes.webhook_ms_handlers import process_incoming_mail
         from app.connectors.gmail_connector2 import GmailConnector
 
         users = get_all_users_with_tool_connections("gmail")
