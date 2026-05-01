@@ -353,3 +353,29 @@ def _register_jobs(scheduler: BackgroundScheduler):
             logger.error(f"[Scheduler] Import echoue pour outlook_reconciliation: {e}")
     else:
         logger.info("[Scheduler] Job DESACTIVE : outlook_reconciliation")
+
+    # Gmail history sync (Phase Connexions Universelles - Semaine 4, Etape 4.3).
+    # Symetrique a outlook_delta_sync mais pour Gmail.
+    # Tourne toutes les 5 min. Pour chaque connexion Gmail active :
+    # - Polle l API Gmail History via startHistoryId
+    # - Stocke le historyId dans connection_health.metadata
+    # - Inscrit dans connection_health + log dans connection_health_events
+    #
+    # ⚠️ SHADOW MODE par defaut : ne traite PAS les messages, log juste.
+    # ⚠️ MODE WRITE : GMAIL_HISTORY_SYNC_WRITE_MODE=true pour activer
+    #
+    # DESACTIVE PAR DEFAUT (SCHEDULER_GMAIL_HISTORY_SYNC_ENABLED=true requis).
+    # Voir docs/vision_connexions_universelles_01mai.md.
+    if _job_enabled("SCHEDULER_GMAIL_HISTORY_SYNC_ENABLED", default=False):
+        try:
+            from app.jobs.mail_gmail_history_sync import run_gmail_history_sync
+            scheduler.add_job(func=run_gmail_history_sync,
+                              trigger=IntervalTrigger(minutes=5),
+                              id="gmail_history_sync",
+                              name="Gmail history sync (5 min)",
+                              replace_existing=True)
+            logger.info("[Scheduler] Job enregistre : gmail_history_sync (5 min)")
+        except Exception as e:
+            logger.error(f"[Scheduler] Import echoue pour gmail_history_sync: {e}")
+    else:
+        logger.info("[Scheduler] Job DESACTIVE : gmail_history_sync (activer via SCHEDULER_GMAIL_HISTORY_SYNC_ENABLED=true)")
