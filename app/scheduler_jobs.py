@@ -154,14 +154,40 @@ def _register_jobs(scheduler: BackgroundScheduler):
         logger.info("[Scheduler] Job DÉSACTIVÉ : heartbeat_morning")
 
     if _job_enabled("SCHEDULER_GMAIL_ENABLED", default=False):
-        try:
-            from app.jobs.gmail_polling import _job_gmail_polling
-            scheduler.add_job(func=_job_gmail_polling, trigger=IntervalTrigger(minutes=3),
-                              id="gmail_polling", name="Gmail polling",
-                              replace_existing=True)
-            logger.info("[Scheduler] Job enregistré : gmail_polling (3 min)")
-        except Exception as e:
-            logger.error(f"[Scheduler] Import échoué pour gmail_polling: {e}")
+        # Etape 4.8 (01/05/2026 soir) : auto-desactivation du legacy
+        # quand le delta sync (4.3) + mode WRITE (4.4) sont actifs.
+        # 
+        # Pourquoi : le polling legacy fait 'is:unread newer_than:5m'
+        # toutes les 3 min. Le delta sync (history-based) couvre tout
+        # ce que faisait le legacy + plus (modifications, archivages,
+        # SENT, SPAM, refresh token automatique, monitoring complet).
+        # 
+        # Donc si le delta WRITE est actif, le legacy fait DOUBLE
+        # ingestion (filtree par mail_exists mais consomme quand meme
+        # de l API Gmail et du temps de polling pour rien).
+        # 
+        # Comportement :
+        # - delta WRITE actif -> legacy ignore (log WARNING explicit)
+        # - delta SHADOW ou OFF -> legacy actif (filet de securite)
+        # - delta WRITE off + legacy off -> aucun polling Gmail (KO)
+        delta_active = _job_enabled("SCHEDULER_GMAIL_HISTORY_SYNC_ENABLED", default=False)
+        delta_write = _job_enabled("GMAIL_HISTORY_SYNC_WRITE_MODE", default=False)
+        if delta_active and delta_write:
+            logger.warning(
+                "[Scheduler] Job gmail_polling LEGACY ignore : "
+                "delta sync + WRITE mode actifs prennent le relais. "
+                "Pour reactiver, mets SCHEDULER_GMAIL_HISTORY_SYNC_ENABLED=false "
+                "OU GMAIL_HISTORY_SYNC_WRITE_MODE=false."
+            )
+        else:
+            try:
+                from app.jobs.gmail_polling import _job_gmail_polling
+                scheduler.add_job(func=_job_gmail_polling, trigger=IntervalTrigger(minutes=3),
+                                  id="gmail_polling", name="Gmail polling (LEGACY)",
+                                  replace_existing=True)
+                logger.info("[Scheduler] Job enregistré : gmail_polling (3 min) [LEGACY]")
+            except Exception as e:
+                logger.error(f"[Scheduler] Import échoué pour gmail_polling: {e}")
     else:
         logger.info("[Scheduler] Job DÉSACTIVÉ : gmail_polling (activer via SCHEDULER_GMAIL_ENABLED=true)")
 
