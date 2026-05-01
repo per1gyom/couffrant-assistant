@@ -577,8 +577,13 @@ def _get_gmail_token_for_connection(connection_id: int,
     try:
         from app.connection_token_manager import get_all_user_connections
         all_conns = get_all_user_connections(username)
+        # FIX 01/05/2026 soir : la cle de retour est 'connection_id',
+        # pas 'id'. Bug analogue au fix "username does not exist" du
+        # matin (Etape 3.4) : mismatch entre cles attendues et cles
+        # reellement retournees. Verifie dans connection_token_manager.py
+        # ligne ~191 : "connection_id": cid.
         for c in all_conns:
-            if (c.get("id") == connection_id
+            if (c.get("connection_id") == connection_id
                     and c.get("tool_type", "").lower() in ("gmail", "google")
                     and c.get("token")):
                 return c["token"]
