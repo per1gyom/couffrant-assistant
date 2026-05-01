@@ -423,7 +423,8 @@ function removeAttachment() {
 // --- KEYBOARD ---
 document.addEventListener('keydown', e => {
   if (e.key==='Escape') {
-    if(typeof closeDrawer==='function') closeDrawer();
+    // NOTE 30/04/2026 : closeDrawer() supprimé en même temps que le drawer
+    // (Note UX #7). Le test typeof était défensif mais devient inutile.
     if(typeof closeShortcutEdit==='function') closeShortcutEdit();
     if(typeof closeOnboarding==='function') closeOnboarding();
     if(typeof _releaseMicFromFeedback==='function') _releaseMicFromFeedback();

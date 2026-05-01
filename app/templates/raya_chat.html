@@ -4,25 +4,24 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=yes, minimum-scale=0.5, maximum-scale=5">
 <title>Raya</title>
-<link rel="manifest" href="/static/manifest.json?v=80">
+<link rel="manifest" href="/static/manifest.json?v=81">
 <meta name="theme-color" content="#0057b8">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Raya">
-<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=80">
+<link rel="apple-touch-icon" sizes="180x180" href="/pwa/icon-180.png?v=81">
 <script>
-window.__RAYA_V = 28;
+window.__RAYA_V = 29;
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then(r => r.forEach(sw => sw.unregister()));
   caches.keys().then(ks => ks.forEach(k => caches.delete(k)));
 }
 </script>
-<link rel="stylesheet" href="/static/chat-base.css?v=80">
-<link rel="stylesheet" href="/static/chat-components.css?v=80">
-<link rel="stylesheet" href="/static/chat-drawer.css?v=80">
-<link rel="stylesheet" href="/static/onboarding.css?v=80">
-<link rel="stylesheet" href="/static/mobile.css?v=80">
-<link rel="stylesheet" href="/static/_modal_system.css?v=1">
+<link rel="stylesheet" href="/static/chat-base.css?v=81">
+<link rel="stylesheet" href="/static/chat-components.css?v=81">
+<link rel="stylesheet" href="/static/onboarding.css?v=81">
+<link rel="stylesheet" href="/static/mobile.css?v=81">
+<link rel="stylesheet" href="/static/_modal_system.css?v=2">
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.6/dist/purify.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.0/dist/mermaid.min.js"></script>
@@ -69,7 +68,6 @@ if ('serviceWorker' in navigator) {
             </button>
             <div class="dotmenu-sep"></div>
             <a class="dotmenu-item" href="/settings"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg> Paramètres</a>
-            <button class="dotmenu-item" onclick="document.querySelector('.dotmenu-wrap')?.classList.remove('open');openDrawer()"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg> Administration</button>
             <a class="dotmenu-item" href="/tenant/panel" id="adminPanelBtn" style="display:none"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg> Ma société</a>
             <a class="dotmenu-item" href="/admin/panel" id="superAdminBtn" style="display:none"><svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Super Admin</a>
             <div class="dotmenu-sep"></div>
@@ -166,80 +164,22 @@ if ('serviceWorker' in navigator) {
   </div>
 </div>
 
-<!-- TIROIR ADMIN -->
-<div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
-<div class="drawer" id="drawer">
-  <div class="drawer-header">
-    <span class="drawer-title">&#9881; Administration</span>
-    <button class="drawer-close" onclick="closeDrawer()">&#10005;</button>
-  </div>
-  <div class="drawer-body">
-    <div class="d-group">
-      <div class="d-group-title">&#129504; Memoire &amp; apprentissage</div>
-      <div class="d-btn" onclick="drawerAction(this,'/build-memory','build')"><span class="d-btn-icon">&#128260;</span><div class="d-btn-body"><span class="d-btn-label">Reconstruire le contexte</span><span class="d-btn-desc">Relit mails et conversations pour mettre a jour le resume et les fiches contacts.</span><div class="d-btn-result" id="result-build"></div></div></div>
-      <div class="d-btn" onclick="drawerAction(this,'/synth','synth')"><span class="d-btn-icon">&#128221;</span><div class="d-btn-body"><span class="d-btn-label">Synthese des conversations</span><span class="d-btn-desc">Extrait des regles et insights des 15 dernieres conversations.</span><div class="d-btn-result" id="result-synth"></div></div></div>
-      <div class="d-btn" onclick="drawerAction(this,'/analyze-raw-mails','analyze')"><span class="d-btn-icon">&#128269;</span><div class="d-btn-body"><span class="d-btn-label">Analyser mails non traites</span><span class="d-btn-desc">Lance l'analyse IA sur les mails ingeres mais pas encore analyses.</span><div class="d-btn-result" id="result-analyze"></div></div></div>
-      <div class="d-btn" onclick="drawerAction(this,'/build-style-profile','style')"><span class="d-btn-icon">&#9997;&#65039;</span><div class="d-btn-body"><span class="d-btn-label">Reconstruire profil de style</span><span class="d-btn-desc">Analyse les mails envoyes pour mettre a jour ta signature redactionnelle.</span><div class="d-btn-result" id="result-style"></div></div></div>
-    </div>
-    <div class="d-group">
-      <div class="d-group-title">&#128202; Etat du systeme</div>
-      <div class="d-btn" onclick="drawerMemoryStatus(this)"><span class="d-btn-icon">&#128200;</span><div class="d-btn-body"><span class="d-btn-label">Voir les compteurs</span><span class="d-btn-desc">Conversations, regles actives, insights, mails en base.</span><div class="d-btn-result" id="result-status"></div></div></div>
-      <div class="d-btn" onclick="drawerRules(this)"><span class="d-btn-icon">&#128203;</span><div class="d-btn-body"><span class="d-btn-label">Voir mes regles actives</span><span class="d-btn-desc">Regles comportementales, style et metier que Raya a apprises.</span><div class="d-btn-result" id="result-rules"></div></div></div>
-      <div class="d-btn nav" onclick="window.open('/admin/bug-reports','_blank')"><span class="d-btn-icon">&#128027;</span><div class="d-btn-body"><span class="d-btn-label">Voir les bug reports</span><span class="d-btn-desc">Liste des bugs et ameliorations signales par les utilisateurs.</span></div></div>
-    </div>
-    <div class="d-sep"></div>
-    <div class="d-group">
-      <div class="d-group-title">&#9888;&#65039; Actions sensibles</div>
-      <div class="d-btn" onclick="drawerAction(this,'/purge-memory','purge')"><span class="d-btn-icon">&#128199;&#65039;</span><div class="d-btn-body"><span class="d-btn-label">Purger les vieux mails</span><span class="d-btn-desc">Supprime les mails de plus de 90 jours. Regles et conversations conservees.</span><div class="d-btn-result" id="result-purge"></div></div></div>
-      <div class="d-btn danger" onclick="drawerShowConfirm('confirm-rebuild')"><span class="d-btn-icon">&#9940;</span><div class="d-btn-body"><span class="d-btn-label">Vider l'historique mails</span><span class="d-btn-desc">Efface tous les mails en base. Regles et insights preserves.</span><div class="d-confirm" id="confirm-rebuild"><div class="d-confirm-text">&#9888;&#65039; Tous les mails en base seront supprimes. Confirmer ?</div><div class="d-confirm-btns"><button class="d-confirm-yes" onclick="drawerConfirmAction(event,'/rebuild-memory','rebuild')">Oui, vider</button><button class="d-confirm-no" onclick="drawerHideConfirm(event,'confirm-rebuild')">Annuler</button></div></div><div class="d-btn-result" id="result-rebuild"></div></div></div>
-    </div>
-    <div class="d-sep"></div>
-    <div class="d-group">
-      <div class="d-group-title">&#128295; Urgence / Debug</div>
-      <div class="d-btn" onclick="drawerAction(this,'/learn-inbox-mails','inbox')"><span class="d-btn-icon">&#128229;</span><div class="d-btn-body"><span class="d-btn-label">Forcer ingesion inbox</span><span class="d-btn-desc">Importe les 50 derniers mails. Utile apres une coupure du token.</span><div class="d-btn-result" id="result-inbox"></div></div></div>
-      <div class="d-btn" onclick="drawerAction(this,'/learn-sent-mails','sent')"><span class="d-btn-icon">&#128228;</span><div class="d-btn-body"><span class="d-btn-label">Forcer ingesion envoyes</span><span class="d-btn-desc">Importe les 50 derniers mails envoyes pour enrichir le style.</span><div class="d-btn-result" id="result-sent"></div></div></div>
-      <div class="d-btn" onclick="drawerAction(this,'/init-db','initdb')"><span class="d-btn-icon">&#128452;&#65039;</span><div class="d-btn-body"><span class="d-btn-label">Verifier la base de donnees</span><span class="d-btn-desc">Cree les tables manquantes et execute les migrations. Sans danger.</span><div class="d-btn-result" id="result-initdb"></div></div></div>
-      <div class="d-btn nav" onclick="window.open('/admin/backup','_blank')"><span class="d-btn-icon">&#128190;</span><div class="d-btn-body"><span class="d-btn-label">Telecharger un backup</span><span class="d-btn-desc">Exporte la base de donnees complete. A faire regulierement.</span></div></div>
-    </div>
-    <div class="d-sep"></div>
-    <div class="d-group">
-      <div class="d-group-title">&#127891; Onboarding</div>
-      <div class="d-btn" onclick="drawerActionPost(this,'/onboarding/restart','onb-restart');closeDrawer()"><span class="d-btn-icon">&#128257;</span><div class="d-btn-body"><span class="d-btn-label">Relancer l'onboarding</span><span class="d-btn-desc">Recommencer la configuration initiale du profil Raya.</span><div class="d-btn-result" id="result-onb-restart"></div></div></div>
-    </div>
-    <div class="d-sep"></div>
-    <div class="d-group">
-      <div class="d-group-title">&#128231; Connexions</div>
-      <div class="d-btn nav" onclick="window.location.href='/login/gmail'"><span class="d-btn-icon">&#9993;&#65039;</span><div class="d-btn-body"><span class="d-btn-label">Connecter Gmail</span><span class="d-btn-desc">Autoriser Raya a lire tes mails Gmail via OAuth2 Google.</span></div></div>
-      <div class="d-btn nav" onclick="window.location.href='/login'"><span class="d-btn-icon">&#128309;</span><div class="d-btn-body"><span class="d-btn-label">Reconnecter Microsoft 365</span><span class="d-btn-desc">Renouveler l'autorisation Microsoft si le token a expire.</span></div></div>
-      <div class="d-btn" onclick="drawerActionPost(this,'/admin/extract-signatures','sig')"><span class="d-btn-icon">&#128140;</span><div class="d-btn-body"><span class="d-btn-label">Recuperer mes signatures</span><span class="d-btn-desc">Analyse les derniers mails envoyes pour extraire ta signature automatiquement.</span><div class="d-btn-result" id="result-sig"></div></div></div>
-    </div>
-    <div class="d-sep"></div>
-    <div class="d-group">
-      <div class="d-group-title">&#128274; Donnees personnelles</div>
-      <div class="d-btn nav" onclick="window.open('/account/export','_blank')"><span class="d-btn-icon">&#128230;</span><div class="d-btn-body"><span class="d-btn-label">Exporter mes donnees</span><span class="d-btn-desc">Telecharge toutes tes donnees Raya au format JSON (RGPD).</span></div></div>
-      <div class="d-btn danger" onclick="(function(){const pw=prompt('Entrez votre mot de passe pour confirmer :');if(pw===null)return;if(!pw){showToast('Mot de passe requis','err',4000);return;}fetch('/account/delete/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:pw})}).then(r=>r.json()).then(d=>{if(d.status==='ok'){showToast('Demande envoyée — votre admin sera notifié.','ok',5000);}else{showToast('Erreur : '+(d.message||'?'),'err',5000);}}).catch(()=>showToast('Erreur réseau','err',4000));})()"><span class="d-btn-icon">&#9940;</span><div class="d-btn-body"><span class="d-btn-label">Supprimer mon compte</span><span class="d-btn-desc">Supprime definitivement ton compte et toutes tes donnees. Irreversible.</span></div></div>
-    </div>
-    <div class="d-sep"></div>
-    <div class="d-group">
-      <div class="d-group-title">&#128279; Navigation</div>
-      <div class="d-btn nav" onclick="window.open(isAdmin && document.getElementById('superAdminBtn')?.style.display!=='none' ? '/admin/panel' : '/tenant/panel','_blank')"><span class="d-btn-icon">&#128421;&#65039;</span><div class="d-btn-body"><span class="d-btn-label">Panel administration</span><span class="d-btn-desc">Gestion de votre societe, utilisateurs et connexions.</span></div></div>
-      <div class="d-btn nav" onclick="window.open('/legal','_blank')"><span class="d-btn-icon">&#128220;</span><div class="d-btn-body"><span class="d-btn-label">Mentions legales</span><span class="d-btn-desc">CGU, confidentialite et RGPD.</span></div></div>
-      <div class="d-btn nav" onclick="window.location.href='/logout'"><span class="d-btn-icon">&#128682;</span><div class="d-btn-body"><span class="d-btn-label">Deconnexion</span><span class="d-btn-desc">Ferme la session en cours.</span></div></div>
-    </div>
-  </div>
-</div>
+<!-- TIROIR ADMIN — supprimé le 30/04/2026 nuit (Note UX #7)
+     Toutes les actions sont maintenant accessibles via :
+     - /settings (côté user)
+     - /tenant/panel (tenant_admin)
+     - /admin/panel (super_admin) -->
 
-<script src="/static/raya-features.js?v=1"></script>
-<script src="/static/chat-onboarding.js?v=80"></script>
-<script src="/static/chat-shortcuts.js?v=80"></script>
-<script src="/static/chat-voice.js?v=80"></script>
-<script src="/static/chat-feedback.js?v=80"></script>
-<script src="/static/chat-triage.js?v=80"></script>
-<script src="/static/chat-admin.js?v=80"></script>
-<script src="/static/chat-topics.js?v=80"></script>
-<script src="/static/chat-core.js?v=80"></script>
-<script src="/static/chat-messages.js?v=80"></script>
-<script src="/static/chat-main.js?v=80"></script>
+<script src="/static/raya-features.js?v=2"></script>
+<script src="/static/chat-onboarding.js?v=81"></script>
+<script src="/static/chat-shortcuts.js?v=81"></script>
+<script src="/static/chat-voice.js?v=81"></script>
+<script src="/static/chat-feedback.js?v=81"></script>
+<script src="/static/chat-triage.js?v=81"></script>
+<script src="/static/chat-topics.js?v=81"></script>
+<script src="/static/chat-core.js?v=81"></script>
+<script src="/static/chat-messages.js?v=81"></script>
+<script src="/static/chat-main.js?v=81"></script>
 
 <script>
   // ─── TOGGLE RAPIDE LECTURE AUTO (menu 3 points) ───

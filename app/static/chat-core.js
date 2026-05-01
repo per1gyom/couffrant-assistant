@@ -142,13 +142,10 @@ async function loadUserInfo() {
       const sa = document.getElementById('superAdminBtn');
       if (sa) sa.style.display = 'inline-flex';
     }
-    if (scope === 'tenant_admin') {
-      document.querySelectorAll('.d-group').forEach(g => {
-        const title = (g.querySelector('.d-group-title') || {}).textContent || '';
-        if (['Mémoire', 'État du', 'Actions sensibles', 'Urgence'].some(k => title.includes(k))) g.style.display = 'none';
-      });
-      document.querySelectorAll('.d-sep').forEach((s, i) => { if (i < 3) s.style.display = 'none'; });
-    }
+    // NOTE 30/04/2026 : le filtrage par scope du drawer 'Administration'
+    // a été supprimé en même temps que le drawer lui-même (Note UX #7).
+    // Toutes les actions admin sont maintenant dans /admin/panel ou
+    // /tenant/panel selon le rôle.
   } catch(e) {}
 }
 
