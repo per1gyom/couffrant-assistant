@@ -18,11 +18,16 @@ import re
 from app.llm_client import llm_complete
 from app.database import get_pg_conn
 from app.rule_engine import get_rules_as_text, get_rules_by_category
-# Fix import orphelin (21/04/2026 nuit) : ai_client.py utilisait
-# _DEFAULT_CATEGORIES, build_learning_text et _parse_json_safe sans les
-# importer, ce qui causait des NameError silencieux a l execution.
+# Fix imports orphelins :
+#   - 21/04/2026 nuit : ajout de _DEFAULT_CATEGORIES, build_learning_text,
+#     _parse_json_safe (utilises sans etre importes -> NameError silencieux).
+#   - 01/05/2026 : ajout de get_odoo_context et get_style_profile (meme
+#     bug, oubli du fix precedent). Sans ces imports, analyze_single_mail_with_ai
+#     levait NameError a chaque appel et tous les mails arrivaient en
+#     analysis_status='fallback' (sans analyse IA, sans alerte d urgence).
 from app.ai_prompts import (
     _DEFAULT_CATEGORIES, build_learning_text, _parse_json_safe,
+    get_odoo_context, get_style_profile,
 )
 
 
