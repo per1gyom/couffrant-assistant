@@ -506,27 +506,40 @@ def _poll_user_outlook(connection_id: int, tenant_id: str,
 
 
 def _get_outlook_connections() -> list:
-    """Retourne la liste des connexions Outlook actives (multi-user, multi-tenant)."""
+    """Retourne la liste des connexions Outlook actives (multi-user, multi-tenant).
+
+    PATTERN ALIGNE SUR connection_token_manager.get_all_user_connections() :
+    le username vient de connection_assignments (table de liaison user/connexion),
+    pas de tenant_connections (qui n a pas de colonne username).
+
+    On filtre :
+      - tc.tool_type IN ('microsoft', 'outlook')   : les 2 conventions de nommage
+      - tc.status = 'connected'                    : connexion active
+      - ca.enabled = true                          : assignation active
+
+    DISTINCT ON (tc.id) : si plusieurs users ont la meme connexion, on prend
+    le 1er (le polling est lie a la connexion via le token, pas au user).
+    """
     conn = None
     try:
         conn = get_pg_conn()
         c = conn.cursor()
-        # FIX 01/05/2026 : la colonne est 'created_by', pas 'username'.
-        # tenant_connections.created_by stocke le username de l'utilisateur
-        # qui possede la connexion.
         c.execute("""
-            SELECT id, tenant_id, created_by, label, status, tool_type
-            FROM tenant_connections
-            WHERE tool_type IN ('microsoft', 'outlook')
-              AND status = 'connected'
-            ORDER BY id
+            SELECT DISTINCT ON (tc.id)
+                tc.id, tc.tenant_id, ca.username, tc.label, tc.tool_type
+            FROM connection_assignments ca
+            JOIN tenant_connections tc ON tc.id = ca.connection_id
+            WHERE tc.tool_type IN ('microsoft', 'outlook')
+              AND tc.status = 'connected'
+              AND ca.enabled = true
+            ORDER BY tc.id, ca.username
         """)
         return [{
             "connection_id": r[0],
             "tenant_id": r[1],
             "username": r[2],
             "label": r[3] or "Outlook",
-            "tool_type": r[5],
+            "tool_type": r[4],
         } for r in c.fetchall()]
     except Exception as e:
         logger.error("[OutlookDelta] _get_outlook_connections echec : %s",
