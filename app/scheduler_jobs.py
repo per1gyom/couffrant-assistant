@@ -379,3 +379,28 @@ def _register_jobs(scheduler: BackgroundScheduler):
             logger.error(f"[Scheduler] Import echoue pour gmail_history_sync: {e}")
     else:
         logger.info("[Scheduler] Job DESACTIVE : gmail_history_sync (activer via SCHEDULER_GMAIL_HISTORY_SYNC_ENABLED=true)")
+
+    # Gmail reconciliation (Phase Connexions Universelles - Semaine 4, Etape 4.7).
+    # Tous les jours a 5h00 UTC (decale d Outlook a 4h30 et d Odoo a 4h
+    # pour ne pas saturer les APIs en parallele), pour chaque user ayant
+    # au moins une connexion Gmail :
+    # - Compte la somme des messagesTotal Google sur INBOX+SENT+SPAM
+    #   (sur toutes ses boites Gmail)
+    # - Compte les mails Raya en mail_memory (mailbox_source IN gmail/gmail_perso)
+    # - Si delta > 1% ET > 50 mails : alerte WARNING via dispatcher
+    # Filet ULTIME contre les fuites silencieuses (niveau 4 du pattern).
+    # Active par defaut a partir du moment ou le polling delta tourne
+    # depuis quelques jours pour eviter de spam les alertes au demarrage.
+    if _job_enabled("SCHEDULER_GMAIL_RECONCILIATION_ENABLED", default=False):
+        try:
+            from app.jobs.mail_gmail_reconciliation import run_gmail_reconciliation
+            scheduler.add_job(func=run_gmail_reconciliation,
+                              trigger=CronTrigger(hour=5, minute=0),
+                              id="gmail_reconciliation",
+                              name="Reconciliation nocturne Gmail (5h00)",
+                              replace_existing=True)
+            logger.info("[Scheduler] Job enregistre : gmail_reconciliation (5h00)")
+        except Exception as e:
+            logger.error(f"[Scheduler] Import echoue pour gmail_reconciliation: {e}")
+    else:
+        logger.info("[Scheduler] Job DESACTIVE : gmail_reconciliation (activer via SCHEDULER_GMAIL_RECONCILIATION_ENABLED=true)")
