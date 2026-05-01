@@ -875,55 +875,79 @@ Action : reprendre la connexion à la racine + définir la blacklist
 
 ### 3.5 — Odoo
 
+**Statut au 01/05/2026 (Semaine 2 implémentée)** :
+
+```
+✅ Polling delta toutes les 2 min via write_date (Niveau 1)     - DEPUIS 20/04
+✅ Inscription dans connection_health (Etape 2.3)                - 01/05
+✅ Logging events dans connection_health_events (Etape 2.3)      - 01/05
+✅ Resilience XML-RPC via @protected (Etape 2.4)                 - 01/05
+✅ Reconciliation nocturne 4h (Niveau 4, Etape 2.5)              - 01/05
+⏳ Webhooks natifs (Niveau 2) - en attente module OpenFire
+   (Demande #2 envoyee 20/04, voir suivis_demandes_openfire.md)
+🔵 Lifecycle Notifications (Niveau 3) : pas applicable Odoo
+```
+
 **Décisions actées :**
 
 ```
-Q12 = On garde le polling existant (62k records, stable) 
-      + on rajoute couche monitoring/alerte/réconciliation
-QUESTION OUVERTE : Odoo Community ou Enterprise ?
-  - Si Enterprise : webhooks natifs disponibles → Niveau 2 activable
-  - Si Community  : on garde polling 2 min uniquement
-  → À trancher en début de Phase B / Semaine 2
+Q12 = On garde le polling existant + couche monitoring/réconciliation
+Q12bis Odoo Community vs Enterprise = COMMUNITY confirme
+  (sandbox safe_eval Odoo 16 Community bloque les imports Python
+   dans base_automation, voir docs/demande_openfire_webhooks_temps_reel.md)
 ```
 
-**Architecture :**
+**Architecture implémentée Semaine 2 :**
 
 ```
-NIVEAU 1 — Polling delta toutes les 2 min (DÉJÀ EN PLACE, INCHANGÉ)
+NIVEAU 1 — Polling delta toutes les 2 min (DEJA EN PLACE depuis 20/04)
   API : XML-RPC Odoo
-  Curseur : write_date par modèle Odoo
-  Couverture : 62 200 records actuellement, multi-modèles
-  → On ne touche pas à ce qui marche (62k records sans incident).
+  Curseur : write_date par modele Odoo (stocke dans system_alerts)
+  Couverture : 12 modeles actifs (sale.order, res.partner, etc.)
+  62k records vectorises sans incident.
 
-NIVEAU 2 — Webhook Odoo (CONDITIONNEL - selon Community/Enterprise)
-  Si Odoo Enterprise : 
-    Configurer base.automation pour POST sur /webhook/odoo
-    Réactivité ~30 sec au lieu de 2 min
-  Si Odoo Community :
-    Pas de webhook natif, on reste en polling pur.
+  AJOUT SEMAINE 2 :
+    - register_connection() en debut de cycle (idempotent)
+    - record_poll_attempt() en fin de cycle (status, items_seen, items_new)
+    - @protected sur l appel XML-RPC (retry immediat sur micro-coupure)
+    - status='ok' si <50% des modeles en erreur
+    - status='internal_error' sinon
 
-NIVEAU 3 — Pas de Lifecycle (pas de subscription concept côté Odoo)
-  À la place : monitoring de la santé de la connexion XML-RPC
-  Test automatique toutes les 15 min : authentification + read simple.
+NIVEAU 2 — Webhooks natifs Odoo (CONDITIONNEL, en attente)
+  Si OpenFire livre le module custom (Demande #2) :
+    Configuration base.automation -> POST sur /webhook/odoo
+    Reactivite ~30 sec au lieu de 2 min
+    Activation : SCHEDULER_ODOO_POLLING_ENABLED=false dans Railway
+    Pas de modif de code Raya supplementaire (endpoint deja pret)
+  Sinon : on reste sur le polling pur (qui marche).
 
-NIVEAU 4 — Réconciliation nocturne
-  À 4h : pour chaque modèle synchronisé, count Odoo vs count Raya.
-  Si delta > 1% → re-sync du modèle + alerte WARNING.
+NIVEAU 3 — Lifecycle (PAS APPLICABLE)
+  Pas de concept de subscription cote Odoo, donc rien a faire.
+
+NIVEAU 4 — Reconciliation nocturne (NOUVEAU SEMAINE 2)
+  Job a 4h du matin :
+    Pour chaque modele POLLED_MODELS :
+      count_odoo = search_count via API
+      count_raya = COUNT DISTINCT(source_record_id) dans odoo_semantic_content
+      Si delta_pct > 1% : alerte WARNING via alert_dispatcher
+  Garantie de completude absolue : on detecte une fuite en max 24h.
 ```
 
 **Couche monitoring/alerte ajoutée :**
 
 ```
-Odoo entre maintenant dans le système commun :
-  • Inscription dans connection_health (un record par connexion Odoo)
-  • Logging dans connection_health_events à chaque cycle de polling
-  • Alertes via alert_dispatcher selon les mêmes règles
-  • Visible dans /admin/health au même endroit que les mails
+Odoo apparait maintenant dans /admin/health/page comme les autres
+connexions :
+  - Pastille de couleur (vert healthy / rouge down / etc.)
+  - last_successful_poll_at visible
+  - silence en minutes
+  - bouton Detail vers les 50 derniers events
+  - alerte automatique si silence > 6 min
 ```
 
 **Bénéfice immédiat :** si demain le polling Odoo plante (token, réseau,
-crash), Guillaume sera prévenu pareil que pour les mails. Aujourd'hui,
-si ça plante, on s'en aperçoit par hasard.
+crash), Guillaume sera prévenu pareil que pour les mails. Avant
+Semaine 2, les pannes Odoo n etaient detectees que par hasard.
 
 ### 3.6 — WhatsApp (NOUVEAU PÉRIMÈTRE)
 

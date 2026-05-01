@@ -291,3 +291,21 @@ def _register_jobs(scheduler: BackgroundScheduler):
             logger.error(f"[Scheduler] Import echoue pour connection_health_check: {e}")
     else:
         logger.info("[Scheduler] Job DESACTIVE : connection_health_check")
+
+    # Reconciliation nocturne Odoo (Phase Connexions Universelles - Semaine 2).
+    # Tourne tous les jours a 4h du matin. Compare count Odoo vs count Raya
+    # par modele. Si delta > 1 pourcent : alerte WARNING via dispatcher.
+    # Filet ULTIME contre les fuites silencieuses du polling.
+    if _job_enabled("SCHEDULER_ODOO_RECONCILIATION_ENABLED", True):
+        try:
+            from app.jobs.odoo_reconciliation import run_odoo_reconciliation
+            scheduler.add_job(func=run_odoo_reconciliation,
+                              trigger=CronTrigger(hour=4, minute=0),
+                              id="odoo_reconciliation",
+                              name="Reconciliation nocturne Odoo (4h)",
+                              replace_existing=True)
+            logger.info("[Scheduler] Job enregistre : odoo_reconciliation (4h)")
+        except Exception as e:
+            logger.error(f"[Scheduler] Import echoue pour odoo_reconciliation: {e}")
+    else:
+        logger.info("[Scheduler] Job DESACTIVE : odoo_reconciliation")
