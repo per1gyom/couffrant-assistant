@@ -498,6 +498,7 @@ def _poll_user_gmail(connection_id: int, tenant_id: str,
     skipped = 0
     skipped_perimetre = 0
     errors_pipeline = 0
+    pipeline_crash = ""
 
     # Stockage du nouveau historyId si succes
     if result["status"] == "ok" and result.get("new_history_id"):
@@ -514,9 +515,18 @@ def _poll_user_gmail(connection_id: int, tenant_id: str,
             skipped_perimetre = process_result.get("skipped_perimetre", 0)
             errors_pipeline = process_result.get("errors", 0)
         except Exception as e:
+            # Trace complete dans error_detail pour qu on puisse
+            # diagnostiquer en DB (jusqu ici l exception etait
+            # juste loguee dans Railway)
+            import traceback
+            tb = traceback.format_exc()
+            pipeline_crash = (
+                f"PIPELINE CRASH : {type(e).__name__}: {str(e)[:150]} "
+                f"| trace: {tb.splitlines()[-3] if len(tb.splitlines()) >= 3 else tb[:200]}"
+            )
             logger.error(
-                "[GmailHistory][WRITE] %s/%s pipeline crash : %s",
-                username, email, str(e)[:200],
+                "[GmailHistory][WRITE] %s/%s pipeline crash : %s\n%s",
+                username, email, str(e)[:200], tb,
             )
     elif result["status"] == "ok" and items_new > 0:
         logger.info(
@@ -541,6 +551,8 @@ def _poll_user_gmail(connection_id: int, tenant_id: str,
                     f"skipped_perimetre={skipped_perimetre}, "
                     f"errors={errors_pipeline}"
                 )
+                if pipeline_crash:
+                    error_detail = f"{error_detail} || {pipeline_crash}"
             else:
                 error_detail = (
                     f"SHADOW MODE - items_seen={items_seen}, "
