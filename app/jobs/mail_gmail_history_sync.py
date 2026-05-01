@@ -565,29 +565,38 @@ def _get_gmail_connections() -> list:
 
 
 def _get_gmail_token_for_connection(connection_id: int,
-                                     username: str) -> Optional[str]:
-    """Recupere un access_token Gmail valide pour une connexion donnee.
+                                     username: str,
+                                     email: str = "",
+                                     tenant_id: str = "") -> Optional[str]:
+    """Recupere un access_token Gmail VALIDE (avec refresh automatique
+    si expire) pour une connexion donnee.
 
-    Reutilise la logique existante de gmail_polling.py qui passe par
-    get_all_user_connections (chaque element a un 'token' deja dechiffre
-    et refresh si necessaire).
+    FIX 01/05/2026 soir (2eme bug Etape 4.3) :
+    ─────────────────────────────────────────────────────────────
+    Avant : utilisait get_all_user_connections() qui retourne
+    l access_token brut SANS faire le refresh quand il est expire.
+    Resultat : apres 1h le token est mort -> 401 systematique.
+    Meme bug que gmail_polling legacy qui spamme 401 dans les logs.
 
-    Pour eviter de tout charger, on filtre sur l ID de connexion.
+    Apres : utilise get_connection_token() qui delegue a _get_v2_token,
+    laquelle :
+      1. Lit access_token + refresh_token + expires_at en base
+      2. Si access_token expire dans <5 min -> appelle Google pour
+         refresh, sauvegarde le nouveau, et retourne le nouveau
+      3. Sinon retourne l access_token courant
+
+    L email est passe en email_hint pour cibler la BONNE boite
+    quand l user a plusieurs Gmail (Guillaume en a 5).
     """
     try:
-        from app.connection_token_manager import get_all_user_connections
-        all_conns = get_all_user_connections(username)
-        # FIX 01/05/2026 soir : la cle de retour est 'connection_id',
-        # pas 'id'. Bug analogue au fix "username does not exist" du
-        # matin (Etape 3.4) : mismatch entre cles attendues et cles
-        # reellement retournees. Verifie dans connection_token_manager.py
-        # ligne ~191 : "connection_id": cid.
-        for c in all_conns:
-            if (c.get("connection_id") == connection_id
-                    and c.get("tool_type", "").lower() in ("gmail", "google")
-                    and c.get("token")):
-                return c["token"]
-        return None
+        from app.connection_token_manager import get_connection_token
+        token = get_connection_token(
+            username=username,
+            tool_type="gmail",
+            tenant_id=tenant_id or None,
+            email_hint=email or None,
+        )
+        return token if token else None
     except Exception as e:
         logger.error(
             "[GmailHistory] _get_gmail_token_for_connection echec : %s",
@@ -621,7 +630,13 @@ def run_gmail_history_sync():
         email = conn_info["email"] or "?"
 
         # Recuperation du token pour cette connexion specifique
-        token = _get_gmail_token_for_connection(connection_id, username)
+        # avec refresh automatique si expire (fix 01/05/2026 soir)
+        token = _get_gmail_token_for_connection(
+            connection_id=connection_id,
+            username=username,
+            email=email if email != "?" else "",
+            tenant_id=tenant_id,
+        )
         if not token:
             try:
                 from app.connection_health import record_poll_attempt
