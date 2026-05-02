@@ -115,6 +115,53 @@ def _find_connection_by_email(email: str) -> Optional[dict]:
         if conn: conn.close()
 
 
+def _track_pubsub_received(connection_id: int, history_id: str,
+                              email: str, mode: str) -> None:
+    """Trace en DB chaque push Pub/Sub recu, peu importe le mode.
+    Stocke en metadata : last_pubsub_received_at, last_pubsub_history_id,
+    last_pubsub_email, last_pubsub_mode, pubsub_received_count.
+    Permet de verifier en mode SHADOW que Pub/Sub a bien recu quelque
+    chose, sans avoir a fouiller les logs Railway.
+    """
+    from app.database import get_pg_conn
+    from datetime import datetime, timezone
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            "SELECT metadata FROM connection_health WHERE connection_id = %s",
+            (connection_id,),
+        )
+        row = c.fetchone()
+        metadata = {}
+        if row and row[0]:
+            metadata = (
+                row[0] if isinstance(row[0], dict) else json.loads(row[0])
+            )
+        metadata["last_pubsub_received_at"] = datetime.now(
+            timezone.utc).isoformat()
+        metadata["last_pubsub_history_id"] = history_id
+        metadata["last_pubsub_email"] = email
+        metadata["last_pubsub_mode"] = mode
+        metadata["pubsub_received_count"] = (
+            int(metadata.get("pubsub_received_count", 0)) + 1
+        )
+        c.execute(
+            "UPDATE connection_health SET metadata = %s "
+            "WHERE connection_id = %s",
+            (json.dumps(metadata), connection_id),
+        )
+        conn.commit()
+    except Exception as e:
+        logger.error(
+            "[GmailPubSub] _track_pubsub_received echec : %s",
+            str(e)[:200],
+        )
+    finally:
+        if conn: conn.close()
+
+
 @router.post("/webhook/gmail/pubsub")
 async def gmail_pubsub_webhook(request: Request):
     """Endpoint recevant les push Pub/Sub de Gmail.
@@ -179,6 +226,16 @@ async def gmail_pubsub_webhook(request: Request):
 
     # ─── 4. Mode SHADOW vs TRIGGER ───
     trigger_mode = _is_trigger_mode_enabled()
+    mode_label = "trigger" if trigger_mode else "shadow"
+
+    # Tracking en DB (independant du mode) pour permettre la verification
+    # post-test sans fouiller les logs Railway
+    _track_pubsub_received(
+        connection_id=conn_info["connection_id"],
+        history_id=new_history_id,
+        email=email_address,
+        mode=mode_label,
+    )
 
     if not trigger_mode:
         # Mode SHADOW : log juste, ne fait rien

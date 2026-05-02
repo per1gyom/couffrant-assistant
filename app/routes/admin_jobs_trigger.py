@@ -309,3 +309,179 @@ def admin_scheduler_status(
             "status": "error",
             "message": f"Crash : {str(e)[:200]}",
         }, status_code=500)
+
+
+@router.get("/admin/jobs/gmail/pubsub_status",
+            response_class=HTMLResponse)
+def admin_gmail_pubsub_status(
+    request: Request,
+    admin: dict = Depends(require_super_admin),
+):
+    """Affiche l etat Pub/Sub Gmail : pour chaque boite, dernier push
+    recu, history_id du watch, expiration, nombre total de pushes.
+
+    Utile pour valider que Pub/Sub fonctionne sans avoir a fouiller
+    les logs Railway, surtout en mode SHADOW ou les pushes ne
+    declenchent rien d observable cote DB normalement.
+    """
+    from app.database import get_pg_conn
+    from datetime import datetime, timezone
+
+    try:
+        with get_pg_conn() as conn:
+            c = conn.cursor()
+            c.execute("""
+                SELECT tc.id, tc.connected_email,
+                       ch.metadata,
+                       ch.last_successful_poll_at
+                FROM tenant_connections tc
+                LEFT JOIN connection_health ch ON ch.connection_id = tc.id
+                WHERE tc.tool_type = 'gmail' AND tc.status = 'connected'
+                ORDER BY tc.id
+            """)
+            rows = c.fetchall()
+    except Exception as e:
+        return HTMLResponse(
+            f"<h1>Erreur DB : {str(e)[:200]}</h1>",
+            status_code=500,
+        )
+
+    rows_html = ""
+    total_pushes = 0
+    boxes_with_pushes = 0
+    most_recent_push = None
+    for r in rows:
+        connection_id = r[0]
+        email = r[1] or "?"
+        metadata = r[2] or {}
+        if isinstance(metadata, str):
+            try:
+                import json as _json
+                metadata = _json.loads(metadata)
+            except Exception:
+                metadata = {}
+
+        watch_set_at = metadata.get("watch_set_at") or "—"
+        watch_expiration_ms = metadata.get("watch_expiration_ms") or 0
+        try:
+            watch_expiration_ms = int(watch_expiration_ms)
+        except Exception:
+            watch_expiration_ms = 0
+        if watch_expiration_ms > 0:
+            exp = datetime.fromtimestamp(
+                watch_expiration_ms / 1000, tz=timezone.utc
+            ).strftime("%d/%m %H:%M UTC")
+        else:
+            exp = "—"
+
+        last_push_at = metadata.get("last_pubsub_received_at") or "—"
+        last_push_count = int(metadata.get("pubsub_received_count", 0))
+        total_pushes += last_push_count
+        if last_push_count > 0:
+            boxes_with_pushes += 1
+            if not most_recent_push or last_push_at > most_recent_push:
+                most_recent_push = last_push_at
+
+        watch_status = "✅" if watch_expiration_ms > 0 else "❌"
+        push_status = "✅" if last_push_count > 0 else "⏳"
+
+        # Format last_push_at lisible
+        last_push_display = "—"
+        if last_push_at != "—":
+            try:
+                dt = datetime.fromisoformat(last_push_at.replace("Z", "+00:00"))
+                age_sec = (datetime.now(timezone.utc) - dt).total_seconds()
+                if age_sec < 60:
+                    last_push_display = f"il y a {int(age_sec)}s"
+                elif age_sec < 3600:
+                    last_push_display = f"il y a {int(age_sec/60)}min"
+                else:
+                    last_push_display = dt.strftime("%H:%M UTC")
+            except Exception:
+                last_push_display = last_push_at
+
+        rows_html += (
+            f"<tr><td>{watch_status}</td>"
+            f"<td>{email}</td>"
+            f"<td>{exp}</td>"
+            f"<td>{push_status} {last_push_count}</td>"
+            f"<td>{last_push_display}</td></tr>"
+        )
+
+    if total_pushes == 0:
+        verdict_color = "#e67700"
+        verdict_icon = "⏳"
+        verdict_msg = (
+            "Aucun push Pub/Sub recu encore. Envoie-toi un mail test "
+            "sur une de tes 5 boites Gmail et reactualise cette page "
+            "dans 30 sec."
+        )
+    elif boxes_with_pushes == len(rows):
+        verdict_color = "#2b8a3e"
+        verdict_icon = "🎉"
+        verdict_msg = (
+            f"Pub/Sub fonctionne sur les {boxes_with_pushes} boites. "
+            f"Total de {total_pushes} push(s) recu(s)."
+        )
+    else:
+        verdict_color = "#1864ab"
+        verdict_icon = "✅"
+        verdict_msg = (
+            f"{boxes_with_pushes}/{len(rows)} boites ont recu au moins "
+            f"un push ({total_pushes} pushes total). Les autres "
+            "n ont juste pas eu de mail entrant pendant le test, "
+            "c est normal."
+        )
+
+    html = f"""
+    <!DOCTYPE html>
+    <html><head><meta charset="utf-8">
+    <title>Etat Pub/Sub Gmail</title>
+    <style>
+      body {{ font-family: system-ui, sans-serif; padding: 30px;
+              max-width: 900px; margin: 0 auto; color: #333; }}
+      h1 {{ color: #1864ab; }}
+      .verdict {{ background: {verdict_color}11; border-left: 4px solid {verdict_color};
+                 padding: 16px 20px; margin: 20px 0; border-radius: 4px; }}
+      .verdict-icon {{ font-size: 28px; margin-right: 12px; }}
+      table {{ border-collapse: collapse; width: 100%;
+              margin-top: 20px; font-size: 14px; }}
+      th, td {{ text-align: left; padding: 10px 14px;
+              border-bottom: 1px solid #ddd; }}
+      th {{ background: #f1f3f5; font-weight: 600; }}
+      a {{ color: #1864ab; }}
+      .refresh {{ background: #1864ab; color: white; border: none;
+                  padding: 10px 20px; border-radius: 4px;
+                  cursor: pointer; font-size: 14px; }}
+    </style>
+    <meta http-equiv="refresh" content="15">
+    </head><body>
+    <h1>📡 Etat Pub/Sub Gmail</h1>
+
+    <div class="verdict">
+      <span class="verdict-icon">{verdict_icon}</span>
+      <b>{verdict_msg}</b>
+    </div>
+
+    <p style="color:#666;font-size:13px">
+      Cette page se rafraichit automatiquement toutes les 15 secondes.
+    </p>
+
+    <table>
+      <thead><tr>
+        <th>Watch</th>
+        <th>Email</th>
+        <th>Watch expire</th>
+        <th>Push recus</th>
+        <th>Dernier push</th>
+      </tr></thead>
+      <tbody>{rows_html}</tbody>
+    </table>
+
+    <p style="margin-top:30px">
+      <a href="/admin/jobs/gmail/setup_watches">🔄 Re-setup les watches</a> |
+      <a href="/admin/health/page">← Retour au panel admin</a>
+    </p>
+    </body></html>
+    """
+    return HTMLResponse(html)
