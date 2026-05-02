@@ -727,9 +727,32 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
           <input type="text" class="search-input" id="rulesSearchInput" placeholder="Décris ce que tu cherches — Raya comprend par le sens, pas les mots exacts" oninput="filterRules()">
         </div>
 
-        <!-- Filtres par catégorie (générés dynamiquement) -->
-        <div class="filter-chips" id="rulesFilterChips">
-          <!-- Les chips seront injectés par renderRuleChips() -->
+        <!-- Bandeau "Dernière règle ajoutée" (cliquable pour scroller) -->
+        <div id="rulesLatestBanner" style="display:none;align-items:center;gap:10px;padding:10px 14px;margin-bottom:14px;background:linear-gradient(135deg,#eff6ff 0%,#dbeafe 100%);border:1px solid #bfdbfe;border-radius:10px;font-size:12.5px;color:var(--text);cursor:pointer;transition:.15s" onclick="scrollToLatestRule()" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='#bfdbfe'">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--accent);flex-shrink:0"><path d="M12 2L13.5 8.5L20 10L13.5 11.5L12 18L10.5 11.5L4 10L10.5 8.5L12 2z"/></svg>
+          <span style="flex:1;min-width:0">
+            <strong style="color:var(--accent);font-weight:600">Dernière règle :</strong>
+            <span id="rulesLatestText" style="color:var(--text-muted)">—</span>
+            <span id="rulesLatestAge" style="color:var(--text-muted);margin-left:6px">—</span>
+          </span>
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--accent);flex-shrink:0"><polyline points="9 18 15 12 9 6"/></svg>
+        </div>
+
+        <!-- Filtres par catégorie + tri (générés dynamiquement) -->
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap">
+          <div class="filter-chips" id="rulesFilterChips" style="margin-bottom:0;flex:1;min-width:0">
+            <!-- Les chips seront injectés par renderRuleChips() -->
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+            <span style="font-size:12px;color:var(--text-muted);white-space:nowrap">Trier :</span>
+            <select id="rulesSortMode" onchange="changeSortMode(this.value)" style="padding:6px 28px 6px 10px;border:1px solid var(--border);border-radius:8px;font-family:var(--font);font-size:12.5px;color:var(--text);background:var(--surface);cursor:pointer;appearance:none;background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236e7687' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E&quot;);background-repeat:no-repeat;background-position:right 8px center;font-weight:500">
+              <option value="importance">Pertinence</option>
+              <option value="recent">Plus récent</option>
+              <option value="ancien">Plus ancien</option>
+              <option value="alpha">A → Z</option>
+              <option value="reinf">Plus renforcée</option>
+            </select>
+          </div>
         </div>
 
         <!-- Conteneur pour les groupes de règles (généré dynamiquement) -->
@@ -1761,6 +1784,8 @@ let _allRules = [];         // toutes les règles actives (depuis GET /memory/ru
 let _activeFilter = 'review';  // 'review' | 'all' | 'Comportement' | 'Divers' | ...
 let _searchQuery = '';      // filtre texte en cours
 let _reviewSessionStart = 0; // index de départ pour la session guidée
+let _sortMode = 'importance'; // 'importance' | 'recent' | 'ancien' | 'alpha' | 'reinf'
+let _latestRuleId = null;   // id de la règle la plus récemment ajoutée (pour scroll & badge)
 
 // Seuil pour regrouper les petites catégories dans "Divers"
 const DIVERS_THRESHOLD = 2;  // catégories avec <=2 règles -> "Divers"
@@ -1818,10 +1843,14 @@ function renderRuleCard(rule) {
   const confTxt = (rule.confidence != null) ? `conf. ${rule.confidence.toFixed(2)}` : '';
   const reinfTxt = rule.reinforcements ? `renforcée ${rule.reinforcements}×` : '';
   const dateTxt = formatRelativeShort(rule.created_at);
+  // Badge "Nouveau" si créée il y a moins de 24h
+  const isNew = rule.created_at &&
+    (Date.now() - new Date(rule.created_at).getTime()) < 86400000;
   // Échappement HTML basique
   const esc = (s) => String(s || '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   return `
-    <div class="rule-card${isInactive ? ' disabled' : ''}">
+    <div class="rule-card${isInactive ? ' disabled' : ''}" id="rule-card-${rule.id}" style="position:relative">
+      ${isNew ? '<span style="position:absolute;top:8px;right:8px;background:linear-gradient(135deg,#3b82f6,#0057b8);color:#fff;font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px;letter-spacing:.02em;box-shadow:0 2px 4px rgba(0,87,184,.25)">🆕 Nouveau</span>' : ''}
       <input type="checkbox" class="rule-check" ${rule.active ? 'checked' : ''} disabled>
       <div class="rule-body">
         <div class="rule-text">${esc(rule.rule)}</div>
@@ -1847,7 +1876,7 @@ function renderRuleGroup(category, rules, totalInCat) {
   const hiddenCount = Math.max(0, rules.length - limit);
   const cards = visible.map(renderRuleCard).join('');
   const moreBtn = hiddenCount > 0
-    ? `<div style="text-align:center;margin-top:10px"><button class="btn" style="font-size:12.5px" onclick="alert('Vue étendue à venir — utilise les chips pour filtrer par catégorie.')">Voir les ${hiddenCount} autres règle${hiddenCount > 1 ? 's' : ''} de ${category}</button></div>`
+    ? `<div style="text-align:center;margin-top:10px"><button class="btn" style="font-size:12.5px" onclick="filterByChip('${category.replace(/'/g, "\\'")}')">Voir les ${hiddenCount} autres règle${hiddenCount > 1 ? 's' : ''} de ${category}</button></div>`
     : '';
   const suffix = rules.length > limit ? ` · les ${limit} plus importantes` : '';
   return `
@@ -1886,7 +1915,7 @@ function getFilteredRules() {
     });
   }
   // Tri : pour "review" → prioriser les + à risque (faible conf + peu renforcées)
-  //       sinon tri par importance décroissante
+  //       sinon, on applique le _sortMode choisi par l'utilisateur (par défaut: importance)
   if (_activeFilter === 'review') {
     rules.sort((a, b) => {
       const aConf = a.confidence || 0, bConf = b.confidence || 0;
@@ -1896,7 +1925,28 @@ function getFilteredRules() {
       const bScore = bConf + Math.min(bReinf, 10) / 30;
       return aScore - bScore; // croissant (les moins sûres en premier)
     });
+  } else if (_sortMode === 'recent') {
+    rules.sort((a, b) => {
+      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return tb - ta; // décroissant : plus récent d'abord
+    });
+  } else if (_sortMode === 'ancien') {
+    rules.sort((a, b) => {
+      const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return ta - tb; // croissant : plus ancien d'abord
+    });
+  } else if (_sortMode === 'alpha') {
+    rules.sort((a, b) => {
+      const ra = (a.rule || '').toLowerCase();
+      const rb = (b.rule || '').toLowerCase();
+      return ra.localeCompare(rb, 'fr');
+    });
+  } else if (_sortMode === 'reinf') {
+    rules.sort((a, b) => (b.reinforcements || 0) - (a.reinforcements || 0));
   } else {
+    // 'importance' (mode par défaut, comportement historique)
     rules.sort((a, b) => ruleImportance(b) - ruleImportance(a));
   }
   return rules;
@@ -2091,6 +2141,90 @@ function filterRules() {
   }, 200);
 }
 
+// Change le mode de tri et re-render
+function changeSortMode(mode) {
+  if (!['importance', 'recent', 'ancien', 'alpha', 'reinf'].includes(mode)) return;
+  _sortMode = mode;
+  // Synchroniser le select (utile si appelé programmatiquement)
+  const sel = document.getElementById('rulesSortMode');
+  if (sel && sel.value !== mode) sel.value = mode;
+  renderRulesContent();
+}
+
+// Scroll & flash sur la dernière règle ajoutée
+function scrollToLatestRule() {
+  if (!_latestRuleId) return;
+  // S'assurer qu'on voit toutes les règles : si on est sur "À revoir"
+  // ou autre filtre, on bascule sur "Toutes" pour garantir la visibilité.
+  if (_activeFilter !== 'all') {
+    filterByChip('all');
+  }
+  // Trier par date pour avoir la dernière en haut (sinon elle peut être loin)
+  if (_sortMode !== 'recent') {
+    changeSortMode('recent');
+  }
+  // Petit délai pour laisser le re-render se faire avant de chercher l'élément
+  setTimeout(() => {
+    const el = document.getElementById('rule-card-' + _latestRuleId);
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Flash visuel pour attirer l'œil
+    const orig = el.style.boxShadow;
+    el.style.transition = 'box-shadow .35s ease';
+    el.style.boxShadow = '0 0 0 3px rgba(59,130,246,.55)';
+    setTimeout(() => { el.style.boxShadow = orig; }, 1400);
+  }, 120);
+}
+
+// Met à jour le bandeau "Dernière règle ajoutée" en haut du panel.
+// Affichée uniquement si la règle a moins de 7 jours (sinon ce n'est plus
+// vraiment "récent" et le bandeau perd son intérêt).
+function updateLatestRuleBanner() {
+  const banner = document.getElementById('rulesLatestBanner');
+  const textEl = document.getElementById('rulesLatestText');
+  const ageEl = document.getElementById('rulesLatestAge');
+  if (!banner || !textEl || !ageEl) return;
+
+  if (!_allRules.length) {
+    banner.style.display = 'none';
+    _latestRuleId = null;
+    return;
+  }
+
+  // Trouver la règle avec created_at le plus récent
+  let latest = null;
+  let latestTs = 0;
+  for (const r of _allRules) {
+    if (!r.created_at) continue;
+    const ts = new Date(r.created_at).getTime();
+    if (ts > latestTs) {
+      latestTs = ts;
+      latest = r;
+    }
+  }
+
+  if (!latest) {
+    banner.style.display = 'none';
+    _latestRuleId = null;
+    return;
+  }
+
+  // Afficher le bandeau seulement si la règle a moins de 7 jours
+  const ageDays = (Date.now() - latestTs) / 86400000;
+  if (ageDays > 7) {
+    banner.style.display = 'none';
+    _latestRuleId = latest.id;  // on garde l'id pour le scroll si jamais
+    return;
+  }
+
+  _latestRuleId = latest.id;
+  // Tronque le texte pour rester compact
+  const txt = (latest.rule || '').trim();
+  textEl.textContent = txt.length > 90 ? txt.slice(0, 90) + '…' : txt;
+  ageEl.textContent = '· ' + formatRelativeShort(latest.created_at);
+  banner.style.display = 'flex';
+}
+
 // Charge les règles + les stats depuis l'API
 async function loadRules() {
   try {
@@ -2105,6 +2239,8 @@ async function loadRules() {
     } else {
       _allRules = [];
     }
+    // Calcul de la dernière règle ajoutée (pour bandeau + raccourci)
+    updateLatestRuleBanner();
     renderRuleChips(stats || {total: 0, new: 0, by_category: {}});
     renderRulesContent();
   } catch (e) {
