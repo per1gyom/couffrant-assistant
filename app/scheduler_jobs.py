@@ -459,3 +459,41 @@ def _register_jobs(scheduler: BackgroundScheduler):
             logger.error(f"[Scheduler] Import echoue pour gmail_watch_renewal: {e}")
     else:
         logger.info("[Scheduler] Job DESACTIVE : gmail_watch_renewal (activer via SCHEDULER_GMAIL_WATCH_RENEWAL_ENABLED=true)")
+
+    # ═══════════════════════════════════════════════════════════════
+    # SEMAINE 5 - DRIVE/SHAREPOINT (preparation 02/05/2026)
+    # ═══════════════════════════════════════════════════════════════
+    # 2 jobs prepares en mode SHADOW pour la Semaine 5 :
+    #   - drive_delta_sync : polling 5 min des changements SharePoint
+    #   - drive_reconciliation : filet ultime nocturne 5h30
+    #
+    # Tous les deux DISABLED par defaut (vars d env). Activation
+    # progressive avec validation a chaque etape.
+
+    if _job_enabled("SCHEDULER_DRIVE_DELTA_SYNC_ENABLED", default=False):
+        try:
+            from app.jobs.drive_delta_sync import run_drive_delta_sync
+            scheduler.add_job(func=run_drive_delta_sync,
+                              trigger=IntervalTrigger(minutes=5),
+                              id="drive_delta_sync",
+                              name="Drive delta sync (5 min)",
+                              replace_existing=True)
+            logger.info("[Scheduler] Job enregistre : drive_delta_sync (5 min)")
+        except Exception as e:
+            logger.error(f"[Scheduler] Import echoue pour drive_delta_sync: {e}")
+    else:
+        logger.info("[Scheduler] Job DESACTIVE : drive_delta_sync (activer via SCHEDULER_DRIVE_DELTA_SYNC_ENABLED=true)")
+
+    if _job_enabled("SCHEDULER_DRIVE_RECONCILIATION_ENABLED", default=False):
+        try:
+            from app.jobs.drive_reconciliation import run_drive_reconciliation
+            scheduler.add_job(func=run_drive_reconciliation,
+                              trigger=CronTrigger(hour=5, minute=30),
+                              id="drive_reconciliation",
+                              name="Drive reconciliation nocturne (5h30)",
+                              replace_existing=True)
+            logger.info("[Scheduler] Job enregistre : drive_reconciliation (5h30)")
+        except Exception as e:
+            logger.error(f"[Scheduler] Import echoue pour drive_reconciliation: {e}")
+    else:
+        logger.info("[Scheduler] Job DESACTIVE : drive_reconciliation (activer via SCHEDULER_DRIVE_RECONCILIATION_ENABLED=true)")
