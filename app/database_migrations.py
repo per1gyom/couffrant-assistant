@@ -1450,4 +1450,58 @@ MIGRATIONS = [
                AND m2.tenant_id IS NOT NULL
                AND m2.id != m1.id
          )""",
+
+    # -- Phase Drive multi-racines (02/05/2026 matin) --
+    # Voir docs/journal_02mai_2026_drive_multi_racines.md
+    #
+    # Decision Guillaume 02/05 : permettre a chaque tenant de configurer
+    # MULTIPLES racines de scan (cas typique : Drive Commun + Drive Direction
+    # chez Couffrant) avec exclusions/inclusions granulaires a n importe
+    # quelle profondeur de l arborescence.
+    #
+    # Regle universelle : "le chemin le plus long gagne" (logique .gitignore).
+    # Heritage par defaut : un dossier inclus/exclu se propage a ses sous-
+    # dossiers, sauf override explicite plus profond.
+    #
+    # Architecture :
+    #   - drive_folders (existante) : liste des RACINES surveillees
+    #   - tenant_drive_blacklist (existante, etendue) : regles d EXCEPTION
+    #       rule_type = 'include' : inclus meme si parent exclu
+    #       rule_type = 'exclude' : exclus (cas legacy, default backward compat)
+    #
+    # Backward compat : les regles existantes (sans rule_type) deviennent
+    # automatiquement rule_type='exclude' grace au DEFAULT de la migration.
+
+    # M-DMR01 : ajout colonne rule_type (include/exclude)
+    # Default 'exclude' preserve le comportement actuel des regles existantes.
+    "ALTER TABLE tenant_drive_blacklist ADD COLUMN IF NOT EXISTS rule_type TEXT NOT NULL DEFAULT 'exclude'",
+    # Contrainte de validation : seulement include ou exclude
+    """DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tdb_rule_type_check') THEN
+            ALTER TABLE tenant_drive_blacklist ADD CONSTRAINT tdb_rule_type_check
+                CHECK (rule_type IN ('include', 'exclude'));
+        END IF;
+    END $$""",
+
+    # M-DMR02 : ajout colonne scope (tenant/user) pour preparer les drives prives
+    # tenant = regle geree par admin du tenant (cas standard, defaut)
+    # user   = regle geree par le user proprietaire du drive prive (V2 future)
+    "ALTER TABLE tenant_drive_blacklist ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'tenant'",
+    """DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'tdb_scope_check') THEN
+            ALTER TABLE tenant_drive_blacklist ADD CONSTRAINT tdb_scope_check
+                CHECK (scope IN ('tenant', 'user'));
+        END IF;
+    END $$""",
+
+    # M-DMR03 : colonne owner_username (qui possede la regle si scope=user)
+    # NULL si scope=tenant (la regle appartient a tout le tenant).
+    # Defini si scope=user (la regle appartient a un user specifique pour son drive prive).
+    "ALTER TABLE tenant_drive_blacklist ADD COLUMN IF NOT EXISTS owner_username TEXT",
+
+    # M-DMR04 : index pour les requetes is_path_indexable (par connexion + path)
+    "CREATE INDEX IF NOT EXISTS idx_drive_rules_lookup ON tenant_drive_blacklist (connection_id, folder_path)",
+
+    # M-DMR05 : index sur tenant pour vue admin
+    "CREATE INDEX IF NOT EXISTS idx_drive_rules_tenant_scope ON tenant_drive_blacklist (tenant_id, scope, connection_id)",
 ]

@@ -604,8 +604,54 @@ def _run_scan(tenant_id: str, username: str, force_rescan: bool = False):
         stats = {"started_at": datetime.now(timezone.utc).isoformat(),
                  "total_files": total, "processed": 0, "ok": 0,
                  "skipped": 0, "errors": 0,
+                 "filtered_by_rules": 0,
                  "level1_chunks": 0, "level2_chunks": 0}
         _save_progress(folder["folder_db_id"], stats)
+
+        # -- Phase Drive multi-racines (02/05/2026) --
+        # Pre-charge les regles inclusion/exclusion pour ce tenant.
+        # Failsafe : si echec de chargement -> liste vide -> comportement
+        # actuel (tout dans la racine est indexe).
+        rules_enabled = os.environ.get("DRIVE_PATH_RULES_ENABLED", "true").lower() == "true"
+        path_roots: list = []
+        path_rules: list = []
+        connection_id_for_rules: Optional[int] = None
+        if rules_enabled:
+            try:
+                from app.connectors.drive_path_rules import (
+                    get_drive_roots, get_path_rules,
+                )
+                # Recupere le connection_id du tenant pour ses regles drive.
+                # On prend la premiere connexion drive/sharepoint connectee.
+                with get_pg_conn() as conn:
+                    cur = conn.cursor()
+                    cur.execute(
+                        """SELECT id FROM tenant_connections
+                           WHERE tenant_id = %s
+                             AND tool_type IN ('drive', 'sharepoint', 'google_drive')
+                             AND status = 'connected'
+                           ORDER BY id DESC
+                           LIMIT 1""",
+                        (tenant_id,),
+                    )
+                    row = cur.fetchone()
+                    if row:
+                        connection_id_for_rules = row[0] if not isinstance(row, dict) else row.get("id")
+                if connection_id_for_rules:
+                    path_roots = get_drive_roots(connection_id_for_rules)
+                    path_rules = get_path_rules(connection_id_for_rules)
+                    logger.info(
+                        "[DriveScanner] regles chargees : %d racines, %d regles (connection_id=%s)",
+                        len(path_roots), len(path_rules), connection_id_for_rules,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "[DriveScanner] echec chargement regles path : %s (failsafe : tout indexer)",
+                    str(e)[:200],
+                )
+                path_roots = []
+                path_rules = []
+                connection_id_for_rules = None
 
         # token_ref mutable pour permettre le refresh in-place sur HTTP 401
         token_ref = [token]
@@ -622,6 +668,31 @@ def _run_scan(tenant_id: str, username: str, force_rescan: bool = False):
                     last_refresh = time.time()
                     logger.info("[DriveScanner] Token refresh proactif OK")
             try:
+                # -- Phase Drive multi-racines (02/05/2026) --
+                # Check is_path_indexable AVANT _process_file.
+                # Failsafe : si pas de regles chargees ou pas de connection_id,
+                # on indexe (comportement actuel preserve).
+                if rules_enabled and connection_id_for_rules and path_roots:
+                    try:
+                        from app.connectors.drive_path_rules import is_path_indexable
+                        file_path = f.get("path") or f.get("name") or ""
+                        if not is_path_indexable(
+                            connection_id_for_rules, file_path,
+                            roots=path_roots, rules=path_rules,
+                        ):
+                            stats["filtered_by_rules"] += 1
+                            logger.debug(
+                                "[DriveScanner] FILTRE par regle : %s",
+                                f.get("name", "?"),
+                            )
+                            continue
+                    except Exception as e:
+                        # Failsafe : on indexe par defaut si check plante
+                        logger.warning(
+                            "[DriveScanner] check is_path_indexable plante pour %s : %s (failsafe : indexer)",
+                            f.get("name", "?"), str(e)[:150],
+                        )
+
                 result = _process_file(tenant_id, folder["folder_db_id"],
                                         token_ref, username,
                                         folder["drive_id"], f,
