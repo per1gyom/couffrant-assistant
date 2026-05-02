@@ -17,9 +17,12 @@ def _parse_json_safe(text: str) -> dict:
 
 # ─── CATÉGORIES DYNAMIQUES ───
 
+# Categories par defaut quand un user n a pas encore configure ses
+# propres categories de tri. Volontairement neutres pour ne pas biaiser
+# vers un metier (avant : raccordement/consuel/chantier = photovoltaique).
 _DEFAULT_CATEGORIES = [
-    "raccordement", "consuel", "chantier", "commercial", "financier",
-    "fournisseur", "reunion", "securite", "interne", "notification", "autre"
+    "commercial", "financier", "interne", "reunion",
+    "fournisseur", "notification", "autre"
 ]
 
 
