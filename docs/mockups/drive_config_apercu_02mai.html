@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mockup Drive Config v2 - Super admin + Tenant admin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #080a0c; --bg2: #0d1117; --bg3: #111820; --bg4: #161e28;
+  --border: #1e2a38; --border2: #243040;
+  --text: #c9d1d9; --text2: #8b949e; --text3: #4a5568;
+  --accent: #00bcd4; --accent2: #1565c0;
+  --green: #00e676; --red: #ff5252; --yellow: #ffca28;
+  --mono: 'JetBrains Mono', monospace; --sans: 'IBM Plex Sans', sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; min-height: 100vh; }
+.header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 28px; height: 56px; display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 100; }
+.header-left { display: flex; align-items: center; gap: 16px; }
+.logo { font-family: var(--mono); font-size: 18px; font-weight: 700; color: #fff; }
+.logo span { color: var(--accent); }
+.badge-admin { background: rgba(0,188,212,0.12); border: 1px solid rgba(0,188,212,0.3); color: var(--accent); font-family: var(--mono); font-size: 10px; padding: 2px 8px; border-radius: 3px; letter-spacing: 1px; }
+.btn-nav { font-family: var(--mono); font-size: 11px; color: var(--text3); background: none; border: 1px solid var(--border); padding: 5px 12px; border-radius: 4px; cursor: pointer; text-decoration: none; display: inline-block; }
+.btn-nav:hover { color: var(--text); border-color: var(--border2); }
+.nav-tabs { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 28px; display: flex; gap: 0; overflow-x: auto; }
+.tab { font-family: var(--mono); font-size: 12px; font-weight: 500; color: var(--text3); padding: 14px 20px; cursor: pointer; border-bottom: 2px solid transparent; text-transform: uppercase; letter-spacing: 0.5px; user-select: none; white-space: nowrap; }
+.tab:hover { color: var(--text2); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.main { padding: 28px; max-width: 1400px; margin: 0 auto; }
+.section-title { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 14px; display: flex; align-items: center; gap: 10px; }
+.section-title::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.actions-row { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; align-items: center; }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 6px; font-family: var(--mono); font-size: 12px; font-weight: 600; cursor: pointer; border: none; }
+.btn-primary { background: var(--accent2); color: #fff; }
+.btn-danger { background: rgba(255,82,82,0.15); color: var(--red); border: 1px solid rgba(255,82,82,0.3); }
+.btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+.btn-accent { background: rgba(0,188,212,0.12); color: var(--accent); border: 1px solid rgba(0,188,212,0.25); }
+.btn-warn { background: rgba(255,202,40,0.1); color: var(--yellow); border: 1px solid rgba(255,202,40,0.25); }
+.table-wrap { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 28px; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th { font-family: var(--mono); font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; padding: 12px 16px; text-align: left; background: var(--bg3); border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 12px 16px; border-bottom: 1px solid var(--border); color: var(--text); font-size: 13px; vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+.badge { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: 3px; font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: 0.5px; }
+.badge-green { background: rgba(0,230,118,0.1); color: var(--green); border: 1px solid rgba(0,230,118,0.2); }
+.badge-blue { background: rgba(21,101,192,0.2); color: #64b5f6; border: 1px solid rgba(21,101,192,0.3); }
+.badge-red { background: rgba(255,82,82,0.1); color: var(--red); border: 1px solid rgba(255,82,82,0.2); }
+.badge-gray { background: rgba(255,255,255,0.05); color: var(--text3); border: 1px solid var(--border); }
+label { display: block; font-family: var(--mono); font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+input[type=text], select { width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; color: var(--text); font-family: var(--mono); font-size: 13px; padding: 10px 12px; outline: none; }
+.profile-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 24px; margin-bottom: 16px; }
+.profile-section-title { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
+.form-group { margin-bottom: 16px; }
+/* mockup */
+.mockup-banner { background: rgba(255,202,40,0.08); border: 1px solid rgba(255,202,40,0.3); padding: 12px 18px; border-radius: 8px; margin: 24px 28px; font-family: var(--mono); font-size: 12px; color: var(--yellow); }
+.option-divider { display: flex; align-items: center; gap: 16px; margin: 60px 28px 12px 28px; }
+.option-divider::before, .option-divider::after { content: ''; flex: 1; height: 2px; background: var(--accent); }
+.option-divider span { font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 2px; padding: 6px 16px; background: var(--bg2); border: 1px solid var(--accent); border-radius: 4px; }
+.section-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 18px; margin-bottom: 16px; }
+.kbd { font-family: var(--mono); background: var(--bg3); border: 1px solid var(--border2); padding: 2px 6px; border-radius: 3px; font-size: 11px; color: var(--text); }
+.user-flow { background: rgba(0,188,212,0.05); border: 1px solid rgba(0,188,212,0.2); padding: 14px 18px; border-radius: 8px; margin: 16px 28px; font-size: 13px; color: var(--text); line-height: 1.7; }
+.user-flow strong { color: var(--accent); }
+.recommend { background: rgba(0,230,118,0.06); border: 1px solid rgba(0,230,118,0.3); padding: 18px; border-radius: 8px; margin: 24px 0; }
+.recommend-title { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--green); margin-bottom: 10px; text-transform: uppercase; letter-spacing: 1px; }
+.modal-mock { background: var(--bg2); border: 2px solid var(--accent); border-radius: 12px; padding: 28px; max-width: 800px; margin: 20px auto; box-shadow: 0 10px 40px rgba(0,188,212,0.2); }
+.modal-mock-title { font-family: var(--mono); font-size: 14px; font-weight: 700; color: #fff; margin-bottom: 6px; }
+.modal-mock-sub { font-family: var(--mono); font-size: 11px; color: var(--text3); margin-bottom: 20px; }
+.tag-required { background: rgba(0,188,212,0.1); color: var(--accent); padding: 2px 8px; border-radius: 3px; font-size: 10px; font-family: var(--mono); margin-left: 8px; text-transform: uppercase; letter-spacing: 1px; }
+</style>
+</head>
+<body>
+
+<div class="mockup-banner">
+  📋 MAQUETTE v2 (02/05/2026 - 13h17) - Aligne sur charte admin-panel.css. Reproduit le panel admin
+  ET le panel tenant existants. Aucun nouveau menu cree. Aucun commit prod.
+</div>
+
+<!-- ============================================================ -->
+<!-- PARTIE 1 : SUPER_ADMIN  -  /admin/connexions                 -->
+<!-- ============================================================ -->
+<div class="option-divider"><span>Partie 1 : Super-admin (/admin/connexions)</span></div>
+
+<div class="user-flow">
+  <strong>Acces super_admin :</strong> menu 3 points (sidebar chat) -> Super Admin -> bouton "🔌 Connexions" du header
+  -> page <span class="kbd">/admin/connexions</span>
+</div>
+
+<header class="header">
+  <div class="header-left">
+    <div class="logo">Raya <span>//</span> Connexions</div>
+    <span class="badge-admin">SUPER-ADMIN</span>
+  </div>
+  <div class="header-right">
+    <a href="#" class="btn-nav">Panel admin</a>
+    <a href="#" class="btn-nav">Chat</a>
+    <a href="#" class="btn-nav">Deconnexion</a>
+  </div>
+</header>
+
+<main class="main">
+<div class="section-title">Connexions par tenant</div>
+<div class="section-card">
+  <div style="font-family:var(--mono);font-weight:600;font-size:15px;color:#fff;margin-bottom:6px">couffrant_solar</div>
+  <div style="font-size:12px;color:var(--text3);margin-bottom:16px">3 connexion(s) actives</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+
+    <!-- Card SharePoint AVEC nouveau bouton -->
+    <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--bg3);display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;justify-content:space-between"><div style="font-size:22px">📁</div><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#14b866"></span></div>
+      <div style="font-weight:600;color:#fff">SharePoint Commun</div>
+      <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">Site : Commun</div>
+      <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">1 racine, 0 regle</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+        <button class="btn btn-accent" style="padding:5px 10px;font-size:11px;width:100%">📂 Configurer dossiers</button>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-ghost" style="padding:5px 10px;font-size:11px">Reconnecter</button>
+        <button class="btn btn-danger" style="padding:5px 10px;font-size:11px">Retirer</button>
+      </div>
+    </div>
+
+    <!-- Card Outlook normale -->
+    <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--bg3);display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;justify-content:space-between"><div style="font-size:22px">📧</div><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#14b866"></span></div>
+      <div style="font-weight:600;color:#fff">Outlook</div>
+      <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">guillaume@couffrant-solar.fr</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+        <button class="btn btn-ghost" style="padding:5px 10px;font-size:11px">Reconnecter</button>
+        <button class="btn btn-danger" style="padding:5px 10px;font-size:11px">Retirer</button>
+      </div>
+    </div>
+
+    <!-- Card Gmail normale -->
+    <div style="border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--bg3);display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;justify-content:space-between"><div style="font-size:22px">@</div><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#14b866"></span></div>
+      <div style="font-weight:600;color:#fff">Gmail</div>
+      <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">per1.guillaume@gmail.com</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+        <button class="btn btn-ghost" style="padding:5px 10px;font-size:11px">Reconnecter</button>
+        <button class="btn btn-danger" style="padding:5px 10px;font-size:11px">Retirer</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+</main>
+
+<!-- ============================================================ -->
+<!-- PARTIE 2 : TENANT_ADMIN  -  /tenant/panel                    -->
+<!-- ============================================================ -->
+<div class="option-divider"><span>Partie 2 : Tenant-admin (/tenant/panel)</span></div>
+
+<div class="user-flow">
+  <strong>Acces tenant_admin :</strong> menu 3 points (sidebar chat) -> Ma societe
+  -> page <span class="kbd">/tenant/panel</span> -> NOUVEL onglet <span class="kbd">📁 Drive</span>
+</div>
+
+<header class="header">
+  <div class="header-left">
+    <div class="logo">⚡ Raya <span>//</span> Ma société</div>
+    <span class="badge-admin">ADMIN</span>
+  </div>
+  <div class="header-right">
+    <a href="#" class="btn-nav">← Chat</a>
+    <a href="#" class="btn-nav">Deconnexion</a>
+  </div>
+</header>
+
+<nav class="nav-tabs">
+  <div class="tab">Ma société</div>
+  <div class="tab active">📁 Drive</div>
+  <div class="tab">Mon profil</div>
+</nav>
+
+<main class="main">
+
+<div style="background:rgba(0,188,212,0.05);border:1px solid rgba(0,188,212,0.2);padding:14px 18px;border-radius:8px;margin-bottom:20px">
+  <div style="font-family:var(--mono);font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📁 CONFIGURATION DOSSIERS DRIVE</div>
+  <div style="font-size:13px;line-height:1.6;color:var(--text)">
+    Choisis quels dossiers Raya peut consulter dans tes drives connectes (SharePoint, Google Drive...).
+    La regle : <strong>"le chemin le plus long gagne"</strong>. Tu inclus un parent, tu peux exclure
+    des sous-dossiers, et re-inclure encore plus profond.
+  </div>
+</div>
+
+<div class="section-title">Mes drives connectes</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin-bottom:28px">
+  <!-- Card drive avec bouton Configurer dossiers -->
+  <div style="border:1px solid var(--border);border-radius:10px;padding:16px;background:var(--bg2);display:flex;flex-direction:column;gap:8px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start"><div style="font-size:22px">📁</div><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#14b866;margin-top:8px"></span></div>
+    <div style="font-weight:600;color:#fff">SharePoint Commun</div>
+    <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">1 racine, 0 regle</div>
+    <button class="btn btn-accent" style="padding:6px 12px;font-size:11px;margin-top:8px;width:100%">📂 Configurer dossiers</button>
+  </div>
+  <div style="border:1px dashed var(--border);border-radius:10px;padding:16px;background:var(--bg2);display:flex;flex-direction:column;gap:8px;align-items:center;justify-content:center;text-align:center">
+    <div style="font-size:32px;color:var(--text3)">+</div>
+    <div style="font-size:12px;color:var(--text3);font-family:var(--mono)">Ajouter un drive<br>(via super-admin)</div>
+  </div>
+</div>
+
+<div style="font-family:var(--mono);font-size:11px;color:var(--text3);line-height:1.7;padding:12px;background:var(--bg3);border-radius:6px;border:1px solid var(--border)">
+  ℹ️ Pour AJOUTER un nouveau drive (Drive Direction par ex.), demande au super-admin de le connecter
+  via <span class="kbd">/admin/connexions</span>. Une fois connecte, il apparaitra ici et tu pourras
+  configurer ses dossiers.
+</div>
+
+</main>
+
+<!-- ============================================================ -->
+<!-- PARTIE 3 : MODALE OU PAGE - Configuration des dossiers       -->
+<!-- ============================================================ -->
+<div class="option-divider"><span>Partie 3 : L'ecran de config (modale)</span></div>
+
+<div class="user-flow">
+  <strong>Au clic sur "📂 Configurer dossiers"</strong> (depuis super-admin OU tenant-admin) :
+  une <strong>modale plein-ecran</strong> s ouvre par-dessus la page courante.
+  Avantage : on revient direct sur la page d ou on vient. Pas de navigation lourde, pas de breadcrumb necessaire.
+</div>
+
+<div class="modal-mock">
+  <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:8px">
+    <div>
+      <div class="modal-mock-title">📂 Configuration dossiers - SharePoint Commun</div>
+      <div class="modal-mock-sub">Tenant : couffrant_solar / Connection ID : 1 / Site : Commun</div>
+    </div>
+    <button class="btn btn-ghost" style="padding:6px 12px">✕ Fermer</button>
+  </div>
+
+  <div class="section-title" style="margin-top:24px">1. Racines surveillees</div>
+  <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:14px;line-height:1.6">
+    La racine = OU Raya commence a regarder. Path vide = scanner TOUT le site.
+  </div>
+  <div class="table-wrap">
+    <table>
+    <thead><tr><th>Site</th><th>Libelle</th><th>Path</th><th>Enabled</th><th>Dernier scan</th><th>Actions</th></tr></thead>
+    <tbody>
+    <tr>
+      <td>Commun</td>
+      <td>1_Photovoltaique</td>
+      <td><span class="kbd">1_Photovoltaique</span></td>
+      <td><span style="color:var(--green)">●</span> oui</td>
+      <td><span style="font-family:var(--mono);font-size:11px;color:var(--text3)">2026-04-20 14:01</span></td>
+      <td>
+        <button class="btn btn-ghost" style="padding:4px 9px;font-size:11px">Modifier</button>
+        <button class="btn btn-danger" style="padding:4px 9px;font-size:11px">Retirer</button>
+      </td>
+    </tr>
+    </tbody>
+    </table>
+  </div>
+  <button class="btn btn-primary" style="margin-bottom:24px">+ Ajouter une racine</button>
+
+  <div class="section-title">2. Regles include / exclude</div>
+  <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:14px;line-height:1.6">
+    Inclus <span class="kbd">Comptabilite</span> = tout indexe<br>
+    Exclus <span class="kbd">Comptabilite/Salaires</span> = sauf ce sous-dossier<br>
+    Inclus <span class="kbd">Comptabilite/Salaires/Public</span> = sauf ce sous-sous-dossier<br>
+    <em>Le chemin le plus long gagne.</em>
+  </div>
+  <div class="table-wrap">
+    <table>
+    <thead><tr><th>Path</th><th>Type</th><th>Raison</th><th>Cree par</th><th>Actions</th></tr></thead>
+    <tbody>
+    <tr>
+      <td colspan="5" style="text-align:center;color:var(--text3);font-family:var(--mono);font-size:12px;padding:28px">
+        Aucune regle. Sans regle, seules les racines surveillees seront indexees.
+      </td>
+    </tr>
+    </tbody>
+    </table>
+  </div>
+  <div style="display:flex;gap:10px;margin-bottom:24px">
+    <button class="btn btn-primary">+ Ajouter une regle</button>
+    <button class="btn btn-accent">🧪 Tester un chemin</button>
+  </div>
+
+  <div class="section-title">3. Actions</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px">
+    <button class="btn btn-warn" style="padding:14px;flex-direction:column;align-items:flex-start;gap:6px;text-align:left;height:auto">
+      <div style="font-size:13px">▶️ Lancer scan complet</div>
+      <div style="font-size:11px;color:var(--text3);font-weight:400">Re-scan complet, 1-3h</div>
+    </button>
+    <button class="btn btn-ghost" style="padding:14px;flex-direction:column;align-items:flex-start;gap:6px;text-align:left;height:auto">
+      <div style="font-size:13px">📊 Statistiques</div>
+      <div style="font-size:11px;color:var(--text3);font-weight:400">Files vectorises, dernier delta</div>
+    </button>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- PARTIE 4 : COMPARAISON page vs modale                        -->
+<!-- ============================================================ -->
+<div class="option-divider"><span>Q2 : Page dediee VS Modale ?</span></div>
+
+<main class="main">
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:20px">
+  <div class="profile-card">
+    <div class="profile-section-title">Option 1 : Page dediee</div>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:14px">
+      URL : <span class="kbd">/admin/connexions/drive/1</span><br>
+      ou <span class="kbd">/tenant/drive/1</span>
+    </div>
+    <div style="font-size:13px;color:var(--text);line-height:1.7">
+      <strong style="color:var(--green)">+ Plus de place visuellement</strong><br>
+      <strong style="color:var(--green)">+ URL en favori possible</strong><br>
+      <strong style="color:var(--green)">+ Breadcrumb naturel</strong><br>
+      <strong style="color:var(--red)">- Necessite navigation entre pages</strong><br>
+      <strong style="color:var(--red)">- Bouton "retour" pour revenir aux connexions</strong>
+    </div>
+  </div>
+  <div class="profile-card" style="border:2px solid var(--green)">
+    <div class="profile-section-title" style="color:var(--green)">Option 2 : Modale plein-ecran <span class="tag-required">recommande</span></div>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:14px">
+      Reste sur <span class="kbd">/admin/connexions</span><br>
+      ou <span class="kbd">/tenant/panel</span>
+    </div>
+    <div style="font-size:13px;color:var(--text);line-height:1.7">
+      <strong style="color:var(--green)">+ Reste sur la page d origine</strong><br>
+      <strong style="color:var(--green)">+ Fermer = retour direct (pas de back button)</strong><br>
+      <strong style="color:var(--green)">+ Coherent avec les autres modals admin existants</strong><br>
+      <strong style="color:var(--green)">+ Tenant_admin et super_admin reutilisent le meme code</strong><br>
+      <strong style="color:var(--yellow)">~ Largeur limitee (max 800px) mais largement suffisant</strong>
+    </div>
+  </div>
+</div>
+
+<div class="recommend">
+  <div class="recommend-title">✅ MA RECOMMANDATION</div>
+  <div style="font-size:14px;color:var(--text);line-height:1.7">
+    <strong>Modale plein-ecran (Option 2)</strong>, identique cote super-admin et tenant-admin
+    (meme HTML, meme JS, juste les permissions backend qui changent).<br><br>
+    Le bouton <strong>📂 Configurer dossiers</strong> apparait :<br>
+    - Dans <span class="kbd">/admin/connexions</span> sur les cards drive/sharepoint (super-admin uniquement)<br>
+    - Dans <span class="kbd">/tenant/panel</span> sous un onglet <strong>📁 Drive</strong> qui liste les drives du tenant
+  </div>
+</div>
+
+<div class="recommend" style="background:rgba(255,202,40,0.06);border-color:rgba(255,202,40,0.3)">
+  <div class="recommend-title" style="color:var(--yellow)">🗑️ NETTOYAGE A FAIRE EN MEME TEMPS</div>
+  <div style="font-size:14px;color:var(--text);line-height:1.7">
+    Une fois la nouvelle UI deployee et validee :<br>
+    1. Supprimer <span class="kbd">app/routes/admin_home.py</span> (le hub /admin doublonne)<br>
+    2. Supprimer ou refondre les pages <span class="kbd">app/routes/admin_drive_config.py</span> que j ai cree (charte hors-style)<br>
+    3. Garder UNIQUEMENT le code backend (drive_path_rules.py + endpoints API drive_folders + tenant_drive_blacklist) qui est OK et compatible<br>
+    4. Re-publier l UI dans <span class="kbd">app/templates/</span> (admin_connexions.html etendu, tenant_panel.html etendu)
+  </div>
+</div>
+
+</main>
+
+<!-- ============================================================ -->
+<!-- PARTIE 5 : Plan en clair                                     -->
+<!-- ============================================================ -->
+<div class="option-divider"><span>Plan d'action</span></div>
+
+<main class="main">
+<ol style="font-size:14px;line-height:2;color:var(--text);padding-left:24px">
+  <li><strong style="color:var(--accent)">Etape 1 - Garder le backend deja fait</strong>
+    <div style="font-size:12px;color:var(--text3);font-family:var(--mono);margin-left:12px">
+      drive_path_rules.py (logique pure, OK), endpoints CRUD racines + regles (OK)
+    </div>
+  </li>
+  <li><strong style="color:var(--accent)">Etape 2 - Etendre admin_connexions.html (super-admin)</strong>
+    <div style="font-size:12px;color:var(--text3);font-family:var(--mono);margin-left:12px">
+      Ajouter bouton "📂 Configurer dossiers" sur cards drive/sharepoint + modale en charte
+    </div>
+  </li>
+  <li><strong style="color:var(--accent)">Etape 3 - Etendre tenant_panel.html (tenant-admin)</strong>
+    <div style="font-size:12px;color:var(--text3);font-family:var(--mono);margin-left:12px">
+      Ajouter onglet "📁 Drive" qui liste les drives du tenant + meme bouton "Configurer dossiers" + meme modale
+    </div>
+  </li>
+  <li><strong style="color:var(--accent)">Etape 4 - Endpoints tenant/* paralleles a admin/*</strong>
+    <div style="font-size:12px;color:var(--text3);font-family:var(--mono);margin-left:12px">
+      /tenant/drive_config/rules/{conn_id} et /tenant/drive_config/roots/... (memes fonctions, scope filtre)
+    </div>
+  </li>
+  <li><strong style="color:var(--accent)">Etape 5 - Tester ensemble</strong>
+    <div style="font-size:12px;color:var(--text3);font-family:var(--mono);margin-left:12px">
+      Toi en super-admin, puis simul en tenant-admin si besoin
+    </div>
+  </li>
+  <li><strong style="color:var(--red)">Etape 6 - Nettoyage</strong>
+    <div style="font-size:12px;color:var(--text3);font-family:var(--mono);margin-left:12px">
+      Supprimer admin_home.py + ancienne page /admin/drive_config (charte hors-style)
+    </div>
+  </li>
+</ol>
+</main>
+
+<div style="height:60px"></div>
+</body>
+</html>

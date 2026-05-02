@@ -24,6 +24,7 @@
 
 <nav class="nav-tabs">
   <div class="tab active" onclick="switchTab('company')">Ma société</div>
+  <div class="tab" onclick="switchTab('drive')">📁 Drive</div>
   <div class="tab" onclick="switchTab('profile')">Mon profil</div>
 </nav>
 
@@ -51,6 +52,30 @@
   </div>
 
   <div id="company-content"><div style="color:var(--text3);font-family:var(--mono);font-size:12px">Chargement...</div></div>
+</section>
+
+<!-- 📁 DRIVE - Configuration dossiers (02/05/2026) -->
+<section id="tab-drive" class="section">
+  <div style="background:rgba(0,188,212,0.05);border:1px solid rgba(0,188,212,0.2);padding:14px 18px;border-radius:8px;margin-bottom:20px">
+    <div style="font-family:var(--mono);font-size:11px;color:var(--accent);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">📁 CONFIGURATION DOSSIERS DRIVE</div>
+    <div style="font-size:13px;line-height:1.6;color:var(--text)">
+      Choisis quels dossiers Raya peut consulter dans tes drives connectés (SharePoint, Google Drive...).
+      La règle : <strong>"le chemin le plus long gagne"</strong>. Tu inclus un parent, tu peux exclure
+      des sous-dossiers, et re-inclure encore plus profond.
+    </div>
+  </div>
+
+  <div id="drive-alert" class="alert"></div>
+
+  <div class="section-title">Mes drives connectés</div>
+  <div id="drives-list">
+    <div style="color:var(--text3);font-family:var(--mono);font-size:12px;padding:14px">Chargement...</div>
+  </div>
+
+  <div style="font-family:var(--mono);font-size:11px;color:var(--text3);line-height:1.7;padding:12px;background:var(--bg3);border-radius:6px;border:1px solid var(--border);margin-top:18px">
+    ℹ️ Pour <strong>ajouter</strong> un nouveau drive (ex: Drive Direction), demande au super-admin de le connecter pour ta société.
+    Une fois connecté, il apparaîtra ici et tu pourras configurer ses dossiers.
+  </div>
 </section>
 
 <!-- MON PROFIL -->
@@ -126,6 +151,7 @@
 // ─── TENANT PANEL JS ───────────────────────────────────
 // Appelle UNIQUEMENT /tenant/* et /profile — aucun accès /admin/*
 let currentEditUser='';
+let _currentTenantId = null;  // setée au premier loadCompany() ou loadDrives()
 
 function switchTab(name){
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
@@ -134,6 +160,7 @@ function switchTab(name){
   if(sec) sec.classList.add('active');
   event.target.classList.add('active');
   if(name==='company'){ loadCompany(); loadPermissions(); }
+  if(name==='drive') loadDrives();
   if(name==='profile') loadProfile();
 }
 
@@ -277,6 +304,7 @@ async function loadCompany(){
     const data=await(await fetch('/tenant/my-overview')).json();
     if(!data||!data.length){document.getElementById('company-content').innerHTML='<p>Aucune donnée.</p>';return;}
     const t=data[0];
+    _currentTenantId = t.tenant_id;  // pour loadDrives + modale drive config
     const count=document.getElementById('company-count');
     if(count) count.textContent=`${t.user_count} utilisateur(s) · ${t.total_conv} conv · ${t.total_mails} mails`;
     let html=`<div class="section-title">${t.name||t.tenant_id}</div>`;
@@ -295,6 +323,74 @@ async function loadCompany(){
     html+='</tbody></table></div>';
     document.getElementById('company-content').innerHTML=html;
   }catch(e){document.getElementById('company-content').innerHTML='<p style="color:var(--red)">Erreur de chargement.</p>';}
+}
+
+// 📁 DRIVE - liste des drives connectes du tenant + bouton Configurer
+async function loadDrives(){
+  const container = document.getElementById('drives-list');
+  if(!container) return;
+  // S il manque le tenant_id (utilisateur a clique sur Drive en premier),
+  // on lance loadCompany d abord pour le récupérer
+  if(!_currentTenantId){
+    try{
+      const data = await (await fetch('/tenant/my-overview')).json();
+      if(data && data.length) _currentTenantId = data[0].tenant_id;
+    }catch(e){}
+  }
+  if(!_currentTenantId){
+    container.innerHTML = '<div style="color:var(--red);font-family:var(--mono);font-size:12px">Impossible de déterminer ton tenant.</div>';
+    return;
+  }
+  container.innerHTML = '<div style="color:var(--text3);font-family:var(--mono);font-size:12px;padding:14px"><span class="loader"></span> Chargement des drives...</div>';
+  try{
+    // Endpoint qui liste les connexions drive/sharepoint + les racines du tenant
+    const r = await fetch('/admin/drive_config/drives/' + _currentTenantId);
+    const data = await r.json();
+    if(data.status !== 'ok'){
+      container.innerHTML = '<div style="color:var(--red);font-family:var(--mono);font-size:12px">Erreur : ' + (data.message || 'inconnue') + '</div>';
+      return;
+    }
+    const conns = data.connections || [];
+    const roots = data.roots || [];
+    if(conns.length === 0){
+      container.innerHTML = '<div style="color:var(--text3);font-family:var(--mono);font-size:12px;padding:18px;background:var(--bg2);border:1px dashed var(--border);border-radius:8px;text-align:center">Aucun drive connecté pour le moment. Demande au super-admin d\'en connecter un.</div>';
+      return;
+    }
+    let html = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">';
+    for(const c of conns){
+      const icon = '📁';
+      const statusDot = c.status === 'connected' ? '#14b866' : (c.status === 'error' ? '#e14747' : '#8a8a8a');
+      const label = (c.label || c.tool_type || 'Drive').replace(/'/g, "\\'");
+      // config_summary depuis le champ config
+      let summary = '';
+      if(c.config && typeof c.config === 'object'){
+        summary = c.config.site_name || c.config.folder_name || '';
+      }
+      summary = summary.replace(/'/g, "\\'");
+      // roots_count : roots du tenant (pas filtrable par connection_id pour l instant)
+      const rootsCount = roots.length;
+      const rulesCount = c.rules_count || 0;
+      html += `
+        <div style="border:1px solid var(--border);border-radius:10px;padding:16px;background:var(--bg2);display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div style="font-size:22px">${icon}</div>
+            <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${statusDot};margin-top:8px" title="${c.status}"></span>
+          </div>
+          <div style="font-weight:600;color:#fff">${c.label || c.tool_type}</div>
+          <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">${summary || '—'}</div>
+          <div style="font-size:11px;color:var(--text3);font-family:var(--mono)">${rootsCount} racine(s) · ${rulesCount} règle(s)</div>
+          <button class="btn btn-accent" style="padding:6px 12px;font-size:11px;margin-top:8px;width:100%"
+            onclick="openDriveConfigModal('${_currentTenantId}', ${c.id}, '${label}', '${summary}')">
+            📂 Configurer dossiers
+          </button>
+        </div>
+      `;
+    }
+    html += '</div>';
+    container.innerHTML = html;
+  }catch(e){
+    container.innerHTML = '<div style="color:var(--red);font-family:var(--mono);font-size:12px">Erreur réseau : ' + e.message + '</div>';
+  }
 }
 
 async function loadProfile(){
@@ -408,5 +504,152 @@ loadCompany();
 loadPermissions();
 loadProfile();
 </script>
+
+<!-- ====================================================================
+     MODALE DRIVE CONFIG (02/05/2026 - Phase Drive multi-racines)
+     Identique a celle de admin_connexions.html. JS partage :
+     /static/admin-drive-config.js
+     ==================================================================== -->
+<div class="modal-overlay" id="modal-drive-config" style="z-index: 1000">
+  <div class="modal" style="max-width: 900px; width: 95%; max-height: 92vh">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
+      <div style="flex:1">
+        <div class="modal-title" id="drive-config-title">📂 Configuration dossiers</div>
+        <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:14px" id="drive-config-sub">—</div>
+      </div>
+      <button class="btn btn-ghost" style="padding:6px 12px;font-size:11px" onclick="closeDriveConfigModal()">✕ Fermer</button>
+    </div>
+    <div id="drive-config-alert" class="alert"></div>
+
+    <div class="section-title" style="margin-top:8px">1. Racines surveillées</div>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:14px;line-height:1.6">
+      La racine = OÙ Raya commence à regarder. Path vide = scanner TOUT le site.
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>Site</th><th>Libellé</th><th>Path</th>
+          <th>Enabled</th><th>Dernier scan</th><th>Actions</th>
+        </tr></thead>
+        <tbody id="drive-config-roots-tbody">
+          <tr class="loading-row"><td colspan="6"><span class="loader"></span> Chargement...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="actions-row" style="margin-bottom:8px">
+      <button class="btn btn-primary" onclick="openAddRootForm()">+ Ajouter une racine</button>
+    </div>
+
+    <div id="drive-root-form" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:18px;margin-bottom:24px">
+      <div style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent);margin-bottom:14px;text-transform:uppercase;letter-spacing:1px" id="drive-root-form-title">Ajouter une racine</div>
+      <input type="hidden" id="drive-root-id">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div class="form-group" style="margin-bottom:0">
+          <label>Provider</label>
+          <select id="drive-root-provider">
+            <option value="sharepoint">SharePoint</option>
+            <option value="google_drive">Google Drive</option>
+            <option value="drive">Drive (autre)</option>
+            <option value="nas">NAS</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>Libellé (folder_name)</label>
+          <input type="text" id="drive-root-folder-name" placeholder="ex: Drive Direction">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+        <div class="form-group" style="margin-bottom:0">
+          <label>Site (SharePoint)</label>
+          <input type="text" id="drive-root-site-name" placeholder="ex: Direction">
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>Path (vide = tout le site)</label>
+          <input type="text" id="drive-root-folder-path" placeholder="ex: Comptabilité">
+        </div>
+      </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;text-transform:none;letter-spacing:normal;font-size:12px;color:var(--text2)">
+          <input type="checkbox" id="drive-root-enabled" style="width:auto" checked> Enabled (Raya scanne cette racine)
+        </label>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn btn-ghost" onclick="closeRootForm()">Annuler</button>
+        <button class="btn btn-primary" onclick="saveRoot()">Enregistrer</button>
+      </div>
+    </div>
+
+    <div class="section-title">2. Règles include / exclude</div>
+    <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:14px;line-height:1.6">
+      Inclus <span class="kbd">Comptabilité</span> = tout indexé<br>
+      Exclus <span class="kbd">Comptabilité/Salaires</span> = sauf ce sous-dossier<br>
+      Inclus <span class="kbd">Comptabilité/Salaires/Public</span> = sauf ce sous-sous-dossier<br>
+      <em>Le chemin le plus long gagne.</em>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Path</th><th>Type</th><th>Raison</th><th>Créé par</th><th>Actions</th></tr></thead>
+        <tbody id="drive-config-rules-tbody">
+          <tr class="loading-row"><td colspan="5"><span class="loader"></span> Chargement...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="actions-row" style="margin-bottom:8px">
+      <button class="btn btn-primary" onclick="openAddRuleForm()">+ Ajouter une règle</button>
+      <button class="btn btn-accent" onclick="openTestPathForm()">🧪 Tester un chemin</button>
+    </div>
+
+    <div id="drive-rule-form" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:18px;margin-bottom:24px">
+      <div style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent);margin-bottom:14px;text-transform:uppercase;letter-spacing:1px">Ajouter une règle</div>
+      <div class="form-group">
+        <label>Chemin (path) du dossier concerné</label>
+        <input type="text" id="drive-rule-path" placeholder="ex: Drive Direction/RH">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;margin-bottom:12px">
+        <div class="form-group" style="margin-bottom:0">
+          <label>Type</label>
+          <select id="drive-rule-type">
+            <option value="exclude">Exclure</option>
+            <option value="include">Inclure</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:0">
+          <label>Raison (optionnel)</label>
+          <input type="text" id="drive-rule-reason" placeholder="ex: RH confidentiel">
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn btn-ghost" onclick="closeRuleForm()">Annuler</button>
+        <button class="btn btn-primary" onclick="saveRule()">Enregistrer</button>
+      </div>
+    </div>
+
+    <div id="drive-test-form" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:18px;margin-bottom:24px">
+      <div style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent);margin-bottom:14px;text-transform:uppercase;letter-spacing:1px">🧪 Tester un chemin</div>
+      <div class="form-group">
+        <label>Path à tester</label>
+        <input type="text" id="drive-test-input" placeholder="ex: Drive Direction/RH/contrat.docx">
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-bottom:8px">
+        <button class="btn btn-ghost" onclick="closeTestForm()">Fermer</button>
+        <button class="btn btn-accent" onclick="runTestPath()">Lancer le test</button>
+      </div>
+      <div id="drive-test-result"></div>
+    </div>
+
+    <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:8px;display:flex;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="closeDriveConfigModal()">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .kbd { font-family: var(--mono); background: var(--bg3); border: 1px solid var(--border2); padding: 1px 6px; border-radius: 3px; font-size: 11px; color: var(--text); }
+  .alert.ok { background: rgba(0,230,118,0.1); border: 1px solid rgba(0,230,118,0.2); color: var(--green); display: block; padding: 10px 14px; border-radius: 6px; font-family: var(--mono); font-size: 12px; margin-bottom: 14px; }
+  .alert.err { background: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.2); color: var(--red); display: block; padding: 10px 14px; border-radius: 6px; font-family: var(--mono); font-size: 12px; margin-bottom: 14px; }
+</style>
+
+<script src="/static/admin-drive-config.js?v=1"></script>
+
 </body>
 </html>

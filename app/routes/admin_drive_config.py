@@ -31,7 +31,7 @@ from typing import Optional
 from fastapi import APIRouter, Request, Depends, Body
 from fastapi.responses import JSONResponse, HTMLResponse
 
-from app.routes.deps import require_admin
+from app.routes.deps import require_admin, require_tenant_admin
 from app.logging_config import get_logger
 
 logger = get_logger("raya.admin_drive_config")
@@ -196,7 +196,7 @@ def _roots_to_js(roots: list) -> str:
 @router.get("/admin/drive_config/drives/{tenant_id}")
 def api_list_drives(
     tenant_id: str,
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_tenant_admin),
 ):
     """Liste les connexions drive d un tenant + leurs racines + nb regles."""
     if not _can_access_tenant(admin, tenant_id):
@@ -224,7 +224,7 @@ def api_list_drives(
 @router.get("/admin/drive_config/rules/{connection_id}")
 def api_list_rules(
     connection_id: int,
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_tenant_admin),
 ):
     """Liste les regles configurees pour cette connexion."""
     meta = _get_connection_meta(connection_id)
@@ -257,7 +257,7 @@ def api_list_rules(
 def api_add_rule(
     connection_id: int,
     payload: dict = Body(...),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_tenant_admin),
 ):
     """Ajoute une regle include/exclude.
 
@@ -341,7 +341,7 @@ def api_add_rule(
 @router.delete("/admin/drive_config/rules/{rule_id}")
 def api_delete_rule(
     rule_id: int,
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_tenant_admin),
 ):
     """Supprime une regle. Verifie l acces tenant via la regle."""
     from app.database import get_pg_conn
@@ -404,7 +404,7 @@ def api_delete_rule(
 def api_add_or_update_root(
     tenant_id: str,
     payload: dict = Body(...),
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_tenant_admin),
 ):
     """Cree ou met a jour une racine surveillee.
 
@@ -558,7 +558,7 @@ def api_add_or_update_root(
 @router.delete("/admin/drive_config/roots/{root_id}")
 def api_delete_root(
     root_id: int,
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_tenant_admin),
 ):
     """Supprime une racine surveillee. ATTENTION : ne supprime PAS le
     contenu deja vectorise (drive_semantic_content) - juste la config
@@ -607,7 +607,7 @@ def api_delete_root(
 def api_preview_path(
     connection_id: int,
     path: str = "",
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_tenant_admin),
 ):
     """Simule la decision is_path_indexable pour un path donne.
 
@@ -694,7 +694,7 @@ _HTML_HEAD = """<!DOCTYPE html>
 @router.get("/admin/drive_config", response_class=HTMLResponse)
 def page_drive_config_home(
     request: Request,
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_tenant_admin),
 ):
     """Page d accueil : liste des connexions drive du tenant courant."""
     # Tenant a afficher : pour super_admin, par defaut son propre tenant ;
@@ -951,7 +951,7 @@ async function deleteRoot(id) {{
 )
 def page_drive_configure(
     connection_id: int,
-    admin: dict = Depends(require_admin),
+    admin: dict = Depends(require_tenant_admin),
 ):
     """Page de configuration detaillee d une connexion drive."""
     meta = _get_connection_meta(connection_id)
