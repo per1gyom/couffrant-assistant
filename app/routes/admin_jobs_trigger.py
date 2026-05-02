@@ -17,79 +17,90 @@ router = APIRouter(tags=["admin_jobs_trigger"])
 
 def _do_gmail_watch_setup(admin_username: str) -> dict:
     """Coeur de la logique partage par les routes GET et POST.
-    Capture before/after via la DB pour donner un retour utile a l UI.
+    Au lieu d appeler run_gmail_watch_renewal() qui ne retourne rien,
+    on boucle nous-memes sur les connexions et on capture les erreurs
+    detaillees de chaque setup_gmail_watch pour pouvoir les afficher
+    dans l UI.
     """
-    from app.database import get_pg_conn
-    from app.jobs.mail_gmail_watch import run_gmail_watch_renewal
-
-    with get_pg_conn() as conn:
-        c = conn.cursor()
-        c.execute(
-            """SELECT connection_id,
-                      metadata->>'gmail_watch_history_id' as hid,
-                      metadata->>'gmail_watch_expiration' as exp
-               FROM connection_health
-               WHERE connection_type='mail_gmail'
-               ORDER BY connection_id"""
-        )
-        before = [
-            {"connection_id": r[0], "history_id": r[1],
-             "expiration": r[2]}
-            for r in c.fetchall()
-        ]
+    from app.jobs.mail_gmail_history_sync import _get_gmail_connections
+    from app.jobs.mail_gmail_watch import setup_gmail_watch
+    from app.connection_token_manager import get_connection_token
 
     logger.info(
-        "[AdminTrigger] gmail_watch_renewal declenche manuellement par %s",
+        "[AdminTrigger] gmail_watch_setup declenche manuellement par %s",
         admin_username,
     )
-    run_gmail_watch_renewal()
 
-    with get_pg_conn() as conn:
-        c = conn.cursor()
-        c.execute(
-            """SELECT cc.id as connection_id, gt.email,
-                      ch.metadata->>'gmail_watch_history_id' as hid,
-                      ch.metadata->>'gmail_watch_expiration' as exp
-               FROM tenant_connections cc
-               LEFT JOIN connection_health ch ON ch.connection_id = cc.id
-               LEFT JOIN gmail_tokens gt ON gt.id = (
-                   SELECT id FROM gmail_tokens
-                   WHERE username = (SELECT username FROM connection_assignments
-                                      WHERE connection_id = cc.id LIMIT 1)
-                   LIMIT 1
-               )
-               WHERE cc.tool_type = 'gmail' AND cc.status = 'connected'
-               ORDER BY cc.id"""
-        )
-        after = [
-            {"connection_id": r[0], "email": r[1] or "?",
-             "history_id": r[2], "expiration": r[3]}
-            for r in c.fetchall()
-        ]
-
-    before_map = {b["connection_id"]: b for b in before}
+    connections = _get_gmail_connections()
+    results = []
     created = 0
-    renewed = 0
     failed = 0
-    for a in after:
-        cid = a["connection_id"]
-        b = before_map.get(cid, {})
-        if not b.get("history_id") and a.get("history_id"):
-            created += 1
-        elif b.get("expiration") and a.get("expiration") and \
-                b.get("expiration") != a.get("expiration"):
-            renewed += 1
-        elif not a.get("history_id"):
+
+    for conn_info in connections:
+        connection_id = conn_info["connection_id"]
+        tenant_id = conn_info["tenant_id"]
+        username = conn_info["username"]
+        email = conn_info.get("email", "?")
+
+        token = None
+        try:
+            token = get_connection_token(
+                username=username,
+                tool_type="gmail",
+                tenant_id=tenant_id,
+                email_hint=email if email != "?" else None,
+            )
+        except Exception as e:
+            results.append({
+                "connection_id": connection_id, "email": email,
+                "status": "error",
+                "error_detail": f"token fetch crash : {str(e)[:200]}",
+                "history_id": None, "expiration": None,
+            })
             failed += 1
+            continue
+
+        if not token:
+            results.append({
+                "connection_id": connection_id, "email": email,
+                "status": "error",
+                "error_detail": "pas de token Gmail disponible",
+                "history_id": None, "expiration": None,
+            })
+            failed += 1
+            continue
+
+        try:
+            res = setup_gmail_watch(token, connection_id)
+        except Exception as e:
+            res = {"status": "error",
+                   "error_detail": f"crash : {str(e)[:200]}"}
+
+        if res.get("status") == "ok":
+            created += 1
+            results.append({
+                "connection_id": connection_id, "email": email,
+                "status": "ok", "error_detail": None,
+                "history_id": res.get("history_id"),
+                "expiration": res.get("expiration_ms"),
+            })
+        else:
+            failed += 1
+            results.append({
+                "connection_id": connection_id, "email": email,
+                "status": res.get("status", "error"),
+                "error_detail": res.get("error_detail", "?"),
+                "history_id": None, "expiration": None,
+            })
 
     return {
         "summary": {
-            "total": len(after),
+            "total": len(results),
             "created": created,
-            "renewed": renewed,
+            "renewed": 0,
             "failed": failed,
         },
-        "details_after": after,
+        "details_after": results,
     }
 
 
@@ -137,10 +148,9 @@ def admin_trigger_gmail_watch_setup_get(
     s = result["summary"]
     rows_html = ""
     for d in result["details_after"]:
-        ok = "✅" if d.get("history_id") else "❌"
+        ok = "✅" if d.get("status") == "ok" else "❌"
         exp = d.get("expiration") or "—"
-        # Conversion expiration ms -> date lisible
-        if exp != "—" and exp.isdigit():
+        if exp != "—":
             try:
                 from datetime import datetime, timezone
                 dt = datetime.fromtimestamp(int(exp) / 1000, tz=timezone.utc)
@@ -148,11 +158,17 @@ def admin_trigger_gmail_watch_setup_get(
             except Exception:
                 pass
         hid = d.get("history_id") or "—"
+        err = d.get("error_detail") or ""
+        # Echappe le HTML basique pour que ca s affiche bien
+        err_html = (err.replace("&", "&amp;").replace("<", "&lt;")
+                       .replace(">", "&gt;"))
         rows_html += (
             f"<tr><td>{ok}</td>"
             f"<td>{d.get('email', '?')}</td>"
-            f"<td>{hid}</td>"
-            f"<td>{exp}</td></tr>"
+            f"<td style='font-family:monospace;font-size:12px'>{hid}</td>"
+            f"<td>{exp}</td>"
+            f"<td style='color:#c92a2a;font-size:12px;max-width:400px;"
+            f"word-break:break-word'>{err_html}</td></tr>"
         )
 
     if s["failed"] > 0:
@@ -238,7 +254,7 @@ def admin_trigger_gmail_watch_setup_get(
 
     <h3>Detail par boite Gmail</h3>
     <table>
-      <thead><tr><th>Etat</th><th>Email</th><th>History ID</th><th>Expire le</th></tr></thead>
+      <thead><tr><th>Etat</th><th>Email</th><th>History ID</th><th>Expire le</th><th>Erreur (si echec)</th></tr></thead>
       <tbody>{rows_html}</tbody>
     </table>
 
