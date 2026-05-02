@@ -123,6 +123,14 @@ try:
     app.include_router(webhook_gmail_pubsub_router)
 except Exception as e:
     print(f"[Main] Import webhook_gmail_pubsub echec : {e}")
+
+# Endpoints admin pour declenchement manuel de jobs scheduler
+# (POST /admin/jobs/gmail/setup_watches, GET /admin/jobs/scheduler_status)
+try:
+    from app.routes.admin_jobs_trigger import router as admin_jobs_trigger_router
+    app.include_router(admin_jobs_trigger_router)
+except Exception as e:
+    print(f"[Main] Import admin_jobs_trigger echec : {e}")
 app.include_router(forced_reset_router)
 app.include_router(onboarding_router)
 app.include_router(elicitation_router)
