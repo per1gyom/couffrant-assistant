@@ -235,13 +235,45 @@ def _get_blacklist(tenant_id: str, connection_id: int) -> list:
 
 
 def _is_blacklisted(item_path: str, blacklist: list) -> bool:
-    """True si item_path commence par un des prefixes blacklistes."""
+    """True si item_path commence par un des prefixes blacklistes.
+
+    DEPRECATED le 02/05/2026 : remplace par _is_path_filtered() qui utilise
+    le module drive_path_rules (regle 'le chemin le plus long gagne').
+    Conserve uniquement comme failsafe si le nouveau module plante.
+    """
     if not item_path or not blacklist:
         return False
     for prefix in blacklist:
         if item_path.startswith(prefix):
             return True
     return False
+
+
+def _is_path_filtered(connection_id: int, item_path: str,
+                       roots: list, rules: list) -> bool:
+    """Decide si un item du delta doit etre IGNORE (filtre) au scan.
+
+    Retourne True si le path doit etre EXCLU (donc filtre = skip).
+    Retourne False si le path doit etre indexe (=> traitement normal).
+
+    Wrapper sur is_path_indexable() qui respecte la regle "le chemin le
+    plus long gagne". Failsafe : en cas d erreur, on indexe (False) pour
+    ne pas perdre des items en silence.
+    """
+    if not item_path:
+        # Pas de path -> on indexe par securite (pas de motif de filtrer)
+        return False
+    try:
+        from app.connectors.drive_path_rules import is_path_indexable
+        return not is_path_indexable(
+            connection_id, item_path, roots=roots, rules=rules,
+        )
+    except Exception as e:
+        logger.warning(
+            "[DriveDelta] _is_path_filtered plante : %s (failsafe : indexer)",
+            str(e)[:150],
+        )
+        return False
 
 
 def _ensure_health_registered(connection_id: int, tenant_id: str,
@@ -384,9 +416,17 @@ def _resolve_drive_for_connection(token: str, tenant_id: str) -> Optional[str]:
         return None
 
 
-def _process_change_shadow(item: dict, blacklist: list) -> dict:
+def _process_change_shadow(item: dict, blacklist: list,
+                              connection_id: int = 0,
+                              path_roots: Optional[list] = None,
+                              path_rules: Optional[list] = None) -> dict:
     """Mode SHADOW : log seulement, ne modifie rien.
     Retourne un dict de stats.
+
+    connection_id + path_roots + path_rules : nouveau systeme
+    inclusion/exclusion (Phase Drive multi-racines, 02/05/2026).
+    Si fournis, utilise is_path_indexable. Sinon, fallback sur la
+    blacklist legacy.
     """
     item_id = item.get("id", "?")
     name = item.get("name", "?")
@@ -395,7 +435,12 @@ def _process_change_shadow(item: dict, blacklist: list) -> dict:
     parent = (item.get("parentReference") or {}).get("path", "")
     full_path = f"{parent}/{name}" if parent else name
 
-    if _is_blacklisted(full_path, blacklist):
+    # Filtre prioritaire : nouveau systeme include/exclude si dispo
+    if connection_id and (path_roots is not None) and (path_rules is not None):
+        if _is_path_filtered(connection_id, full_path, path_roots, path_rules):
+            return {"action": "skipped_rules", "name": name}
+    elif _is_blacklisted(full_path, blacklist):
+        # Fallback legacy
         return {"action": "skipped_blacklist", "name": name}
 
     if is_deleted:
@@ -416,7 +461,10 @@ def _process_change_shadow(item: dict, blacklist: list) -> dict:
 
 def _process_change_write(item: dict, blacklist: list, tenant_id: str,
                             username: str, token: str,
-                            drive_id: str) -> dict:
+                            drive_id: str,
+                            connection_id: int = 0,
+                            path_roots: Optional[list] = None,
+                            path_rules: Optional[list] = None) -> dict:
     """Mode WRITE : applique reellement le changement detecte.
 
     Pour un fichier modifie : delegue a drive_scanner._process_file
@@ -424,6 +472,8 @@ def _process_change_write(item: dict, blacklist: list, tenant_id: str,
     Pour un fichier supprime : marque deleted_at dans
       drive_semantic_content (soft delete).
     Pour un dossier : ignore (drive_scanner gere via path).
+
+    connection_id + path_roots + path_rules : Phase Drive multi-racines.
 
     Retourne un dict de stats avec action effectuee.
     """
@@ -440,7 +490,12 @@ def _process_change_write(item: dict, blacklist: list, tenant_id: str,
         parent_path = parent_path.split(":", 1)[1].lstrip("/")
     full_path = f"{parent_path}/{name}" if parent_path else name
 
-    if _is_blacklisted(full_path, blacklist):
+    # Filtre prioritaire : nouveau systeme include/exclude si dispo
+    if connection_id and (path_roots is not None) and (path_rules is not None):
+        if _is_path_filtered(connection_id, full_path, path_roots, path_rules):
+            return {"action": "skipped_rules", "name": name}
+    elif _is_blacklisted(full_path, blacklist):
+        # Fallback legacy
         return {"action": "skipped_blacklist", "name": name}
 
     if is_folder:
@@ -633,8 +688,31 @@ def _sync_one_connection(conn_info: dict) -> dict:
         )
         return stats
 
-    # 4. Lecture blacklist (cache pour ce tick)
+    # 4. Lecture blacklist (cache pour ce tick) + nouvelles regles include/exclude
+    # Phase Drive multi-racines (02/05/2026) : on charge les roots+rules
+    # du nouveau systeme. La _is_blacklisted reste pour failsafe.
     blacklist = _get_blacklist(tenant_id, connection_id)
+    rules_enabled = os.environ.get("DRIVE_PATH_RULES_ENABLED", "true").lower() == "true"
+    path_roots: list = []
+    path_rules: list = []
+    if rules_enabled:
+        try:
+            from app.connectors.drive_path_rules import (
+                get_drive_roots, get_path_rules,
+            )
+            path_roots = get_drive_roots(connection_id)
+            path_rules = get_path_rules(connection_id)
+            logger.info(
+                "[DriveDelta] conn=%d regles chargees : %d racines, %d regles",
+                connection_id, len(path_roots), len(path_rules),
+            )
+        except Exception as e:
+            logger.warning(
+                "[DriveDelta] conn=%d echec chargement regles path : %s",
+                connection_id, str(e)[:150],
+            )
+            path_roots = []
+            path_rules = []
 
     # 5. Boucle de pagination delta
     current_url = delta_link
@@ -675,9 +753,15 @@ def _sync_one_connection(conn_info: dict) -> dict:
                         item=item, blacklist=blacklist,
                         tenant_id=tenant_id, username=username,
                         token=token, drive_id=drive_id,
+                        connection_id=connection_id,
+                        path_roots=path_roots, path_rules=path_rules,
                     )
                 else:
-                    res = _process_change_shadow(item, blacklist)
+                    res = _process_change_shadow(
+                        item, blacklist,
+                        connection_id=connection_id,
+                        path_roots=path_roots, path_rules=path_rules,
+                    )
 
                 action = res.get("action", "")
                 if "deleted" in action:

@@ -131,6 +131,16 @@ try:
     app.include_router(admin_jobs_trigger_router)
 except Exception as e:
     print(f"[Main] Import admin_jobs_trigger echec : {e}")
+
+# Endpoints admin pour configuration multi-racines Drive
+# (Phase Drive multi-racines, 02/05/2026)
+# Pages : /admin/drive_config, /admin/drive_config/configure/{id}
+# API   : /admin/drive_config/rules/{id}, /admin/drive_config/preview/{id}
+try:
+    from app.routes.admin_drive_config import router as admin_drive_config_router
+    app.include_router(admin_drive_config_router)
+except Exception as e:
+    print(f"[Main] Import admin_drive_config echec : {e}")
 app.include_router(forced_reset_router)
 app.include_router(onboarding_router)
 app.include_router(elicitation_router)
