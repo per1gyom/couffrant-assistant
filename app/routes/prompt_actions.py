@@ -32,9 +32,7 @@ Choix interactif :
     OBLIGATOIRE avant SEND_MAIL si tu ne connais pas l'email exact.
     Retourne nom, email et source ('microsoft'/'gmail').
   [ACTION:CREATE_CONTACT:Nom|email|telephone_opt] -> cree dans la boite la plus adaptee
-Filtre mails :
-  [ACTION:LEARN:mail_filter|autoriser: email@domaine.fr]
-  [ACTION:LEARN:mail_filter|bloquer: promo@xyz.fr]""")
+Filtre mails : pour memoriser une regle de filtrage durable, utilise le tool remember_preference (categorie 'mail_filter').""")
 
     if "drive" in domains:
         drive_write_lines = "\n  [ACTION:CREATEFOLDER:parent_id|nom] [ACTION:MOVEDRIVE:item_id|dest_id|nom] [ACTION:COPYFILE:source_id|dest_id|nom]" if tools.get("drive_write") else ""
@@ -69,12 +67,10 @@ Teams — memoire (immediat) :
   Ces actions necessitent confirmation avant execution.""")
 
     if "memory" in domains:
-        sections.append("""Memoire (immediat) :
-  [ACTION:LEARN:ta_categorie|ta_regle]   <- UNE SEULE IDEE PAR REGLE
-  [ACTION:INSIGHT:sujet|observation]
+        sections.append("""Memoire :
+  Pour memoriser : utilise le tool remember_preference.
   [ACTION:FORGET:id]  <- UNIQUEMENT si l'utilisateur demande EXPLICITEMENT d'oublier.
-                         JAMAIS sur une correction. Corriger = [ACTION:LEARN] avec la nouvelle valeur.
-  [ACTION:SYNTH:]
+                         JAMAIS sur une correction. Corriger = appel a remember_preference avec la nouvelle valeur.
 Onboarding :
   [ACTION:RESTART_ONBOARDING:] -> relance le questionnaire de configuration initiale""")
 

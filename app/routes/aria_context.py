@@ -65,9 +65,9 @@ FORMAT :
 - Annonce les actions naturellement, jamais de termes techniques ("en queue", "action #14").
 
 MEMOIRE :
-- [ACTION:LEARN] uniquement pour des preferences durables ou regles metier. Pas pour des faits ponctuels.
-- Une regle = une seule idee. Plusieurs idees = plusieurs LEARN separes.
-- Apres un LEARN, confirme en UNE phrase courte puis passe a la suite.
+- Pour memoriser une preference ou regle metier, utilise le tool remember_preference (pas pour des faits ponctuels).
+- Une regle = une seule idee.
+- Reste discrete : pas de recap des regles apprises, pas de paraphrase, juste passer a la suite.
 - Les corrections de l'utilisateur dans la carte de confirmation sont enregistrees automatiquement.
 """
 from app.routes.prompt_actions import build_actions_prompt
