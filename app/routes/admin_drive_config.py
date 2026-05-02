@@ -637,6 +637,345 @@ def api_preview_path(
 
 
 # =====================================================================
+# ENDPOINT BROWSE - Explorateur de dossiers (02/05/2026)
+# =====================================================================
+# Permet a l UI de naviguer dans l arborescence d un drive sans connaitre
+# les ids ni les paths a l avance. Utilise par la modale "Configurer
+# dossiers" pour les boutons "Parcourir" sur les champs path (racines + regles).
+#
+# Pour SharePoint : utilise le token Microsoft du super_admin qui a connecte
+# le drive. Token recupere via get_connection_token sur le created_by.
+#
+# Pour Google Drive : meme principe avec token google.
+#
+# Pour NAS : non implemente (V2).
+
+def _resolve_admin_token_for_connection(connection_id: int, current_admin: dict) -> tuple:
+    """Retourne (token, source_username, error_msg).
+
+    Strategie pour trouver un token valide :
+    1. Token Microsoft du super_admin courant (si super_admin)
+    2. Token Microsoft du tenant_admin courant (si il a connecte sa boite)
+    3. Token Microsoft du created_by de la connexion (qui a fait le OAuth)
+
+    On a besoin d'un token utilisateur valide avec scope Sites.Read.All
+    (deja dans GRAPH_SCOPES).
+    """
+    from app.connection_token_manager import get_connection_token
+    from app.database import get_pg_conn
+
+    # Tente le user courant d'abord
+    username = current_admin.get("username", "")
+    if username:
+        tok = get_connection_token(username, "microsoft")
+        if tok:
+            return (tok, username, None)
+
+    # Sinon : created_by de la connexion
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT created_by FROM tenant_connections WHERE id = %s",
+                (connection_id,),
+            )
+            r = cur.fetchone()
+            if r:
+                created_by = r[0] if not isinstance(r, dict) else r.get("created_by")
+                if created_by and created_by != username:
+                    tok = get_connection_token(created_by, "microsoft")
+                    if tok:
+                        return (tok, created_by, None)
+    except Exception as e:
+        logger.warning("[browse] resolve token : %s", e)
+
+    return (None, None, "Aucun token Microsoft disponible. "
+                        "Le super-admin doit reconnecter sa boite Microsoft "
+                        "pour permettre l'exploration SharePoint.")
+
+
+@router.get("/admin/drive_config/browse/{connection_id}")
+def api_browse_folder(
+    connection_id: int,
+    path: str = "",
+    admin: dict = Depends(require_tenant_admin),
+):
+    """Liste les enfants (dossiers + fichiers) d un path donne dans un drive.
+
+    Query params :
+      path : path complet relatif a la racine du site/drive
+             "" = racine
+             "Documents" = dans le dossier Documents
+             "Documents/Sous-dossier" = dans un sous-sous-dossier
+
+    Retour :
+      {
+        "status": "ok",
+        "provider": "sharepoint",
+        "current_path": "Documents",
+        "parent_path": "",         (None si on est a la racine)
+        "items": [
+          {"name": "Sous-dossier1", "type": "folder", "path": "Documents/Sous-dossier1"},
+          {"name": "fichier.docx", "type": "file", "path": "Documents/fichier.docx", "size": 12345}
+        ]
+      }
+    """
+    meta = _get_connection_meta(connection_id)
+    if not meta:
+        return JSONResponse(
+            {"status": "error", "message": "Connexion introuvable"},
+            status_code=404,
+        )
+    if not _can_access_tenant(admin, meta["tenant_id"]):
+        return JSONResponse(
+            {"status": "error", "message": "Acces refuse"},
+            status_code=403,
+        )
+
+    tool_type = meta.get("tool_type", "")
+    cfg = meta.get("config") or {}
+    if not isinstance(cfg, dict):
+        cfg = {}
+
+    # Normalise le path
+    path = (path or "").strip().strip("/").replace("\\", "/")
+
+    # Calcule le parent_path pour le bouton "remonter"
+    parent_path = None
+    if path:
+        if "/" in path:
+            parent_path = path.rsplit("/", 1)[0]
+        else:
+            parent_path = ""  # racine
+
+    try:
+        if tool_type == "sharepoint":
+            return _browse_sharepoint(connection_id, cfg, path, parent_path, admin)
+        elif tool_type == "google_drive":
+            return _browse_google_drive(connection_id, cfg, path, parent_path, admin)
+        elif tool_type == "drive":
+            # 'drive' generique = on essaie sharepoint (fallback historique)
+            return _browse_sharepoint(connection_id, cfg, path, parent_path, admin)
+        else:
+            return JSONResponse(
+                {"status": "error",
+                 "message": f"Provider {tool_type} non supporte pour browse"},
+                status_code=400,
+            )
+    except Exception as e:
+        logger.exception("[admin_drive_config] api_browse_folder crash")
+        return JSONResponse(
+            {"status": "error", "message": str(e)[:300]},
+            status_code=500,
+        )
+
+
+def _browse_sharepoint(connection_id, cfg, path, parent_path, admin):
+    """Browse SharePoint via Graph API."""
+    import requests
+
+    token, src_user, err = _resolve_admin_token_for_connection(connection_id, admin)
+    if not token:
+        return JSONResponse(
+            {"status": "error", "message": err or "Token MS introuvable"},
+            status_code=400,
+        )
+
+    # Resolution du drive_id pour ce site SharePoint
+    site_name = cfg.get("site_name", "")
+    site_id = cfg.get("site_id", "")
+    if not site_id and site_name:
+        # Tente de retrouver le site_id via Graph
+        try:
+            from app.connectors.drive_connector import _find_sharepoint_site_and_drive
+            _, drive_id_resolved, _ = _find_sharepoint_site_and_drive(
+                token, {"site_name": site_name}
+            )
+        except Exception as e:
+            logger.warning("[browse] resolve site %s : %s", site_name, e)
+            drive_id_resolved = None
+    else:
+        drive_id_resolved = None
+
+    # Si on a site_id direct, on le prefere
+    headers = {"Authorization": f"Bearer {token}"}
+    GRAPH = "https://graph.microsoft.com/v1.0"
+
+    # Etape 1 : trouver le drive (Documents library) du site
+    drive_id = drive_id_resolved
+    if not drive_id and site_id:
+        try:
+            r = requests.get(f"{GRAPH}/sites/{site_id}/drive",
+                             headers=headers, timeout=15)
+            if r.ok:
+                drive_id = r.json().get("id")
+        except Exception as e:
+            logger.warning("[browse] /sites/%s/drive : %s", site_id, e)
+
+    if not drive_id:
+        return JSONResponse(
+            {"status": "error",
+             "message": f"Impossible de resoudre le drive pour ce site "
+                        f"(site_id={site_id[:30] if site_id else '-'}, "
+                        f"site_name={site_name})"},
+            status_code=500,
+        )
+
+    # Etape 2 : lister les enfants
+    if not path:
+        # Racine
+        url = f"{GRAPH}/drives/{drive_id}/root/children"
+    else:
+        # Sous-dossier (Graph utilise :/path:/children pour resoudre par path)
+        # Encoder les caracteres speciaux dans le path
+        from urllib.parse import quote
+        encoded_path = quote(path, safe="/")
+        url = f"{GRAPH}/drives/{drive_id}/root:/{encoded_path}:/children"
+
+    params = {
+        "$top": 200,
+        "$select": "name,id,size,folder,file,lastModifiedDateTime",
+        "$orderby": "name",
+    }
+
+    try:
+        r = requests.get(url, headers=headers, params=params, timeout=20)
+        if not r.ok:
+            return JSONResponse(
+                {"status": "error",
+                 "message": f"Graph API {r.status_code} : {r.text[:200]}"},
+                status_code=500,
+            )
+        data = r.json()
+    except Exception as e:
+        return JSONResponse(
+            {"status": "error", "message": f"Erreur reseau : {str(e)[:200]}"},
+            status_code=500,
+        )
+
+    items = []
+    for raw in data.get("value", []):
+        name = raw.get("name", "")
+        if not name:
+            continue
+        is_folder = "folder" in raw
+        # Path complet de l item
+        item_path = f"{path}/{name}" if path else name
+        items.append({
+            "name": name,
+            "type": "folder" if is_folder else "file",
+            "path": item_path,
+            "size": raw.get("size", 0),
+            "modified": (raw.get("lastModifiedDateTime") or "")[:10],
+            "child_count": (raw.get("folder", {}) or {}).get("childCount", 0)
+                if is_folder else None,
+        })
+
+    # Tri : dossiers d'abord, puis fichiers, alphabetique
+    items.sort(key=lambda x: (0 if x["type"] == "folder" else 1, x["name"].lower()))
+
+    return {
+        "status": "ok",
+        "provider": "sharepoint",
+        "site_name": site_name,
+        "current_path": path,
+        "parent_path": parent_path,
+        "items": items,
+        "count": len(items),
+    }
+
+
+def _browse_google_drive(connection_id, cfg, path, parent_path, admin):
+    """Browse Google Drive via API v3.
+
+    Google Drive ne fonctionne pas avec des paths mais des parent_id.
+    On reconstruit la navigation a partir d'un id de dossier qu'on
+    encode dans le 'path' (path = id du dossier courant, ou "" pour root).
+    """
+    from app.connection_token_manager import get_connection_token
+    import requests
+
+    # Token google_drive du user courant ou du created_by
+    username = admin.get("username", "")
+    token = get_connection_token(username, "google_drive") if username else None
+    if not token:
+        # Tente created_by
+        from app.database import get_pg_conn
+        try:
+            with get_pg_conn() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT created_by FROM tenant_connections WHERE id = %s",
+                    (connection_id,),
+                )
+                r = cur.fetchone()
+                if r:
+                    created_by = r[0] if not isinstance(r, dict) else r.get("created_by")
+                    if created_by:
+                        token = get_connection_token(created_by, "google_drive")
+        except Exception:
+            pass
+
+    if not token:
+        return JSONResponse(
+            {"status": "error",
+             "message": "Aucun token Google Drive disponible pour cette connexion"},
+            status_code=400,
+        )
+
+    # path = id du parent (ou "root" pour la racine)
+    parent_id = path if path else "root"
+
+    # Liste les enfants
+    url = "https://www.googleapis.com/drive/v3/files"
+    params = {
+        "q": f"'{parent_id}' in parents and trashed=false",
+        "pageSize": 200,
+        "fields": "files(id,name,mimeType,size,modifiedTime)",
+        "orderBy": "folder,name",
+    }
+    headers = {"Authorization": f"Bearer {token}"}
+
+    try:
+        r = requests.get(url, headers=headers, params=params, timeout=20)
+        if not r.ok:
+            return JSONResponse(
+                {"status": "error",
+                 "message": f"Google API {r.status_code} : {r.text[:200]}"},
+                status_code=500,
+            )
+        data = r.json()
+    except Exception as e:
+        return JSONResponse(
+            {"status": "error", "message": f"Erreur reseau : {str(e)[:200]}"},
+            status_code=500,
+        )
+
+    items = []
+    for raw in data.get("files", []):
+        is_folder = raw.get("mimeType") == "application/vnd.google-apps.folder"
+        items.append({
+            "name": raw.get("name", ""),
+            "type": "folder" if is_folder else "file",
+            "path": raw.get("id"),  # pour Google : path = id du dossier
+            "size": int(raw.get("size", 0) or 0),
+            "modified": (raw.get("modifiedTime") or "")[:10],
+        })
+
+    items.sort(key=lambda x: (0 if x["type"] == "folder" else 1, x["name"].lower()))
+
+    return {
+        "status": "ok",
+        "provider": "google_drive",
+        "current_path": parent_id,
+        "parent_path": parent_path,  # devra etre re-resolu cote frontend pour Google
+        "items": items,
+        "count": len(items),
+        "note_google": "Pour Google Drive, le 'path' est un id de dossier",
+    }
+
+
+# =====================================================================
 # PAGES HTML
 # =====================================================================
 

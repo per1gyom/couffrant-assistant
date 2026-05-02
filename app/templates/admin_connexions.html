@@ -488,7 +488,10 @@ loadTenants();
         </div>
         <div class="form-group" style="margin-bottom:0">
           <label>Path (vide = tout le site)</label>
-          <input type="text" id="drive-root-folder-path" placeholder="ex: Comptabilite">
+          <div style="display:flex;gap:6px">
+            <input type="text" id="drive-root-folder-path" placeholder="ex: Documents (vide = tout)" style="flex:1">
+            <button type="button" class="btn btn-accent" style="padding:8px 12px;white-space:nowrap" onclick="openBrowser('drive-root-folder-path')">🔍 Parcourir</button>
+          </div>
         </div>
       </div>
       <div class="form-group">
@@ -526,7 +529,10 @@ loadTenants();
       <div style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent);margin-bottom:14px;text-transform:uppercase;letter-spacing:1px">Ajouter une regle</div>
       <div class="form-group">
         <label>Chemin (path) du dossier concerne</label>
-        <input type="text" id="drive-rule-path" placeholder="ex: Drive Direction/RH">
+        <div style="display:flex;gap:6px">
+          <input type="text" id="drive-rule-path" placeholder="ex: Documents/Confidentiel" style="flex:1">
+          <button type="button" class="btn btn-accent" style="padding:8px 12px;white-space:nowrap" onclick="openBrowser('drive-rule-path')">🔍 Parcourir</button>
+        </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;margin-bottom:12px">
         <div class="form-group" style="margin-bottom:0">
@@ -551,13 +557,36 @@ loadTenants();
       <div style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent);margin-bottom:14px;text-transform:uppercase;letter-spacing:1px">🧪 Tester un chemin</div>
       <div class="form-group">
         <label>Path a tester</label>
-        <input type="text" id="drive-test-input" placeholder="ex: Drive Direction/RH/contrat.docx">
+        <div style="display:flex;gap:6px">
+          <input type="text" id="drive-test-input" placeholder="ex: Documents/Confidentiel/fichier.docx" style="flex:1">
+          <button type="button" class="btn btn-accent" style="padding:8px 12px;white-space:nowrap" onclick="openBrowser('drive-test-input', {foldersOnly: false})">🔍 Parcourir</button>
+        </div>
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end;margin-bottom:8px">
         <button class="btn btn-ghost" onclick="closeTestForm()">Fermer</button>
         <button class="btn btn-accent" onclick="runTestPath()">Lancer le test</button>
       </div>
       <div id="drive-test-result"></div>
+    </div>
+
+    <!-- EXPLORATEUR DE DOSSIERS (browse) -->
+    <div id="drive-browser" style="display:none;background:var(--bg3);border:2px solid var(--accent);border-radius:8px;padding:16px;margin-bottom:24px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px">🔍 Explorateur de dossiers</div>
+        <button class="btn btn-ghost" style="padding:4px 10px;font-size:11px" onclick="closeBrowser()">✕ Fermer</button>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font-family:var(--mono);font-size:12px;margin-bottom:8px;display:flex;align-items:center;gap:8px">
+        <button class="btn btn-ghost" style="padding:2px 8px;font-size:11px" onclick="browserGoUp()" title="Remonter d un cran">↑</button>
+        <span style="color:var(--text3)">📍</span>
+        <span id="drive-browser-breadcrumb" style="flex:1;color:var(--text)">Chargement...</span>
+      </div>
+      <div id="drive-browser-items" style="max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;padding:6px;background:var(--bg)">
+        Chargement...
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
+        <button class="btn btn-ghost" onclick="closeBrowser()">Annuler</button>
+        <button class="btn btn-primary" onclick="validateBrowserPath()">✓ Valider ce dossier</button>
+      </div>
     </div>
 
     <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:8px;display:flex;justify-content:flex-end">
@@ -572,7 +601,7 @@ loadTenants();
   .alert.err { background: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.2); color: var(--red); display: block; padding: 10px 14px; border-radius: 6px; font-family: var(--mono); font-size: 12px; margin-bottom: 14px; }
 </style>
 
-<script src="/static/admin-drive-config.js?v=1"></script>
+<script src="/static/admin-drive-config.js?v=2"></script>
 
 </body>
 </html>
