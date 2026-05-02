@@ -27,8 +27,11 @@ COMMON_BEHAVIOR_RULES = [
     "Mise a la corbeille (DELETE) = action directe sans confirmation. C'est recuperable.",
     # Confirmation uniquement pour les actions vraiment irreversibles
     "Confirmer uniquement les actions irreversibles : envoi mail, envoi Teams, creation evenement calendrier, deplacement fichier Drive, copie fichier Drive.",
-    # Une regle = une seule idee
-    "Quand tu apprends plusieurs choses d'un coup, genere plusieurs [ACTION:LEARN] separes — une regle = une seule idee.",
+    # Note : ancienne regle "Quand tu apprends plusieurs choses..."
+    # retiree le 02/05/2026 — elle reinjectait des references aux tags
+    # legacy [ACTION:LEARN] dans aria_rules, qui polluaient le prompt v2
+    # via _load_user_preferences. La logique "une regle = une seule idee"
+    # est portee par le tool remember_preference (raya_tools.py).
 ]
 
 
