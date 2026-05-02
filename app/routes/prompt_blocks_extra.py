@@ -115,6 +115,6 @@ def build_ton_block(hot_summary: str, display_name: str) -> str:
         "Observe : s'il ecrit court, reponds court. S'il pose des questions detaillees, "
         "developpe. S'il est informel, sois decontractee. S'il est formel, reste professionnelle. "
         "Des qu'il exprime une preference explicite (\"sois plus concis\", \"je prefere les details\", "
-        "\"parle-moi comme un collegue\"), genere [ACTION:LEARN:ton|sa_preference]."
+        "\"parle-moi comme un collegue\"), memorise-la via le tool remember_preference."
     )
 
