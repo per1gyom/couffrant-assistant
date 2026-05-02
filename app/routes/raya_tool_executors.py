@@ -491,6 +491,134 @@ def _execute_forget_preference(inp: dict, username: str, tenant_id: str) -> dict
 
 
 # ==========================================================================
+# EXECUTEURS — META-INFO (sources/connexions)
+# ==========================================================================
+
+def _execute_list_my_connections(inp: dict, username: str, tenant_id: str) -> dict:
+    """Liste factuelle des connexions actives du tenant.
+
+    Lit directement tenant_connections (verite metier) et croise avec
+    connection_health (sante technique) pour donner a Raya une vue exacte
+    de ce qui est branche, sans passer par le RAG.
+
+    Output JSON :
+      {
+        "tenant_id": "...",
+        "total": 9,
+        "connections": [
+          {"id": 1, "tool_type": "drive", "label": "...", "status": "connected",
+           "health": "healthy", "last_poll_minutes_ago": 2, "site_name": "Commun"},
+          ...
+        ],
+        "summary_by_type": {"drive": 1, "gmail": 5, "outlook": 1, ...}
+      }
+    """
+    from app.database import get_pg_conn
+    from datetime import datetime
+
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        # tenant_connections + LEFT JOIN connection_health
+        c.execute("""
+            SELECT tc.id, tc.tool_type, tc.label, tc.status, tc.config,
+                   ch.status AS health_status,
+                   ch.last_successful_poll_at,
+                   ch.consecutive_failures
+            FROM tenant_connections tc
+            LEFT JOIN connection_health ch ON ch.connection_id = tc.id
+            WHERE tc.tenant_id = %s
+            ORDER BY tc.tool_type, tc.id
+        """, (tenant_id,))
+        rows = c.fetchall()
+
+        connections = []
+        by_type = {}
+        for r in rows:
+            tc_id = r[0] if not isinstance(r, dict) else r.get("id")
+            tool_type = r[1] if not isinstance(r, dict) else r.get("tool_type")
+            label = r[2] if not isinstance(r, dict) else r.get("label")
+            status = r[3] if not isinstance(r, dict) else r.get("status")
+            cfg = r[4] if not isinstance(r, dict) else r.get("config")
+            health = r[5] if not isinstance(r, dict) else r.get("health_status")
+            last_poll = r[6] if not isinstance(r, dict) else r.get("last_successful_poll_at")
+            cons_failures = r[7] if not isinstance(r, dict) else r.get("consecutive_failures")
+
+            if not isinstance(cfg, dict):
+                cfg = {}
+
+            # Calcule le delai depuis le dernier poll reussi
+            last_poll_min = None
+            if last_poll:
+                try:
+                    delta = (datetime.now() - last_poll).total_seconds() / 60
+                    last_poll_min = round(delta, 1)
+                except Exception:
+                    last_poll_min = None
+
+            # Resume des champs config utiles selon le type
+            extra = {}
+            if tool_type in ("drive", "sharepoint"):
+                site = cfg.get("site_name") or cfg.get("sharepoint_site")
+                if site:
+                    extra["site_name"] = site
+                folder = cfg.get("sharepoint_folder")
+                if folder:
+                    extra["folder_focus"] = folder
+            elif tool_type in ("gmail", "outlook", "microsoft", "mailbox"):
+                email = cfg.get("email") or cfg.get("primary_email")
+                if email:
+                    extra["email"] = email
+            elif tool_type == "odoo":
+                base = cfg.get("base_url") or cfg.get("url")
+                if base:
+                    extra["base_url"] = base
+
+            connections.append({
+                "id": tc_id,
+                "tool_type": tool_type,
+                "label": label or "",
+                "status": status or "unknown",
+                "health": health or "unknown",
+                "last_poll_minutes_ago": last_poll_min,
+                "consecutive_failures": cons_failures or 0,
+                **extra,
+            })
+
+            by_type[tool_type] = by_type.get(tool_type, 0) + 1
+
+        # Resume textuel pour aider Raya a comprendre l etat global
+        all_healthy = all(
+            (c.get("health") == "healthy" or c.get("health") == "unknown")
+            and c.get("status") == "connected"
+            for c in connections
+        )
+
+        return {
+            "tenant_id": tenant_id,
+            "total": len(connections),
+            "connections": connections,
+            "summary_by_type": by_type,
+            "all_healthy_and_connected": all_healthy,
+            "note": (
+                "Cette liste est la SOURCE DE VERITE des connexions actives. "
+                "Si une boite ou un drive n est PAS dans cette liste, "
+                "il n est PAS connecte (meme si tu vois du contenu lie ailleurs)."
+            ),
+        }
+    except Exception as e:
+        logger.exception("[ToolExec] list_my_connections crash")
+        return {
+            "error": type(e).__name__,
+            "message": str(e)[:500],
+        }
+    finally:
+        if conn:
+            conn.close()
+
+
+# ==========================================================================
 # GESTION DES PENDING_ACTIONS (actions necessitant confirmation)
 # ==========================================================================
 
@@ -603,4 +731,6 @@ _EXECUTORS: dict[str, Any] = {
     # Preferences durables
     "remember_preference": _execute_remember_preference,
     "forget_preference": _execute_forget_preference,
+    # Meta-info
+    "list_my_connections": _execute_list_my_connections,
 }

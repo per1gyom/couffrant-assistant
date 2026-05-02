@@ -505,6 +505,29 @@ TOOL_FORGET_PREFERENCE = {
 
 
 # ==========================================================================
+# OUTILS DE META-INFO (sources, connexions, capacites)
+# ==========================================================================
+
+TOOL_LIST_MY_CONNECTIONS = {
+    "name": "list_my_connections",
+    "description": (
+        "Liste exacte et factuelle des connexions actives de l utilisateur "
+        "(boites mails, drives, Odoo, Teams, etc.) avec leur type, libelle, "
+        "statut technique (healthy/degraded/down) et fraicheur du dernier "
+        "polling. Utiliser systematiquement avant de repondre a toute "
+        "question sur 'mes connexions', 'mes boites mails', 'mes drives', "
+        "'mes outils', 'mes sources' ou un audit/tour/etat de ce qui est "
+        "branche. Ne pas extrapoler depuis le contenu indexe (voir un mail "
+        "de quelqu un ne signifie PAS que sa boite est connectee)."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {},
+    },
+}
+
+
+# ==========================================================================
 # REGISTRE CENTRAL DES TOOLS v2
 # ==========================================================================
 # Cette liste est ce qu on passe a l API Anthropic via le parametre `tools=`.
@@ -541,6 +564,8 @@ RAYA_TOOLS: list[dict[str, Any]] = [
     # Memoire preferences durables
     TOOL_REMEMBER_PREFERENCE,
     TOOL_FORGET_PREFERENCE,
+    # Meta-info (sources/connexions/capacites)
+    TOOL_LIST_MY_CONNECTIONS,
 ]
 
 
