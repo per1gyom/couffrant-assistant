@@ -521,8 +521,11 @@ def _execute_list_my_connections(inp: dict, username: str, tenant_id: str) -> di
         conn = get_pg_conn()
         c = conn.cursor()
         # tenant_connections + LEFT JOIN connection_health
+        # connected_email est une colonne dediee de tenant_connections
+        # (l email de la boite branchee), distincte du label.
         c.execute("""
             SELECT tc.id, tc.tool_type, tc.label, tc.status, tc.config,
+                   tc.connected_email,
                    ch.status AS health_status,
                    ch.last_successful_poll_at,
                    ch.consecutive_failures
@@ -541,9 +544,10 @@ def _execute_list_my_connections(inp: dict, username: str, tenant_id: str) -> di
             label = r[2] if not isinstance(r, dict) else r.get("label")
             status = r[3] if not isinstance(r, dict) else r.get("status")
             cfg = r[4] if not isinstance(r, dict) else r.get("config")
-            health = r[5] if not isinstance(r, dict) else r.get("health_status")
-            last_poll = r[6] if not isinstance(r, dict) else r.get("last_successful_poll_at")
-            cons_failures = r[7] if not isinstance(r, dict) else r.get("consecutive_failures")
+            connected_email = r[5] if not isinstance(r, dict) else r.get("connected_email")
+            health = r[6] if not isinstance(r, dict) else r.get("health_status")
+            last_poll = r[7] if not isinstance(r, dict) else r.get("last_successful_poll_at")
+            cons_failures = r[8] if not isinstance(r, dict) else r.get("consecutive_failures")
 
             if not isinstance(cfg, dict):
                 cfg = {}
@@ -567,7 +571,9 @@ def _execute_list_my_connections(inp: dict, username: str, tenant_id: str) -> di
                 if folder:
                     extra["folder_focus"] = folder
             elif tool_type in ("gmail", "outlook", "microsoft", "mailbox"):
-                email = cfg.get("email") or cfg.get("primary_email")
+                # connected_email est le champ canonique (colonne dediee)
+                # On retombe sur config.email seulement en fallback (legacy)
+                email = connected_email or cfg.get("email") or cfg.get("primary_email")
                 if email:
                     extra["email"] = email
             elif tool_type == "odoo":
