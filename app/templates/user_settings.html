@@ -738,21 +738,22 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--accent);flex-shrink:0"><polyline points="9 18 15 12 9 6"/></svg>
         </div>
 
-        <!-- Filtres par catégorie + tri (générés dynamiquement) -->
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap">
-          <div class="filter-chips" id="rulesFilterChips" style="margin-bottom:0;flex:1;min-width:0">
-            <!-- Les chips seront injectés par renderRuleChips() -->
-          </div>
-          <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-            <span style="font-size:12px;color:var(--text-muted);white-space:nowrap">Trier :</span>
-            <select id="rulesSortMode" onchange="changeSortMode(this.value)" style="padding:6px 28px 6px 10px;border:1px solid var(--border);border-radius:8px;font-family:var(--font);font-size:12.5px;color:var(--text);background:var(--surface);cursor:pointer;appearance:none;background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236e7687' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E&quot;);background-repeat:no-repeat;background-position:right 8px center;font-weight:500">
-              <option value="importance">Pertinence</option>
-              <option value="recent">Plus récent</option>
-              <option value="ancien">Plus ancien</option>
-              <option value="alpha">A → Z</option>
-              <option value="reinf">Plus renforcée</option>
-            </select>
-          </div>
+        <!-- Ligne dédiée au tri (au-dessus des chips, alignée à droite) -->
+        <div style="display:flex;justify-content:flex-end;align-items:center;gap:8px;margin-bottom:10px">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--text-muted);flex-shrink:0"><path d="M3 6h18M7 12h10M11 18h2"/></svg>
+          <label for="rulesSortMode" style="font-size:12px;color:var(--text-muted);white-space:nowrap;font-weight:500">Trier par :</label>
+          <select id="rulesSortMode" onchange="changeSortMode(this.value)" style="padding:7px 30px 7px 12px;border:1px solid var(--border);border-radius:8px;font-family:var(--font);font-size:12.5px;color:var(--text);background:var(--surface2);cursor:pointer;appearance:none;background-image:url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%230057b8' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E&quot;);background-repeat:no-repeat;background-position:right 10px center;font-weight:600;transition:.15s" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
+            <option value="importance">Pertinence</option>
+            <option value="recent">Plus récent</option>
+            <option value="ancien">Plus ancien</option>
+            <option value="alpha">A → Z</option>
+            <option value="reinf">Plus renforcée</option>
+          </select>
+        </div>
+
+        <!-- Filtres par catégorie (générés dynamiquement) -->
+        <div class="filter-chips" id="rulesFilterChips">
+          <!-- Les chips seront injectés par renderRuleChips() -->
         </div>
 
         <!-- Conteneur pour les groupes de règles (généré dynamiquement) -->
