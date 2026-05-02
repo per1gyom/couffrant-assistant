@@ -132,23 +132,18 @@ try:
 except Exception as e:
     print(f"[Main] Import admin_jobs_trigger echec : {e}")
 
-# Endpoints admin pour configuration multi-racines Drive
+# Endpoints API JSON admin pour configuration multi-racines Drive
 # (Phase Drive multi-racines, 02/05/2026)
-# Pages : /admin/drive_config, /admin/drive_config/configure/{id}
-# API   : /admin/drive_config/rules/{id}, /admin/drive_config/preview/{id}
+# API : /admin/drive_config/{drives,browse,rules,roots,preview}
 try:
     from app.routes.admin_drive_config import router as admin_drive_config_router
     app.include_router(admin_drive_config_router)
 except Exception as e:
     print(f"[Main] Import admin_drive_config echec : {e}")
 
-# Page hub d accueil pour tous les outils admin (02/05/2026 aprem)
-# URL : GET /admin -> liens vers Drive Config, Gmail Pub/Sub, scheduler, etc.
-try:
-    from app.routes.admin_home import router as admin_home_router
-    app.include_router(admin_home_router)
-except Exception as e:
-    print(f"[Main] Import admin_home echec : {e}")
+# admin_home.py supprime le 02/05/2026 : la page hub /admin doublonnait
+# le menu 3 points existant (chat sidebar -> Super Admin -> /admin/panel)
+# qui couvre deja tous les outils admin. Pas besoin d intermediaire.
 app.include_router(forced_reset_router)
 app.include_router(onboarding_router)
 app.include_router(elicitation_router)
