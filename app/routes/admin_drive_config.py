@@ -771,7 +771,13 @@ def api_browse_folder(
 
 
 def _browse_sharepoint(connection_id, cfg, path, parent_path, admin):
-    """Browse SharePoint via Graph API."""
+    """Browse SharePoint via Graph API.
+
+    Gere 3 formats de config (historique du projet) :
+    - Format legacy : {sharepoint_site, sharepoint_drive, sharepoint_folder}
+    - Format new : {site_name, site_id, site_url}
+    - Mixte : un peu des deux
+    """
     import requests
 
     token, src_user, err = _resolve_admin_token_for_connection(connection_id, admin)
@@ -781,43 +787,99 @@ def _browse_sharepoint(connection_id, cfg, path, parent_path, admin):
             status_code=400,
         )
 
-    # Resolution du drive_id pour ce site SharePoint
-    site_name = cfg.get("site_name", "")
+    # Resolution du nom de site (multi-formats config)
+    site_name = (
+        cfg.get("site_name")
+        or cfg.get("sharepoint_site")
+        or ""
+    )
     site_id = cfg.get("site_id", "")
-    if not site_id and site_name:
-        # Tente de retrouver le site_id via Graph
-        try:
-            from app.connectors.drive_connector import _find_sharepoint_site_and_drive
-            _, drive_id_resolved, _ = _find_sharepoint_site_and_drive(
-                token, {"site_name": site_name}
-            )
-        except Exception as e:
-            logger.warning("[browse] resolve site %s : %s", site_name, e)
-            drive_id_resolved = None
-    else:
-        drive_id_resolved = None
 
-    # Si on a site_id direct, on le prefere
+    # Si on n a ni site_id ni site_name, on ne peut rien faire
+    if not site_id and not site_name:
+        return JSONResponse(
+            {"status": "error",
+             "message": "Connexion SharePoint sans site identifie. "
+                        "Config attendue : {site_name} ou {sharepoint_site} "
+                        f"ou {{site_id}}. Recue : {list(cfg.keys())}"},
+            status_code=500,
+        )
+
     headers = {"Authorization": f"Bearer {token}"}
     GRAPH = "https://graph.microsoft.com/v1.0"
 
-    # Etape 1 : trouver le drive (Documents library) du site
-    drive_id = drive_id_resolved
-    if not drive_id and site_id:
+    # Etape 1 : trouver le drive_id du site
+    drive_id = None
+
+    # Cas 1 : on a deja un site_id direct -> appel Graph rapide
+    if site_id:
         try:
             r = requests.get(f"{GRAPH}/sites/{site_id}/drive",
                              headers=headers, timeout=15)
             if r.ok:
                 drive_id = r.json().get("id")
+            else:
+                logger.warning("[browse] /sites/%s/drive : %s %s",
+                               site_id[:30], r.status_code, r.text[:200])
         except Exception as e:
             logger.warning("[browse] /sites/%s/drive : %s", site_id, e)
+
+    # Cas 2 : on a juste un site_name -> resoudre via la fonction existante
+    # qui cherche le site puis recupere le drive_id
+    if not drive_id and site_name:
+        try:
+            from app.connectors.drive_connector import _find_sharepoint_site_and_drive
+            # _find_sharepoint_site_and_drive attend un dict avec site_name
+            _, drive_id_resolved, _ = _find_sharepoint_site_and_drive(
+                token, {"site_name": site_name}
+            )
+            if drive_id_resolved:
+                drive_id = drive_id_resolved
+                logger.info(
+                    "[browse] site %s -> drive_id %s (resolu via _find_sharepoint_site_and_drive)",
+                    site_name, drive_id[:30]
+                )
+        except Exception as e:
+            logger.warning("[browse] resolve site %s : %s", site_name, e)
+
+    # Cas 3 : fallback - chercher directement via Graph search
+    if not drive_id and site_name:
+        try:
+            r = requests.get(
+                f"{GRAPH}/sites",
+                headers=headers,
+                params={"search": site_name, "$top": 5},
+                timeout=15,
+            )
+            if r.ok:
+                sites = r.json().get("value", [])
+                # Prend le 1er site qui matche le nom (insensitive)
+                for s in sites:
+                    s_name = (s.get("displayName") or s.get("name") or "").lower()
+                    if site_name.lower() in s_name or s_name in site_name.lower():
+                        site_id_found = s.get("id")
+                        if site_id_found:
+                            r2 = requests.get(
+                                f"{GRAPH}/sites/{site_id_found}/drive",
+                                headers=headers, timeout=15,
+                            )
+                            if r2.ok:
+                                drive_id = r2.json().get("id")
+                                logger.info(
+                                    "[browse] site %s -> site_id %s -> drive_id %s (fallback search)",
+                                    site_name, site_id_found[:30], drive_id[:30]
+                                )
+                                break
+        except Exception as e:
+            logger.warning("[browse] fallback search %s : %s", site_name, e)
 
     if not drive_id:
         return JSONResponse(
             {"status": "error",
-             "message": f"Impossible de resoudre le drive pour ce site "
-                        f"(site_id={site_id[:30] if site_id else '-'}, "
-                        f"site_name={site_name})"},
+             "message": (f"Impossible de resoudre le drive pour ce site. "
+                         f"site_name='{site_name}' / site_id='{site_id[:30] if site_id else ''}'. "
+                         f"Verifie que le super-admin a bien connecte sa boite "
+                         f"Microsoft et que le site SharePoint existe.")},
             status_code=500,
         )
 
