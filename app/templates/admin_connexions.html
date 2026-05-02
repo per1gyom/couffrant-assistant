@@ -569,28 +569,43 @@ loadTenants();
       <div id="drive-test-result"></div>
     </div>
 
-    <!-- EXPLORATEUR DE DOSSIERS (browse) -->
-    <div id="drive-browser" style="display:none;background:var(--bg3);border:2px solid var(--accent);border-radius:8px;padding:16px;margin-bottom:24px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:1px">🔍 Explorateur de dossiers</div>
-        <button class="btn btn-ghost" style="padding:4px 10px;font-size:11px" onclick="closeBrowser()">✕ Fermer</button>
-      </div>
-      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font-family:var(--mono);font-size:12px;margin-bottom:8px;display:flex;align-items:center;gap:8px">
-        <button class="btn btn-ghost" style="padding:2px 8px;font-size:11px" onclick="browserGoUp()" title="Remonter d un cran">↑</button>
-        <span style="color:var(--text3)">📍</span>
-        <span id="drive-browser-breadcrumb" style="flex:1;color:var(--text)">Chargement...</span>
-      </div>
-      <div id="drive-browser-items" style="max-height:340px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;padding:6px;background:var(--bg)">
-        Chargement...
-      </div>
-      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:12px">
-        <button class="btn btn-ghost" onclick="closeBrowser()">Annuler</button>
-        <button class="btn btn-primary" onclick="validateBrowserPath()">✓ Valider ce dossier</button>
-      </div>
-    </div>
+    <!-- L'EXPLORATEUR n'est plus inline : il est en overlay FIXE place
+         a la fin du document, voir <div id="browser-overlay"> tout en bas -->
 
     <div style="border-top:1px solid var(--border);padding-top:14px;margin-top:8px;display:flex;justify-content:flex-end">
       <button class="btn btn-ghost" onclick="closeDriveConfigModal()">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ====================================================================
+     EXPLORATEUR DE DOSSIERS - OVERLAY FIXE PAR-DESSUS LA MODALE
+     ==================================================================== -->
+<div class="browser-overlay" id="browser-overlay">
+  <div class="browser-box">
+    <!-- HEADER FIXE -->
+    <div class="browser-header">
+      <div class="browser-title">🔍 Explorateur de dossiers</div>
+      <button class="btn btn-ghost" style="padding:4px 10px;font-size:11px" onclick="closeBrowser()">✕ Fermer</button>
+    </div>
+    <!-- TOOLBAR FIXE (breadcrumb + bouton remonter) -->
+    <div class="browser-toolbar">
+      <button class="browser-btn-up" id="browser-btn-up" onclick="browserGoUp()" title="Remonter d un cran">↑</button>
+      <div class="browser-breadcrumb" id="browser-breadcrumb">/</div>
+    </div>
+    <!-- LISTE SCROLLABLE - SEULE zone qui scroll -->
+    <div class="browser-items" id="browser-items">
+      <div class="browser-loading">Chargement...</div>
+    </div>
+    <!-- FOOTER FIXE (selection + actions) -->
+    <div class="browser-footer">
+      <div class="browser-selected-info">
+        Dossier courant : <strong id="browser-current-display">/</strong>
+      </div>
+      <div class="browser-actions">
+        <button class="btn btn-ghost" onclick="closeBrowser()">Annuler</button>
+        <button class="btn btn-primary" onclick="validateBrowserPath()">✓ Valider ce dossier</button>
+      </div>
     </div>
   </div>
 </div>
@@ -599,9 +614,41 @@ loadTenants();
   .kbd { font-family: var(--mono); background: var(--bg3); border: 1px solid var(--border2); padding: 1px 6px; border-radius: 3px; font-size: 11px; color: var(--text); }
   .alert.ok { background: rgba(0,230,118,0.1); border: 1px solid rgba(0,230,118,0.2); color: var(--green); display: block; padding: 10px 14px; border-radius: 6px; font-family: var(--mono); font-size: 12px; margin-bottom: 14px; }
   .alert.err { background: rgba(255,82,82,0.1); border: 1px solid rgba(255,82,82,0.2); color: var(--red); display: block; padding: 10px 14px; border-radius: 6px; font-family: var(--mono); font-size: 12px; margin-bottom: 14px; }
+
+  /* === Explorateur de dossiers - Overlay fixe === */
+  .browser-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(2px); z-index: 2000; align-items: center; justify-content: center; padding: 24px; }
+  .browser-overlay.open { display: flex; }
+  .browser-box { background: var(--bg2); border: 1px solid var(--accent); border-radius: 10px; width: 100%; max-width: 640px; height: 600px; max-height: calc(100vh - 48px); display: flex; flex-direction: column; box-shadow: 0 20px 60px rgba(0,188,212,0.15); }
+  .browser-header { flex-shrink: 0; padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .browser-title { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 1px; }
+  .browser-toolbar { flex-shrink: 0; padding: 10px 14px; background: var(--bg3); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 10px; }
+  .browser-breadcrumb { flex: 1; font-family: var(--mono); font-size: 12px; color: var(--text); overflow-x: auto; white-space: nowrap; padding: 4px 0; }
+  .browser-breadcrumb .bc-link { color: var(--text2); cursor: pointer; text-decoration: none; }
+  .browser-breadcrumb .bc-link:hover { color: var(--accent); }
+  .browser-breadcrumb .bc-current { color: var(--accent); font-weight: 600; }
+  .browser-breadcrumb .bc-sep { color: var(--text3); margin: 0 6px; }
+  .browser-btn-up { flex-shrink: 0; background: transparent; border: 1px solid var(--border); color: var(--text2); padding: 4px 10px; border-radius: 4px; cursor: pointer; font-family: var(--mono); font-size: 12px; }
+  .browser-btn-up:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+  .browser-btn-up:disabled { opacity: 0.3; cursor: not-allowed; }
+  .browser-items { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 6px; background: var(--bg); }
+  .browser-item { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-radius: 4px; margin-bottom: 1px; user-select: none; }
+  .browser-item-folder { cursor: pointer; }
+  .browser-item-folder:hover { background: var(--bg3); }
+  .browser-item-file { opacity: 0.5; cursor: default; }
+  .browser-item-icon { font-size: 16px; }
+  .browser-item-name { flex: 1; font-size: 13px; color: var(--text); }
+  .browser-item-meta { font-family: var(--mono); font-size: 10px; color: var(--text3); }
+  .browser-item-chevron { color: var(--text3); font-size: 14px; }
+  .browser-item-folder:hover .browser-item-chevron { color: var(--accent); }
+  .browser-footer { flex-shrink: 0; padding: 12px 18px; border-top: 1px solid var(--border); background: var(--bg3); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .browser-selected-info { flex: 1; font-family: var(--mono); font-size: 11px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .browser-selected-info strong { color: var(--accent); }
+  .browser-actions { display: flex; gap: 8px; flex-shrink: 0; }
+  .browser-empty, .browser-loading { padding: 40px 20px; text-align: center; color: var(--text3); font-family: var(--mono); font-size: 12px; }
+  .browser-error { padding: 18px; background: rgba(255,82,82,0.08); border: 1px solid rgba(255,82,82,0.3); border-radius: 6px; color: var(--red); font-family: var(--mono); font-size: 12px; margin: 12px; }
 </style>
 
-<script src="/static/admin-drive-config.js?v=2"></script>
+<script src="/static/admin-drive-config.js?v=3"></script>
 
 </body>
 </html>

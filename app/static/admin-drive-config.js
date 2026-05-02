@@ -366,137 +366,165 @@
     }
   };
 
-  // ----- Explorateur de dossiers (browse) -----
+  // ============================================================
+  // Explorateur de dossiers - OVERLAY FIXE PAR-DESSUS LA MODALE
+  // ============================================================
   // S'utilise comme un picker : openBrowser(targetInputId, opts)
   // - targetInputId : id de l input texte ou ecrire le path choisi
-  // - opts.foldersOnly : true (defaut) = on ne peut valider que des dossiers
-  // - opts.allowRoot   : true (defaut) = bouton "valider la racine vide"
+  // - opts.foldersOnly : true (defaut) = fichiers grises (cliquer impossible)
   //
-  // Usage cote HTML : un bouton "🔍 Parcourir" a cote du champ path qui
-  // appelle openBrowser('drive-root-folder-path').
+  // L UI est un OVERLAY position:fixed centre par-dessus toute la page :
+  // - Header / Toolbar / Footer FIXES (ne bougent jamais)
+  // - Liste interne SCROLLABLE (scroll independant)
+  // - Aucun decalage de la modale parente
+  // - Fermeture par Echap, ✕ Fermer, ou clic fond noir
+  // ============================================================
 
   let _browseState = {
     targetInputId: null,
     foldersOnly: true,
-    allowRoot: true,
     currentPath: '',
     isGoogle: false,
-    breadcrumb: [], // [{name, path}] historique de navigation pour Google Drive
+    breadcrumb: [],  // [{name, path}] navigation Google Drive
+    bodyOverflowSaved: '',
   };
 
   window.openBrowser = async function(targetInputId, opts) {
     opts = opts || {};
     _browseState.targetInputId = targetInputId;
     _browseState.foldersOnly = opts.foldersOnly !== false;
-    _browseState.allowRoot = opts.allowRoot !== false;
     _browseState.currentPath = '';
     _browseState.breadcrumb = [{name: '/ (racine)', path: ''}];
+
     // Si l input contient deja un path, on demarre dessus
     const input = document.getElementById(targetInputId);
     if (input && input.value.trim()) {
       _browseState.currentPath = input.value.trim();
     }
-    document.getElementById('drive-browser').style.display = 'block';
+
+    // Empeche le scroll du body derriere l overlay
+    _browseState.bodyOverflowSaved = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    document.getElementById('browser-overlay').classList.add('open');
     await reloadBrowser();
-    // Scroll into view pour que le user voie l'explorateur
-    setTimeout(() => {
-      const el = document.getElementById('drive-browser');
-      if (el) el.scrollIntoView({behavior: 'smooth', block: 'start'});
-    }, 50);
   };
 
   window.closeBrowser = function() {
-    document.getElementById('drive-browser').style.display = 'none';
+    document.getElementById('browser-overlay').classList.remove('open');
+    document.body.style.overflow = _browseState.bodyOverflowSaved || '';
     _browseState.targetInputId = null;
   };
 
   async function reloadBrowser() {
-    const itemsContainer = document.getElementById('drive-browser-items');
-    const breadcrumbContainer = document.getElementById('drive-browser-breadcrumb');
+    const itemsContainer = document.getElementById('browser-items');
+    const breadcrumbContainer = document.getElementById('browser-breadcrumb');
+    const currentDisplay = document.getElementById('browser-current-display');
+    const btnUp = document.getElementById('browser-btn-up');
     if (!itemsContainer) return;
-    itemsContainer.innerHTML = '<div style="color:var(--text3);padding:14px;font-family:var(--mono);font-size:12px"><span class="loader"></span> Chargement...</div>';
+
+    itemsContainer.innerHTML = '<div class="browser-loading">Chargement...</div>';
+
+    // Update bouton remonter (active/inactif selon position)
+    if (btnUp) {
+      const canGoUp = _browseState.isGoogle
+        ? (_browseState.breadcrumb.length > 1)
+        : !!_browseState.currentPath;
+      btnUp.disabled = !canGoUp;
+    }
+
     try {
       const url = '/admin/drive_config/browse/' + _ctx.connection_id +
                   '?path=' + encodeURIComponent(_browseState.currentPath || '');
       const r = await fetch(url);
       const data = await r.json();
       if (data.status !== 'ok') {
-        itemsContainer.innerHTML = '<div style="color:var(--red);padding:14px;font-family:var(--mono);font-size:12px">Erreur : ' + escapeHtml(data.message || 'inconnue') + '</div>';
+        itemsContainer.innerHTML = '<div class="browser-error">Erreur : ' + escapeHtml(data.message || 'inconnue') + '</div>';
         return;
       }
       _browseState.isGoogle = (data.provider === 'google_drive');
       const items = data.items || [];
 
+      // Reactualiser le bouton remonter avec la vraie info
+      if (btnUp) {
+        const canGoUp = _browseState.isGoogle
+          ? (_browseState.breadcrumb.length > 1)
+          : !!_browseState.currentPath;
+        btnUp.disabled = !canGoUp;
+      }
+
       // Breadcrumb
       let bc = '';
       if (_browseState.isGoogle) {
-        // Pour Google : utilise l historique de navigation interne
         bc = _browseState.breadcrumb.map((b, i) => {
           const last = (i === _browseState.breadcrumb.length - 1);
-          if (last) return '<span style="color:var(--accent)">' + escapeHtml(b.name) + '</span>';
-          return `<a href="#" onclick="navigateBrowserGoogle(${i});return false;" style="color:var(--text2)">${escapeHtml(b.name)}</a>`;
-        }).join(' <span style="color:var(--text3)">›</span> ');
+          if (last) return '<span class="bc-current">' + escapeHtml(b.name) + '</span>';
+          return `<a class="bc-link" onclick="navigateBrowserGoogle(${i});return false;">${escapeHtml(b.name)}</a>`;
+        }).join('<span class="bc-sep">›</span>');
       } else {
-        // Pour SharePoint/path-based : decompose le path
         const parts = _browseState.currentPath ? _browseState.currentPath.split('/') : [];
-        bc = '<a href="#" onclick="navigateBrowser(\'\');return false;" style="color:var(--text2)">/ (racine)</a>';
-        let acc = '';
-        for (let i = 0; i < parts.length; i++) {
-          acc = acc ? acc + '/' + parts[i] : parts[i];
-          const last = (i === parts.length - 1);
-          if (last) {
-            bc += ' <span style="color:var(--text3)">›</span> <span style="color:var(--accent)">' + escapeHtml(parts[i]) + '</span>';
-          } else {
-            bc += ' <span style="color:var(--text3)">›</span> <a href="#" onclick="navigateBrowser(\'' + acc.replace(/'/g, "\\'") + '\');return false;" style="color:var(--text2)">' + escapeHtml(parts[i]) + '</a>';
+        if (parts.length === 0) {
+          bc = '<span class="bc-current">/ (racine du site)</span>';
+        } else {
+          bc = '<a class="bc-link" onclick="navigateBrowser(\'\');return false;">/ (racine)</a>';
+          let acc = '';
+          for (let i = 0; i < parts.length; i++) {
+            acc = acc ? acc + '/' + parts[i] : parts[i];
+            const last = (i === parts.length - 1);
+            const escAcc = acc.replace(/'/g, "\\'");
+            bc += '<span class="bc-sep">›</span>';
+            if (last) {
+              bc += '<span class="bc-current">' + escapeHtml(parts[i]) + '</span>';
+            } else {
+              bc += '<a class="bc-link" onclick="navigateBrowser(\'' + escAcc + '\');return false;">' + escapeHtml(parts[i]) + '</a>';
+            }
           }
         }
       }
-      breadcrumbContainer.innerHTML = bc;
+      if (breadcrumbContainer) breadcrumbContainer.innerHTML = bc;
+
+      // Update affichage selection courante en bas
+      if (currentDisplay) {
+        currentDisplay.textContent = _browseState.currentPath || '/ (racine du site)';
+      }
 
       // Liste items
       if (items.length === 0) {
-        itemsContainer.innerHTML = '<div style="color:var(--text3);padding:18px;font-family:var(--mono);font-size:12px;text-align:center">Dossier vide</div>';
+        itemsContainer.innerHTML = '<div class="browser-empty">Dossier vide</div>';
         return;
       }
-      let html = '<div style="display:flex;flex-direction:column;gap:2px">';
+      let html = '';
       for (const it of items) {
-        if (_browseState.foldersOnly && it.type !== 'folder') {
-          // Affiche les fichiers en grise mais on ne peut pas naviguer dedans
-          html += `
-            <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg);border-radius:4px;opacity:0.5">
-              <span style="font-size:14px">📄</span>
-              <span style="flex:1;font-size:13px;color:var(--text3)">${escapeHtml(it.name)}</span>
-              <span style="font-family:var(--mono);font-size:10px;color:var(--text3)">${formatSize(it.size)}</span>
-            </div>
-          `;
-        } else if (it.type === 'folder') {
+        const isFolder = (it.type === 'folder');
+        if (isFolder) {
           const childInfo = (it.child_count !== null && it.child_count !== undefined)
-            ? `${it.child_count} elem.` : '';
+            ? it.child_count + ' elem.' : '';
           html += `
-            <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--bg2);border:1px solid var(--border);border-radius:4px;cursor:pointer"
-                 onclick='navigateBrowserItem(${JSON.stringify(it).replace(/'/g, "&#39;")})'
-                 onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">
-              <span style="font-size:14px">📁</span>
-              <span style="flex:1;font-size:13px;color:var(--text);font-weight:500">${escapeHtml(it.name)}</span>
-              <span style="font-family:var(--mono);font-size:10px;color:var(--text3)">${childInfo}</span>
-              <span style="color:var(--accent);font-size:14px">›</span>
+            <div class="browser-item browser-item-folder" onclick='navigateBrowserItem(${JSON.stringify(it).replace(/'/g, "&#39;")})'>
+              <span class="browser-item-icon">📁</span>
+              <span class="browser-item-name">${escapeHtml(it.name)}</span>
+              <span class="browser-item-meta">${childInfo}</span>
+              <span class="browser-item-chevron">›</span>
             </div>
           `;
         } else {
-          // Fichier (cas non foldersOnly)
+          // Fichier : grise si foldersOnly
+          const cls = _browseState.foldersOnly ? 'browser-item browser-item-file' : 'browser-item';
           html += `
-            <div style="display:flex;align-items:center;gap:10px;padding:8px 12px">
-              <span style="font-size:14px">📄</span>
-              <span style="flex:1;font-size:13px;color:var(--text2)">${escapeHtml(it.name)}</span>
-              <span style="font-family:var(--mono);font-size:10px;color:var(--text3)">${formatSize(it.size)}</span>
+            <div class="${cls}">
+              <span class="browser-item-icon">📄</span>
+              <span class="browser-item-name">${escapeHtml(it.name)}</span>
+              <span class="browser-item-meta">${formatSize(it.size || 0)}</span>
             </div>
           `;
         }
       }
-      html += '</div>';
       itemsContainer.innerHTML = html;
+
+      // Reset le scroll au top quand on change de dossier
+      itemsContainer.scrollTop = 0;
     } catch (e) {
-      itemsContainer.innerHTML = '<div style="color:var(--red);padding:14px;font-family:var(--mono);font-size:12px">Erreur reseau : ' + escapeHtml(e.message) + '</div>';
+      itemsContainer.innerHTML = '<div class="browser-error">Erreur reseau : ' + escapeHtml(e.message) + '</div>';
     }
   }
 
@@ -510,7 +538,6 @@
   window.navigateBrowserItem = async function(item) {
     if (!item || item.type !== 'folder') return;
     if (_browseState.isGoogle) {
-      // Google : path = id du dossier, on accumule le breadcrumb
       _browseState.breadcrumb.push({name: item.name, path: item.path});
       _browseState.currentPath = item.path;
     } else {
@@ -527,7 +554,7 @@
     await reloadBrowser();
   };
 
-  // Bouton "Valider ce dossier comme racine/path"
+  // Bouton "Valider ce dossier"
   window.validateBrowserPath = function() {
     const targetId = _browseState.targetInputId;
     if (!targetId) return;
@@ -535,14 +562,17 @@
     if (!input) return;
     let valueToSet = '';
     if (_browseState.isGoogle) {
-      // Pour Google, l ID du dossier courant
       valueToSet = _browseState.currentPath || 'root';
     } else {
-      // Pour SharePoint, le path complet
       valueToSet = _browseState.currentPath || '';
     }
     input.value = valueToSet;
     input.dispatchEvent(new Event('change'));
+    // Visual feedback : flash le champ pour que le user voit que c est rempli
+    input.style.transition = 'background 0.4s';
+    const originalBg = input.style.background;
+    input.style.background = 'rgba(0,188,212,0.2)';
+    setTimeout(() => { input.style.background = originalBg; }, 600);
     closeBrowser();
     setAlert('Dossier choisi : ' + (valueToSet || '(racine du site)'), 'ok');
   };
@@ -572,6 +602,29 @@
     if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
     return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
   }
+
+  // Listeners specifiques au browser overlay
+  document.addEventListener('DOMContentLoaded', function() {
+    const overlay = document.getElementById('browser-overlay');
+    if (overlay) {
+      // Fermeture clic sur le fond (pas sur la boite interne)
+      overlay.addEventListener('click', function(e) {
+        if (e.target === overlay) closeBrowser();
+      });
+    }
+    // Fermeture par Echap (en plus du listener de la modale principale)
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        const o = document.getElementById('browser-overlay');
+        if (o && o.classList.contains('open')) {
+          // Si l overlay browser est ouvert, on le ferme et on stoppe la
+          // propagation pour eviter de fermer aussi la modale parente
+          closeBrowser();
+          e.stopPropagation();
+        }
+      }
+    }, true);  // capture = true pour passer avant le listener modale
+  });
 
   // ----- Utilitaire -----
 
