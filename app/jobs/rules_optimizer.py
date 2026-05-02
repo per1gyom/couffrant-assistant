@@ -12,10 +12,15 @@ Planification : chaque dimanche 03h00 (via scheduler_jobs.py).
 Peut aussi être lancé manuellement avec dry_run=True pour preview.
 
 Couches d'optimisation :
-  A. FUSION AUTOMATIQUE : doublons (cosine >= 0.93 OU texte normalisé identique)
-  B. CONTRADICTIONS OPUS : détection intelligente via LLM
-  C. OUBLI DOUX : règles inactives depuis 60j → confidence -= 0.1
-  D. JOURNAL : log complet dans rules_optimization_log
+  A0. CANONISATION DES CATEGORIES : fusionne les variantes équivalentes
+      ('Comportement' = 'comportement' = 'COMPORTEMENT', 'tri_mails' =
+      'Tri mails', 'Mémoire' = 'memoire'). Tourne AVANT Layer A pour
+      que la déduplication suivante voie les règles 'identiques modulo
+      casse de catégorie' comme étant dans la même catégorie.
+  A.  FUSION AUTOMATIQUE : doublons (cosine >= 0.93 OU texte normalisé identique)
+  B.  CONTRADICTIONS OPUS : détection intelligente via LLM
+  C.  OUBLI DOUX : règles inactives depuis 60j → confidence -= 0.1
+  D.  JOURNAL : log complet dans rules_optimization_log
 """
 import json
 import time
@@ -31,6 +36,32 @@ OUBLI_DOUX_DAYS = 60
 OUBLI_DOUX_DEGRADATION = 0.1
 OUBLI_DOUX_MIN_CONFIDENCE = 0.10
 OPUS_MAX_RULES = 80              # Limite tokens pour Opus
+
+
+# ===== HELPERS DE NORMALISATION =========================================
+
+def _category_signature(cat: str) -> str:
+    """Signature canonique d'une catégorie pour matcher les variantes.
+
+    Ignore casse, accents, séparateurs (_, -, espaces multiples). Permet
+    au moteur d'optimisation de voir 'Comportement' / 'comportement' /
+    'tri_mails' / 'tri-mails' / 'Tri mails' comme la même catégorie pour
+    la déduplication. Renvoie une chaîne lower sans accent, séparateurs
+    convertis en espaces simples.
+
+    Exemples :
+        'Comportement' / 'comportement' / 'COMPORTEMENT' -> 'comportement'
+        'tri_mails' / 'tri-mails' / 'Tri mails' -> 'tri mails'
+        'Mémoire' / 'memoire' -> 'memoire'
+    """
+    if not cat:
+        return ""
+    s = str(cat).strip().lower()
+    s = s.replace('_', ' ').replace('-', ' ')
+    accents_in  = "àâäéèêëîïôöùûüÿç"
+    accents_out = "aaaeeeeiioouuuyc"
+    s = s.translate(str.maketrans(accents_in, accents_out))
+    return ' '.join(s.split())
 
 
 # ===== COUCHE A : FUSION AUTOMATIQUE DES DOUBLONS =========================
@@ -172,6 +203,113 @@ def _apply_merge(winner_id: int, loser_id: int, w_conf: float, l_conf: float,
         if conn:
             conn.rollback()
         return False
+    finally:
+        if conn: conn.close()
+
+
+def run_layer_a0_canonize_categories(username: str, tenant_id: str,
+                                      dry_run: bool = False) -> dict:
+    """
+    Couche A0 : canonisation des catégories AVANT toute fusion.
+
+    Détecte les variantes équivalentes ('Comportement' vs 'comportement',
+    'tri_mails' vs 'Tri mails', etc.) et renomme tout vers une forme
+    canonique unique : celle qui a le plus grand nombre de règles.
+    En cas d'égalité de count, on préfère la variante qui commence par
+    une majuscule (style 'Tri mails' plutôt que 'tri mails').
+
+    Cette couche tourne juste avant Layer A pour qu'à l'étape suivante,
+    les règles 'identiques modulo casse de catégorie' soient vues comme
+    appartenant à la même catégorie et donc fusionnables.
+
+    UPDATE SQL massif, 0 appel IA.
+
+    Retourne :
+        {"renamed_count": N, "groups_canonized": M}
+        - renamed_count : nb de règles dont la catégorie a été renommée
+        - groups_canonized : nb de groupes de signatures qui contenaient
+          au moins 2 variantes
+    """
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        # Récupère toutes les catégories actives + leur count
+        c.execute("""
+            SELECT category, COUNT(*) as nb
+            FROM aria_rules
+            WHERE username = %s AND tenant_id = %s
+              AND active = true
+              AND category IS NOT NULL AND category != ''
+            GROUP BY category
+            ORDER BY COUNT(*) DESC
+        """, (username, tenant_id))
+        cats = c.fetchall()
+
+        # Groupe par signature
+        groups = {}  # sig -> [(cat, count), ...]
+        for cat, nb in cats:
+            sig = _category_signature(cat)
+            if not sig:
+                continue
+            groups.setdefault(sig, []).append((cat, nb))
+
+        renamed_count = 0
+        groups_canonized = 0
+
+        for sig, variants in groups.items():
+            if len(variants) < 2:
+                continue  # Pas de doublon de signature, on saute
+            # Choix de la forme canonique :
+            #   1. count max d'abord
+            #   2. en cas d'égalité, préférence aux variantes avec majuscule
+            #      initiale (plus joli visuellement)
+            variants.sort(key=lambda x: (
+                -x[1],                       # count desc
+                0 if x[0][:1].isupper() else 1,  # majuscule d'abord
+                x[0],                        # alpha pour stabilité
+            ))
+            canonical = variants[0][0]
+            losers = [v[0] for v in variants[1:]]
+
+            groups_canonized += 1
+
+            if dry_run:
+                # Compter ce qu'on aurait renommé sans toucher à la DB
+                c.execute("""
+                    SELECT COUNT(*) FROM aria_rules
+                    WHERE username = %s AND tenant_id = %s
+                      AND active = true
+                      AND category = ANY(%s)
+                """, (username, tenant_id, losers))
+                renamed_count += c.fetchone()[0]
+            else:
+                # UPDATE massif vers la forme canonique
+                c.execute("""
+                    UPDATE aria_rules
+                    SET category = %s, updated_at = NOW()
+                    WHERE username = %s AND tenant_id = %s
+                      AND active = true
+                      AND category = ANY(%s)
+                """, (canonical, username, tenant_id, losers))
+                renamed_count += c.rowcount
+                logger.info(
+                    f"[RulesOptimizer A0] {username}@{tenant_id} : "
+                    f"{c.rowcount} règles renommées vers '{canonical}' "
+                    f"(était : {', '.join(repr(l) for l in losers)})"
+                )
+
+        if not dry_run:
+            conn.commit()
+
+        return {
+            "renamed_count": renamed_count,
+            "groups_canonized": groups_canonized,
+        }
+    except Exception as e:
+        logger.error(f"[RulesOptimizer A0] erreur : {e}")
+        if conn: conn.rollback()
+        return {"renamed_count": 0, "groups_canonized": 0, "error": str(e)}
     finally:
         if conn: conn.close()
 
@@ -487,11 +625,25 @@ def _count_active_rules(username: str, tenant_id: str) -> int:
 
 def run_for_user(username: str, tenant_id: str, dry_run: bool = False) -> dict:
     """
-    Lance les 3 couches d'optimisation pour un user+tenant donné.
+    Lance les couches d'optimisation pour un user+tenant donné.
     Journalise le résultat dans rules_optimization_log.
+
+    Ordre d'exécution :
+      A0. Canonisation des catégories (nouveau, gratuit) — fusionne les
+          variantes 'Comportement'/'comportement'/'tri_mails'/'Tri mails'
+          AVANT Layer A pour que la déduplication suivante voie ces règles
+          comme appartenant à la même catégorie.
+      A.  Fusion doublons (gratuit, rapide)
+      B.  Contradictions Opus (payant, lent)
+      C.  Oubli doux (gratuit)
     """
     start = time.time()
     rules_before = _count_active_rules(username, tenant_id)
+
+    # Couche A0 : canonisation des catégories (gratuit, déterministe)
+    # Doit tourner AVANT Layer A pour que le filtre catégorie de Layer A
+    # ne masque pas les doublons sémantiques entre 'Comportement' et 'comportement'.
+    result_a0 = run_layer_a0_canonize_categories(username, tenant_id, dry_run=dry_run)
 
     # Couche A : fusion doublons (gratuit, rapide)
     result_a = run_layer_a_fusion(username, tenant_id, dry_run=dry_run)
@@ -507,6 +659,11 @@ def run_for_user(username: str, tenant_id: str, dry_run: bool = False) -> dict:
 
     # Résumé textuel
     parts = []
+    if result_a0.get("renamed_count", 0) > 0:
+        parts.append(
+            f"{result_a0['renamed_count']} règles recatégorisées "
+            f"({result_a0['groups_canonized']} groupes)"
+        )
     if result_a["merged_count"] > 0:
         parts.append(f"{result_a['merged_count']} doublons fusionnés")
     if result_b["resolved_count"] > 0:
@@ -536,7 +693,12 @@ def run_for_user(username: str, tenant_id: str, dry_run: bool = False) -> dict:
                 result_b["pending_count"],
                 result_c["forgotten_count"],
                 summary,
-                json.dumps({"layer_a": result_a, "layer_b": result_b, "layer_c": result_c}),
+                json.dumps({
+                    "layer_a0": result_a0,
+                    "layer_a": result_a,
+                    "layer_b": result_b,
+                    "layer_c": result_c,
+                }),
                 result_b.get("tokens_used", 0),
                 round(duration, 2),
             ))
@@ -549,6 +711,7 @@ def run_for_user(username: str, tenant_id: str, dry_run: bool = False) -> dict:
     return {
         "username": username, "tenant_id": tenant_id,
         "rules_before": rules_before, "rules_after": rules_after,
+        "layer_a0": result_a0,
         "layer_a": result_a, "layer_b": result_b, "layer_c": result_c,
         "summary": summary, "duration_seconds": round(duration, 2),
         "dry_run": dry_run,

@@ -32,110 +32,6 @@ def _embed_rule(rule_text: str, category: str):
         return None
 
 
-# ─── HELPERS NORMALISATION DE CATEGORIE ───
-
-def _category_signature(cat: str) -> str:
-    """Signature canonique d'une categorie pour matcher les variantes.
-
-    'comportement', 'Comportement', 'COMPORTEMENT' -> 'comportement'
-    'tri_mails', 'tri-mails', 'Tri mails', 'TRI MAILS' -> 'tri mails'
-    'Mémoire', 'memoire' -> 'memoire'
-    """
-    if not cat:
-        return ""
-    s = cat.strip().lower()
-    # Remplace _ et - par espace, puis collapse les espaces multiples
-    s = s.replace('_', ' ').replace('-', ' ')
-    # Retire les accents pour matcher 'memoire' et 'Mémoire'
-    accents_in  = "àâäéèêëîïôöùûüÿç"
-    accents_out = "aaaeeeeiioouuuyc"
-    trans = str.maketrans(accents_in, accents_out)
-    s = s.translate(trans)
-    # Collapse les espaces multiples
-    s = ' '.join(s.split())
-    return s
-
-
-def _titlecase_category(cat: str) -> str:
-    """Met en forme une categorie sans variante existante.
-
-    'comportement' -> 'Comportement'
-    'tri_mails' / 'tri-mails' -> 'Tri mails'
-    """
-    if not cat:
-        return cat
-    # Normalise les separateurs en espaces
-    s = cat.strip().replace('_', ' ').replace('-', ' ')
-    s = ' '.join(s.split())
-    # Capitalise uniquement la premiere lettre du premier mot (style "Tri mails", pas "Tri Mails")
-    if not s:
-        return s
-    return s[0].upper() + s[1:].lower() if len(s) > 1 else s.upper()
-
-
-def _normalize_category_for_save(category: str, username: str,
-                                  effective_tenant: str) -> str:
-    """Normalise une categorie avant INSERT pour eviter les doublons casse.
-
-    1. Cherche si une variante existe deja en DB pour ce user+tenant
-       (matching par signature lower+sans-accent+sans-separateurs).
-       Si oui, retourne la forme canonique deja existante.
-    2. Sinon, applique _titlecase_category pour avoir une forme propre.
-
-    NOTE : si la categorie est deja exactement OK, on ne fait pas d aller-retour
-    DB inutile (early return).
-    """
-    if not category or not category.strip():
-        return category
-
-    # On garde le cas ou tout est deja propre (premiere lettre majuscule, etc.)
-    # Mais on doit quand meme verifier en DB au cas ou il y aurait une 
-    # variante plus ancienne — on fait donc toujours le check.
-
-    sig = _category_signature(category)
-    if not sig:
-        return category
-
-    conn = None
-    try:
-        conn = get_pg_conn()
-        c = conn.cursor()
-        # Recherche une categorie existante avec meme signature pour ce user+tenant
-        c.execute("""
-            SELECT category, COUNT(*) as nb
-            FROM aria_rules
-            WHERE username = %s
-              AND (tenant_id = %s OR tenant_id IS NULL)
-              AND category IS NOT NULL
-              AND active = true
-            GROUP BY category
-        """, (username, effective_tenant))
-        existing_cats = c.fetchall()
-
-        # Cherche une variante avec meme signature
-        # Priorite : on choisit la variante la plus utilisee (count desc)
-        # parmi celles qui matchent la signature
-        candidates = [
-            (cat, nb) for (cat, nb) in existing_cats
-            if _category_signature(cat) == sig
-        ]
-        if candidates:
-            # Retourne la categorie existante la plus utilisee
-            candidates.sort(key=lambda x: -x[1])
-            return candidates[0][0]
-
-        # Pas de variante existante : applique la mise en forme propre
-        return _titlecase_category(category)
-    except Exception as e:
-        # Degradation gracieuse : on retourne la categorie d origine
-        # plutot que de bloquer l ecriture.
-        print(f"[memory_rules] _normalize_category_for_save error: {e}")
-        return category
-    finally:
-        if conn:
-            conn.close()
-
-
 # ─── FONCTIONS ACTIVES ───
 
 def get_aria_rules(username: str, tenant_id: str) -> str:
@@ -197,12 +93,6 @@ def save_rule(category: str, rule: str, source: str = "auto",
         effective_tenant = None
     else:
         effective_tenant = tenant_id or DEFAULT_TENANT
-
-    # Normalisation de la categorie : evite les doublons casse
-    # ('comportement' / 'Comportement' / 'tri_mails' / 'Tri mails' / etc.)
-    # Si une variante existe deja pour ce user+tenant, on reutilise la
-    # forme canonique. Sinon on applique une mise en forme propre.
-    category = _normalize_category_for_save(category, username, effective_tenant)
 
     conn = None
     try:
