@@ -599,7 +599,6 @@ loadProfile();
     </div>
     <div class="actions-row" style="margin-bottom:8px">
       <button class="btn btn-primary" onclick="openAddRuleForm()">+ Ajouter une règle</button>
-      <button class="btn btn-accent" onclick="openTestPathForm()">🧪 Tester un chemin</button>
     </div>
 
     <div id="drive-rule-form" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:18px;margin-bottom:24px">
@@ -630,20 +629,11 @@ loadProfile();
       </div>
     </div>
 
-    <div id="drive-test-form" style="display:none;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:18px;margin-bottom:24px">
-      <div style="font-family:var(--mono);font-size:12px;font-weight:700;color:var(--accent);margin-bottom:14px;text-transform:uppercase;letter-spacing:1px">🧪 Tester un chemin</div>
-      <div class="form-group">
-        <label>Path à tester</label>
-        <div style="display:flex;gap:6px">
-          <input type="text" id="drive-test-input" placeholder="ex: Documents/Confidentiel/fichier.docx" style="flex:1">
-          <button type="button" class="btn btn-accent" style="padding:8px 12px;white-space:nowrap" onclick="openBrowser('drive-test-input', {foldersOnly: false})">🔍 Parcourir</button>
-        </div>
-      </div>
-      <div style="display:flex;gap:10px;justify-content:flex-end;margin-bottom:8px">
-        <button class="btn btn-ghost" onclick="closeTestForm()">Fermer</button>
-        <button class="btn btn-accent" onclick="runTestPath()">Lancer le test</button>
-      </div>
-      <div id="drive-test-result"></div>
+    <div id="drive-test-form" style="display:none">
+      <!-- Bloc "Tester un chemin" retire du panel tenant_admin (02/05/2026)
+           Reste accessible cote super_admin via /admin/connexions.
+           Endpoint backend GET /admin/drive_config/preview/{conn_id} conserve
+           pour le futur "voir 5 fichiers exemple par regle". -->
     </div>
 
     <!-- L'EXPLORATEUR n'est plus inline : il est en overlay FIXE place
@@ -721,7 +711,7 @@ loadProfile();
   .browser-error { padding: 18px; background: rgba(255,82,82,0.08); border: 1px solid rgba(255,82,82,0.3); border-radius: 6px; color: var(--red); font-family: var(--mono); font-size: 12px; margin: 12px; }
 </style>
 
-<script src="/static/admin-drive-config.js?v=3"></script>
+<script src="/static/admin-drive-config.js?v=4"></script>
 
 </body>
 </html>
