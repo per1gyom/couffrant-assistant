@@ -168,6 +168,27 @@ def _can_access_tenant(admin: dict, tenant_id: str) -> bool:
     return user_tenant == tenant_id
 
 
+def _roots_to_js(roots: list) -> str:
+    """Serialise la liste des racines pour injection dans une balise <script>.
+
+    Filtre les champs pertinents pour le JS frontend (pas les timestamps
+    ni le drive_id technique). Echappe les caracteres dangereux.
+    """
+    import json
+    safe_roots = []
+    for r in roots:
+        safe_roots.append({
+            "id": r.get("id"),
+            "provider": r.get("provider"),
+            "folder_name": r.get("folder_name"),
+            "site_name": r.get("site_name"),
+            "folder_path": r.get("folder_path") or "",
+            "enabled": bool(r.get("enabled")),
+        })
+    # ensure_ascii=True garantit pas de caracteres unicode bizarres dans le HTML.
+    return json.dumps(safe_roots, ensure_ascii=True)
+
+
 # =====================================================================
 # ENDPOINTS API JSON
 # =====================================================================
@@ -362,6 +383,226 @@ def api_delete_rule(
         )
 
 
+# =====================================================================
+# ENDPOINTS API JSON - GESTION DES RACINES (drive_folders)
+# =====================================================================
+# Permet de modifier la racine de scan d un drive directement dans l UI,
+# sans avoir a passer par la console DB.
+# Cas typiques :
+#   1. Elargir : passer folder_path de '1_Photovoltaique' a '' (= toute
+#      la racine du site SharePoint, soit le Drive Commun en entier)
+#   2. Ajouter une nouvelle racine : Drive Direction sur un autre site
+#   3. Desactiver temporairement une racine sans la supprimer
+#   4. Supprimer une racine devenue obsolete
+#
+# Les champs techniques (drive_id, folder_id) ne sont PAS modifiables ici :
+# ils sont resolus automatiquement par drive_scanner au prochain scan via
+# Graph API, en se basant sur site_name + folder_path. L admin manipule
+# juste des labels lisibles.
+
+@router.post("/admin/drive_config/roots/{tenant_id}")
+def api_add_or_update_root(
+    tenant_id: str,
+    payload: dict = Body(...),
+    admin: dict = Depends(require_admin),
+):
+    """Cree ou met a jour une racine surveillee.
+
+    payload = {
+      "id": 1,                          # optionnel : si fourni, UPDATE
+      "provider": "sharepoint",
+      "folder_name": "Commun complet",  # libelle libre
+      "site_name": "Commun",            # nom du site SharePoint
+      "folder_path": "",                # vide = scanner tout le site
+      "enabled": true
+    }
+
+    Si id present -> UPDATE de la racine existante.
+    Sinon -> INSERT d une nouvelle racine.
+    """
+    if not _can_access_tenant(admin, tenant_id):
+        return JSONResponse(
+            {"status": "error", "message": "Acces refuse"},
+            status_code=403,
+        )
+
+    root_id = payload.get("id")
+    provider = (payload.get("provider") or "sharepoint").strip()
+    folder_name = (payload.get("folder_name") or "").strip()
+    site_name = (payload.get("site_name") or "").strip() or None
+    folder_path = payload.get("folder_path", "")
+    if folder_path is None:
+        folder_path = ""
+    folder_path = str(folder_path).strip().strip("/")
+    enabled = bool(payload.get("enabled", True))
+
+    if not folder_name:
+        return JSONResponse(
+            {"status": "error", "message": "folder_name requis (libelle de la racine)"},
+            status_code=400,
+        )
+    if provider not in ("sharepoint", "google_drive", "drive", "nas"):
+        return JSONResponse(
+            {"status": "error", "message": f"provider {provider} non supporte"},
+            status_code=400,
+        )
+
+    from app.database import get_pg_conn
+
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            if root_id:
+                # UPDATE : on garde drive_id/folder_id existants
+                # (ils seront re-resolus au prochain scan si folder_path
+                # change). On reset folder_id si folder_path change pour
+                # forcer le re-discovery via Graph API.
+                cur.execute(
+                    "SELECT folder_path FROM drive_folders "
+                    "WHERE id = %s AND tenant_id = %s",
+                    (root_id, tenant_id),
+                )
+                old = cur.fetchone()
+                if not old:
+                    return JSONResponse(
+                        {"status": "error", "message": "Racine introuvable pour ce tenant"},
+                        status_code=404,
+                    )
+                old_path = old[0] if not isinstance(old, dict) else old.get("folder_path")
+                # Si le folder_path change, on reset folder_id pour
+                # forcer drive_scanner a re-resoudre via Graph API
+                reset_folder_id = (old_path or "") != folder_path
+
+                if reset_folder_id:
+                    cur.execute(
+                        """
+                        UPDATE drive_folders SET
+                          provider = %s,
+                          folder_name = %s,
+                          site_name = %s,
+                          folder_path = %s,
+                          enabled = %s,
+                          folder_id = NULL,
+                          last_full_scan_at = NULL,
+                          updated_at = NOW()
+                        WHERE id = %s AND tenant_id = %s
+                        RETURNING id
+                        """,
+                        (provider, folder_name, site_name, folder_path,
+                         enabled, root_id, tenant_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        UPDATE drive_folders SET
+                          provider = %s,
+                          folder_name = %s,
+                          site_name = %s,
+                          enabled = %s,
+                          updated_at = NOW()
+                        WHERE id = %s AND tenant_id = %s
+                        RETURNING id
+                        """,
+                        (provider, folder_name, site_name,
+                         enabled, root_id, tenant_id),
+                    )
+                row = cur.fetchone()
+                action = "updated"
+            else:
+                # INSERT
+                cur.execute(
+                    """
+                    INSERT INTO drive_folders
+                      (tenant_id, provider, folder_name, site_name,
+                       folder_path, enabled)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (tenant_id, provider, folder_name)
+                    DO UPDATE SET
+                      site_name = EXCLUDED.site_name,
+                      folder_path = EXCLUDED.folder_path,
+                      enabled = EXCLUDED.enabled,
+                      updated_at = NOW()
+                    RETURNING id
+                    """,
+                    (tenant_id, provider, folder_name, site_name,
+                     folder_path, enabled),
+                )
+                row = cur.fetchone()
+                action = "created"
+
+            new_id = row[0] if not isinstance(row, dict) else row.get("id")
+            conn.commit()
+
+        logger.info(
+            "[admin_drive_config] racine %s id=%s par %s "
+            "(provider=%s, site=%s, path='%s', enabled=%s)",
+            action, new_id, admin.get("username"),
+            provider, site_name, folder_path, enabled,
+        )
+        return {
+            "status": "ok",
+            "root_id": new_id,
+            "action": action,
+            "reset_folder_id": (root_id is not None and
+                                action == "updated" and
+                                payload.get("folder_path") is not None),
+        }
+    except Exception as e:
+        logger.exception("[admin_drive_config] api_add_or_update_root crash")
+        return JSONResponse(
+            {"status": "error", "message": str(e)[:300]},
+            status_code=500,
+        )
+
+
+@router.delete("/admin/drive_config/roots/{root_id}")
+def api_delete_root(
+    root_id: int,
+    admin: dict = Depends(require_admin),
+):
+    """Supprime une racine surveillee. ATTENTION : ne supprime PAS le
+    contenu deja vectorise (drive_semantic_content) - juste la config
+    de la racine. Pour purger le vectorise, action manuelle separee.
+    """
+    from app.database import get_pg_conn
+
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT tenant_id FROM drive_folders WHERE id = %s",
+                (root_id,),
+            )
+            r = cur.fetchone()
+            if not r:
+                return JSONResponse(
+                    {"status": "error", "message": "Racine introuvable"},
+                    status_code=404,
+                )
+            tenant_id = r[0] if not isinstance(r, dict) else r.get("tenant_id")
+            if not _can_access_tenant(admin, tenant_id):
+                return JSONResponse(
+                    {"status": "error", "message": "Acces refuse"},
+                    status_code=403,
+                )
+            cur.execute(
+                "DELETE FROM drive_folders WHERE id = %s",
+                (root_id,),
+            )
+            conn.commit()
+        logger.info(
+            "[admin_drive_config] racine id=%s supprimee par %s",
+            root_id, admin.get("username"),
+        )
+        return {"status": "ok"}
+    except Exception as e:
+        logger.exception("[admin_drive_config] api_delete_root crash")
+        return JSONResponse(
+            {"status": "error", "message": str(e)[:300]},
+            status_code=500,
+        )
+
+
 @router.get("/admin/drive_config/preview/{connection_id}")
 def api_preview_path(
     connection_id: int,
@@ -472,7 +713,10 @@ def page_drive_config_home(
 
     body = _HTML_HEAD.format(title="Configuration Drive - Raya")
     body += f"""
-<div class="breadcrumb">Configuration Drive / Vue d ensemble</div>
+<div class="breadcrumb">
+  <a href="/admin">Admin Raya</a> /
+  Configuration Drive / Vue d ensemble
+</div>
 <h1>📁 Configuration des dossiers Drive</h1>
 <div class="info">
 Ici tu choisis quels dossiers de tes drives connectes Raya peut consulter.
@@ -526,14 +770,26 @@ SharePoint, Google Drive ou autre via la page de configuration des connexions.
 </div>
 """
 
-    if roots:
-        body += """
-<h2>Racines actuellement surveillees</h2>
+    # Section gestion des racines (modifier/ajouter/supprimer)
+    body += f"""
+<h2>Racines surveillees ({len(roots)})</h2>
+<div class="info">
+La <b>racine</b> definit OU Raya commence a regarder dans ton drive.
+Mettre <code>folder_path = ""</code> (vide) = scanner TOUT le site SharePoint.
+Mettre <code>folder_path = "1_Photovoltaique"</code> = scanner ce sous-dossier seulement.<br>
+Tu peux avoir plusieurs racines (Drive Commun + Drive Direction par exemple).
+</div>
 <div class="card">
+"""
+
+    if not roots:
+        body += "<div class='warn'>Aucune racine. Ajoute-en une ci-dessous pour que Raya commence a scanner.</div>"
+    else:
+        body += """
 <table>
 <thead><tr>
-  <th>Provider</th><th>Site</th><th>Dossier</th><th>Path</th>
-  <th>Enabled</th><th>Dernier scan</th>
+  <th>Provider</th><th>Site</th><th>Libelle</th><th>Path</th>
+  <th>Enabled</th><th>Dernier scan</th><th>Action</th>
 </tr></thead>
 <tbody>
 """
@@ -541,17 +797,149 @@ SharePoint, Google Drive ou autre via la page de configuration des connexions.
             last_scan = r.get("last_full_scan_at")
             last_scan_str = (last_scan.strftime("%Y-%m-%d %H:%M")
                              if last_scan else "-")
+            rid = r["id"]
+            path_display = (
+                f"<code>{r.get('folder_path')}</code>"
+                if r.get("folder_path") else "<i>(racine du site)</i>"
+            )
+            enabled_emoji = "✅" if r.get("enabled") else "❌"
             body += (
                 "<tr>"
                 f"<td>{r.get('provider', '?')}</td>"
                 f"<td>{r.get('site_name') or '-'}</td>"
                 f"<td>{r.get('folder_name') or '-'}</td>"
-                f"<td><code>{r.get('folder_path') or '-'}</code></td>"
-                f"<td>{'✅' if r.get('enabled') else '❌'}</td>"
+                f"<td>{path_display}</td>"
+                f"<td>{enabled_emoji}</td>"
                 f"<td>{last_scan_str}</td>"
+                f"<td>"
+                f"<button class='btn' onclick='editRoot({rid})'>Modifier</button> "
+                f"<button class='btn btn-danger' onclick='deleteRoot({rid})'>Supprimer</button>"
+                f"</td>"
                 "</tr>"
             )
-        body += "</tbody></table></div>"
+        body += "</tbody></table>"
+    body += "</div>"
+
+    # Formulaire d'ajout de racine
+    body += f"""
+<h3>Ajouter une nouvelle racine</h3>
+<div class="card">
+<form id="addRootForm" onsubmit="addRoot(event); return false;">
+  <div style="margin-bottom: 10px;">
+    <label>Provider : </label>
+    <select id="rootProvider">
+      <option value="sharepoint">SharePoint</option>
+      <option value="google_drive">Google Drive</option>
+      <option value="drive">Drive (autre)</option>
+      <option value="nas">NAS</option>
+    </select>
+  </div>
+  <div style="margin-bottom: 10px;">
+    <label>Libelle (folder_name UNIQUE) : </label>
+    <input type="text" id="rootFolderName" placeholder="ex: Drive Direction">
+  </div>
+  <div style="margin-bottom: 10px;">
+    <label>Site (SharePoint) : </label>
+    <input type="text" id="rootSiteName" placeholder="ex: Direction">
+  </div>
+  <div style="margin-bottom: 10px;">
+    <label>Path (vide = tout le site) : </label>
+    <input type="text" id="rootFolderPath" placeholder="ex: Comptabilite (vide = tout)">
+  </div>
+  <button type="submit" class="btn btn-primary">Ajouter cette racine</button>
+</form>
+</div>
+
+<!-- Modal d edition de racine -->
+<div id="editRootModal" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0;
+     background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
+  <div style="background:white; padding:24px; border-radius:8px; max-width:500px; width:90%;">
+    <h3 style="margin-top:0;">Modifier la racine</h3>
+    <input type="hidden" id="editRootId">
+    <div style="margin-bottom:10px;"><label>Libelle : </label>
+      <input type="text" id="editRootFolderName"></div>
+    <div style="margin-bottom:10px;"><label>Site : </label>
+      <input type="text" id="editRootSiteName"></div>
+    <div style="margin-bottom:10px;"><label>Path : </label>
+      <input type="text" id="editRootFolderPath" placeholder="vide = tout le site"></div>
+    <div style="margin-bottom:10px;"><label>Enabled : </label>
+      <input type="checkbox" id="editRootEnabled"></div>
+    <div class="warn">Si tu changes le path, le folder_id sera reset pour
+    forcer une re-resolution via Graph API au prochain scan.</div>
+    <button class="btn btn-primary" onclick="saveRoot()">Enregistrer</button>
+    <button class="btn" onclick="closeEditRoot()">Annuler</button>
+  </div>
+</div>
+
+<script>
+const TENANT_ID = '{tenant_id}';
+const ROOTS_DATA = {_roots_to_js(roots)};
+
+async function addRoot(event) {{
+  const payload = {{
+    provider: document.getElementById('rootProvider').value,
+    folder_name: document.getElementById('rootFolderName').value.trim(),
+    site_name: document.getElementById('rootSiteName').value.trim(),
+    folder_path: document.getElementById('rootFolderPath').value.trim(),
+    enabled: true,
+  }};
+  if (!payload.folder_name) {{ alert('Libelle requis'); return; }}
+  const r = await fetch('/admin/drive_config/roots/' + TENANT_ID, {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify(payload)
+  }});
+  const data = await r.json();
+  if (data.status === 'ok') {{ location.reload(); }}
+  else {{ alert('Erreur: ' + (data.message || 'inconnue')); }}
+}}
+
+function editRoot(id) {{
+  const root = ROOTS_DATA.find(r => r.id === id);
+  if (!root) {{ alert('Racine introuvable'); return; }}
+  document.getElementById('editRootId').value = root.id;
+  document.getElementById('editRootFolderName').value = root.folder_name || '';
+  document.getElementById('editRootSiteName').value = root.site_name || '';
+  document.getElementById('editRootFolderPath').value = root.folder_path || '';
+  document.getElementById('editRootEnabled').checked = !!root.enabled;
+  document.getElementById('editRootModal').style.display = 'flex';
+}}
+
+function closeEditRoot() {{
+  document.getElementById('editRootModal').style.display = 'none';
+}}
+
+async function saveRoot() {{
+  const payload = {{
+    id: parseInt(document.getElementById('editRootId').value),
+    provider: 'sharepoint',  // garde le provider existant (lookup ROOTS_DATA)
+    folder_name: document.getElementById('editRootFolderName').value.trim(),
+    site_name: document.getElementById('editRootSiteName').value.trim(),
+    folder_path: document.getElementById('editRootFolderPath').value.trim(),
+    enabled: document.getElementById('editRootEnabled').checked,
+  }};
+  // Garde le provider existant
+  const existing = ROOTS_DATA.find(r => r.id === payload.id);
+  if (existing) payload.provider = existing.provider;
+  const r = await fetch('/admin/drive_config/roots/' + TENANT_ID, {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify(payload)
+  }});
+  const data = await r.json();
+  if (data.status === 'ok') {{ location.reload(); }}
+  else {{ alert('Erreur: ' + (data.message || 'inconnue')); }}
+}}
+
+async function deleteRoot(id) {{
+  if (!confirm('Supprimer cette racine ?\\n\\nLe contenu deja indexe ne sera PAS supprime, seulement la config.')) return;
+  const r = await fetch('/admin/drive_config/roots/' + id, {{ method: 'DELETE' }});
+  const data = await r.json();
+  if (data.status === 'ok') {{ location.reload(); }}
+  else {{ alert('Erreur: ' + (data.message || 'inconnue')); }}
+}}
+</script>
+"""
 
     body += "</body></html>"
     return HTMLResponse(body)
@@ -579,6 +967,7 @@ def page_drive_configure(
     body = _HTML_HEAD.format(title=f"Configuration {label} - Raya")
     body += f"""
 <div class="breadcrumb">
+  <a href="/admin">Admin Raya</a> /
   <a href="/admin/drive_config">Configuration Drive</a> /
   Configuration de <b>{label}</b>
 </div>
