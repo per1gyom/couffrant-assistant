@@ -175,6 +175,38 @@ def record_poll_attempt(
                     updated_at = NOW()
                 WHERE connection_id = %s
             """, (next_delta_token, connection_id))
+
+            # 3. Auto-resolution des alertes connection_silence pour ce
+            # connection_id (fix bug "alertes fantomes" du 02/05/2026 :
+            # quand le polling repasse en healthy, les anciennes alertes
+            # restaient affichees indefiniment dans /admin/health/page).
+            #
+            # On acquitte automatiquement avec acknowledged_by='auto_resolved'
+            # pour distinguer des acquittements manuels par un admin.
+            try:
+                c.execute("""
+                    UPDATE system_alerts
+                    SET acknowledged = TRUE,
+                        acknowledged_at = NOW(),
+                        acknowledged_by = 'auto_resolved',
+                        updated_at = NOW()
+                    WHERE acknowledged = FALSE
+                      AND alert_type = 'connection_silence'
+                      AND component = %s
+                """, (f"connection_{connection_id}",))
+                if c.rowcount > 0:
+                    logger.info(
+                        "[Health] Auto-resolu %d alerte(s) connection_silence pour "
+                        "connection_id=%s (poll OK)",
+                        c.rowcount, connection_id,
+                    )
+            except Exception as e:
+                # Si la table system_alerts a un schema different ou est absente
+                # (cas tests), on n'arrete pas le polling pour autant
+                logger.warning(
+                    "[Health] Auto-resolu alertes echoue (non bloquant) : %s",
+                    str(e)[:200],
+                )
         else:
             # Poll échoué : on incrémente le compteur d'échecs consécutifs
             c.execute("""
