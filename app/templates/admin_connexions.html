@@ -362,7 +362,7 @@ loadTenants();
         </div>
         <div class="form-group" style="margin-bottom:0">
           <label>Libelle (folder_name)</label>
-          <input type="text" id="drive-root-folder-name" placeholder="ex: Drive Direction">
+          <input type="text" id="drive-root-folder-name" placeholder="ex: Documents">
         </div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
@@ -392,8 +392,8 @@ loadTenants();
     <div class="section-title">2. Regles include / exclude</div>
     <div style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-bottom:14px;line-height:1.6">
       Inclus <span class="kbd">Comptabilite</span> = tout indexe<br>
-      Exclus <span class="kbd">Comptabilite/Salaires</span> = sauf ce sous-dossier<br>
-      Inclus <span class="kbd">Comptabilite/Salaires/Public</span> = sauf ce sous-sous-dossier<br>
+      Exclus <span class="kbd">Documents/Confidentiel</span> = sauf ce sous-dossier<br>
+      Inclus <span class="kbd">Documents/Confidentiel/Public</span> = sauf ce sous-sous-dossier<br>
       <em>Le chemin le plus long gagne.</em>
     </div>
     <div class="table-wrap">
@@ -428,7 +428,7 @@ loadTenants();
         </div>
         <div class="form-group" style="margin-bottom:0">
           <label>Raison (optionnel)</label>
-          <input type="text" id="drive-rule-reason" placeholder="ex: RH confidentiel">
+          <input type="text" id="drive-rule-reason" placeholder="ex: Documents internes">
         </div>
       </div>
       <div style="display:flex;gap:10px;justify-content:flex-end">

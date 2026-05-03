@@ -267,9 +267,9 @@ def api_add_rule(
     """Ajoute une regle include/exclude.
 
     payload = {
-      "folder_path": "Drive Direction/RH",
+      "folder_path": "Documents/Confidentiel",
       "rule_type": "exclude",
-      "reason": "RH confidentiel"
+      "reason": "Documents internes"
     }
     """
     meta = _get_connection_meta(connection_id)
@@ -396,7 +396,7 @@ def api_delete_rule(
 # Cas typiques :
 #   1. Elargir : passer folder_path de '1_Photovoltaique' a '' (= toute
 #      la racine du site SharePoint, soit le Drive Commun en entier)
-#   2. Ajouter une nouvelle racine : Drive Direction sur un autre site
+#   2. Ajouter une nouvelle racine : Documents sur un autre site
 #   3. Desactiver temporairement une racine sans la supprimer
 #   4. Supprimer une racine devenue obsolete
 #
