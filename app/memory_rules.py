@@ -59,7 +59,7 @@ def get_aria_rules(username: str, tenant_id: str) -> str:
             WHERE active = true
               AND username = %s
               AND (tenant_id = %s OR tenant_id IS NULL)
-              AND category != 'memoire'
+              AND category != 'Mémoire'
             ORDER BY confidence DESC, reinforcements DESC, created_at DESC
             LIMIT 60
         """, (username, tenant_id))

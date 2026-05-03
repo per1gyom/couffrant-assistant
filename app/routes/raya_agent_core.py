@@ -8,7 +8,7 @@ Architecture :
   - Utilise l API Anthropic tool use native
   - Boucle while stop_reason != "end_turn"
   - Chaque iteration : appel API → tool_use → execution → tool_result
-  - Garde-fous : 10 iterations, 30s timeout, 30k tokens de budget
+  - Garde-fous : 15 iterations, 60s timeout, 150k tokens de budget (palier P1)
 """
 import os
 import time
@@ -183,7 +183,7 @@ def _load_user_preferences(username: str, tenant_id: str, query: str = "") -> tu
             "WHERE username = %s "
             "  AND (tenant_id = %s OR tenant_id IS NULL) "
             "  AND active = true "
-            "  AND category != 'memoire' "
+            "  AND category != 'Mémoire' "
             "ORDER BY confidence DESC, reinforcements DESC, id DESC "
             "LIMIT 30",
             (username, tenant_id),

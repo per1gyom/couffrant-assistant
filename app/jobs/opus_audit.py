@@ -53,7 +53,7 @@ def _load_rules_for_audit(tenant_id: str, limit: int = 80) -> list:
             FROM aria_rules
             WHERE active = true
               AND (tenant_id = %s OR tenant_id IS NULL)
-              AND category != 'memoire'
+              AND category != 'Mémoire'
             ORDER BY confidence DESC, reinforcements DESC
             LIMIT %s
         """, (tenant_id, limit))

@@ -119,7 +119,7 @@ def _score_by_rules(sender, subject, preview, username, tenant_id):
             SELECT rule, confidence FROM aria_rules
             WHERE username = %s AND active = true
               AND (tenant_id = %s OR tenant_id IS NULL)
-              AND category IN ('urgence', 'tri_mails', 'mail_filter')
+              AND category IN ('urgence', 'Tri mails', 'mail_filter')
               AND confidence >= 0.4
             ORDER BY confidence DESC LIMIT 20
         """, (username, tenant_id))

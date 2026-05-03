@@ -127,7 +127,7 @@ def _find_similar_rules(rule_text: str, username: str, tenant_id: str) -> list:
             query_text=rule_text,
             limit=5,
             tenant_id=tenant_id,
-            extra_filter="active = true AND category != 'memoire'",
+            extra_filter="active = true AND category != 'Mémoire'",
         )
         return rows or []
     except Exception as e:
@@ -144,7 +144,7 @@ def _fallback_rules(username: str, tenant_id: str) -> list:
         c.execute("""
             SELECT id, category, rule, confidence
             FROM aria_rules
-            WHERE username = %s AND active = true AND category != 'memoire'
+            WHERE username = %s AND active = true AND category != 'Mémoire'
               AND (tenant_id = %s OR tenant_id IS NULL)
             ORDER BY confidence DESC, reinforcements DESC
             LIMIT 10

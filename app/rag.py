@@ -28,7 +28,7 @@ def retrieve_rules(query: str, username: str, tenant_id: str = None,
                    tenant_ids: list[str] = None, limit: int = RAG_RULES_LIMIT,
                    precomputed_vec: list = None) -> dict:
     """Règles pertinentes — {text, ids}. Exclut confidence < 0.30."""
-    conf_filter = f"active = true AND category != 'memoire' AND confidence >= {RAG_CONFIDENCE_THRESHOLD}"
+    conf_filter = f"active = true AND category != 'Mémoire' AND confidence >= {RAG_CONFIDENCE_THRESHOLD}"
 
     if not is_available():
         try:
@@ -37,20 +37,20 @@ def retrieve_rules(query: str, username: str, tenant_id: str = None,
                 c.execute("""
                     SELECT id, category, rule FROM aria_rules
                     WHERE active=true AND username=%s AND (tenant_id=ANY(%s) OR tenant_id IS NULL)
-                    AND category!='memoire' AND confidence>=%s
+                    AND category != 'Mémoire' AND confidence>=%s
                     ORDER BY confidence DESC, reinforcements DESC LIMIT 60
                 """, (username, tenant_ids, RAG_CONFIDENCE_THRESHOLD))
             elif tenant_id:
                 c.execute("""
                     SELECT id, category, rule FROM aria_rules
                     WHERE active=true AND username=%s AND (tenant_id=%s OR tenant_id IS NULL)
-                    AND category!='memoire' AND confidence>=%s
+                    AND category != 'Mémoire' AND confidence>=%s
                     ORDER BY confidence DESC, reinforcements DESC LIMIT 60
                 """, (username, tenant_id, RAG_CONFIDENCE_THRESHOLD))
             else:
                 c.execute("""
                     SELECT id, category, rule FROM aria_rules
-                    WHERE active=true AND username=%s AND category!='memoire' AND confidence>=%s
+                    WHERE active=true AND username=%s AND category != 'Mémoire' AND confidence>=%s
                     ORDER BY confidence DESC, reinforcements DESC LIMIT 60
                 """, (username, RAG_CONFIDENCE_THRESHOLD))
             rows = c.fetchall(); conn.close()
@@ -117,7 +117,7 @@ def retrieve_theme_context(theme: str, username: str, tenant_id: str = None,
     """Enrichit le contexte avec tout ce qui concerne le thème de session (B8)."""
     if not is_available() or not theme:
         return {"extra_rules": "", "extra_insights": "", "extra_mails": []}
-    conf_filter = f"active = true AND category != 'memoire' AND confidence >= {RAG_CONFIDENCE_THRESHOLD}"
+    conf_filter = f"active = true AND category != 'Mémoire' AND confidence >= {RAG_CONFIDENCE_THRESHOLD}"
     theme_vec = embed(theme)
     extra_rules    = search_similar(table="aria_rules",    username=username, query_text=theme,
                                     limit=RAG_THEME_RULES_EXTRA, tenant_id=tenant_id,

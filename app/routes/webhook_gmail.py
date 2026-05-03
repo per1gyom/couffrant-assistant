@@ -73,7 +73,7 @@ def _whatsapp_raya_response(username: str, message: str, tenant_id: str) -> str:
     # 2. Règles de comportement et style
     rules_text = ""
     try:
-        rules_text = get_rules_as_text(username, ["comportement", "style", "memoire"])
+        rules_text = get_rules_as_text(username, ["Comportement", "Style", "Mémoire"])
     except Exception:
         pass
 

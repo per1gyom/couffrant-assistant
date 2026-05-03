@@ -73,7 +73,7 @@ def _load_existing_rules_summary(username: str, tenant_id: str) -> str:
             SELECT category, rule FROM aria_rules
             WHERE active = true AND username = %s
               AND (tenant_id = %s OR tenant_id IS NULL)
-              AND category != 'memoire'
+              AND category != 'Mémoire'
             ORDER BY confidence DESC, reinforcements DESC LIMIT 40
         """, (username, tenant_id))
         rows = c.fetchall()
