@@ -636,23 +636,32 @@ def get_tools_for_user(username: str, tenant_id: str) -> list[dict]:
     du tenant pour eviter d exposer search_odoo a un user sans Odoo, ou
     search_drive a un user sans drive connecte.
 
-    Comportement :
-    - Tenant sans aucune connexion (onboarding en cours) : on N applique
-      AUCUN filtre — on expose tous les tools pour ne pas bloquer un user
-      qui finalise sa configuration.
-    - Tenant avec au moins une connexion : on filtre selon _TOOL_DEPENDENCIES.
-      Un tool sans dependance configuree (graph, web, fichiers, memoire,
-      list_my_connections...) est toujours expose.
-    - Erreur DB : on expose tous les tools (fail open vers plus de
-      capacites plutot que moins, pour ne pas casser le service).
+    REGLE UNIQUE (simple et stricte) :
+      Si une dependance d un tool n a aucune connexion 'connected' pour
+      ce tenant, le tool est exclu. Toujours. Pas de cas particulier.
+
+    Comportement par cas :
+      - Tenant a 0 connexion 'connected' (cas onboarding ou OAuth
+        en cours) : seuls les tools sans dependance sont exposes
+        (graph, web_search, create_file/pdf/excel/image, memoire,
+        list_my_connections, search_conversations).
+        Les tools mail/drive/odoo/teams sont caches tant qu aucune
+        connexion correspondante n est 'connected'. C est l etat
+        attendu pendant les premieres minutes apres creation du
+        tenant — Raya peut quand meme repondre via le graphe et
+        le web, et elle suggerera naturellement de connecter une
+        boite mail ou un drive si la question l exige.
+      - Tenant avec connexions actives : filtrage selon
+        _TOOL_DEPENDENCIES. Au moins une dependance doit etre
+        connectee pour que le tool soit expose.
+      - Erreur DB : fail-open vers tous les tools (preferable a
+        casser le service en cas d incident transitoire DB).
     """
-    active_types = _get_active_tool_types(tenant_id)
-    if not active_types:
-        # Tenant sans aucune connexion : on n applique aucun filtre.
-        # L agent verra tous les tools, mais ses appels echoueront
-        # gentiment via list_my_connections / messages d erreur des
-        # executors. C est plus accueillant qu une liste vide pour un
-        # user en cours de configuration.
+    try:
+        active_types = _get_active_tool_types(tenant_id)
+    except Exception:
+        # Fail-open en cas d incident DB transitoire : on prefere
+        # exposer trop de tools que casser totalement la conversation.
         return RAYA_TOOLS
 
     filtered = []
