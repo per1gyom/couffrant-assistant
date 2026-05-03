@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test Explorateur Stable v3</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #080a0c; --bg2: #0d1117; --bg3: #111820; --bg4: #161e28;
+  --border: #1e2a38; --border2: #243040;
+  --text: #c9d1d9; --text2: #8b949e; --text3: #4a5568;
+  --accent: #00bcd4; --accent2: #1565c0;
+  --green: #00e676; --red: #ff5252; --yellow: #ffca28;
+  --mono: 'JetBrains Mono', monospace; --sans: 'IBM Plex Sans', sans-serif;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; min-height: 100vh; padding: 24px; }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 6px; font-family: var(--mono); font-size: 12px; font-weight: 600; cursor: pointer; border: none; }
+.btn-primary { background: var(--accent2); color: #fff; }
+.btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+.btn-accent { background: rgba(0,188,212,0.12); color: var(--accent); border: 1px solid rgba(0,188,212,0.25); }
+.btn-danger { background: rgba(255,82,82,0.15); color: var(--red); border: 1px solid rgba(255,82,82,0.3); }
+.btn:hover { opacity: 0.85; }
+
+/* Page de demo : reproduit le contexte de la modale Drive Config */
+.demo-page { max-width: 900px; margin: 0 auto; }
+.demo-header { font-family: var(--mono); font-size: 12px; color: var(--accent); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 18px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.demo-section { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 24px; margin-bottom: 16px; }
+.demo-section-title { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--accent); text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 14px; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.form-group { margin-bottom: 12px; }
+label { display: block; font-family: var(--mono); font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 6px; }
+input[type=text], select { width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: 6px; color: var(--text); font-family: var(--mono); font-size: 13px; padding: 10px 12px; outline: none; }
+.input-with-browse { display: flex; gap: 6px; }
+.input-with-browse input { flex: 1; }
+
+/* ================================================================ */
+/*  EXPLORATEUR : OVERLAY FIXE CENTRÉ                                */
+/* ================================================================ */
+
+.browser-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(2px);
+  z-index: 2000;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.browser-overlay.open { display: flex; }
+
+.browser-box {
+  background: var(--bg2);
+  border: 1px solid var(--accent);
+  border-radius: 10px;
+  width: 100%;
+  max-width: 640px;
+  height: 600px;          /* hauteur FIXE, pas de variation au clic */
+  max-height: calc(100vh - 48px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 188, 212, 0.15);
+}
+
+.browser-header {
+  flex-shrink: 0;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.browser-title {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.browser-toolbar {
+  flex-shrink: 0;
+  padding: 10px 14px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.breadcrumb {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  overflow-x: auto;
+  white-space: nowrap;
+  padding: 4px 0;
+}
+.breadcrumb a {
+  color: var(--text2);
+  text-decoration: none;
+  cursor: pointer;
+}
+.breadcrumb a:hover { color: var(--accent); }
+.breadcrumb .sep { color: var(--text3); margin: 0 4px; }
+.breadcrumb .current { color: var(--accent); font-weight: 600; }
+.btn-up {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text2);
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.btn-up:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.btn-up:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* C'est ICI le truc : la liste est la SEULE zone scrollable */
+.browser-items {
+  flex: 1;
+  overflow-y: auto;     /* scroll INTERNE pas de la page */
+  overflow-x: hidden;
+  padding: 6px;
+  background: var(--bg);
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  margin-bottom: 1px;
+  cursor: pointer;
+  user-select: none;
+}
+.item-folder {
+  background: transparent;
+}
+.item-folder:hover {
+  background: var(--bg3);
+}
+.item-folder.selected {
+  background: rgba(0, 188, 212, 0.15);
+  border: 1px solid var(--accent);
+}
+.item-file {
+  opacity: 0.5;
+  cursor: default;
+}
+.item-icon { font-size: 16px; }
+.item-name { flex: 1; font-size: 13px; color: var(--text); }
+.item-meta { font-family: var(--mono); font-size: 10px; color: var(--text3); }
+.item-chevron { color: var(--text3); font-size: 14px; }
+.item-folder:hover .item-chevron { color: var(--accent); }
+
+.browser-footer {
+  flex-shrink: 0;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: var(--bg3);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.selected-info {
+  flex: 1;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.selected-info strong { color: var(--accent); }
+
+.browser-actions { display: flex; gap: 8px; flex-shrink: 0; }
+
+.empty-state {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text3);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.loading-state {
+  padding: 40px 20px;
+  text-align: center;
+  color: var(--text3);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.error-state {
+  padding: 18px;
+  background: rgba(255,82,82,0.08);
+  border: 1px solid rgba(255,82,82,0.3);
+  border-radius: 6px;
+  color: var(--red);
+  font-family: var(--mono);
+  font-size: 12px;
+  margin: 12px;
+}
+
+.demo-banner {
+  background: rgba(255,202,40,0.08);
+  border: 1px solid rgba(255,202,40,0.3);
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--yellow);
+  margin-bottom: 18px;
+}
+
+.kbd {
+  font-family: var(--mono);
+  background: var(--bg3);
+  border: 1px solid var(--border2);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--text);
+}
+</style>
+</head>
+<body>
+
+<div class="demo-banner">
+  📋 Page de test - Donnees mockees (pas de backend). Teste le clic sur "Parcourir", la navigation,
+  le scroll dans la liste, le bouton remonter, le breadcrumb cliquable. Aucun decalage de la page parente.
+</div>
+
+<div class="demo-page">
+  <div class="demo-header">
+    Modale "Configurer dossiers - SharePoint Commun" (simulation)
+  </div>
+
+  <div class="demo-section">
+    <div class="demo-section-title">1. Racines surveillees - Modifier la racine</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Provider</label>
+        <select><option>SharePoint</option></select>
+      </div>
+      <div class="form-group">
+        <label>Libelle</label>
+        <input type="text" value="Commun">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Site (SharePoint)</label>
+        <input type="text" value="Commun">
+      </div>
+      <div class="form-group">
+        <label>Path (vide = tout le site)</label>
+        <div class="input-with-browse">
+          <input type="text" id="path-input-1" placeholder="ex: Documents (vide = tout)">
+          <button class="btn btn-accent" onclick="openBrowser('path-input-1')">🔍 Parcourir</button>
+        </div>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:8px">
+      <button class="btn btn-ghost">Annuler</button>
+      <button class="btn btn-primary">Enregistrer</button>
+    </div>
+  </div>
+
+  <div class="demo-section">
+    <div class="demo-section-title">2. Regles include / exclude</div>
+    <div class="form-group">
+      <label>Chemin du dossier concerne</label>
+      <div class="input-with-browse">
+        <input type="text" id="path-input-2" placeholder="ex: Documents/Confidentiel">
+        <button class="btn btn-accent" onclick="openBrowser('path-input-2')">🔍 Parcourir</button>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Type</label>
+        <select><option>Exclure</option><option>Inclure</option></select>
+      </div>
+      <div class="form-group">
+        <label>Raison (optionnel)</label>
+        <input type="text" placeholder="ex: contenu sensible">
+      </div>
+    </div>
+  </div>
+
+  <div class="demo-section">
+    <div class="demo-section-title">3. Tester un chemin</div>
+    <div class="form-group">
+      <label>Path a tester</label>
+      <div class="input-with-browse">
+        <input type="text" id="path-input-3" placeholder="ex: Documents/Sous-dossier/fichier.docx">
+        <button class="btn btn-accent" onclick="openBrowser('path-input-3', {foldersOnly: false})">🔍 Parcourir</button>
+      </div>
+    </div>
+  </div>
+
+  <p style="font-family:var(--mono);font-size:11px;color:var(--text3);margin-top:30px;line-height:1.7">
+    Pour le test, j'ai mis des donnees mockees :<br>
+    - 5 dossiers a la racine<br>
+    - Le dossier <span class="kbd">Documents</span> contient 3 sous-dossiers + 2 fichiers<br>
+    - Le dossier <span class="kbd">Documents/Projets</span> contient 8 sous-dossiers (pour tester le scroll)<br>
+    - <span class="kbd">Archives</span> est vide<br><br>
+    Verifie : l'overlay est centre, on clique partout sans rien decaler de la page derriere.
+    On peut scroller dans la liste sans bouger l'entete ni le footer.
+  </p>
+</div>
+
+<!-- ============================================================ -->
+<!-- L'EXPLORATEUR : POSITION FIXED CENTRÉE                        -->
+<!-- ============================================================ -->
+<div class="browser-overlay" id="browser-overlay">
+  <div class="browser-box">
+
+    <!-- HEADER FIXE -->
+    <div class="browser-header">
+      <div class="browser-title">🔍 Explorateur de dossiers</div>
+      <button class="btn btn-ghost" style="padding:4px 10px;font-size:11px" onclick="closeBrowser()">✕ Fermer</button>
+    </div>
+
+    <!-- TOOLBAR FIXE (breadcrumb + bouton remonter) -->
+    <div class="browser-toolbar">
+      <button class="btn-up" id="btn-up" onclick="goUp()" title="Remonter d'un cran">↑</button>
+      <div class="breadcrumb" id="breadcrumb">/</div>
+    </div>
+
+    <!-- LISTE SCROLLABLE - C'est le SEUL element qui scroll -->
+    <div class="browser-items" id="browser-items">
+      <div class="loading-state">Chargement...</div>
+    </div>
+
+    <!-- FOOTER FIXE (selection + actions) -->
+    <div class="browser-footer">
+      <div class="selected-info" id="selected-info">
+        Dossier courant : <strong id="current-display">/</strong>
+      </div>
+      <div class="browser-actions">
+        <button class="btn btn-ghost" onclick="closeBrowser()">Annuler</button>
+        <button class="btn btn-primary" onclick="validateSelection()">✓ Valider ce dossier</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ============================================================
+// DONNEES MOCKEES (simulent l'API /admin/drive_config/browse)
+// ============================================================
+const MOCK_TREE = {
+  '': {
+    items: [
+      {name: 'Documents', type: 'folder', path: 'Documents', child_count: 5},
+      {name: 'Archives', type: 'folder', path: 'Archives', child_count: 0},
+      {name: 'Projets', type: 'folder', path: 'Projets', child_count: 12},
+      {name: 'Equipe', type: 'folder', path: 'Equipe', child_count: 3},
+      {name: 'Public', type: 'folder', path: 'Public', child_count: 7},
+      {name: 'lisez-moi.txt', type: 'file', path: 'lisez-moi.txt', size: 1024},
+    ]
+  },
+  'Documents': {
+    items: [
+      {name: 'Sous-dossier 1', type: 'folder', path: 'Documents/Sous-dossier 1', child_count: 3},
+      {name: 'Sous-dossier 2', type: 'folder', path: 'Documents/Sous-dossier 2', child_count: 0},
+      {name: 'Projets', type: 'folder', path: 'Documents/Projets', child_count: 8},
+      {name: 'rapport.docx', type: 'file', path: 'Documents/rapport.docx', size: 45000},
+      {name: 'donnees.xlsx', type: 'file', path: 'Documents/donnees.xlsx', size: 1234567},
+    ]
+  },
+  'Documents/Projets': {
+    items: [
+      {name: 'Projet A', type: 'folder', path: 'Documents/Projets/Projet A', child_count: 4},
+      {name: 'Projet B', type: 'folder', path: 'Documents/Projets/Projet B', child_count: 2},
+      {name: 'Projet C', type: 'folder', path: 'Documents/Projets/Projet C', child_count: 0},
+      {name: 'Projet D', type: 'folder', path: 'Documents/Projets/Projet D', child_count: 1},
+      {name: 'Projet E', type: 'folder', path: 'Documents/Projets/Projet E', child_count: 0},
+      {name: 'Projet F', type: 'folder', path: 'Documents/Projets/Projet F', child_count: 0},
+      {name: 'Projet G', type: 'folder', path: 'Documents/Projets/Projet G', child_count: 0},
+      {name: 'Projet H', type: 'folder', path: 'Documents/Projets/Projet H', child_count: 0},
+    ]
+  },
+  'Archives': { items: [] },
+  'Projets': {
+    items: [
+      {name: 'Anciens', type: 'folder', path: 'Projets/Anciens', child_count: 0},
+      {name: 'En cours', type: 'folder', path: 'Projets/En cours', child_count: 5},
+    ]
+  },
+  'Equipe': {
+    items: [
+      {name: 'RH', type: 'folder', path: 'Equipe/RH', child_count: 0},
+      {name: 'Public', type: 'folder', path: 'Equipe/Public', child_count: 0},
+    ]
+  },
+  'Public': { items: [] },
+};
+
+// ============================================================
+// ETAT
+// ============================================================
+let _state = {
+  currentPath: '',
+  targetInput: null,
+  foldersOnly: true,
+};
+
+// ============================================================
+// API PUBLIQUE
+// ============================================================
+function openBrowser(targetInputId, opts) {
+  opts = opts || {};
+  _state.targetInput = targetInputId;
+  _state.foldersOnly = opts.foldersOnly !== false;
+
+  // Si l input contient deja un path, on demarre dessus (mais seulement
+  // si ce path existe dans le mock)
+  const input = document.getElementById(targetInputId);
+  const existingValue = input ? input.value.trim() : '';
+  _state.currentPath = (existingValue && MOCK_TREE[existingValue]) ? existingValue : '';
+
+  document.getElementById('browser-overlay').classList.add('open');
+  // Empeche le scroll du body derriere
+  document.body.style.overflow = 'hidden';
+  reloadBrowser();
+}
+
+function closeBrowser() {
+  document.getElementById('browser-overlay').classList.remove('open');
+  document.body.style.overflow = '';
+  _state.targetInput = null;
+}
+
+function validateSelection() {
+  const target = _state.targetInput;
+  if (!target) return;
+  const input = document.getElementById(target);
+  if (!input) return;
+  input.value = _state.currentPath || '';
+  closeBrowser();
+  // Visual feedback : flash le champ pour que le user voit que c est rempli
+  input.style.transition = 'background 0.4s';
+  input.style.background = 'rgba(0,188,212,0.2)';
+  setTimeout(() => { input.style.background = ''; }, 600);
+}
+
+function goUp() {
+  if (!_state.currentPath) return;
+  if (_state.currentPath.includes('/')) {
+    _state.currentPath = _state.currentPath.split('/').slice(0, -1).join('/');
+  } else {
+    _state.currentPath = '';
+  }
+  reloadBrowser();
+}
+
+function navigateTo(path) {
+  _state.currentPath = path;
+  reloadBrowser();
+}
+
+// ============================================================
+// RENDU
+// ============================================================
+function reloadBrowser() {
+  // Update breadcrumb
+  const bc = document.getElementById('breadcrumb');
+  if (!_state.currentPath) {
+    bc.innerHTML = '<span class="current">/ (racine du site)</span>';
+  } else {
+    let html = '<a onclick="navigateTo(\'\')">/ (racine)</a>';
+    const parts = _state.currentPath.split('/');
+    let acc = '';
+    for (let i = 0; i < parts.length; i++) {
+      acc = acc ? acc + '/' + parts[i] : parts[i];
+      const isLast = (i === parts.length - 1);
+      const escapedAcc = acc.replace(/'/g, "\\'");
+      html += '<span class="sep">›</span>';
+      if (isLast) {
+        html += '<span class="current">' + escapeHtml(parts[i]) + '</span>';
+      } else {
+        html += '<a onclick="navigateTo(\'' + escapedAcc + '\')">' + escapeHtml(parts[i]) + '</a>';
+      }
+    }
+    bc.innerHTML = html;
+  }
+
+  // Update bouton remonter
+  document.getElementById('btn-up').disabled = !_state.currentPath;
+
+  // Update selected info
+  document.getElementById('current-display').textContent = _state.currentPath || '/ (racine du site)';
+
+  // Update items
+  const data = MOCK_TREE[_state.currentPath];
+  const container = document.getElementById('browser-items');
+
+  if (!data) {
+    container.innerHTML = '<div class="error-state">Erreur : dossier introuvable</div>';
+    return;
+  }
+  if (!data.items || data.items.length === 0) {
+    container.innerHTML = '<div class="empty-state">Dossier vide</div>';
+    return;
+  }
+
+  // Tri : dossiers d abord, alphabetique
+  const items = data.items.slice().sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'folder' ? -1 : 1;
+    return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+  });
+
+  let html = '';
+  for (const it of items) {
+    if (it.type === 'folder') {
+      const childInfo = (it.child_count !== null && it.child_count !== undefined)
+        ? it.child_count + ' elem.' : '';
+      html += `
+        <div class="item item-folder" onclick='navigateTo(${JSON.stringify(it.path)})'>
+          <span class="item-icon">📁</span>
+          <span class="item-name">${escapeHtml(it.name)}</span>
+          <span class="item-meta">${childInfo}</span>
+          <span class="item-chevron">›</span>
+        </div>
+      `;
+    } else {
+      // Fichier : grise si foldersOnly
+      const opacity = _state.foldersOnly ? 'item-file' : '';
+      html += `
+        <div class="item ${opacity}">
+          <span class="item-icon">📄</span>
+          <span class="item-name">${escapeHtml(it.name)}</span>
+          <span class="item-meta">${formatSize(it.size || 0)}</span>
+        </div>
+      `;
+    }
+  }
+  container.innerHTML = html;
+
+  // Reset le scroll au top quand on change de dossier
+  container.scrollTop = 0;
+}
+
+function formatSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+  return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+}
+
+function escapeHtml(s) {
+  if (s === null || s === undefined) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+// Fermeture par Echap
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    if (document.getElementById('browser-overlay').classList.contains('open')) {
+      closeBrowser();
+    }
+  }
+});
+
+// Fermeture par clic sur le fond (mais pas sur la boite)
+document.getElementById('browser-overlay').addEventListener('click', (e) => {
+  if (e.target.id === 'browser-overlay') closeBrowser();
+});
+</script>
+</body>
+</html>

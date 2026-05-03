@@ -1,5 +1,38 @@
 # À faire — Roadmap Raya
 
+> **📌 État système le plus à jour** : voir `docs/etat_04mai_2026.pdf` pour la photo réelle des connexions, du graphe et des problèmes ouverts.
+
+---
+
+## ✅ Session 4 mai 2026 — bilan rapide
+
+**Commits poussés sur main aujourd'hui** :
+- `27c76ce` — feat(tenant_profile): helper get_tenant_profile + profils DB remplis
+- `f79ef36` — feat(prompt-v2): adapter prompt agent au tenant
+- `b9e53de` — feat(mail-analysis): ai_client.py + ai_prompts.py adaptés au tenant
+- `d004cc9` — fix(prompt-guardrails): exemples génériques
+- `b212719` — fix(templates): valeurs initiales propres
+- `398a368` — feat(raya-tools): FILTRAGE INTELLIGENT par connexions actives
+- `ead7b36` — fix(drive-placeholders): génériques au lieu de Couffrant
+- `4cc764f` — fix(neutralisation): retire Romorantin de get_weather, etc.
+- `5104fb2` — fix(raya-tools): retire mode permissif onboarding
+- `7a3861c` — fix(seeds): harmoniser categories seeds vers forme canonique
+- `f132aff` — feat(prompt-v2): simplification 7 règles → 4 règles
+- `5682586` — fix(categories): tour complet harmonisation casse
+- `a1a7721` — feat(prompt-v2): règles 5+6 anti-injection + suppression prompt_guardrails.py
+- `e1ce61b` — feat(opus-tracking): tracking origine appels + simplification prompt deepen
+
+**Documents** :
+- 36 docs obsolètes archivés dans `archives/cleanup_04mai_2026/`
+- Nouveau doc d'état créé : `etat_04mai_2026.pdf`
+- `plan_proactivite.pdf` créé avec vision 4 étages
+
+**Reste à faire en priorité** :
+1. P1 SharePoint figé depuis 14j (incohérence connection_health vs drive_semantic_content)
+2. P2 Brique manquante mail_memory → semantic_graph_nodes (1006 mails)
+3. P3 Bug ingestion Gmail 31 coquilles vides
+4. Charlotte fait ses connexions Gmail/Drive
+
 ---
 
 ## ✅ État chantier 2FA — 30/04/2026

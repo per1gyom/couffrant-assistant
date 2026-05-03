@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Audit complet - Système de graphes Raya - 27/04/2026</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 1400px; margin: 20px auto; padding: 20px; line-height: 1.6; color: #1f2937; }
+  h1 { color: #0f172a; border-bottom: 3px solid #2563eb; padding-bottom: 10px; }
+  h2 { color: #1e40af; margin-top: 40px; }
+  h3 { color: #1e3a8a; }
+  .mermaid { background: #f8fafc; padding: 20px; border-radius: 12px; margin: 20px 0; border: 1px solid #e2e8f0; }
+  table { border-collapse: collapse; width: 100%; margin: 20px 0; }
+  th, td { border: 1px solid #cbd5e1; padding: 10px; text-align: left; vertical-align: top; }
+  th { background: #1e40af; color: white; }
+  tr:nth-child(even) { background: #f1f5f9; }
+  code { background: #e2e8f0; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+  .alert-bad { background: #fef2f2; border-left: 4px solid #dc2626; padding: 12px 18px; margin: 18px 0; border-radius: 6px; }
+  .alert-warn { background: #fffbeb; border-left: 4px solid #d97706; padding: 12px 18px; margin: 18px 0; border-radius: 6px; }
+  .alert-good { background: #f0fdf4; border-left: 4px solid #16a34a; padding: 12px 18px; margin: 18px 0; border-radius: 6px; }
+  .alert-info { background: #eff6ff; border-left: 4px solid #2563eb; padding: 12px 18px; margin: 18px 0; border-radius: 6px; }
+  .legend { display: flex; gap: 20px; flex-wrap: wrap; margin: 20px 0; font-size: 14px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; }
+  .legend-color { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #94a3b8; }
+</style>
+</head>
+<body>
+
+<h1>🧠 Audit complet du système d'apprentissage Raya</h1>
+<p><b>Date :</b> 27 avril 2026 — 14h30<br>
+<b>Auteur :</b> Claude (audit lecture seule, 0 modification)<br>
+<b>Périmètre :</b> tous les flux d'apprentissage et de mise en graphe, toutes sources connectées.</p>
+
+<div class="alert-info">
+<b>🎯 Question de Guillaume :</b> "Schéma d'apprentissage et de mise en graphe : règles, chat, corrections de chat/mail/règles, modifications Drive, modifications Odoo, et tout ce que j'aurais pu oublier."<br>
+<b>→ Méthode :</b> j'ai parcouru le code de A à Z (tous les <code>INSERT INTO</code>, tous les jobs cron, tous les webhooks, tous les imports de modules d'apprentissage). Si quelque chose n'apparaît pas dans ce schéma, c'est qu'il n'existe pas dans le code actuel.
+</div>
+
+<h2>🗺️ 1. Schéma global : Sources → Stockage → Cœur de Raya</h2>
+
+<div class="legend">
+  <div class="legend-item"><div class="legend-color" style="background:#bfdbfe"></div>Source externe</div>
+  <div class="legend-item"><div class="legend-color" style="background:#fde68a"></div>Job/Trigger d'écriture</div>
+  <div class="legend-item"><div class="legend-color" style="background:#bbf7d0"></div>Stockage (table DB)</div>
+  <div class="legend-item"><div class="legend-color" style="background:#fbcfe8"></div>Cœur de réflexion</div>
+  <div class="legend-item"><div class="legend-color" style="background:#fecaca"></div>⚠️ Problème identifié</div>
+</div>
+
+<div class="mermaid">
+flowchart LR
+    %% ===== SOURCES EXTERNES =====
+    subgraph SRC["🌐 SOURCES EXTERNES"]
+        ODOO[("Odoo<br>partners, devis,<br>factures, leads,<br>events, projects,<br>tasks, planning")]
+        DRIVE[("OneDrive/SharePoint<br>fichiers + dossiers")]
+        GMAIL[("Gmail / Outlook<br>mails entrants/<br>sortants")]
+        CAL[("Calendrier<br>events + participants")]
+        USER[("👤 Utilisateur<br>chat, corrections,<br>règles écrites")]
+    end
+
+    %% ===== JOBS DE CAPTURE =====
+    subgraph CAPTURE["⚙️ JOBS DE CAPTURE / WEBHOOKS"]
+        OPOLL["odoo_polling<br>2 min"]
+        OWH["webhook_odoo<br>(temps réel)"]
+        DSCAN["drive_scanner<br>+ external_observer<br>30 min"]
+        MPOLL["gmail_polling<br>3 min"]
+        WHQ["webhook_queue<br>(worker)"]
+    end
+
+    %% ===== JOBS D'APPRENTISSAGE =====
+    subgraph LEARN["🧠 JOBS D'APPRENTISSAGE"]
+        OVECT["odoo_vectorize<br>(embeddings Odoo)"]
+        GIDX["graph_indexer<br>3 min<br>⚠️ CASSÉ"]
+        PATTERN["pattern_analysis<br>quotidien 04h"]
+        SYNTH["memory_synthesis<br>(résumés sessions)"]
+        STYLE["memory_style<br>(corrections mail)"]
+        RULES["memory_rules<br>(extraction règles)"]
+        ROPT["rules_optimizer<br>dimanche 03h"]
+        DECAY["confidence_decay<br>lundi 02h"]
+    end
+
+    %% ===== STOCKAGES =====
+    subgraph STOCK_A["🅰️ SYSTÈME A : Graphe structurel"]
+        SGN[("semantic_graph_nodes<br>5 644 nœuds typés<br>Person, Deal, File, Event...")]
+        SGE[("semantic_graph_edges<br>6 007 relations<br>partner_of, contains, ...")]
+        OSC[("odoo_semantic_content<br>1 711 chunks vectoriels")]
+        DSC[("drive_semantic_content<br>5 086 chunks vectoriels")]
+    end
+
+    subgraph STOCK_B["🅱️ SYSTÈME B : Vue à plat 'tout sur X'"]
+        ELINKS[("entity_links<br>1 367 liens<br>contact ↔ ressources")]
+    end
+
+    subgraph STOCK_MEM["💾 MÉMOIRE CONVERSATIONNELLE"]
+        AMEM[("aria_memory<br>209 conversations<br>+ embedding")]
+        ARULES[("aria_rules<br>règles utilisateur")]
+        AINS[("aria_insights<br>connaissances extraites")]
+        APAT[("aria_patterns<br>patterns détectés")]
+        ADIG[("aria_session_digests<br>résumés sessions")]
+        AHOT[("aria_hot_summary<br>contexte chaud")]
+        RLM[("reply_learning_memory<br>corrections mail")]
+        ASE[("aria_style_examples<br>exemples de style")]
+        MMEM[("mail_memory<br>mails archivés")]
+    end
+
+    %% ===== CŒUR =====
+    subgraph CORE["💖 CŒUR DE RÉFLEXION"]
+        ACTX["aria_context.py<br>(assemble le prompt)"]
+        RAGENT["raya_agent_core.py<br>(boucle agent)"]
+        TOOLS["raya_tool_executors.py<br>(outils search)"]
+        RETR["retrieval.py<br>(hybrid search)"]
+    end
+
+    %% ===== FLUX SOURCES → JOBS =====
+    ODOO --> OPOLL & OWH
+    DRIVE --> DSCAN
+    GMAIL --> MPOLL
+    CAL --> DSCAN
+    USER --> RAGENT
+    OPOLL --> WHQ
+    OWH --> WHQ
+
+    %% ===== FLUX JOBS DE CAPTURE → APPRENTISSAGE =====
+    WHQ --> OVECT
+    DSCAN -.peuple.-> SGN & SGE & DSC & ELINKS
+    OVECT -.peuple.-> SGN & SGE & OSC & ELINKS
+    MPOLL --> MMEM
+    MMEM -.peuple.-> ELINKS
+
+    %% ===== APPRENTISSAGE CONVERSATIONNEL =====
+    RAGENT -- "INSERT" --> AMEM
+    RAGENT -- "extraction" --> RULES
+    RULES -- "INSERT/UPDATE" --> ARULES
+    RAGENT -- "feedback" --> SYNTH
+    SYNTH -- "save_insight" --> AINS
+    SYNTH --> ADIG & AHOT
+    USER -- "correction mail" --> STYLE
+    STYLE --> RLM & ASE
+    PATTERN -.lit.-> AMEM
+    PATTERN --> APAT
+    ROPT -.lit.-> ARULES
+    DECAY -.maj.-> ARULES
+    GIDX -.lit.-> AMEM
+    GIDX -.essaie écrire.-> SGN
+
+    %% ===== CŒUR LIT QUOI ? =====
+    ACTX <-- "lit" --> ELINKS
+    ACTX <-- "lit" --> AHOT
+    ACTX <-- "lit" --> ARULES
+    ACTX <-- "lit" --> ADIG
+    RETR <-- "lit" --> SGN
+    RETR <-- "lit" --> SGE
+    RETR <-- "vector search" --> OSC
+    RETR <-- "vector search" --> DSC
+    RETR <-- "vector search" --> AMEM
+    TOOLS --> RETR
+    RAGENT --> ACTX
+    RAGENT --> TOOLS
+
+    classDef src fill:#bfdbfe,stroke:#1e40af,stroke-width:2px
+    classDef job fill:#fde68a,stroke:#b45309,stroke-width:2px
+    classDef store fill:#bbf7d0,stroke:#166534,stroke-width:2px
+    classDef core fill:#fbcfe8,stroke:#9d174d,stroke-width:2px
+    classDef bug fill:#fecaca,stroke:#991b1b,stroke-width:3px
+
+    class ODOO,DRIVE,GMAIL,CAL,USER src
+    class OPOLL,OWH,DSCAN,MPOLL,WHQ,OVECT,GIDX,PATTERN,SYNTH,STYLE,RULES,ROPT,DECAY job
+    class SGN,SGE,OSC,DSC,ELINKS,AMEM,ARULES,AINS,APAT,ADIG,AHOT,RLM,ASE,MMEM store
+    class ACTX,RAGENT,TOOLS,RETR core
+    class GIDX bug
+</div>
+
+<h2>📋 2. Inventaire complet des flux d'apprentissage</h2>
+
+<table>
+<thead><tr><th>Source / Trigger</th><th>Quand</th><th>Quoi</th><th>Écrit dans</th><th>État</th></tr></thead>
+<tbody>
+<tr><td><b>Odoo polling</b></td><td>Toutes les 2 min</td><td>Détecte modifs sur partners, factures, devis, leads, events…</td><td><code>webhook_queue</code> → traitement</td><td>✅ OK (vu dans logs : sale.order, crm.lead, etc.)</td></tr>
+<tr><td><b>Webhook Odoo</b></td><td>Temps réel</td><td>Notif push depuis Odoo (modif/création/suppression)</td><td><code>webhook_queue</code> → <code>semantic_graph_*</code></td><td>✅ OK</td></tr>
+<tr><td><b>odoo_vectorize</b></td><td>Déclenché par webhook</td><td>Crée embeddings + nœuds graphe pour records Odoo</td><td><code>odoo_semantic_content</code> + <code>semantic_graph_*</code> + <code>entity_links</code></td><td>✅ OK</td></tr>
+<tr><td><b>drive_scanner</b></td><td>30 min (external_observer)</td><td>Scan complet Drive : fichiers + dossiers</td><td><code>drive_semantic_content</code> + <code>semantic_graph_*</code></td><td>✅ OK (5086 chunks)</td></tr>
+<tr><td><b>gmail_polling</b></td><td>3 min</td><td>Récupère nouveaux mails</td><td><code>mail_memory</code></td><td>⚠️ DÉSACTIVÉ par défaut (env <code>SCHEDULER_GMAIL_ENABLED</code>)</td></tr>
+<tr><td><b>populate_from_mail_memory</b></td><td>Appel manuel admin</td><td>Liens mail ↔ contact (entity_links)</td><td><code>entity_links</code></td><td>✅ OK</td></tr>
+<tr><td><b>populate_from_calendar</b></td><td>Appel manuel admin</td><td>Liens event ↔ participants</td><td><code>entity_links</code></td><td>✅ OK</td></tr>
+<tr><td><b>populate_from_contacts</b></td><td>Appel manuel admin</td><td>Profils contact à partir de mail_memory</td><td><code>entity_links</code></td><td>✅ OK</td></tr>
+<tr><td><b>Chat utilisateur</b></td><td>Chaque message</td><td>Sauvegarde de l'échange (user + Raya)</td><td><code>aria_memory</code></td><td>✅ OK</td></tr>
+<tr><td><b>memory_rules.save_rule</b></td><td>Extraction LLM dans la boucle agent</td><td>Règles du user, déclarations factuelles</td><td><code>aria_rules</code> + history</td><td>✅ OK</td></tr>
+<tr><td><b>Correction mail (raya.py:448)</b></td><td>User édite un brouillon mail</td><td>Apprentissage style écriture</td><td><code>reply_learning_memory</code> + <code>aria_style_examples</code></td><td>✅ OK</td></tr>
+<tr><td><b>memory_synthesis.synthesize_session</b></td><td>Trigger après N échanges</td><td>Synthèse session + insights</td><td><code>aria_session_digests</code> + <code>aria_insights</code> + <code>aria_hot_summary</code></td><td>✅ OK</td></tr>
+<tr><td><b>pattern_analysis</b></td><td>Quotidien 04h</td><td>Détection de patterns récurrents</td><td><code>aria_patterns</code></td><td>✅ OK</td></tr>
+<tr><td><b>rules_optimizer</b></td><td>Dimanche 03h</td><td>Optimisation hebdo des règles (dédup, simplification)</td><td><code>aria_rules</code></td><td>✅ OK</td></tr>
+<tr><td><b>confidence_decay</b></td><td>Lundi 02h</td><td>Décroissance de confiance des règles non utilisées</td><td><code>aria_rules</code></td><td>✅ OK</td></tr>
+<tr><td><b>Correction de règles (feedback)</b></td><td>User dit "non, c'est faux"</td><td>Modification règle + audit</td><td><code>aria_rules</code> + <code>aria_rule_audit</code></td><td>✅ OK</td></tr>
+<tr style="background:#fef2f2"><td><b>graph_indexer</b></td><td>3 min</td><td>Indexation conversations + liens vers entités</td><td>Cible <code>semantic_graph_*</code></td><td>❌ <b>CASSÉ : 0 lien créé</b></td></tr>
+<tr><td><b>Suppression Drive</b></td><td>Webhook Drive (external_observer)</td><td>Soft-delete fichier</td><td><code>semantic_graph_nodes.deleted_at</code></td><td>✅ OK (visible dans <code>webhook_queue.py:207</code>)</td></tr>
+<tr><td><b>Suppression Odoo</b></td><td>Webhook unlink</td><td>Soft-delete record</td><td><code>semantic_graph_nodes.deleted_at</code></td><td>✅ OK (visible dans <code>webhook_queue.py:268</code>)</td></tr>
+<tr><td><b>RGPD purge user</b></td><td>Demande user via /settings</td><td>Hard-delete + anonymisation</td><td>Cascade sur 16 tables</td><td>✅ OK (refonte ce week-end)</td></tr>
+</tbody>
+</table>
+
+<h2>🔍 3. Le problème central : 2 systèmes de graphe non communicants</h2>
+
+<div class="alert-bad">
+<b>Photo brutale :</b> Raya a deux systèmes de graphe parallèles qui ne se parlent pas. Le <b>cœur</b> consulte le Système B (entity_links). Les <b>outils search</b> consultent le Système A (semantic_graph). <b>graph_indexer essaie d'écrire dans A mais avec un format de clé incompatible</b> → 0 lien créé depuis 5 jours.
+</div>
+
+<table>
+<thead><tr><th>Critère</th><th>Système A — semantic_graph</th><th>Système B — entity_links</th></tr></thead>
+<tbody>
+<tr><td><b>Volumétrie (couffrant_solar)</b></td><td>5 644 nœuds + 6 007 edges</td><td>1 367 liens</td></tr>
+<tr><td><b>Format de clé</b></td><td><code>odoo-partner-3795</code>, <code>drive-file-01OQYJ...</code></td><td><code>renoult-sa</code>, <code>coullet-francine</code></td></tr>
+<tr><td><b>Modèle de données</b></td><td>Graphe (nœuds typés + relations typées)</td><td>Vue à plat (entité ↔ ressources)</td></tr>
+<tr><td><b>Peuplé par</b></td><td>odoo_vectorize, drive_scanner, scanner/processor</td><td>populate_from_* (Odoo, Drive, Mail, Calendar)</td></tr>
+<tr><td><b>Consulté par le CŒUR ?</b></td><td>❌ Non (uniquement par les outils search)</td><td>✅ Oui (aria_context.py)</td></tr>
+<tr><td><b>Consulté par les OUTILS Raya ?</b></td><td>✅ Oui (retrieval.py traverse multi-hop)</td><td>❌ Non</td></tr>
+<tr><td><b>Force</b></td><td>Recherche structurée multi-hop ("tous les fichiers liés au client X via ses devis")</td><td>Vue rapide "tout ce que je sais sur X"</td></tr>
+<tr><td><b>Faiblesse</b></td><td>Demande de connaître le format de clé</td><td>Pas de relations typées entre entités</td></tr>
+</tbody>
+</table>
+
+<h2>⚠️ 4. Anomalies découvertes pendant l'audit</h2>
+
+<div class="alert-bad">
+<b>Anomalie #1 : graph_indexer cassé fonctionnellement</b><br>
+196 conversations ont été insérées comme nœuds dans <code>semantic_graph_nodes</code> mais avec <b>0 edge</b>. La fonction <code>_extract_entity_keys</code> retourne des clés au format Système B (<code>francine-coullet</code>), alors qu'elle cherche dans le Système A qui utilise des clés au format <code>odoo-partner-3795</code>. Match impossible.<br>
+<b>Conséquence :</b> Quand l'utilisateur demande "qu'est-ce qu'on s'est dit sur Francine ?", aucune conversation passée n'est retrouvée.
+</div>
+
+<div class="alert-bad">
+<b>Anomalie #2 : Tenant orphelin "couffrant" (sans _solar)</b><br>
+La DB contient un tenant_id <code>couffrant</code> avec :<br>
+- 114 712 nœuds dans semantic_graph_nodes (vs 5 644 pour couffrant_solar)<br>
+- 562 971 edges dans semantic_graph_edges (vs 6 007)<br>
+- 60 426 chunks dans odoo_semantic_content (vs 1 711)<br>
+C'est probablement un ancien tenant_id avant le renommage en <code>couffrant_solar</code>. Données <b>fantômes</b> jamais nettoyées. Pollution importante.
+</div>
+
+<div class="alert-warn">
+<b>Anomalie #3 : Doublons silencieux entre A et B</b><br>
+Exemple <b>Francine Coullet</b> existe à 4 endroits différents :<br>
+- 2 nœuds Person dans Système A (<code>odoo-partner-3795</code>, <code>odoo-partner-3643</code>)<br>
+- 11 ressources sous <code>coullet-francine</code> dans Système B<br>
+- 1 ressource sous <code>francinecoullet41@gmail.com</code> dans Système B<br>
+- 6 nœuds Conversation dans Système A (<code>conv_202</code>, <code>conv_337</code>, <code>conv_338</code>, <code>conv_340</code>, <code>conv_341</code>, <code>conv_342</code>)<br>
+Aucune liaison entre les 4 silos.
+</div>
+
+<div class="alert-warn">
+<b>Anomalie #4 : gmail_polling DÉSACTIVÉ par défaut</b><br>
+Le polling Gmail nécessite la variable d'env <code>SCHEDULER_GMAIL_ENABLED=true</code>. Probablement intentionnel (tu utilises Outlook), mais à vérifier que ce n'est pas un oubli si tu voulais ingérer les mails Gmail.
+</div>
+
+<div class="alert-warn">
+<b>Anomalie #5 : populate_from_* sont des appels MANUELS</b><br>
+<code>populate_from_mail_memory</code>, <code>populate_from_calendar</code>, <code>populate_from_contacts</code>, <code>populate_from_drive</code> sont tous appelables uniquement via le panel admin (route <code>/admin/system/populate</code>). Aucun job cron ne les déclenche automatiquement.<br>
+<b>Conséquence :</b> Si tu ne cliques pas, le Système B (entity_links) ne se met pas à jour automatiquement après changements. Sauf <code>populate_from_odoo</code> qui peut être déclenché par le webhook.
+</div>
+
+<div class="alert-info">
+<b>Observation #6 : Les peupleurs Drive/Calendar/Mail nourrissent les DEUX systèmes</b><br>
+<code>drive_scanner</code> écrit dans Système A (graph) ET dans entity_links via <code>populate_from_drive</code>.<br>
+Mais cette double-écriture n'est pas synchrone : le drive_scanner peuple A en temps réel, et populate_from_drive peuple B uniquement sur demande manuelle.<br>
+<b>Conséquence :</b> les deux systèmes peuvent être désynchronisés à tout moment.
+</div>
+
+<h2>💡 5. Architectures cibles possibles</h2>
+
+<h3>Option 1 — Fix minimal (court terme)</h3>
+<ul>
+<li>Réparer <code>graph_indexer</code> en faisant matcher par <code>node_label</code> dans Système A.</li>
+<li><b>Effort :</b> 30 min — <b>Bénéfice cœur :</b> ~zéro (le cœur ne lit pas A).</li>
+<li>Bénéfice : les outils search Raya retrouveraient les conversations passées via traverse.</li>
+</ul>
+
+<h3>Option 2 — Re-router graph_indexer vers Système B (recommandé court terme)</h3>
+<ul>
+<li><code>graph_indexer</code> insère désormais dans <code>entity_links</code> :
+    <code>entity_key = "coullet-francine"</code>, <code>resource_type = "conversation"</code>, <code>resource_id = conv_42</code>.</li>
+<li>Le cœur (qui lit <code>entity_links</code>) voit immédiatement les conversations passées dans le contexte d'un contact.</li>
+<li><b>Effort :</b> 45 min — <b>Bénéfice cœur :</b> élevé.</li>
+<li>Inconvénient : on accentue la dépendance au Système B avant unification.</li>
+</ul>
+
+<h3>Option 3 — Unification A+B (moyen/long terme, ~1 semaine)</h3>
+<ul>
+<li>Créer une couche d'abstraction unique <code>app.knowledge_graph</code> qui accepte les deux types d'entrées (clé technique et clé humaine).</li>
+<li>Migration progressive : ajouter une colonne <code>entity_key_human</code> dans <code>semantic_graph_nodes</code> pour pouvoir matcher par nom.</li>
+<li>Réécriture des consommateurs pour passer par cette couche unique.</li>
+<li>Suppression du système <code>entity_links</code> (devient une vue SQL).</li>
+<li><b>Effort :</b> 5-7 jours — <b>Bénéfice :</b> architecture saine, durable.</li>
+<li>À faire après le renommage Saiyan et la stabilisation B.</li>
+</ul>
+
+<h3>Option 4 — Bonus pré-requis (à faire de toute façon)</h3>
+<ul>
+<li><b>Nettoyer le tenant orphelin <code>couffrant</code></b> : 738 109 lignes fantômes à purger (114k nœuds + 562k edges + 60k chunks). Pollution énorme.</li>
+<li>Décider du sort du tenant : suppression totale OU migration des données vers <code>couffrant_solar</code>.</li>
+<li><b>Effort :</b> 30 min audit + 15 min purge — <b>Bénéfice :</b> performance DB (indexes plus petits) + clarté.</li>
+<li>À <b>faire avant</b> de toucher au reste pour ne pas raisonner sur des données pourries.</li>
+</ul>
+
+<h2>📌 6. Recommandation finale</h2>
+
+<div class="alert-good">
+<b>Plan d'action en 3 étapes ordonnées :</b><br><br>
+<b>Étape 1 (ce week-end, 1h) :</b> Nettoyer le tenant orphelin <code>couffrant</code>. Audit + décision (purge ou migrer) + exécution.<br><br>
+<b>Étape 2 (ce week-end, 45 min) :</b> Re-router <code>graph_indexer</code> vers Système B (Option 2). Bénéfice immédiat sur le cœur de Raya. Reset du flag <code>indexed_in_graph</code> pour ré-indexer les 196 conversations vers le bon endroit.<br><br>
+<b>Étape 3 (semaine prochaine ou plus tard) :</b> Plan d'unification A+B (Option 3). Refonte propre, durable.<br><br>
+<b>NE PAS toucher</b> aux populate_from_*, au Système A, au retrieval.py, ni aux jobs cron existants tant que l'étape 3 n'est pas planifiée. Tout fonctionne en l'état (sauf graph_indexer).
+</div>
+
+<h2>📎 7. Vérification finale post-correction (à faire après étape 2)</h2>
+<ol>
+<li>Lancer une question dans Raya : "qu'est-ce qu'on s'est dit récemment sur Francine ?"<br>→ doit retrouver les conversations 202, 337, 338, 340, 341, 342.</li>
+<li>Vérifier que <code>entity_links</code> contient désormais des lignes <code>resource_type='conversation'</code> pour <code>coullet-francine</code>.</li>
+<li>Vérifier qu'aucune table ne s'est mise à grossir anormalement.</li>
+<li>Vérifier que les tests d'isolation tenant ne sont pas régressés.</li>
+<li>Compter les conversations <code>indexed_in_graph=true</code> : doit augmenter normalement par cycle.</li>
+</ol>
+
+<script>mermaid.initialize({startOnLoad:true, securityLevel:'loose', theme:'default', flowchart:{curve:'basis'}});</script>
+</body>
+</html>
