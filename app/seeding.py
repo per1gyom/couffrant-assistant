@@ -42,14 +42,14 @@ PROFILE_PV_FRENCH = {
         "raccordement", "consuel", "chantier", "commercial", "financier",
         "fournisseur", "reunion", "securite", "interne", "notification", "autre",
     ],
-    "regroupement": [
+    "Regroupement": [
         "categorie raccordement = urgent",
         "categorie consuel = urgent",
         "categorie financier contenant 'relance', 'retard' = urgent",
         "categorie financier = a_traiter",
         "categorie notification = faible",
     ],
-    "tri_mails": [
+    "Tri mails": [
         "Mails contenant 'enedis', 'consuel', 'raccordement' -> categorie raccordement",
         "Mails contenant 'devis', 'offre', 'contrat' -> categorie commercial",
         "Mails contenant 'reunion', 'meeting' -> categorie reunion",
@@ -57,7 +57,7 @@ PROFILE_PV_FRENCH = {
         "Mails contenant 'facture', 'paiement', 'echeance' -> categorie financier",
         "Mails contenant 'fournisseur', 'livraison', 'commande' -> categorie fournisseur",
     ],
-    "memoire": [
+    "Mémoire": [
         "synth_threshold:15",
         "keep_recent:5",
         "purge_days:90",
@@ -69,26 +69,26 @@ PROFILE_EVENT_PLANNER = {
         "client", "prestataire", "lieu", "logistique", "commercial", "interne",
         "notification", "autre",
     ],
-    "regroupement": [
+    "Regroupement": [
         "categorie commercial contenant 'urgent', 'relance', 'retard' = urgent",
         "categorie client contenant 'urgent', 'asap', 'demain' = urgent",
         "categorie lieu = a_traiter",
         "categorie prestataire = a_traiter",
         "categorie notification = faible",
     ],
-    "tri_mails": [
+    "Tri mails": [
         "Mails contenant 'devis', 'contrat', 'facture', 'acompte' -> categorie commercial",
         "Mails contenant 'traiteur', 'fleuriste', 'DJ', 'photographe', 'son', 'lumiere' -> categorie prestataire",
         "Mails contenant 'salle', 'chateau', 'domaine', 'lieu', 'espace' -> categorie lieu",
         "Mails contenant 'transport', 'livraison', 'montage', 'installation' -> categorie logistique",
         "Mails contenant 'mariage', 'reception', 'evenement', 'ceremonie' -> categorie client",
     ],
-    "comportement": [
+    "Comportement": [
         "Quand je parle d'un evenement, il y a un client principal et plusieurs prestataires impliques.",
         "La coordination de prestataires est au coeur du metier : dates, disponibilites et confirmations sont cruciales.",
         "Les delais sont souvent serres : traite les relances sans reponse comme urgentes.",
     ],
-    "memoire": [
+    "Mémoire": [
         "synth_threshold:15",
         "keep_recent:5",
         "purge_days:90",
@@ -99,7 +99,7 @@ PROFILE_GENERIC = {
     "categories_mail": [
         "commercial", "financier", "interne", "notification", "autre",
     ],
-    "memoire": [
+    "Mémoire": [
         "synth_threshold:15",
         "keep_recent:5",
         "purge_days:90",
@@ -111,17 +111,17 @@ PROFILE_ARTISAN = {
         "chantier", "client", "fournisseur", "devis", "financier",
         "administratif", "notification", "autre",
     ],
-    "tri_mails": [
+    "Tri mails": [
         "Mails contenant 'chantier', 'travaux', 'intervention', 'planning' -> categorie chantier",
         "Mails contenant 'devis', 'estimation', 'prix' -> categorie devis",
         "Mails contenant 'facture', 'paiement', 'relance' -> categorie financier",
         "Mails contenant 'commande', 'livraison', 'materiel' -> categorie fournisseur",
     ],
-    "comportement": [
+    "Comportement": [
         "Le planning chantier est la priorite : interventions, rendez-vous clients, livraisons.",
         "Les devis en attente de reponse depuis plus de 7 jours meritent une relance.",
     ],
-    "memoire": ["synth_threshold:15", "keep_recent:5", "purge_days:90"],
+    "Mémoire": ["synth_threshold:15", "keep_recent:5", "purge_days:90"],
 }
 
 PROFILE_IMMOBILIER = {
@@ -129,18 +129,18 @@ PROFILE_IMMOBILIER = {
         "mandat", "visite", "acquereur", "notaire", "financier",
         "marketing", "notification", "autre",
     ],
-    "tri_mails": [
+    "Tri mails": [
         "Mails contenant 'mandat', 'estimation', 'compromis' -> categorie mandat",
         "Mails contenant 'visite', 'rendez-vous', 'disponibilite' -> categorie visite",
         "Mails contenant 'notaire', 'acte', 'signature' -> categorie notaire",
         "Mails contenant 'pret', 'financement', 'banque' -> categorie financier",
         "Mails contenant 'annonce', 'photo', 'diffusion' -> categorie marketing",
     ],
-    "comportement": [
+    "Comportement": [
         "Les compromis et signatures chez le notaire sont des echeances critiques.",
         "Chaque bien a un vendeur et potentiellement plusieurs acquereurs a coordonner.",
     ],
-    "memoire": ["synth_threshold:15", "keep_recent:5", "purge_days:90"],
+    "Mémoire": ["synth_threshold:15", "keep_recent:5", "purge_days:90"],
 }
 
 PROFILE_CONSEIL = {
@@ -148,17 +148,17 @@ PROFILE_CONSEIL = {
         "client", "mission", "livrable", "facturation", "recrutement",
         "interne", "notification", "autre",
     ],
-    "tri_mails": [
+    "Tri mails": [
         "Mails contenant 'mission', 'projet', 'proposition', 'offre' -> categorie mission",
         "Mails contenant 'rapport', 'livrable', 'presentation', 'audit' -> categorie livrable",
         "Mails contenant 'facture', 'honoraires', 'paiement' -> categorie facturation",
         "Mails contenant 'candidat', 'entretien', 'recrutement' -> categorie recrutement",
     ],
-    "comportement": [
+    "Comportement": [
         "Chaque mission a un client, un perimetre et des echeances de livrables.",
         "La facturation suit les jalons de mission — surveiller les retards de paiement.",
     ],
-    "memoire": ["synth_threshold:15", "keep_recent:5", "purge_days:90"],
+    "Mémoire": ["synth_threshold:15", "keep_recent:5", "purge_days:90"],
 }
 
 PROFILE_COMMERCE = {
@@ -166,17 +166,17 @@ PROFILE_COMMERCE = {
         "commande", "fournisseur", "client", "logistique", "financier",
         "marketing", "notification", "autre",
     ],
-    "tri_mails": [
+    "Tri mails": [
         "Mails contenant 'commande', 'bon de commande', 'confirmation' -> categorie commande",
         "Mails contenant 'livraison', 'expedition', 'transporteur', 'stock' -> categorie logistique",
         "Mails contenant 'facture', 'paiement', 'avoir', 'relance' -> categorie financier",
         "Mails contenant 'promo', 'campagne', 'newsletter', 'soldes' -> categorie marketing",
     ],
-    "comportement": [
+    "Comportement": [
         "Les ruptures de stock et retards de livraison sont des alertes prioritaires.",
         "Les commandes clients en attente de traitement sont urgentes.",
     ],
-    "memoire": ["synth_threshold:15", "keep_recent:5", "purge_days:90"],
+    "Mémoire": ["synth_threshold:15", "keep_recent:5", "purge_days:90"],
 }
 
 PROFILE_MEDICAL = {
@@ -184,17 +184,17 @@ PROFILE_MEDICAL = {
         "patient", "rendez_vous", "labo", "administratif", "confrere",
         "formation", "notification", "autre",
     ],
-    "tri_mails": [
+    "Tri mails": [
         "Mails contenant 'rendez-vous', 'consultation', 'annulation' -> categorie rendez_vous",
         "Mails contenant 'resultat', 'analyse', 'laboratoire', 'bilan' -> categorie labo",
         "Mails contenant 'CPAM', 'mutuelle', 'teletransmission', 'ordonnance' -> categorie administratif",
         "Mails contenant 'confrere', 'adressage', 'avis medical' -> categorie confrere",
     ],
-    "comportement": [
+    "Comportement": [
         "Les resultats de laboratoire urgents ou anormaux doivent etre signales immediatement.",
         "La confidentialite des donnees patients est absolue — jamais de nom dans les logs.",
     ],
-    "memoire": ["synth_threshold:15", "keep_recent:5", "purge_days:90"],
+    "Mémoire": ["synth_threshold:15", "keep_recent:5", "purge_days:90"],
 }
 
 PROFILES = {
@@ -223,20 +223,20 @@ def seed_tenant(tenant_id: str, admin_username: str,
     counts = {}
 
     # Regles UX communes en premier
-    counts["comportement"] = 0
+    counts["Comportement"] = 0
     for rule_text in COMMON_BEHAVIOR_RULES:
         try:
             save_rule(
-                category="comportement",
+                category="Comportement",
                 rule=rule_text,
                 source="seed",
                 confidence=0.8,  # Confidence plus haute : ce sont des garde-fous UX
                 username=admin_username,
                 tenant_id=tenant_id,
             )
-            counts["comportement"] += 1
+            counts["Comportement"] += 1
         except Exception as e:
-            print(f"[seeding] Erreur [comportement] '{rule_text[:40]}': {e}")
+            print(f"[seeding] Erreur [Comportement] '{rule_text[:40]}': {e}")
 
     # Regles specifiques au profil
     for category, rules in PROFILES[profile].items():
