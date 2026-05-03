@@ -2932,21 +2932,56 @@ async function mailBootstrapStart(connId, btn){
 }
 
 async function _doBootstrapStart(connId, months){
-  // Ferme la modale de choix
-  const oldModal = document.querySelector('div[style*="rgba(0,0,0,0.85)"]');
-  if (oldModal) oldModal.remove();
+  // Confirmation explicite avant lancement (UX feedback fort).
+  // Bug remonte par Guillaume 04/05/2026 : sans confirmation + auto-redirect,
+  // l user clique et rien ne semble se passer.
+  const dureeLabel = months ? months + ' mois' : 'TOUT l historique';
+  const ok = await confirmAction(
+    '🚀 Lancer le bootstrap ?',
+    `Profondeur : ${dureeLabel}\n\n` +
+    'Le pipeline complet est applique :\n' +
+    '  - filtre whitelist / blacklist\n' +
+    '  - triage Haiku (newsletters ignorees auto)\n' +
+    '  - analyse Sonnet + insert + push graphe\n\n' +
+    'Tourne en background sur Railway. Tu pourras fermer\n' +
+    'le navigateur, le scan continue tout seul.\n\n' +
+    'Une fois lance, l etat de progression s ouvrira\n' +
+    'automatiquement avec auto-refresh toutes les 5s.',
+    'Oui, lancer', 'Annuler'
+  );
+  if(!ok) return;
+
+  // Ferme TOUTES les modales mail ouvertes (modale de choix + confirmation)
+  document.querySelectorAll('div[style*="rgba(0,0,0,0.85)"]').forEach(m => m.remove());
+  const cm = document.getElementById('raya-confirm-modal');
+  if(cm) cm.remove();
+
   try{
     const r = await fetch(`/admin/mail/bootstrap/start?conn_id=${connId}&months=${months}&include_sent=true`, {method:'POST'});
     const d = await r.json();
     if(d.status === 'already_running'){
-      setAlert('companies-alert', '⚠️ Un bootstrap est deja en cours pour cette connexion. Voir "📊 Etat du dernier bootstrap".', 'warn');
+      setAlert('companies-alert', '⚠️ Un bootstrap est deja en cours pour cette connexion. La fenetre d etat va s ouvrir.', 'warn');
+      // On ouvre quand meme l etat pour qu il voit le run en cours
+      _openBootstrapStatusByConnId(connId);
       return;
     }
     if(d.status !== 'started') throw new Error(d.message || 'Demarrage echoue');
-    setAlert('companies-alert', `🚀 Bootstrap lance pour ${months ? months+' mois' : 'tout l historique'} (run_id ${d.run_id}). Suivi via "📊 Etat du dernier bootstrap".`, 'ok');
+    setAlert('companies-alert', `🚀 Bootstrap lance pour ${dureeLabel} (run_id ${d.run_id}). Etat de progression ci-dessous.`, 'ok');
+    // Ouvre AUTOMATIQUEMENT la modale d etat avec auto-refresh
+    _openBootstrapStatusByConnId(connId);
   }catch(e){
     setAlert('companies-alert', '❌ Demarrage bootstrap echoue : '+e.message, 'err');
   }
+}
+
+// Helper interne : ouvre la modale d etat sans avoir besoin d un bouton
+// (utilise apres lancement du bootstrap pour redirection auto).
+function _openBootstrapStatusByConnId(connId){
+  // Cree un bouton fictif pour reutiliser mailBootstrapStatus tel quel
+  const fakeBtn = {disabled: false, innerHTML: ''};
+  // Le btn n etant pas un vrai bouton DOM, on appelle directement la fonction
+  // en passant un bouton "stub" a usage interne
+  mailBootstrapStatus(connId, fakeBtn);
 }
 
 

@@ -203,7 +203,13 @@ def _bootstrap_outlook_folder(token: str, folder_name: str, since_iso: str,
         "$select": "id,subject,from,receivedDateTime,bodyPreview,body",
     }
     hdrs = {"Authorization": f"Bearer {token}"}
-    stats = {"seen": 0, "processed": 0, "errors": 0}
+    # Detail par dossier : on aligne sur la semantique des compteurs globaux
+    # du run pour eviter l incoherence (bug remonte par Guillaume 04/05) :
+    # processed = ingere reellement (analyzed + stored_simple), pas les
+    # doublons ni les filtres Haiku.
+    stats = {"seen": 0, "processed": 0, "errors": 0,
+             "duplicates": 0, "filtered_haiku": 0,
+             "stored_simple": 0, "analyzed": 0}
     page_url = url
     page_params = params
 
@@ -238,13 +244,25 @@ def _bootstrap_outlook_folder(token: str, folder_name: str, since_iso: str,
                 received_at = msg.get("receivedDateTime", "")
                 raw_body = (msg.get("body", {}) or {}).get(
                     "content", "") or preview
-                _process_mail_via_pipeline(
+                result = _process_mail_via_pipeline(
                     run_id=run_id, message_id=mid, sender=sender,
                     subject=subject, preview=preview, raw_body=raw_body,
                     received_at=received_at, mailbox_source="outlook",
                     mailbox_email=mailbox_email,
                     connection_id=connection_id, username=username)
-                stats["processed"] += 1
+                # Detail aligne sur la semantique du run total
+                if result == "duplicate":
+                    stats["duplicates"] += 1
+                elif result == "ignored":
+                    stats["filtered_haiku"] += 1
+                elif result == "stored_simple":
+                    stats["stored_simple"] += 1
+                    stats["processed"] += 1
+                elif result in ("done_ai", "fallback"):
+                    stats["analyzed"] += 1
+                    stats["processed"] += 1
+                else:
+                    stats["errors"] += 1
             except Exception as e:
                 stats["errors"] += 1
                 logger.warning("[MailBootstrap] Outlook msg crash : %s",
@@ -311,7 +329,11 @@ def _bootstrap_gmail_label(token: str, label_id: str, after_str: str,
     GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
     list_url = f"{GMAIL_API}/messages"
     hdrs = {"Authorization": f"Bearer {token}"}
-    stats = {"seen": 0, "processed": 0, "errors": 0}
+    # Detail par dossier aligne sur la semantique du run total
+    # (cf commentaire identique dans _bootstrap_outlook_folder).
+    stats = {"seen": 0, "processed": 0, "errors": 0,
+             "duplicates": 0, "filtered_haiku": 0,
+             "stored_simple": 0, "analyzed": 0}
     query = f"label:{label_id}"
     if after_str:
         query += f" after:{after_str}"
@@ -362,13 +384,24 @@ def _bootstrap_gmail_label(token: str, label_id: str, after_str: str,
                 subject = hh.get("subject", "") or ""
                 received_at = hh.get("date", "")
                 snippet = msg.get("snippet", "") or ""
-                _process_mail_via_pipeline(
+                result = _process_mail_via_pipeline(
                     run_id=run_id, message_id=msg_id, sender=sender,
                     subject=subject, preview=snippet[:300], raw_body=snippet,
                     received_at=received_at, mailbox_source="gmail",
                     mailbox_email=mailbox_email,
                     connection_id=connection_id, username=username)
-                stats["processed"] += 1
+                if result == "duplicate":
+                    stats["duplicates"] += 1
+                elif result == "ignored":
+                    stats["filtered_haiku"] += 1
+                elif result == "stored_simple":
+                    stats["stored_simple"] += 1
+                    stats["processed"] += 1
+                elif result in ("done_ai", "fallback"):
+                    stats["analyzed"] += 1
+                    stats["processed"] += 1
+                else:
+                    stats["errors"] += 1
             except Exception as e:
                 stats["errors"] += 1
                 _increment_run(run_id, items_errors=1)
