@@ -492,34 +492,20 @@ def _raya_core_agent(
                 system += f"- {instr}\n"
 
         # V2.4 fix : mode approfondissement (clic "Approfondir avec Opus")
-        # L utilisateur a deja recu une reponse de Sonnet (visible dans
-        # l historique ci-dessous comme dernier message assistant). Il
-        # demande une version plus profonde. Opus herite de tout le contexte
-        # habituel (regles, graphe, tools) + cette consigne claire pour ne
-        # pas accuser Sonnet d hallucination sans preuve factuelle.
+        # L utilisateur a deja recu une reponse de Sonnet et clique pour
+        # avoir une version plus profonde. Opus voit l historique avec
+        # cette reponse precedente comme dernier message assistant. On lui
+        # donne juste l intention de l user, sans mise en scene Sonnet vs
+        # Opus qui invitait a juger / accuser (probleme detecte fin avril).
         if deepen_mode:
             system += (
                 "\n\n=== MODE APPROFONDISSEMENT ===\n"
-                "L utilisateur vient de recevoir une reponse de ta version "
-                "rapide (Sonnet 4.6, visible comme dernier message assistant "
-                "dans ton historique recent). Il a clique \"Approfondir avec "
-                "Opus\" pour obtenir une version plus profonde et reflechie.\n\n"
-                "Ta mission :\n"
-                "- Reprends le fil exactement la ou Sonnet s est arrete\n"
-                "- Enrichis l analyse : nuances, implications, points "
-                "d attention subtils, recommandations operationnelles\n"
-                "- Verifie les faits si tu as un doute legitime (tes tools "
-                "de recherche dans les sources de l entreprise sont "
-                "disponibles) AVANT de conclure "
-                "que quelque chose est faux ou invente\n"
-                "- Si apres reflexion la reponse initiale etait deja tres "
-                "bonne, confirme-le honnetement plutot que d inventer du "
-                "contenu pour justifier ton appel\n\n"
-                "IMPORTANT - ne JAMAIS affirmer que Sonnet a hallucine ou "
-                "invente sans l avoir verifie avec tes tools. Sonnet a acces "
-                "aux memes sources que toi et a probablement travaille "
-                "correctement. En cas de doute sur une donnee precise "
-                "(reference produit, chiffre, nom), verifie avant d accuser."
+                "L utilisateur a demande une reflexion plus approfondie sur "
+                "ta reponse precedente (visible dans l historique). Reprends "
+                "le fil et enrichis : nuances, implications, points "
+                "d attention subtils, recommandations operationnelles. "
+                "Si la reponse initiale couvrait deja tout, dis-le honnetement "
+                "plutot que de remplir."
             )
 
         # 2. Historique (3 derniers echanges + troncature)
@@ -815,14 +801,33 @@ def _raya_core_agent(
             )
 
     # Log usage total
+    # Determine le 'trigger' semantique pour les stats :
+    #   - deepen_click   : clic "Approfondir avec Opus"
+    #   - continue_click : clic "Etendre la reflexion" (continuation P2/P3)
+    #   - main_question  : message initial classique
+    if deepen_mode:
+        agent_trigger = "deepen_click"
+    elif is_continuation:
+        agent_trigger = "continue_click"
+    else:
+        agent_trigger = "main_question"
+
+    # Resoudre le nom de modele effectif (anciennement 'unknown' dans les
+    # logs car on passait un dict {usage: ...} sans le champ 'model').
+    from app.llm_client import _PROVIDER_MODELS as _PM, LLM_PROVIDER as _LP
+    _model_name = _PM.get(_LP, {}).get(model_tier_local) or "unknown"
+
     log_llm_usage(
-        {"usage": {
+        {
+            "provider": _LP,
+            "model": _model_name,
             "input_tokens": total_input_tokens,
             "output_tokens": total_output_tokens,
-        }},
+        },
         username=username,
         tenant_id=tenant_id,
         purpose=f"agent_loop_iter{iterations}",
+        trigger=agent_trigger,
     )
 
 

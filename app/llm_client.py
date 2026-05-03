@@ -202,10 +202,26 @@ def _complete_anthropic(messages, model_name, max_tokens, system, temperature, w
 
 # ─── LOGGING DES COÛTS (non-bloquant) ───
 
-def log_llm_usage(result: dict, username: str, tenant_id: str, purpose: str = ""):
+def log_llm_usage(result: dict, username: str, tenant_id: str,
+                  purpose: str = "", trigger: str | None = None):
     """
     Logge l'usage LLM en base pour suivi des coûts par tenant.
     Non-bloquant : si l'écriture échoue, on continue.
+
+    Paramètres :
+      result    : dict retourné par llm_complete (provider, model, tokens)
+      username  : utilisateur concerné
+      tenant_id : tenant concerné
+      purpose   : raison de l'appel (ex: "raya_main_conversation",
+                  "agent_loop_iter1", "opus_audit", etc.)
+      trigger   : OPTIONNEL — origine sémantique de l'appel pour les stats.
+                  Valeurs typiques pour la conversation principale :
+                    - "main_question"   : message initial utilisateur
+                    - "deepen_click"    : clic bouton "Approfondir avec Opus"
+                    - "continue_click"  : clic bouton "Étendre la réflexion"
+                  None pour les jobs internes (audit, optimizer, etc.)
+                  Permet d'analyser l'usage Opus déclenché par utilisateur
+                  vs imposé par garde-fou.
     """
     conn = None
     try:
@@ -214,8 +230,9 @@ def log_llm_usage(result: dict, username: str, tenant_id: str, purpose: str = ""
         c = conn.cursor()
         c.execute("""
             INSERT INTO llm_usage
-              (tenant_id, username, provider, model, input_tokens, output_tokens, purpose)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+              (tenant_id, username, provider, model,
+               input_tokens, output_tokens, purpose, trigger)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             tenant_id, username,
             result.get("provider", "unknown"),
@@ -223,6 +240,7 @@ def log_llm_usage(result: dict, username: str, tenant_id: str, purpose: str = ""
             result.get("input_tokens",  0),
             result.get("output_tokens", 0),
             (purpose or "")[:100],
+            (trigger or None),
         ))
         conn.commit()
     except Exception as e:
