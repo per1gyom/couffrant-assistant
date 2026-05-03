@@ -133,7 +133,7 @@ def get_memoire_param(username: str, param: str, default,
     Lit un paramètre numérique depuis les règles memoire.
     Format : "nom_param:valeur" ex: "synth_threshold:15"
     """
-    rules = get_rules_by_category(username, "memoire", tenant_id)
+    rules = get_rules_by_category(username, "Mémoire", tenant_id)
     for rule in rules:
         if rule.strip().lower().startswith(f"{param.lower()}:"):
             try:
@@ -149,7 +149,7 @@ def extract_category_keywords(username: str, target_category: str,
     """
     Extrait les mots-clés liés à une catégorie depuis les règles tri_mails.
     """
-    rules = get_rules_by_category(username, "tri_mails", tenant_id)
+    rules = get_rules_by_category(username, "Tri mails", tenant_id)
     keywords = []
     for rule in rules:
         rule_l = rule.lower()
@@ -185,7 +185,7 @@ def get_urgency_keywords(username: str, tenant_id: str = None) -> list:
 
 
 def get_internal_domains(username: str, tenant_id: str = None) -> list:
-    rules = get_rules_by_category(username, "tri_mails", tenant_id)
+    rules = get_rules_by_category(username, "Tri mails", tenant_id)
     domains = []
     for rule in rules:
         rule_l = rule.lower()
@@ -203,7 +203,7 @@ def parse_business_priority(category: str, title: str, username: str,
     Détermine la priorité business d'un groupe de mails depuis les règles.
     Retourne : 'urgent', 'a_traiter', 'faible'
     """
-    rules = get_rules_by_category(username, "regroupement", tenant_id)
+    rules = get_rules_by_category(username, "Regroupement", tenant_id)
     cat_l = (category or "").lower()
     title_l = (title or "").lower()
     combined = f"{cat_l} {title_l}"

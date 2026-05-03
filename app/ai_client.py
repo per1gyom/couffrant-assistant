@@ -151,7 +151,7 @@ def analyze_single_mail_with_ai(
     categories_str = ", ".join(mail_categories)
 
     # ─ Règles métier
-    rules_text = get_rules_as_text(username, ["tri_mails", "urgence", "style_reponse"])
+    rules_text = get_rules_as_text(username, ["Tri mails", "urgence", "style_reponse"])
 
     # ─ Détection de catégorie pour le few-shot
     hint_cat = _get_hint_category(full_lower, username)

@@ -269,7 +269,7 @@ Format JSON strict (sans backticks) :
         raw = re.sub(r'\s*```$', '', raw, flags=re.MULTILINE).strip()
         parsed = json.loads(raw)
 
-        category = parsed.get("category", "comportement")
+        category = parsed.get("category", "Comportement")
         rule_text = parsed.get("rule", "")
         if not rule_text:
             return {"status": "error", "message": "Opus n'a pas pu formuler de règle"}

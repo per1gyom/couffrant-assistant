@@ -30,7 +30,7 @@ def get_dashboard(days: int = 2, username: str = None,
     rows = [dict(zip(columns, row)) for row in c.fetchall()]
     conn.close()
 
-    regroupement_rules = get_rules_by_category(username, "regroupement")
+    regroupement_rules = get_rules_by_category(username, "Regroupement")
 
     groups = defaultdict(list)
     for row in rows:
