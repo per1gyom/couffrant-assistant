@@ -224,6 +224,27 @@ function renderMicrosoftActions(tenantId, connId){
   return '';
 }
 
+// ─── ACTIONS POUR BOITES MAIL (microsoft, outlook, gmail) ──────
+// Chantier B 04/05/2026 : miroir du menu Scanner SharePoint mais pour
+// les boites mail. Ingestion = paginate API + triage Haiku + IA + push graphe.
+function renderMailActions(tenantId, connId){
+  const mailMenu = _ddMenu('#7c3aed', '📧 Scanner boite mail', [
+    _ddItem(`mailInventory(${connId}, this)`, '📊 Inventaire boite',
+      'Compte les mails par dossier (Inbox, SentItems, Archive, Junk) sans rien ingerer. Utile pour savoir ce qu il y a a scanner.'),
+    `<div style="height:1px;background:#334155;margin:4px 0"></div>`,
+    _ddItem(`mailBootstrapStart(${connId}, this)`, '📥 Bootstrap historique',
+      'Recupere les mails sur N mois et les passe par le pipeline complet (filtre, triage Haiku, IA, push graphe). Choix 3/6/9/12 mois ou tout.'),
+    _ddItem(`mailBootstrapStatus(${connId}, this)`, '📊 Etat du dernier bootstrap',
+      'Affiche le resultat ou la progression en cours du dernier bootstrap. Auto-refresh si scan en cours.'),
+    `<div style="height:1px;background:#334155;margin:4px 0"></div>`,
+    _ddItem(`mailGraphStats(${connId}, this)`, '🌐 Etat du graphe mail',
+      'Stats du graphe pour cette boite : nb noeuds Mail, top expediteurs, repartition par categorie, edges.'),
+    _ddItem(`mailMigrateToGraph(${connId}, this)`, '⚡ Migrer mails vers graphe',
+      'Rattrape les mails ingere mais pas dans le graphe. Idempotent.'),
+  ]);
+  return mailMenu;
+}
+
 function renderDriveActions(tenantId, connId){
   // Nouveau 20/04 soir : boutons associes a la connexion 'drive' =
   // SharePoint commun au tenant. Scope tenant, pas user.
@@ -338,6 +359,7 @@ async function loadConnections(tenantId,idx){
           <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px;cursor:pointer;border-bottom:1px dashed var(--text3)" onclick="renameConn(${c.id},'${tenantId}',${idx},'${c.label.replace(/'/g,"\\'")}')" title="Cliquer pour renommer">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span>${helpBadge} ${statusBadge}</div>
           ${oauthBtn}
           ${['microsoft','gmail','outlook'].includes(c.tool_type)?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px" onclick="discoverTool('${tenantId}','${c.tool_type}',this)">🔍 Découvrir</button>`:''}
+          ${['microsoft','gmail','outlook'].includes(c.tool_type)?renderMailActions(tenantId, c.id):''}
           ${(c.tool_type==='microsoft'||c.tool_type==='outlook')?renderMicrosoftActions(tenantId, c.id):''}
           ${c.tool_type==='drive'?renderDriveActions(tenantId, c.id):''}
           ${c.tool_type==='odoo'?renderOdooActions(tenantId, c.id):''}
@@ -2785,5 +2807,391 @@ async function toggleTenantFeature(tenantId, featureKey, newEnabled, checkboxEl,
     setAlert('companies-alert', '❌ Erreur : '+e.message, 'err');
   }finally{
     checkboxEl.disabled = false;
+  }
+}
+
+// ============================================================================
+// MAIL ADMIN TOOLS (chantier B 04/05/2026)
+// Miroir du menu Scanner SharePoint pour les boites mail.
+// ============================================================================
+
+// Petit helper de modale generique reutilisable pour les modales mail
+function _openMailModal(title, contentHtml, onClose){
+  const backdrop = document.createElement('div');
+  backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9998;display:flex;align-items:center;justify-content:center';
+  const modal = document.createElement('div');
+  modal.style.cssText = 'background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:18px 22px;width:95vw;max-width:1100px;max-height:90vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,0.8)';
+  modal.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+      <h3 style="margin:0">${title}</h3>
+      <button id="mail-modal-close" style="background:#ef4444;color:white;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:700">✕ Fermer</button>
+    </div>
+    <div id="mail-modal-content">${contentHtml}</div>
+  `;
+  backdrop.appendChild(modal);
+  document.body.appendChild(backdrop);
+  const close = () => {
+    backdrop.remove();
+    if (onClose) onClose();
+  };
+  backdrop.addEventListener('click', e => { if(e.target === backdrop) close(); });
+  document.getElementById('mail-modal-close').onclick = close;
+  return {backdrop, modal, close, content: document.getElementById('mail-modal-content')};
+}
+
+
+async function mailInventory(connId, btn){
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Chargement...';
+  try{
+    const r = await fetch(`/admin/mail/inventory/${connId}`);
+    const d = await r.json();
+    if(d.status !== 'ok') throw new Error(d.message || 'Erreur');
+    const fmt = n => (n === null || n === undefined) ? '<span style="color:var(--text3)">?</span>' : n.toLocaleString('fr-FR');
+    const ci = d.connection || {};
+    const folders = d.folders || {};
+    const rows = Object.entries(folders).map(([f, n]) =>
+      `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:8px;font-weight:600">${f}</td>
+        <td style="padding:8px;text-align:right;font-variant-numeric:tabular-nums">${fmt(n)}</td>
+      </tr>`).join('');
+    const coverage_mem = d.total_remote ? Math.round(100 * d.ingere_chez_raya / d.total_remote) : 0;
+    const coverage_graph = d.ingere_chez_raya ? Math.round(100 * d.dans_graphe / d.ingere_chez_raya) : 0;
+    const content = `
+      <div style="margin-bottom:14px;padding:12px;background:rgba(124,58,237,0.08);border:1px solid #7c3aed40;border-radius:10px">
+        <div style="font-size:13px;color:#a78bfa;font-weight:700;margin-bottom:6px">📬 ${ci.label || ""} — ${ci.connected_email || ""}</div>
+        <div style="font-size:12px;color:var(--text2)">Type : <code>${ci.tool_type}</code> · Tenant : <code>${ci.tenant_id}</code></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px">
+        <div style="padding:12px;background:var(--bg1);border:1px solid var(--border);border-radius:10px">
+          <div style="font-size:11px;color:var(--text3);text-transform:uppercase">📦 Total dans la boite</div>
+          <div style="font-size:24px;font-weight:700;color:#64748b">${fmt(d.total_remote)}</div>
+        </div>
+        <div style="padding:12px;background:var(--bg1);border:1px solid var(--border);border-radius:10px">
+          <div style="font-size:11px;color:var(--text3);text-transform:uppercase">📥 Ingere chez Raya</div>
+          <div style="font-size:24px;font-weight:700;color:#10b981">${fmt(d.ingere_chez_raya)}</div>
+          <div style="font-size:10px;color:var(--text3)">${coverage_mem}% du total</div>
+        </div>
+        <div style="padding:12px;background:var(--bg1);border:1px solid var(--border);border-radius:10px">
+          <div style="font-size:11px;color:var(--text3);text-transform:uppercase">🌐 Dans le graphe</div>
+          <div style="font-size:24px;font-weight:700;color:#0ea5e9">${fmt(d.dans_graphe)}</div>
+          <div style="font-size:10px;color:var(--text3)">${coverage_graph}% des ingere</div>
+        </div>
+      </div>
+
+      <div style="overflow-x:auto;border:1px solid var(--border);border-radius:8px">
+        <table style="width:100%;border-collapse:collapse">
+          <thead style="background:var(--bg2)">
+            <tr style="border-bottom:2px solid var(--border)">
+              <th style="padding:10px;text-align:left;font-size:11px">Dossier / Label</th>
+              <th style="padding:10px;text-align:right;font-size:11px">Nb mails</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+
+      <div style="margin-top:10px;font-size:11px;color:var(--text3)">Comptage en direct via API Microsoft Graph / Gmail. Aucun mail n a ete ingere — c est juste un inventaire.</div>
+    `;
+    _openMailModal('📊 Inventaire boite mail', content);
+  }catch(e){
+    setAlert('companies-alert', '❌ Inventaire echoue : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+
+async function mailBootstrapStart(connId, btn){
+  // Modale de choix de duree (3/6/9/12/all) puis lance le bootstrap
+  const choiceContent = `
+    <p style="font-size:13px;color:var(--text2);line-height:1.6">
+      Choisis la profondeur de l historique a recuperer. Pour chaque mail
+      trouve, le pipeline complet est applique :
+    </p>
+    <ul style="font-size:12px;color:var(--text3);margin:8px 0 14px 18px">
+      <li>Filtre whitelist / blacklist</li>
+      <li>Heuristique anti-bulk (rapide)</li>
+      <li>Triage Haiku (newsletters / notifs ignorees automatiquement)</li>
+      <li>Si pertinent : analyse Sonnet + insert mail_memory + push graphe</li>
+    </ul>
+    <p style="font-size:12px;color:var(--text3);margin-bottom:14px">Inclus mails recus + mails envoyes (apprentissage du style).</p>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:14px">
+      <button onclick="_doBootstrapStart(${connId}, 3)" class="btn btn-accent" style="padding:14px 8px;font-size:13px;font-weight:700">3 mois</button>
+      <button onclick="_doBootstrapStart(${connId}, 6)" class="btn btn-accent" style="padding:14px 8px;font-size:13px;font-weight:700">6 mois</button>
+      <button onclick="_doBootstrapStart(${connId}, 9)" class="btn btn-accent" style="padding:14px 8px;font-size:13px;font-weight:700">9 mois</button>
+      <button onclick="_doBootstrapStart(${connId}, 12)" class="btn btn-accent" style="padding:14px 8px;font-size:13px;font-weight:700;background:#7c3aed">12 mois</button>
+      <button onclick="_doBootstrapStart(${connId}, 0)" class="btn btn-danger" style="padding:14px 8px;font-size:13px;font-weight:700">TOUT</button>
+    </div>
+    <div style="font-size:11px;color:var(--text3);padding-top:8px;border-top:1px solid var(--border)">⚠️ Le bootstrap tourne sur Railway en arriere-plan. Tu peux fermer le navigateur. Suivi via le bouton "📊 Etat du dernier bootstrap".</div>
+  `;
+  _openMailModal('📥 Bootstrap historique', choiceContent);
+}
+
+async function _doBootstrapStart(connId, months){
+  // Ferme la modale de choix
+  const oldModal = document.querySelector('div[style*="rgba(0,0,0,0.85)"]');
+  if (oldModal) oldModal.remove();
+  try{
+    const r = await fetch(`/admin/mail/bootstrap/start?conn_id=${connId}&months=${months}&include_sent=true`, {method:'POST'});
+    const d = await r.json();
+    if(d.status === 'already_running'){
+      setAlert('companies-alert', '⚠️ Un bootstrap est deja en cours pour cette connexion. Voir "📊 Etat du dernier bootstrap".', 'warn');
+      return;
+    }
+    if(d.status !== 'started') throw new Error(d.message || 'Demarrage echoue');
+    setAlert('companies-alert', `🚀 Bootstrap lance pour ${months ? months+' mois' : 'tout l historique'} (run_id ${d.run_id}). Suivi via "📊 Etat du dernier bootstrap".`, 'ok');
+  }catch(e){
+    setAlert('companies-alert', '❌ Demarrage bootstrap echoue : '+e.message, 'err');
+  }
+}
+
+
+async function mailBootstrapStatus(connId, btn){
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Chargement...';
+
+  let backdrop = null;
+  let modalContent = null;
+  let pollTimeout = null;
+  let isClosed = false;
+
+  const renderContent = (d) => {
+    const fmt = n => (n === null || n === undefined) ? '0' : n.toLocaleString('fr-FR');
+    const ci = d.connection || {};
+    const last = d.last_run;
+    const running = d.is_running;
+
+    if(!last){
+      return `<p style="color:var(--text3)">Aucun bootstrap n a encore ete lance pour cette boite.</p>`;
+    }
+
+    const total = (last.items_seen || 0);
+    const processed = last.items_processed || 0;
+    const filtered = last.items_filtered_haiku || 0;
+    const skip_dup = last.items_skipped_duplicate || 0;
+    const errors = last.items_errors || 0;
+    const stored_simple = last.items_stored_simple || 0;
+    const analyzed = last.items_analyzed || 0;
+
+    const statusBadge = running
+      ? `<span style="background:#f59e0b20;color:#f59e0b;padding:4px 12px;border-radius:10px;font-size:12px;font-weight:700">⏳ EN COURS</span>`
+      : last.status === 'done'
+        ? `<span style="background:#10b98120;color:#10b981;padding:4px 12px;border-radius:10px;font-size:12px;font-weight:700">✅ TERMINE</span>`
+        : last.status === 'error'
+          ? `<span style="background:#dc262620;color:#dc2626;padding:4px 12px;border-radius:10px;font-size:12px;font-weight:700">❌ ERREUR</span>`
+          : `<span style="background:#64748b20;color:#64748b;padding:4px 12px;border-radius:10px;font-size:12px;font-weight:700">${last.status}</span>`;
+
+    let progressBar = '';
+    if(running){
+      progressBar = `
+        <div style="margin:10px 0;padding:14px;background:rgba(245,158,11,0.08);border:1px solid #f59e0b40;border-radius:10px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text2);margin-bottom:8px">
+            <span><strong style="color:#f59e0b">⏳ Bootstrap en cours</strong> · ${fmt(total)} mails parcourus jusqu ici</span>
+            <span style="color:var(--text3)">auto-refresh 5s</span>
+          </div>
+          <div style="font-size:11px;color:var(--text3)">Le scan continue tant qu il trouve des mails plus anciens. Quand il termine, ce panneau passera en vert.</div>
+        </div>`;
+    }
+
+    const errorBlock = last.error_detail
+      ? `<div style="padding:12px;background:rgba(220,38,38,0.08);border:1px solid #dc262640;border-radius:8px;margin:10px 0;font-size:12px;color:#fca5a5"><strong>Erreur :</strong> ${last.error_detail}</div>`
+      : '';
+
+    const foldersBlock = last.folders_done && Object.keys(last.folders_done).length
+      ? `<div style="margin-top:10px"><strong style="font-size:12px;color:var(--text2)">Detail par dossier :</strong>
+          <pre style="font-size:11px;background:var(--bg1);padding:10px;border-radius:6px;overflow:auto;max-height:200px">${JSON.stringify(last.folders_done, null, 2)}</pre>
+         </div>`
+      : '';
+
+    return `
+      <div style="margin-bottom:14px;padding:12px;background:rgba(124,58,237,0.08);border:1px solid #7c3aed40;border-radius:10px">
+        <div style="font-size:13px;color:#a78bfa;font-weight:700;margin-bottom:6px">📬 ${ci.label || ""} — ${ci.connected_email || ""}</div>
+        <div style="font-size:12px;color:var(--text2)">Run #${last.id} · ${statusBadge} · Profondeur ${last.months_back ? last.months_back + ' mois' : 'TOUT'} · Inclut SentItems : ${last.include_sent?'oui':'non'}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">Demarre : ${last.started_at ? new Date(last.started_at).toLocaleString('fr-FR') : '?'} · MaJ : ${last.last_update ? new Date(last.last_update).toLocaleString('fr-FR') : '?'}${last.finished_at ? ' · Fini : '+new Date(last.finished_at).toLocaleString('fr-FR'):''}</div>
+      </div>
+      ${progressBar}
+      ${errorBlock}
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">
+        <div style="padding:12px;background:var(--bg1);border:1px solid var(--border);border-radius:10px">
+          <div style="font-size:11px;color:var(--text3);text-transform:uppercase">📦 Vus</div>
+          <div style="font-size:22px;font-weight:700;color:#64748b">${fmt(total)}</div>
+        </div>
+        <div style="padding:12px;background:var(--bg1);border:1px solid var(--border);border-radius:10px">
+          <div style="font-size:11px;color:var(--text3);text-transform:uppercase">✅ Vectorises</div>
+          <div style="font-size:22px;font-weight:700;color:#10b981">${fmt(processed)}</div>
+          <div style="font-size:10px;color:var(--text3)">${fmt(analyzed)} IA · ${fmt(stored_simple)} stock simple</div>
+        </div>
+        <div style="padding:12px;background:var(--bg1);border:1px solid var(--border);border-radius:10px">
+          <div style="font-size:11px;color:var(--text3);text-transform:uppercase">🛑 Filtres Haiku</div>
+          <div style="font-size:22px;font-weight:700;color:#f59e0b">${fmt(filtered)}</div>
+          <div style="font-size:10px;color:var(--text3)">newsletters/notifs</div>
+        </div>
+        <div style="padding:12px;background:var(--bg1);border:1px solid var(--border);border-radius:10px">
+          <div style="font-size:11px;color:var(--text3);text-transform:uppercase">⏭️ Doublons</div>
+          <div style="font-size:22px;font-weight:700;color:#0ea5e9">${fmt(skip_dup)}</div>
+        </div>
+        <div style="padding:12px;background:var(--bg1);border:1px solid var(--border);border-radius:10px">
+          <div style="font-size:11px;color:var(--text3);text-transform:uppercase">❌ Erreurs</div>
+          <div style="font-size:22px;font-weight:700;color:${errors?'#dc2626':'#64748b'}">${fmt(errors)}</div>
+        </div>
+      </div>
+      ${foldersBlock}
+    `;
+  };
+
+  const refresh = async () => {
+    if(isClosed) return;
+    try{
+      const r = await fetch(`/admin/mail/bootstrap/status/${connId}`);
+      const d = await r.json();
+      if(modalContent && !isClosed){
+        modalContent.innerHTML = renderContent(d);
+      }
+      if(d.is_running && !isClosed){
+        pollTimeout = setTimeout(refresh, 5000);
+      }
+    }catch(e){
+      console.warn('mailBootstrapStatus refresh : ', e);
+      if(!isClosed) pollTimeout = setTimeout(refresh, 8000);
+    }
+  };
+
+  try{
+    const r = await fetch(`/admin/mail/bootstrap/status/${connId}`);
+    const d = await r.json();
+    const m = _openMailModal('📊 Etat du dernier bootstrap', renderContent(d), () => {
+      isClosed = true;
+      if(pollTimeout) clearTimeout(pollTimeout);
+    });
+    backdrop = m.backdrop;
+    modalContent = m.content;
+    if(d.is_running){
+      pollTimeout = setTimeout(refresh, 5000);
+    }
+  }catch(e){
+    setAlert('companies-alert', '❌ Status bootstrap echoue : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+
+async function mailGraphStats(connId, btn){
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Chargement...';
+  try{
+    const r = await fetch(`/admin/mail/graph-stats/${connId}`);
+    const d = await r.json();
+    if(d.status !== 'ok') throw new Error(d.message || 'Erreur');
+    const fmt = n => (n === null || n === undefined) ? '0' : n.toLocaleString('fr-FR');
+    const ci = d.connection || {};
+    const sendersRows = (d.top_senders || []).map(s => 
+      `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:6px 10px;font-size:11px">${(s.sender||'').substring(0,80)}</td>
+        <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmt(s.count)}</td>
+      </tr>`).join('') || '<tr><td colspan=2 style="padding:10px;text-align:center;color:var(--text3);font-size:11px">Aucun sender</td></tr>';
+    const catRows = (d.by_category || []).map(c =>
+      `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:6px 10px;font-size:11px">${c.category}</td>
+        <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmt(c.count)}</td>
+      </tr>`).join('') || '<tr><td colspan=2 style="padding:10px;text-align:center;color:var(--text3);font-size:11px">Aucune categorie</td></tr>';
+    const edgeRows = (d.edges_out || []).map(e =>
+      `<tr style="border-bottom:1px solid var(--border)">
+        <td style="padding:6px 10px;font-size:11px"><code>${e.edge_type}</code></td>
+        <td style="padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums">${fmt(e.count)}</td>
+      </tr>`).join('') || '<tr><td colspan=2 style="padding:10px;text-align:center;color:var(--text3);font-size:11px">Aucun edge</td></tr>';
+
+    const content = `
+      <div style="margin-bottom:14px;padding:12px;background:rgba(124,58,237,0.08);border:1px solid #7c3aed40;border-radius:10px">
+        <div style="font-size:13px;color:#a78bfa;font-weight:700;margin-bottom:6px">📬 ${ci.label || ""} — ${ci.connected_email || ""}</div>
+        <div style="font-size:12px;color:var(--text2)">Tenant : <code>${ci.tenant_id}</code></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:14px">
+        <div style="padding:12px;background:var(--bg1);border:1px solid var(--border);border-radius:10px">
+          <div style="font-size:11px;color:var(--text3);text-transform:uppercase">📥 Mails en mail_memory</div>
+          <div style="font-size:24px;font-weight:700;color:#10b981">${fmt(d.nb_in_memory)}</div>
+        </div>
+        <div style="padding:12px;background:var(--bg1);border:1px solid var(--border);border-radius:10px">
+          <div style="font-size:11px;color:var(--text3);text-transform:uppercase">🌐 Noeuds Mail dans graphe</div>
+          <div style="font-size:24px;font-weight:700;color:#0ea5e9">${fmt(d.nb_in_graph)}</div>
+          <div style="font-size:10px;color:var(--text3)">${d.coverage_pct}% de couverture</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">
+        <div>
+          <h4 style="margin:0 0 8px 0;font-size:13px">🎯 Top expediteurs</h4>
+          <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;max-height:300px;overflow-y:auto">
+            <table style="width:100%;border-collapse:collapse">
+              <thead style="background:var(--bg2)"><tr><th style="padding:8px;text-align:left;font-size:11px">Expediteur</th><th style="padding:8px;text-align:right;font-size:11px">Nb</th></tr></thead>
+              <tbody>${sendersRows}</tbody>
+            </table>
+          </div>
+        </div>
+        <div>
+          <h4 style="margin:0 0 8px 0;font-size:13px">🏷️ Repartition par categorie IA</h4>
+          <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden;max-height:300px;overflow-y:auto">
+            <table style="width:100%;border-collapse:collapse">
+              <thead style="background:var(--bg2)"><tr><th style="padding:8px;text-align:left;font-size:11px">Categorie</th><th style="padding:8px;text-align:right;font-size:11px">Nb</th></tr></thead>
+              <tbody>${catRows}</tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <div>
+        <h4 style="margin:0 0 8px 0;font-size:13px">🔗 Edges sortantes</h4>
+        <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
+          <table style="width:100%;border-collapse:collapse">
+            <thead style="background:var(--bg2)"><tr><th style="padding:8px;text-align:left;font-size:11px">Type d edge</th><th style="padding:8px;text-align:right;font-size:11px">Nb</th></tr></thead>
+            <tbody>${edgeRows}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+    _openMailModal('🌐 Etat du graphe mail', content);
+  }catch(e){
+    setAlert('companies-alert', '❌ Graphe stats echoue : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
+  }
+}
+
+
+async function mailMigrateToGraph(connId, btn){
+  const ok = await confirmAction(
+    '⚡ Migrer les mails vers le graphe ?',
+    'Cette operation va :\n' +
+    '• Detecter les mails ingere mais pas dans le graphe\n' +
+    '• Les pousser dans semantic_graph_nodes (idempotent, sans risque)\n' +
+    '• Tourne en arriere-plan (best effort)\n\n' +
+    'Continuer ?',
+    'Oui, lancer', 'Annuler'
+  );
+  if(!ok) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '⏳ Demarrage...';
+  try{
+    const r = await fetch(`/admin/mail/migrate-to-graph/${connId}`, {method:'POST'});
+    const d = await r.json();
+    if(d.status === 'started'){
+      setAlert('companies-alert', `⚡ Migration lancee pour ${d.to_push} mails. Verifie l etat avec "🌐 Etat du graphe mail" dans 1-2 min.`, 'ok');
+    } else if(d.status === 'ok'){
+      setAlert('companies-alert', `✅ ${d.message}`, 'ok');
+    } else {
+      throw new Error(d.message || 'Erreur');
+    }
+  }catch(e){
+    setAlert('companies-alert', '❌ Migration echouee : '+e.message, 'err');
+  }finally{
+    btn.disabled = false;
+    btn.innerHTML = orig;
   }
 }
