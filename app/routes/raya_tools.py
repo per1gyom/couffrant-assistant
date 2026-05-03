@@ -99,9 +99,10 @@ TOOL_GET_CLIENT_360 = {
 TOOL_SEARCH_DRIVE = {
     "name": "search_drive",
     "description": (
-        "Recherche semantique dans les fichiers SharePoint (photos, PDF, docs "
-        "techniques, plans). Remonte les fichiers dont le contenu ou le nom "
-        "correspond a la requete."
+        "Recherche semantique dans les fichiers du Drive de l utilisateur "
+        "(SharePoint, Google Drive ou OneDrive selon les connexions actives). "
+        "Remonte les fichiers (photos, PDF, docs techniques, plans) dont le "
+        "contenu ou le nom correspond a la requete."
     ),
     "input_schema": {
         "type": "object",
@@ -172,7 +173,8 @@ TOOL_READ_MAIL = {
 TOOL_READ_DRIVE_FILE = {
     "name": "read_drive_file",
     "description": (
-        "Lit le contenu d un fichier SharePoint par son ID. Supporte texte, "
+        "Lit le contenu d un fichier du Drive (SharePoint, Google Drive ou "
+        "OneDrive selon le tenant) par son ID. Supporte texte, "
         "PDF, Office (avec extraction auto)."
     ),
     "input_schema": {
@@ -211,7 +213,7 @@ TOOL_GET_WEATHER = {
         "properties": {
             "location": {
                 "type": "string",
-                "description": "Ville ou code postal. Par defaut Romorantin-Lanthenay.",
+                "description": "Ville ou code postal. Si omis, utilise la localisation du tenant.",
             },
         },
     },
@@ -225,12 +227,13 @@ TOOL_GET_WEATHER = {
 TOOL_SEND_MAIL = {
     "name": "send_mail",
     "description": (
-        "Prepare l envoi d un mail (Outlook par defaut, Gmail si specifie). "
-        "Le mail n est pas envoye directement : une carte de confirmation "
-        "s affiche pour validation manuelle par l utilisateur. "
+        "Prepare l envoi d un mail. Le provider (Outlook ou Gmail) est choisi "
+        "automatiquement selon la boite par defaut de l utilisateur, ou peut "
+        "etre specifie explicitement. Le mail n est pas envoye directement : "
+        "une carte de confirmation s affiche pour validation manuelle. "
         "IMPORTANT : ne termine pas le corps du mail par une signature "
-        "(pas de 'Cordialement, Guillaume' ni bloc de contact). La signature "
-        "de l utilisateur est ajoutee automatiquement par le systeme. "
+        "(pas de formule 'Cordialement, [Prenom]' ni bloc de contact). La "
+        "signature de l utilisateur est ajoutee automatiquement par le systeme. "
         "Termine juste ton texte et c est bon."
     ),
     "input_schema": {
@@ -248,7 +251,7 @@ TOOL_SEND_MAIL = {
             "provider": {
                 "type": "string",
                 "enum": ["outlook", "gmail"],
-                "default": "outlook",
+                "description": "Optionnel. Choisi automatiquement selon la boite par defaut du tenant si omis.",
             },
             "cc": {"type": "string", "description": "Optionnel."},
         },
@@ -307,8 +310,9 @@ TOOL_DELETE_MAIL = {
 TOOL_CREATE_CALENDAR_EVENT = {
     "name": "create_calendar_event",
     "description": (
-        "Prepare la creation d un RDV dans le calendrier Outlook. "
-        "Carte de confirmation avant creation."
+        "Prepare la creation d un RDV dans le calendrier de l utilisateur "
+        "(Outlook ou Google Calendar selon le tenant). Carte de confirmation "
+        "avant creation."
     ),
     "input_schema": {
         "type": "object",
@@ -437,7 +441,7 @@ TOOL_CREATE_IMAGE = {
 
 TOOL_MOVE_DRIVE_FILE = {
     "name": "move_drive_file",
-    "description": "Deplace un fichier SharePoint. Carte de confirmation.",
+    "description": "Deplace un fichier du Drive (SharePoint, Google Drive ou OneDrive selon le tenant). Carte de confirmation.",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -451,7 +455,7 @@ TOOL_MOVE_DRIVE_FILE = {
 
 TOOL_CREATE_DRIVE_FOLDER = {
     "name": "create_drive_folder",
-    "description": "Cree un dossier SharePoint.",
+    "description": "Cree un dossier dans le Drive (SharePoint, Google Drive ou OneDrive selon le tenant).",
     "input_schema": {
         "type": "object",
         "properties": {
@@ -569,19 +573,100 @@ RAYA_TOOLS: list[dict[str, Any]] = [
 ]
 
 
+def _get_active_tool_types(tenant_id: str) -> set[str]:
+    """Retourne le set des tool_types connectes pour un tenant.
+
+    Utilise par get_tools_for_user pour filtrer les outils dont la
+    dependance backend n est pas connectee. Defense en profondeur :
+    en cas d erreur DB, retourne set() ce qui declenchera le mode
+    'aucun filtre' (on prefere exposer trop de tools que pas assez,
+    pour ne pas casser un user dont la connexion est en cours).
+    """
+    if not tenant_id:
+        return set()
+    try:
+        from app.database import get_pg_conn
+        conn = get_pg_conn()
+        try:
+            c = conn.cursor()
+            c.execute("""
+                SELECT DISTINCT tool_type FROM tenant_connections
+                WHERE tenant_id = %s AND status = 'connected'
+            """, (tenant_id,))
+            return {row[0] for row in c.fetchall() if row[0]}
+        finally:
+            conn.close()
+    except Exception:
+        return set()
+
+
+# Mapping : nom du tool -> set des tool_types qui suffisent a l activer.
+# Si AUCUN type du set n est connecte, le tool est exclu de la liste.
+# Les tools absents de ce mapping sont TOUJOURS exposes (independants
+# des connexions : graphe, web, creation de fichiers, memoire, etc).
+_TOOL_DEPENDENCIES = {
+    # Odoo : tools qui necessitent la connexion ERP
+    "search_odoo":            {"odoo"},
+    "get_client_360":         {"odoo"},
+    # Drive : tools qui necessitent au moins un drive connecte
+    "search_drive":           {"drive", "sharepoint", "onedrive", "google_drive"},
+    "read_drive_file":        {"drive", "sharepoint", "onedrive", "google_drive"},
+    "move_drive_file":        {"drive", "sharepoint", "onedrive", "google_drive"},
+    "create_drive_folder":    {"drive", "sharepoint", "onedrive", "google_drive"},
+    # Mail : tools qui necessitent au moins une boite mail connectee
+    "search_mail":            {"outlook", "gmail", "microsoft"},
+    "read_mail":              {"outlook", "gmail", "microsoft"},
+    "send_mail":              {"outlook", "gmail", "microsoft"},
+    "reply_to_mail":          {"outlook", "gmail", "microsoft"},
+    "archive_mail":           {"outlook", "gmail", "microsoft"},
+    "delete_mail":            {"outlook", "gmail", "microsoft"},
+    # Calendar : Outlook (microsoft) ou Google Calendar (souvent via gmail)
+    "create_calendar_event":  {"outlook", "microsoft", "gmail"},
+    # Teams : tool_type 'teams' (jamais connecte aujourd'hui mais prevu)
+    "send_teams_message":     {"teams"},
+}
+
+
 def get_tools_for_user(username: str, tenant_id: str) -> list[dict]:
     """
     Retourne la liste des tools exposes pour un utilisateur donne.
 
     Cette fonction est le point d entree appele par raya_helpers.py avant
-    chaque appel agent. Elle peut filtrer les tools selon les permissions
-    de l utilisateur ou les connecteurs actifs.
+    chaque appel agent. Elle filtre les tools selon les connexions actives
+    du tenant pour eviter d exposer search_odoo a un user sans Odoo, ou
+    search_drive a un user sans drive connecte.
 
-    Pour la v2 initiale, elle retourne simplement RAYA_TOOLS. Le filtrage
-    par permissions viendra dans une sous-etape ulterieure.
+    Comportement :
+    - Tenant sans aucune connexion (onboarding en cours) : on N applique
+      AUCUN filtre — on expose tous les tools pour ne pas bloquer un user
+      qui finalise sa configuration.
+    - Tenant avec au moins une connexion : on filtre selon _TOOL_DEPENDENCIES.
+      Un tool sans dependance configuree (graph, web, fichiers, memoire,
+      list_my_connections...) est toujours expose.
+    - Erreur DB : on expose tous les tools (fail open vers plus de
+      capacites plutot que moins, pour ne pas casser le service).
     """
-    # TODO v2.1 : filtrer selon app.permissions et connexions actives
-    return RAYA_TOOLS
+    active_types = _get_active_tool_types(tenant_id)
+    if not active_types:
+        # Tenant sans aucune connexion : on n applique aucun filtre.
+        # L agent verra tous les tools, mais ses appels echoueront
+        # gentiment via list_my_connections / messages d erreur des
+        # executors. C est plus accueillant qu une liste vide pour un
+        # user en cours de configuration.
+        return RAYA_TOOLS
+
+    filtered = []
+    for tool in RAYA_TOOLS:
+        deps = _TOOL_DEPENDENCIES.get(tool["name"])
+        if deps is None:
+            # Tool sans dependance => toujours expose
+            filtered.append(tool)
+            continue
+        if deps & active_types:
+            # Au moins une dependance est satisfaite
+            filtered.append(tool)
+        # Sinon : tool exclu (ex: search_odoo si pas de tool_type 'odoo')
+    return filtered
 
 
 # Set des tools qui necessitent une carte de confirmation cote front.

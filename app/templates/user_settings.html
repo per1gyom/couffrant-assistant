@@ -577,13 +577,13 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
           <span>Identité</span>
         </div>
         <div class="field-group" style="display:flex;gap:20px;align-items:center">
-          <div class="avatar-large" id="profileAvatar">GP</div>
+          <div class="avatar-large" id="profileAvatar">--</div>
           <div style="flex:1;min-width:0">
-            <div id="profileName" style="font-size:17px;font-weight:700;color:var(--text);margin-bottom:2px">Guillaume Perrin</div>
-            <div id="profileEmail" style="font-size:13px;color:var(--text-muted);margin-bottom:6px">guillaume@couffrant-solar.fr</div>
+            <div id="profileName" style="font-size:17px;font-weight:700;color:var(--text);margin-bottom:2px">Chargement…</div>
+            <div id="profileEmail" style="font-size:13px;color:var(--text-muted);margin-bottom:6px">…</div>
             <div id="profileBadges" style="display:flex;gap:6px;flex-wrap:wrap">
               <span id="badgeUser" style="display:inline-flex;align-items:center;gap:4px;padding:3px 10px;background:var(--accent-light);color:var(--accent);border-radius:999px;font-size:11.5px;font-weight:600">Utilisateur</span>
-              <span id="badgeTenantAdmin" style="display:none;align-items:center;gap:4px;padding:3px 10px;background:#fef3c7;color:#92400e;border-radius:999px;font-size:11.5px;font-weight:600">Admin <span id="badgeTenantName">Couffrant Solar</span></span>
+              <span id="badgeTenantAdmin" style="display:none;align-items:center;gap:4px;padding:3px 10px;background:#fef3c7;color:#92400e;border-radius:999px;font-size:11.5px;font-weight:600">Admin <span id="badgeTenantName">--</span></span>
               <span id="badgeSuperAdmin" style="display:none;align-items:center;gap:4px;padding:3px 10px;background:#fce7f3;color:#9f1239;border-radius:999px;font-size:11.5px;font-weight:600">Super Admin Raya</span>
             </div>
           </div>
@@ -599,7 +599,7 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
         <div class="field-group">
           <div class="field">
             <label class="field-label">Nom affiché dans le chat</label>
-            <input class="field-input" type="text" id="inputDisplayName" value="Guillaume">
+            <input class="field-input" type="text" id="inputDisplayName" value="" placeholder="Ton prénom">
             <div class="field-hint">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
               C'est le nom que Raya utilise pour te parler.
@@ -607,7 +607,7 @@ html{scrollbar-width:thin;scrollbar-color:var(--border) transparent}
           </div>
           <div class="field" style="margin-bottom:0">
             <label class="field-label">Téléphone (optionnel)</label>
-            <input class="field-input" type="tel" id="inputPhone" value="+33 6 23 45 67 89">
+            <input class="field-input" type="tel" id="inputPhone" value="" placeholder="+33 6 12 34 56 78">
             <div class="field-hint">
               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
               Utilisé uniquement pour les alertes urgentes (connexion perdue, anomalie).
@@ -2761,7 +2761,7 @@ function _sigInsertEmoji(emoji) {
 
 // Insertion d'un lien
 function _sigInsertLink() {
-  const url = prompt('URL du lien (ex: https://couffrant-solar.fr) :');
+  const url = prompt('URL du lien (ex: https://votre-societe.fr) :');
   if (!url) return;
   document.getElementById('sigEditorContent').focus();
   document.execCommand('createLink', false, url);

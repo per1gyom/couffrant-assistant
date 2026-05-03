@@ -224,6 +224,64 @@ def ensure_default_tenant():
         if conn: conn.close()
 
 
+# ─────────────────────────────────────────────────────────────────────────
+# PROFIL TENANT — onboarding multi-métier (3 mai 2026)
+# Les prompts/tools/templates lisent ce profil au lieu d'avoir Couffrant
+# Solar / photovoltaïque / Romorantin en dur. Stocké dans settings->profile.
+# ─────────────────────────────────────────────────────────────────────────
+
+# Profil par défaut quand le tenant n'a pas (encore) de profil renseigné.
+# Volontairement neutre pour qu'un nouveau tenant ne reçoive pas
+# d'hypothèses business hardcodées.
+_PROFILE_DEFAULTS = {
+    "company_name": "",            # ex: "Couffrant Solar", "juillet"
+    "activity": "",                # ex: "photovoltaïque", "agence événementielle B2B"
+    "location": "",                # ex: "Romorantin-Lanthenay", "Blois", ""
+    "gender": "féminin",           # "féminin" | "masculin" | "neutre"
+    "address_form": "tutoiement",  # "tutoiement" | "vouvoiement"
+    "default_mail_provider": "",   # "outlook" | "gmail" | ""
+    "default_drive_provider": "",  # "sharepoint" | "google_drive" | "onedrive" | ""
+}
+
+
+def get_tenant_profile(tenant_id: str) -> dict:
+    """Retourne le profil tenant (nom société, métier, ton, etc).
+
+    Utilisé par les prompts (raya_agent_core, ai_client) et les tools
+    pour adapter dynamiquement leur comportement au métier du tenant
+    plutôt que d'avoir Couffrant Solar / photovoltaïque / Outlook en dur.
+
+    Si le tenant n'a pas encore de profil renseigné, retourne des
+    défauts neutres (chaînes vides) pour ne pas exposer un autre
+    métier par accident.
+
+    Stocké dans tenants.settings->'profile'.
+
+    Exemple de structure :
+        {
+          "company_name": "Couffrant Solar",
+          "activity": "photovoltaïque",
+          "location": "Romorantin-Lanthenay",
+          "gender": "féminin",
+          "address_form": "tutoiement",
+          "default_mail_provider": "outlook",
+          "default_drive_provider": "sharepoint",
+        }
+    """
+    settings = get_tenant_settings(tenant_id) if tenant_id else {}
+    profile = (settings.get("profile") or {}) if isinstance(settings, dict) else {}
+    if not isinstance(profile, dict):
+        profile = {}
+    return {**_PROFILE_DEFAULTS, **profile}
+
+
+def update_tenant_profile(tenant_id: str, updates: dict) -> dict:
+    """Met à jour partiellement le profil tenant."""
+    current = get_tenant_profile(tenant_id)
+    merged = {**current, **updates}
+    return update_tenant_settings(tenant_id, {"profile": merged})
+
+
 def get_user_tenants(username: str) -> list[dict]:
     """
     Retourne tous les tenants auxquels un utilisateur a accès.

@@ -23,6 +23,7 @@ from app.feedback_store import get_global_instructions
 from app.routes.raya_tools import get_tools_for_user
 from app.routes.raya_tool_executors import execute_tool
 from app.routes.raya_helpers import _strip_action_tags, _build_user_content
+from app.tenant_manager import get_tenant_profile
 
 logger = get_logger("raya.agent")
 
@@ -65,18 +66,56 @@ def _build_agent_system_prompt(
     Prompt systeme court de la v2. Remplace les ~15-20k chars de la v1
     par ~800 chars bien cibles.
 
+    Adapte dynamiquement au tenant via get_tenant_profile() :
+    nom societe, activite, localisation, ton (genre/tutoiement) sont
+    lus depuis tenants.settings->'profile' au lieu d etre hardcodes.
+
     Les descriptions des tools sont injectees automatiquement par l API
     Anthropic (parametre tools=). Pas besoin de les redecrire ici.
 
     Les preferences durables (aria_rules) sont ajoutees a ce prompt par
     _load_user_preferences() ci-dessous.
     """
-    return f"""Tu es Raya, IA de {display_name} chez Couffrant Solar (photovoltaique, Romorantin-Lanthenay).
-Tu parles au feminin, tutoiement.
+    profile = get_tenant_profile(tenant_id)
+    company = profile.get("company_name", "").strip()
+    activity = profile.get("activity", "").strip()
+    location = profile.get("location", "").strip()
+    gender = profile.get("gender", "feminin").strip()
+    address_form = profile.get("address_form", "tutoiement").strip()
 
-Tu as acces a l ensemble des donnees de l entreprise via tes outils :
-Odoo (clients, devis, factures), SharePoint, mails analyses, graphe
-semantique des relations, historique des conversations, web.
+    # Phrase d'identification : "IA de Pierre chez juillet (agence
+    # evenementielle B2B, Blois)." — composition propre selon ce qui
+    # est renseigne (l'activite et la localisation sont optionnelles).
+    parts = [f"IA de {display_name}"]
+    if company:
+        parts.append(f"chez {company}")
+    if activity or location:
+        details = []
+        if activity:
+            details.append(activity)
+        if location:
+            details.append(location)
+        parts.append(f"({', '.join(details)})")
+    identity_line = "Tu es Raya, " + " ".join(parts).strip() + "."
+
+    # Ligne de ton : adaptable feminin/masculin/neutre × tutoiement/vouvoiement
+    if gender == "masculin":
+        ton_phrase = "Tu parles au masculin"
+    elif gender == "neutre":
+        ton_phrase = "Tu parles avec un ton neutre"
+    else:
+        ton_phrase = "Tu parles au feminin"
+    ton_line = f"{ton_phrase}, {address_form}."
+
+    return f"""{identity_line}
+{ton_line}
+
+Tu as acces a l ensemble des donnees professionnelles de l utilisateur
+via tes outils : applications metier connectees (CRM, ERP), fichiers
+(Drive, SharePoint, OneDrive selon les connexions actives), mails
+analyses, graphe semantique des relations, historique des conversations,
+web. La liste reelle de tes outils t est fournie a chaque requete dans
+le parametre tools de l API.
 
 Regles non negociables :
 1. Tout fait cite (nom, date, montant, reference) doit provenir d un
@@ -91,23 +130,22 @@ Regles non negociables :
    toujours pas une donnee precise, ne persiste pas. Conclus que la
    donnee n est pas accessible, explique ce qui manque (quelle source,
    quelle API, quelle permission) et donne ce que tu as deja assemble.
-   Exemple : "Je n arrive pas a obtenir les montants detailles des
-   devis car sale.order.line n est pas expose par l API Odoo. Il
-   faudrait demander a OpenFire d ouvrir ce modele. Voici neanmoins
-   ce que je peux te dire : [contexte disponible]."
+   Exemple : "Cette donnee n est pas accessible par mes outils
+   actuels. Voici neanmoins ce que j ai pu rassembler : [contexte
+   disponible]."
 6. Mails : la signature de l utilisateur est ajoutee automatiquement
    a l envoi par le systeme. Ne mets PAS de signature dans le corps
-   du mail (pas de "Cordialement, Guillaume", pas de bloc de contact).
-   Termine simplement le corps, le systeme s occupe du reste.
+   du mail (pas de formule "Cordialement, [Prenom]", pas de bloc de
+   contact). Termine simplement le corps, le systeme s occupe du reste.
 7. Pour tout schema visuel (organigramme, flux, hierarchie, timeline,
    montage juridique, arbre de decision), utilise un bloc ```mermaid :
    le frontend le rend en SVG propre. Ne fais JAMAIS de schema en
    caracteres ASCII (boites avec + - | et fleches ->). Exemple :
    ```mermaid
    graph TD
-     A[SARL Des Moines] -->|loue le toit| B[SCI Arrault Legroux]
-     A -->|siege| C[43 rue des Moines]
-     B -->|batiment| D[79 rue des Deportes]
+     A[Societe Mere] -->|filiale| B[Filiale A]
+     A -->|filiale| C[Filiale B]
+     B -->|prestataire| D[Fournisseur X]
    ```
 """
 
@@ -487,7 +525,8 @@ def _raya_core_agent(
                 "- Enrichis l analyse : nuances, implications, points "
                 "d attention subtils, recommandations operationnelles\n"
                 "- Verifie les faits si tu as un doute legitime (tes tools "
-                "Odoo, mails, SharePoint sont disponibles) AVANT de conclure "
+                "de recherche dans les sources de l entreprise sont "
+                "disponibles) AVANT de conclure "
                 "que quelque chose est faux ou invente\n"
                 "- Si apres reflexion la reponse initiale etait deja tres "
                 "bonne, confirme-le honnetement plutot que d inventer du "

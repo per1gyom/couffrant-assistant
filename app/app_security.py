@@ -122,7 +122,7 @@ input:focus {{
       <div class="logo-dot"></div>
       <span class="logo-text">Raya</span>
     </div>
-    <p class="subtitle">Couffrant Solar — Assistant IA</p>
+    <p class="subtitle">Assistant IA</p>
     {error_block}
     <form method="post" action="/login-app">
       <div class="form-group">

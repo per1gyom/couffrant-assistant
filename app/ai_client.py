@@ -18,6 +18,7 @@ import re
 from app.llm_client import llm_complete
 from app.database import get_pg_conn
 from app.rule_engine import get_rules_as_text, get_rules_by_category
+from app.tenant_manager import get_tenant_profile
 # Fix imports orphelins :
 #   - 21/04/2026 nuit : ajout de _DEFAULT_CATEGORIES, build_learning_text,
 #     _parse_json_safe (utilises sans etre importes -> NameError silencieux).
@@ -93,16 +94,10 @@ def _get_hint_category(full_text: str, username: str) -> str:
             continue
         kws = extract_category_keywords(username, cat)
         if not kws:
-            # Fallbacks légers uniquement pour les catégories techniques
-            fallbacks = {
-                "raccordement": ["enedis", "consuel", "raccordement"],
-                "commercial":   ["devis", "offre", "contrat"],
-                "reunion":      ["réunion", "meeting", "teams.microsoft"],
-                "chantier":     ["chantier", "planning", "installation"],
-                "financier":    ["facture", "paiement", "échéance"],
-                "fournisseur":  ["fournisseur", "livraison", "commande"],
-            }
-            kws = fallbacks.get(cat, [])
+            # Sans mots-cles configures pour cette categorie, on saute :
+            # plus de fallback hardcode ('enedis', 'consuel', 'chantier'...)
+            # qui biaisait l analyse vers le metier photovoltaique.
+            continue
         if any(kw in full_text for kw in kws):
             return cat
     return "autre"
@@ -113,6 +108,28 @@ def _get_hint_category(full_text: str, username: str) -> str:
 # Mots-clés indiquant qu'une réponse est probablement attendue
 _REPLY_HINTS = ["?", "merci de", "pouvez-vous", "peux-tu", "svp", "s'il vous plaît",
                 "pourriez", "auriez", "avez-vous", "avez vous", "demande"]
+
+
+def _get_tenant_id_for_user(username: str) -> str | None:
+    """Resout le tenant_id principal d un user pour lui adapter les prompts.
+
+    Charge depuis la table users. Retourne None si user inconnu (le
+    caller devra utiliser un fallback neutre).
+    """
+    if not username:
+        return None
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("SELECT tenant_id FROM users WHERE username = %s LIMIT 1",
+                  (username,))
+        row = c.fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+    finally:
+        if conn: conn.close()
 
 
 def analyze_single_mail_with_ai(
@@ -163,10 +180,16 @@ def analyze_single_mail_with_ai(
         ),
     }
 
+    # ─ Profil tenant pour personnaliser le prompt (pas Couffrant en dur)
+    tenant_id = _get_tenant_id_for_user(username)
+    profile = get_tenant_profile(tenant_id) if tenant_id else {}
+    company_name = (profile.get("company_name") or "").strip() or "l'entreprise"
+    activity = (profile.get("activity") or "").strip()
+
     rules_section = (
         f"=== RÈGLES (apprises, évolutives) ===\n{rules_text}\n"
         if rules_text else
-        "Pas encore de règles. Utilise le bon sens métier photovoltaïque.\n"
+        f"Pas encore de règles. Utilise le bon sens métier.\n"
     )
 
     # Blocs conditionnels
@@ -175,7 +198,15 @@ def analyze_single_mail_with_ai(
     examples_block = f"\nExemples de corrections passées :\n{learning_text}" if learning_text else ""
     instructions_block = f"\nConsignes : {json.dumps(instructions, ensure_ascii=False)}" if instructions else ""
 
-    system_prompt = f"""Tu es Raya, l'assistante de Couffrant Solar.
+    # Identite : "l'assistante de Couffrant Solar (photovoltaique)"
+    # ou "l'assistante de juillet (agence evenementielle B2B)"
+    # ou simplement "l'assistante de l'entreprise" si tenant inconnu
+    if activity:
+        assistant_intro = f"Tu es Raya, l'assistante de {company_name} ({activity})."
+    else:
+        assistant_intro = f"Tu es Raya, l'assistante de {company_name}."
+
+    system_prompt = f"""{assistant_intro}
 Analyse ce mail et retourne UNIQUEMENT un objet JSON valide, sans texte avant ou après, sans bloc markdown.
 
 {rules_section}
