@@ -2074,15 +2074,19 @@ async function scanDriveStatus(btn){
   const orig = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '⏳ Chargement...';
-  try{
-    const r = await fetch('/admin/drive/scan-status');
-    const d = await r.json();
-    if(d.status !== 'ok') throw new Error(d.message || 'Erreur');
 
+  // État partagé entre fonction d ouverture et boucle de polling
+  let backdrop = null;
+  let modalContent = null;
+  let pollInterval = null;
+  let isClosed = false;
+
+  // Fonction qui rend tout le contenu interne de la modale a partir des donnees fraiches
+  const renderContent = (d) => {
     const fmt = n => (n === null || n === undefined) ? '-' : n.toLocaleString('fr-FR');
     const folders = (d.folders || []);
 
-    // Agrégats pour les cartes métriques
+    // Agrégats
     const sum = (key) => folders.reduce((a, f) => a + ((f.stats||{})[key]||0), 0);
     const totalFiles = sum("total_files");
     const totalOk = sum("ok");
@@ -2092,7 +2096,43 @@ async function scanDriveStatus(btn){
     const totalN2 = sum("level2_chunks");
     const errRate = totalFiles ? (totalErr / totalFiles * 100) : 0;
 
-    // Badge état pour chaque ligne du tableau
+    // Y a-t-il un scan en cours ?
+    const isRunning = !!d.scan_running || folders.some(f => f.state === 'running');
+
+    // Progression globale (si scan en cours, on prend la 1ere ligne running)
+    let progressBar = '';
+    if (isRunning) {
+      const runningFolder = folders.find(f => f.state === 'running') || folders[0];
+      const s = runningFolder ? (runningFolder.stats || {}) : {};
+      const total = s.total_files || 0;
+      const processed = (s.ok || 0) + (s.skipped || 0) + (s.errors || 0) + (s.filtered_by_rules || 0);
+      const pct = total > 0 ? Math.min(100, (processed / total * 100)) : 0;
+      progressBar = `
+        <div style="margin:14px 0;padding:14px;background:rgba(245,158,11,0.08);border:1px solid #f59e0b40;border-radius:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="display:flex;align-items:center;gap:10px">
+              <span style="font-size:18px">⏳</span>
+              <strong style="color:#f59e0b">Scan en cours${runningFolder ? ' — ' + runningFolder.folder_name : ''}</strong>
+            </div>
+            <div style="font-size:13px;color:var(--text3)">
+              ${fmt(processed)} / ${fmt(total)} fichiers · auto-refresh
+            </div>
+          </div>
+          <div style="background:rgba(0,0,0,0.4);border-radius:6px;overflow:hidden;height:14px;position:relative">
+            <div style="background:linear-gradient(90deg,#f59e0b,#fbbf24);height:100%;width:${pct.toFixed(1)}%;transition:width 0.5s ease;border-radius:6px"></div>
+            <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,0.6)">
+              ${pct.toFixed(1)}%
+            </div>
+          </div>
+          <div style="display:flex;gap:14px;margin-top:8px;font-size:11px;color:var(--text3)">
+            <span>✅ ${fmt(s.ok || 0)} vectorises</span>
+            <span>⏭️ ${fmt(s.skipped || 0)} ignores</span>
+            ${s.filtered_by_rules ? `<span>🔒 ${fmt(s.filtered_by_rules)} filtres</span>` : ''}
+            ${s.errors ? `<span style="color:#dc2626">❌ ${fmt(s.errors)} erreurs</span>` : ''}
+          </div>
+        </div>`;
+    }
+
     const stateBadge = st => ({
       done: '<span style="background:#10b98120;color:#10b981;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700">✅ TERMINÉ</span>',
       running: '<span style="background:#f59e0b20;color:#f59e0b;padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700">⏳ EN COURS</span>',
@@ -2123,16 +2163,13 @@ async function scanDriveStatus(btn){
       </tr>`;
     }).join('') || '<tr><td colspan="11" style="padding:14px;text-align:center;color:var(--text3)">Aucun dossier surveille. Lance un scan pour commencer.</td></tr>';
 
-    const backdrop = document.createElement('div');
-    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9998;display:flex;align-items:center;justify-content:center';
-    const modal = document.createElement('div');
-    modal.style.cssText = 'background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:18px 22px;width:95vw;max-width:1200px;max-height:90vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,0.8)';
-    modal.innerHTML = `
+    return `
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
-        <h3 style="margin:0">🚀 État des scans Drive SharePoint</h3>
+        <h3 style="margin:0">🚀 État des scans Drive SharePoint ${isRunning ? '<span style="font-size:12px;color:#f59e0b;margin-left:10px">⚙️ live</span>' : ''}</h3>
         <button id="drive-close" style="background:#ef4444;color:white;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-weight:700">✕ Fermer</button>
       </div>
-      ${renderVerdictBanner(d.verdict)}
+      ${progressBar}
+      ${!isRunning ? renderVerdictBanner(d.verdict) : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px">
         ${renderMetricCard('📦','Fichiers total',fmt(totalFiles),'#64748b',
           'Nombre total de fichiers detectes dans le(s) dossier(s) surveille(s).')}
@@ -2168,13 +2205,67 @@ async function scanDriveStatus(btn){
         </table>
       </div>
       <div style="margin-top:10px;font-size:11px;color:var(--text3)">
-        Taux d erreur global : <strong style="color:${errRate>20?'#dc2626':errRate>5?'#f59e0b':'#10b981'}">${errRate.toFixed(1)}%</strong> · N1 meta = Raya sait que le fichier existe · N2 detail = recherche semantique precise · Re-cliquer sur 📊 pour rafraichir
+        Taux d erreur global : <strong style="color:${errRate>20?'#dc2626':errRate>5?'#f59e0b':'#10b981'}">${errRate.toFixed(1)}%</strong> · N1 meta = Raya sait que le fichier existe · N2 detail = recherche semantique precise${isRunning ? ' · 🔄 Auto-refresh toutes les 3s tant qu un scan tourne' : ''}
       </div>`;
-    backdrop.appendChild(modal);
+  };
+
+  // Fetch + render (idempotent, peut etre appele plusieurs fois)
+  const refresh = async () => {
+    if (isClosed) return;
+    try {
+      const r = await fetch('/admin/drive/scan-status');
+      const d = await r.json();
+      if (d.status !== 'ok') throw new Error(d.message || 'Erreur');
+      if (modalContent && !isClosed) {
+        modalContent.innerHTML = renderContent(d);
+        // Re-attache le bouton fermer (recree a chaque render)
+        const closeBtn = document.getElementById('drive-close');
+        if (closeBtn) closeBtn.onclick = closeModal;
+      }
+      // Si un scan tourne, on reprogramme un poll dans 3s
+      const isRunning = !!d.scan_running || (d.folders || []).some(f => f.state === 'running');
+      if (isRunning && !isClosed) {
+        pollInterval = setTimeout(refresh, 3000);
+      } else {
+        if (pollInterval) { clearTimeout(pollInterval); pollInterval = null; }
+      }
+    } catch(e) {
+      console.warn('[scanDriveStatus] refresh failed:', e);
+      // En cas d echec on re-essaye dans 5s
+      if (!isClosed) {
+        pollInterval = setTimeout(refresh, 5000);
+      }
+    }
+  };
+
+  const closeModal = () => {
+    isClosed = true;
+    if (pollInterval) { clearTimeout(pollInterval); pollInterval = null; }
+    if (backdrop) backdrop.remove();
+  };
+
+  try{
+    // Premier appel pour avoir des donnees, puis on cree la modale
+    const r = await fetch('/admin/drive/scan-status');
+    const d = await r.json();
+    if(d.status !== 'ok') throw new Error(d.message || 'Erreur');
+
+    backdrop = document.createElement('div');
+    backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:9998;display:flex;align-items:center;justify-content:center';
+    modalContent = document.createElement('div');
+    modalContent.style.cssText = 'background:#0b1220;border:1px solid var(--border);border-radius:12px;padding:18px 22px;width:95vw;max-width:1200px;max-height:90vh;overflow:auto;box-shadow:0 10px 40px rgba(0,0,0,0.8)';
+    modalContent.innerHTML = renderContent(d);
+    backdrop.appendChild(modalContent);
     document.body.appendChild(backdrop);
-    const close = () => backdrop.remove();
-    backdrop.addEventListener('click', e => { if(e.target === backdrop) close(); });
-    document.getElementById('drive-close').onclick = close;
+
+    backdrop.addEventListener('click', e => { if(e.target === backdrop) closeModal(); });
+    document.getElementById('drive-close').onclick = closeModal;
+
+    // Lancer le polling si un scan tourne
+    const isRunning = !!d.scan_running || (d.folders || []).some(f => f.state === 'running');
+    if (isRunning) {
+      pollInterval = setTimeout(refresh, 3000);
+    }
   }catch(e){
     setAlert('companies-alert', '❌ Status Drive echoue : '+e.message, 'err');
   }finally{
