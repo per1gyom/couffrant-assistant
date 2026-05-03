@@ -146,6 +146,29 @@ def process_incoming_mail(
             "connection_id": connection_id,
         })
 
+        # 4b — Push vers le graphe semantique (P2, 04/05/2026)
+        # Recupere l id du mail qu on vient d inserer puis le pousse vers
+        # semantic_graph_nodes. Best-effort : si le push echoue, on ne
+        # fait pas planter l ingestion du mail (deja sauvee en mail_memory).
+        try:
+            from app.mail_to_graph import push_mail_to_graph
+            _conn_g = get_pg_conn()
+            try:
+                _c_g = _conn_g.cursor()
+                _c_g.execute(
+                    "SELECT id FROM mail_memory "
+                    "WHERE message_id = %s AND username = %s "
+                    "ORDER BY id DESC LIMIT 1",
+                    (message_id, username),
+                )
+                _row_g = _c_g.fetchone()
+                if _row_g:
+                    push_mail_to_graph(_row_g[0])
+            finally:
+                _conn_g.close()
+        except Exception as _e_graph:
+            print(f"[Pipeline] Push mail->graphe ignore : {_e_graph}")
+
         # Heartbeat monitoring (7-7)
         try:
             from app.database import get_pg_conn as _hb_conn
