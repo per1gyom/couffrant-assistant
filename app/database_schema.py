@@ -252,7 +252,10 @@ def get_schema_statements() -> list[str]:
             confidence REAL, reinforcements INTEGER, active BOOLEAN,
             change_type TEXT NOT NULL, changed_at TIMESTAMP DEFAULT NOW(),
             CONSTRAINT change_type_check CHECK (
-                change_type IN ('created', 'updated', 'reinforced', 'deactivated', 'rollback')
+                change_type IN (
+                    'created', 'updated', 'reinforced', 'deactivated', 'rollback',
+                    'merged_optimizer', 'recategorized_optimizer'
+                )
             )
         )
     """,

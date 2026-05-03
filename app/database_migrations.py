@@ -755,7 +755,7 @@ MIGRATIONS = [
          'run2_agent', 0.8, 'moyenne', 1
        WHERE NOT EXISTS (SELECT 1 FROM aria_rules WHERE rule LIKE '%Format de présentation standard validé%' AND username='guillaume' AND tenant_id='couffrant_solar')""",
     """INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence, level, reinforcements)
-       SELECT 'guillaume', 'couffrant_solar', 'comportement',
+       SELECT 'guillaume', 'couffrant_solar', 'Comportement',
          'Guillaume a double casquette (dirigeant utilisateur + super-admin/dev Raya). Identifier la casquette active avant de répondre : contexte métier = ton concis opérationnel ; contexte dev/audit = ton technique transparent sur les limites.',
          'run2_agent', 0.8, 'moyenne', 1
        WHERE NOT EXISTS (SELECT 1 FROM aria_rules WHERE rule LIKE '%double casquette%' AND username='guillaume' AND tenant_id='couffrant_solar')""",
@@ -814,7 +814,7 @@ MIGRATIONS = [
        FROM aria_rules WHERE id IN (9, 18) AND active = true
          AND NOT EXISTS (SELECT 1 FROM aria_rules_history h WHERE h.rule_id = aria_rules.id AND h.change_type = 'merged_run2_fusion_tagger')""",
     """INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence, level, reinforcements)
-       SELECT 'guillaume', 'couffrant_solar', 'memoire',
+       SELECT 'guillaume', 'couffrant_solar', 'Mémoire',
          'Tagger mémoire et apprentissage par entité : [couffrant-solar], [sci-gaucherie], [sci-romagui], [sas-gplh], [holding].',
          'merged_from_9_18', 0.8, 'moyenne', 4
        WHERE NOT EXISTS (SELECT 1 FROM aria_rules WHERE source = 'merged_from_9_18' AND username='guillaume' AND tenant_id='couffrant_solar')""",
@@ -838,7 +838,7 @@ MIGRATIONS = [
        FROM aria_rules WHERE id IN (20, 22, 30) AND active = true
          AND NOT EXISTS (SELECT 1 FROM aria_rules_history h WHERE h.rule_id = aria_rules.id AND h.change_type = 'merged_run2_fusion_transparence')""",
     """INSERT INTO aria_rules (username, tenant_id, category, rule, source, confidence, level, reinforcements)
-       SELECT 'guillaume', 'couffrant_solar', 'comportement',
+       SELECT 'guillaume', 'couffrant_solar', 'Comportement',
          'Transparence totale sur les limites techniques : jamais prétendre à un accès sans confirmation technique explicite (API, permissions, génération liens).',
          'merged_from_20_22_30', 0.85, 'moyenne', 6
        WHERE NOT EXISTS (SELECT 1 FROM aria_rules WHERE source = 'merged_from_20_22_30' AND username='guillaume' AND tenant_id='couffrant_solar')""",
@@ -1504,4 +1504,20 @@ MIGRATIONS = [
 
     # M-DMR05 : index sur tenant pour vue admin
     "CREATE INDEX IF NOT EXISTS idx_drive_rules_tenant_scope ON tenant_drive_blacklist (tenant_id, scope, connection_id)",
+
+    # M-RH01 : elargir la contrainte CHECK sur aria_rules_history.change_type
+    # pour autoriser les nouveaux types ecrits par le job rules_optimizer du
+    # dimanche soir : 'merged_optimizer' (Layer A fusion doublons) et
+    # 'recategorized_optimizer' (Layer A0 canonisation des categories).
+    # Avant cette migration, le job catchait silencieusement la CHECK violation
+    # et concluait '0 doublon fusionne' alors qu il en avait trouve. Bug
+    # diagnostique le 03/05/2026 apres run nocturne.
+    """DO $$ BEGIN
+        ALTER TABLE aria_rules_history DROP CONSTRAINT IF EXISTS change_type_check;
+        ALTER TABLE aria_rules_history ADD CONSTRAINT change_type_check
+            CHECK (change_type IN (
+                'created', 'updated', 'reinforced', 'deactivated', 'rollback',
+                'merged_optimizer', 'recategorized_optimizer'
+            ));
+    END $$""",
 ]
