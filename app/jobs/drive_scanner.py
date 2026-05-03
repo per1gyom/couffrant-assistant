@@ -528,6 +528,15 @@ def _ensure_folder_registered(tenant_id: str, token: str) -> Optional[dict]:
     """Utilise la config SharePoint du tenant pour localiser le dossier cible,
     l enregistre dans drive_folders s il ne l est pas encore, et retourne
     un dict avec folder_db_id, drive_id, folder_id, etc.
+
+    Fix 04/05/2026 : le UPSERT utilise (tenant_id, provider, drive_id,
+    folder_path) comme cle d unicite physique au lieu de folder_name.
+    Raison : folder_name est un libelle UI que l utilisateur peut renommer
+    (ex : 'Commun' -> 'Direction'). Si on UPSERT par folder_name, un
+    re-clic 'Scanner' apres renommage cree un doublon car la config
+    tenant pointe sur le folder_name d origine, qui ne matche plus
+    l entree renommee. drive_id + folder_path identifient le dossier
+    physique de maniere stable, peu importe le libelle UI.
     """
     from app.connectors.drive_connector import (
         get_drive_config, _find_sharepoint_site_and_drive, _find_folder_root,
@@ -550,23 +559,28 @@ def _ensure_folder_registered(tenant_id: str, token: str) -> Optional[dict]:
         logger.error("[DriveScanner] Dossier %s introuvable", folder_name)
         return None
 
-    with get_pg_conn() as conn:
+    conn = None
+    try:
+        conn = get_pg_conn()
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO drive_folders
                (tenant_id, provider, folder_name, site_name, drive_id,
                 folder_id, folder_path, enabled, updated_at)
                VALUES (%s, 'sharepoint', %s, %s, %s, %s, %s, TRUE, NOW())
-               ON CONFLICT (tenant_id, provider, folder_name) DO UPDATE
-               SET drive_id = EXCLUDED.drive_id,
-                   folder_id = EXCLUDED.folder_id,
-                   folder_path = EXCLUDED.folder_path,
-                   enabled = TRUE, updated_at = NOW()
+               ON CONFLICT (tenant_id, provider, drive_id, folder_path) DO UPDATE
+               SET folder_id = EXCLUDED.folder_id,
+                   site_name = EXCLUDED.site_name,
+                   enabled = TRUE,
+                   updated_at = NOW()
                RETURNING id""",
             (tenant_id, folder_name, site_name, drive_id, folder_id, folder_path),
         )
         folder_db_id = cur.fetchone()[0]
         conn.commit()
+    finally:
+        if conn:
+            conn.close()
     return {"folder_db_id": folder_db_id, "drive_id": drive_id,
             "folder_id": folder_id, "folder_name": folder_name,
             "folder_path": folder_path, "site_name": site_name}
