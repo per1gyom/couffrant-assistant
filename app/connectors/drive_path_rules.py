@@ -93,26 +93,31 @@ def get_drive_roots(connection_id: int) -> list[str]:
     Une racine vide est invalide (ambigue).
     """
     # Import lazy : permet d importer ce module sans env DB
-    from app.database import get_pg_connection
+    from app.database import get_pg_conn
     roots: list[str] = []
+    conn = None
     try:
-        with get_pg_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT folder_path
-                FROM drive_folders
-                WHERE enabled = TRUE
-                  AND folder_path IS NOT NULL
-                  AND folder_path <> ''
-                """
-            )
-            for row in cur.fetchall():
-                fp = row[0] if not isinstance(row, dict) else row.get("folder_path")
-                if fp:
-                    roots.append(_normalize_path(fp))
+        conn = get_pg_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT folder_path
+            FROM drive_folders
+            WHERE enabled = TRUE
+              AND folder_path IS NOT NULL
+              AND folder_path <> ''
+            """
+        )
+        for row in cur.fetchall():
+            fp = row[0] if not isinstance(row, dict) else row.get("folder_path")
+            if fp:
+                roots.append(_normalize_path(fp))
     except Exception:
         logger.exception("[drive_path_rules] erreur get_drive_roots(connection_id=%s)", connection_id)
         return []
+    finally:
+        if conn:
+            conn.close()
     return roots
 
 
@@ -141,32 +146,37 @@ def get_path_rules(connection_id: int, scope: str = "tenant") -> list[tuple[str,
     Plus tard, on pourra appeler avec scope='user' pour les drives prives.
     """
     # Import lazy
-    from app.database import get_pg_connection
+    from app.database import get_pg_conn
     rules: list[tuple[str, str]] = []
+    conn = None
     try:
-        with get_pg_connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT folder_path, rule_type
-                FROM tenant_drive_blacklist
-                WHERE connection_id = %s
-                  AND scope = %s
-                """,
-                (connection_id, scope),
-            )
-            for row in cur.fetchall():
-                if isinstance(row, dict):
-                    fp = row.get("folder_path")
-                    rt = row.get("rule_type") or "exclude"
-                else:
-                    fp = row[0]
-                    rt = row[1] if len(row) > 1 else "exclude"
-                if fp is None:
-                    continue
-                rules.append((_normalize_path(fp), rt))
+        conn = get_pg_conn()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT folder_path, rule_type
+            FROM tenant_drive_blacklist
+            WHERE connection_id = %s
+              AND scope = %s
+            """,
+            (connection_id, scope),
+        )
+        for row in cur.fetchall():
+            if isinstance(row, dict):
+                fp = row.get("folder_path")
+                rt = row.get("rule_type") or "exclude"
+            else:
+                fp = row[0]
+                rt = row[1] if len(row) > 1 else "exclude"
+            if fp is None:
+                continue
+            rules.append((_normalize_path(fp), rt))
     except Exception:
         logger.exception("[drive_path_rules] erreur get_path_rules(connection_id=%s)", connection_id)
         return []
+    finally:
+        if conn:
+            conn.close()
     return rules
 
 
