@@ -20,12 +20,19 @@ def process_incoming_mail(
     received_at: str,
     mailbox_source: str = "outlook",
     raw_body: str = None,
+    mailbox_email: str = None,
+    connection_id: int = None,
 ) -> str:
     """
     Pipeline de filtrage commun (7-1b) — source-agnostic.
     Appelé par le webhook Microsoft ET le polling Gmail.
 
     Retourne : "duplicate", "ignored", "stored_simple", "done_ai", "fallback", "error".
+
+    Fix 04/05/2026 : nouveaux parametres mailbox_email et connection_id pour
+    identifier de maniere certaine quelle boite a recu le mail. Permet de ne
+    pas confondre les 5 boites Gmail entre elles ni les 2 boites Outlook
+    entre elles. Ces valeurs sont stockees telles quelles dans mail_memory.
     """
     from datetime import datetime
     from app.mail_memory_store import mail_exists, insert_mail
@@ -135,6 +142,8 @@ def process_incoming_mail(
             "suggested_reply_subject": item.get("suggested_reply_subject"),
             "suggested_reply": item.get("suggested_reply"),
             "mailbox_source": mailbox_source,
+            "mailbox_email": mailbox_email,
+            "connection_id": connection_id,
         })
 
         # Heartbeat monitoring (7-7)

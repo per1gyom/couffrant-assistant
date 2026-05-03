@@ -343,7 +343,9 @@ def _fetch_message_full(token: str, message_id: str) -> Optional[dict]:
 
 
 def _process_messages_via_pipeline(token: str, messages_meta: list,
-                                     username: str) -> dict:
+                                     username: str,
+                                     connection_id: int = None,
+                                     mailbox_email: str = None) -> dict:
     """Mode WRITE : pour chaque message_id, fetch et appelle process_incoming_mail.
 
     Reutilise le pipeline source-agnostic existant (cf gmail_polling.py)
@@ -354,6 +356,10 @@ def _process_messages_via_pipeline(token: str, messages_meta: list,
       - Analyse IA si demande
       - Insert dans mail_memory
       - Heartbeat + scoring urgence
+
+    Fix 04/05/2026 : on passe maintenant connection_id + mailbox_email pour
+    que chaque mail soit etiquete avec sa boite Gmail d origine reelle
+    (sinon impossible de distinguer les 5 boites Gmail entre elles).
 
     Returns:
         Dict {processed: int, skipped: int, errors: int, fetched: int}
@@ -421,6 +427,8 @@ def _process_messages_via_pipeline(token: str, messages_meta: list,
                 message_id=message_id,
                 received_at=received_at,
                 mailbox_source="gmail",
+                mailbox_email=mailbox_email,
+                connection_id=connection_id,
             )
 
             if result in ("done_ai", "stored_simple", "fallback"):
@@ -509,6 +517,8 @@ def _poll_user_gmail(connection_id: int, tenant_id: str,
         try:
             process_result = _process_messages_via_pipeline(
                 token, result["message_ids"], username,
+                connection_id=connection_id,
+                mailbox_email=email,
             )
             processed = process_result["processed"]
             skipped = process_result["skipped_existing"]
