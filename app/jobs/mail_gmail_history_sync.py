@@ -332,10 +332,15 @@ def _poll_history(token: str, connection_id: int,
 
 
 def _fetch_message_full(token: str, message_id: str) -> Optional[dict]:
-    """Fetch un message Gmail en mode 'metadata' avec headers principaux."""
+    """Fetch un message Gmail en mode 'metadata' avec headers principaux.
+
+    Fix 04/05 soir : metadataHeaders DOIT etre une liste Python (pas une
+    string virgulee), sinon Gmail interprete "From,Subject,Date" comme un
+    seul nom de header bizarre et renvoie payload sans aucun header.
+    """
     response = _gmail_get(token, f"/messages/{message_id}", {
         "format": "metadata",
-        "metadataHeaders": "From,Subject,Date,To,Cc",
+        "metadataHeaders": ["From", "Subject", "Date", "To", "Cc"],
     })
     if response.get("_error"):
         return None

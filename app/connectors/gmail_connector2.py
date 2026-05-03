@@ -114,9 +114,12 @@ class GmailConnector(MailboxConnector):
             messages = []
             for msg_id in message_ids:
                 try:
+                    # Fix 04/05 soir : metadataHeaders en LISTE et pas
+                    # string virgulee. Sinon Gmail renvoie payload sans
+                    # aucun header (subject/sender/date vides).
                     msg = self._get(f"{_GMAIL}/messages/{msg_id}", {
                         "format": "metadata",
-                        "metadataHeaders": "From,Subject,Date",
+                        "metadataHeaders": ["From", "Subject", "Date"],
                     })
                     headers = {h["name"].lower(): h["value"]
                                for h in msg.get("payload", {}).get("headers", [])}

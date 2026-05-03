@@ -370,8 +370,13 @@ def _bootstrap_gmail_label(token: str, label_id: str, after_str: str,
                 rmsg = requests.get(
                     f"{GMAIL_API}/messages/{msg_id}",
                     headers=hdrs,
+                    # Fix 04/05 soir : metadataHeaders DOIT etre une liste
+                    # Python (et non une string virgulee). requests envoie
+                    # alors le param en multi-valeurs, format attendu par
+                    # l API Gmail. Sinon le payload retourne ne contient
+                    # AUCUN header (subject/from/date vides systemiquement).
                     params={"format": "metadata",
-                            "metadataHeaders": "From,Subject,Date"},
+                            "metadataHeaders": ["From", "Subject", "Date"]},
                     timeout=20)
                 if rmsg.status_code != 200:
                     stats["errors"] += 1
