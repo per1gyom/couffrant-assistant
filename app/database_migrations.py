@@ -1520,4 +1520,14 @@ MIGRATIONS = [
                 'merged_optimizer', 'recategorized_optimizer'
             ));
     END $$""",
+
+    # M-LLM01 : tracking semantique de l origine des appels LLM.
+    # Ajout de la colonne trigger pour distinguer les appels Opus
+    # declenches par clic explicite (deepen_click, continue_click) des
+    # questions principales (main_question). Permet d analyser la
+    # consommation Opus reelle (volontaire vs imposee par garde-fou).
+    # Mis en place le 04/05/2026 avant les premiers tests reels avec
+    # Charlotte / la femme de Guillaume / ses amis.
+    "ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS trigger TEXT NULL",
+    "CREATE INDEX IF NOT EXISTS idx_llm_usage_trigger ON llm_usage (trigger) WHERE trigger IS NOT NULL",
 ]

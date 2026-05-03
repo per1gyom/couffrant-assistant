@@ -193,6 +193,7 @@ def get_schema_statements() -> list[str]:
             provider TEXT NOT NULL, model TEXT NOT NULL,
             input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0,
             cost_usd_estimate NUMERIC(10, 6), purpose TEXT,
+            trigger TEXT NULL,
             created_at TIMESTAMP DEFAULT NOW()
         )
     """,
