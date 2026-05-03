@@ -67,7 +67,7 @@ _PAGE_SMTP_MISSING = f"""<!DOCTYPE html>
 <style>{_BASE_STYLE}</style></head>
 <body><div class="page"><div class="card">
   <div class="logo">⚡ Ra<span>ya</span></div>
-  <p class="subtitle">Couffrant Solar — Assistant IA</p>
+  <p class="subtitle">Assistant IA</p>
   <h2>Mot de passe oublié ?</h2>
   <div class="msg info">
     La réinitialisation par email n'est pas encore activée.<br>
@@ -85,7 +85,7 @@ _PAGE_FORM = f"""<!DOCTYPE html>
 <style>{_BASE_STYLE}</style></head>
 <body><div class="page"><div class="card">
   <div class="logo">⚡ Ra<span>ya</span></div>
-  <p class="subtitle">Couffrant Solar — Assistant IA</p>
+  <p class="subtitle">Assistant IA</p>
   <h2>Mot de passe oublié ?</h2>
   <p class="desc">
     Entrez votre identifiant ou adresse email. Si un compte correspondant
@@ -109,7 +109,7 @@ _PAGE_SENT = f"""<!DOCTYPE html>
 <style>{_BASE_STYLE}</style></head>
 <body><div class="page"><div class="card">
   <div class="logo">⚡ Ra<span>ya</span></div>
-  <p class="subtitle">Couffrant Solar — Assistant IA</p>
+  <p class="subtitle">Assistant IA</p>
   <h2>Vérifiez votre boîte mail</h2>
   <div class="msg ok">
     Si un compte existe avec ces informations, un email de réinitialisation

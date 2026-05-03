@@ -323,10 +323,20 @@ def _execute_get_weather(inp: dict, username: str, tenant_id: str) -> dict:
     Non implemente en v2 initiale (pas de connecteur meteo dans le code
     actuel). A brancher plus tard via OpenWeatherMap ou similaire si besoin.
     """
+    # Si la requete ne specifie pas de location, on tombe sur la
+    # localisation du profil tenant (au lieu d un default Romorantin-Lanthenay
+    # PV-specifique). Si aucune des deux n est dispo, chaine vide.
+    location = inp.get("location", "").strip()
+    if not location and tenant_id:
+        try:
+            from app.tenant_manager import get_tenant_profile
+            location = (get_tenant_profile(tenant_id).get("location") or "").strip()
+        except Exception:
+            location = ""
     return {
         "error": "Connecteur meteo non disponible. Retire du registre v2 "
                  "initiale. Voir docs/a_faire.md pour le brancher plus tard.",
-        "location": inp.get("location", "Romorantin-Lanthenay"),
+        "location": location,
     }
 
 
