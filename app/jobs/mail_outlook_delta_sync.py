@@ -261,7 +261,9 @@ def _poll_folder_delta(token: str, folder_name: str,
 
 
 def _process_messages_via_pipeline(messages: list, username: str,
-                                     folder_name: str) -> dict:
+                                     folder_name: str,
+                                     connection_id: int = None,
+                                     mailbox_email: str = None) -> dict:
     """Mode WRITE : traite chaque message via process_incoming_mail.
 
     Reutilise le pipeline source-agnostic existant qui :
@@ -271,6 +273,10 @@ def _process_messages_via_pipeline(messages: list, username: str,
       - Analyse IA si demande
       - Insert dans mail_memory
       - Heartbeat + scoring urgence
+
+    Fix 04/05/2026 : on passe maintenant connection_id + mailbox_email pour
+    que chaque mail soit etiquete avec sa boite d origine reelle (sinon
+    impossible de distinguer les 2 boites Outlook entre elles).
 
     Returns:
         Dict {processed: int, skipped: int, errors: int}
@@ -320,6 +326,8 @@ def _process_messages_via_pipeline(messages: list, username: str,
                 received_at=received_at,
                 mailbox_source="outlook",
                 raw_body=raw_body,
+                mailbox_email=mailbox_email,
+                connection_id=connection_id,
             )
 
             if result in ("done_ai", "stored_simple", "fallback"):
@@ -365,9 +373,35 @@ def _poll_user_outlook(connection_id: int, tenant_id: str,
       - write  : appelle process_incoming_mail pour chaque message
     """
     from app.token_manager import get_valid_microsoft_token
+    from app.database import get_pg_conn
 
     poll_started = datetime.now()
     write_mode = _is_write_mode_enabled()
+
+    # Resolution de l adresse de boite reelle (fix 04/05/2026 : on ne veut
+    # plus mailbox_source generique 'outlook' ; on stocke l adresse exacte
+    # qui a recu le mail, pour eviter les confusions entre les 2 boites
+    # Outlook d un meme user).
+    mailbox_email = None
+    _conn_mb = None
+    try:
+        _conn_mb = get_pg_conn()
+        _c_mb = _conn_mb.cursor()
+        _c_mb.execute(
+            "SELECT connected_email FROM tenant_connections WHERE id = %s",
+            (connection_id,),
+        )
+        _row_mb = _c_mb.fetchone()
+        if _row_mb and _row_mb[0]:
+            mailbox_email = _row_mb[0]
+    except Exception as _e_mb:
+        logger.warning(
+            "[OutlookDelta] Recuperation mailbox_email echouee conn=%d : %s",
+            connection_id, str(_e_mb)[:150],
+        )
+    finally:
+        if _conn_mb:
+            _conn_mb.close()
 
     # Recupere le token utilisateur
     try:
@@ -426,6 +460,8 @@ def _poll_user_outlook(connection_id: int, tenant_id: str,
                 if write_mode and result["messages"]:
                     process_result = _process_messages_via_pipeline(
                         result["messages"], username, folder_name,
+                        connection_id=connection_id,
+                        mailbox_email=mailbox_email,
                     )
                     total_processed += process_result["processed"]
                     total_skipped += process_result["skipped_existing"]

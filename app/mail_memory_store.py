@@ -123,11 +123,11 @@ def insert_mail(data: dict):
                 needs_review, raw_body_preview, analysis_status, created_at,
                 needs_reply, reply_urgency, reply_reason, suggested_reply_subject,
                 suggested_reply, response_type, missing_fields, confidence_level,
-                mailbox_source, tenant_id, embedding
+                mailbox_source, tenant_id, mailbox_email, connection_id, embedding
             ) VALUES (
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                %s,%s,%s,%s,%s,%s,%s::vector
+                %s,%s,%s,%s,%s,%s,%s,%s,%s::vector
             ) ON CONFLICT DO NOTHING
         """, (
             username, data["message_id"],
@@ -151,6 +151,8 @@ def insert_mail(data: dict):
             data.get("confidence_level"),
             data.get("mailbox_source", "outlook"),
             tenant_id,
+            data.get("mailbox_email"),
+            data.get("connection_id"),
             vec_str,
         ))
     else:
@@ -162,11 +164,11 @@ def insert_mail(data: dict):
                 needs_review, raw_body_preview, analysis_status, created_at,
                 needs_reply, reply_urgency, reply_reason, suggested_reply_subject,
                 suggested_reply, response_type, missing_fields, confidence_level,
-                mailbox_source, tenant_id
+                mailbox_source, tenant_id, mailbox_email, connection_id
             ) VALUES (
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                 %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
-                %s,%s,%s,%s,%s,%s
+                %s,%s,%s,%s,%s,%s,%s,%s
             ) ON CONFLICT DO NOTHING
         """, (
             username, data["message_id"],
@@ -190,6 +192,8 @@ def insert_mail(data: dict):
             data.get("confidence_level"),
             data.get("mailbox_source", "outlook"),
             tenant_id,
+            data.get("mailbox_email"),
+            data.get("connection_id"),
         ))
 
     conn.commit()

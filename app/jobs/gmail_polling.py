@@ -46,6 +46,7 @@ def _job_gmail_polling():
                 for conn in gmail_conns:
                     total_boxes += 1
                     email = conn.get("email", "") or "?"
+                    cid = conn.get("connection_id")
                     try:
                         connector = GmailConnector(
                             username=username,
@@ -63,6 +64,8 @@ def _job_gmail_polling():
                                 message_id=msg.id,
                                 received_at=msg.date,
                                 mailbox_source="gmail",
+                                mailbox_email=email,
+                                connection_id=cid,
                             )
                             total_mails += 1
                     except Exception as e:
