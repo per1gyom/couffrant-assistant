@@ -610,8 +610,14 @@ def _run_scan(tenant_id: str, username: str, force_rescan: bool = False):
 
         logger.info("[DriveScanner] Cible : %s > %s",
                     folder["site_name"], folder["folder_name"])
+        # Fix 04/05/2026 : passer folder_path comme path_prefix initial
+        # pour que les paths produits soient absolus depuis la racine
+        # SharePoint (ex : "1_Photovoltaique/sous/fichier.pdf").
+        # Sans ce prefix, is_path_indexable rejette tout car le path
+        # ne matche pas la racine declaree dans drive_folders.
         files = _list_folder_recursive(token, folder["drive_id"],
-                                         folder["folder_id"])
+                                         folder["folder_id"],
+                                         path_prefix=folder.get("folder_path", ""))
         total = len(files)
         logger.info("[DriveScanner] %d fichiers detectes", total)
 
