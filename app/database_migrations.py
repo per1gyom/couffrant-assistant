@@ -442,6 +442,16 @@ MIGRATIONS = [
     "ALTER TABLE semantic_graph_edges ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
     "ALTER TABLE odoo_semantic_content ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
     "CREATE INDEX IF NOT EXISTS idx_sg_nodes_active ON semantic_graph_nodes (tenant_id, node_type) WHERE deleted_at IS NULL",
+    # -- Soft delete mail (Chantier 1, 04/05/2026) --
+    # Quand un mail est supprime depuis Gmail/Outlook, on ne le retire pas
+    # de la base : on marque deleted_at. Permet la restauration et evite
+    # qu un mail supprime "reapparaisse" via reconciliation.
+    # trashed_at = mail dans la corbeille (TRASH/DeletedItems) avant
+    # purge definitive (auto au bout de 30j ou suppression utilisateur).
+    "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP",
+    "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS trashed_at TIMESTAMP",
+    "CREATE INDEX IF NOT EXISTS idx_mm_active ON mail_memory (tenant_id, username) WHERE deleted_at IS NULL",
+    "CREATE INDEX IF NOT EXISTS idx_mm_trashed ON mail_memory (tenant_id, trashed_at) WHERE trashed_at IS NOT NULL AND deleted_at IS NULL",
     # -- Phase Permissions tenant Read/Write/Delete (18/04/2026 soir) --
     # Plan : docs/raya_permissions_plan.md
     # Hierarchie : super_admin > tenant_admin > user (v2)
