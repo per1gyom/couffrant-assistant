@@ -4,6 +4,77 @@
 
 ---
 
+## Session 04/05/2026 soir + 05/05/2026 minuit — Marathon sécurité (6 commits + 1 revert + 1 reapply)
+
+**Thème principal** : Audit complet du système de permissions, suppression des chemins d'exécution dangereux, mur physique branché sur les tools agentiques, UX pending actions, et début du chantier "débridage Raya".
+
+**Déclencheur** : Guillaume a signalé un incident où ~100 mails ont disparu de contact@couffrant-solar.fr en 1 mois, et a demandé un audit du système de permissions par connexion. L'investigation a révélé que le système était CONÇU et CODÉ depuis le 18/04 mais BRANCHÉ NULLE PART sur le chemin d'exécution moderne (tools agentiques).
+
+### Commits poussés en prod
+
+- `a9a40e3` — feat(mail) : cœur fonctionnel suppression Gmail/Outlook + purge 30j
+  - Détection messagesDeleted dans Gmail history + labelsAdded/Removed pour TRASH
+  - Soft-delete des `@removed` Outlook au lieu de skip silencieux
+  - Cron quotidien 03h15 `_job_purge_trashed_mails` qui passe les `trashed_at < NOW() - 30 days` en `deleted_at`
+  - Effet : graphe et mail_memory restent fidèles à la source
+
+- `9874d6a` — fix(sécurité) : suppression chemins B dangereux (DELETE/ARCHIVE/REPLY/CREATEEVENT direct)
+  - Dans `mail_actions.py` : suppression des blocs qui exécutaient `perform_outlook_action` SANS confirmation quand `mail_can_delete=True`
+  - Dans `tools_seed_data.py` : retrait des 4 entrées correspondantes
+  - Dans `aria_context.py` : remplacement de l'instruction "Si l'utilisateur dit 'corbeille', génère [ACTION:DELETE]" par une directive d'utiliser les tools agentiques
+  - Dans `prompt_actions.py` : retrait des mentions des 4 balises
+  - Effet : toute action destructive doit OBLIGATOIREMENT passer par `pending_actions` + carte de confirmation
+
+- `dd2c9c2` — fix(ux) : pending actions sans rattachement → badge timestamp clair
+  - Bug remarqué par Guillaume : 14 cartes DELETE Studeria créées à 13:38 mais avec `conversation_id=NULL`. Quand Guillaume rouvrait le chat à 17:57, le frontend les affichait après le dernier message Raya, donnant l'illusion qu'elles venaient d'être créées par cette nouvelle question.
+  - Fix : quand le rattachement par `conversation_id` échoue, ON N AJOUTE PLUS la carte après le dernier message Raya. À la place : `appendToChat` en bas avec un BADGE timestamp clair "Action en attente — créée le 04/05 à 13:38".
+  - Risque : faible, modification frontend uniquement.
+  - Limitation connue : 39/50 actions historiques ont `conversation_id=NULL` car les tools agentiques sont appelés AVANT que `aria_memory_id` soit créé. Sera fixé dans un commit backend séparé (UX 1.2) qui pré-créera `aria_memory` au début de la requête.
+
+- `04a6fa3` puis revert `81e5f67` puis reapply `b7801eb` — feat(security) : MUR PHYSIQUE permissions sur tools agentiques + bug fix DELETE/ARCHIVE simples
+  - Nouveau dans `permissions.py` : `check_permission_for_tool(tenant_id, username, tool_name, tool_input)` qui :
+    1. Mappe `tool_name` → `action_tag` (delete_mail → DELETE_MAIL)
+    2. Résout `connection_id` depuis `tool_input` :
+       - tools mail (delete/archive/reply) : lookup `mail_memory` par `mail_id` → `mailbox_email` → `tenant_connections.id`
+       - send_mail : utilise le `provider` (outlook/gmail) du payload
+       - calendar/teams/drive : première connexion appropriée du tenant
+    3. Récupère niveau effectif (cap entre `super_admin_permission_level` et `tenant_admin_permission_level`)
+    4. Compare avec niveau requis via `level_satisfies()`
+    5. Log dans `permission_audit_log`
+    6. Retourne dict `{allowed, reason, details}` avec `current_level`, `required_level`, `remediation` que l'agent peut interpréter et relayer
+  - Branchement #1 : dans `_execute_pending_action` (raya_tool_executors.py) AVANT la création de la pending_action. Si refus → retour JSON `permission_denied` à Raya avec détails. L'agent comprend, ne réessaie pas, explique à l'utilisateur.
+  - Branchement #2 : dans `_execute_confirmed_action` (confirmations.py) AVANT l'exécution réelle (défense en profondeur). Si l'admin a modifié le niveau entre la création de la carte et le clic Confirmer, la nouvelle politique s'applique.
+  - Bug fix bonus : `_execute_confirmed_action` ne gérait pas `action_type='DELETE'` ni `'ARCHIVE'` simples (seulement `DELETE_GROUPED`). C'est ce qui produisait *"Type d'action inconnu : DELETE"* dans le chat de Guillaume au clic Confirmer. Handlers ajoutés.
+  - Incident Railway 502 (~23h) : après push, l'app a passé en 502. Diagnostic : `init_postgres()` prend 29.5s en local (260 commandes SQL de migration rejouées à chaque démarrage). Sur Railway, timeout dépassé pendant que la DB était lente. Cause finale = Railway lui-même après 5 push en 2h, pas le code. Revert puis re-push après stabilisation.
+
+### Modifications en base
+
+- **3 règles `aria_rules` désactivées** (id 71, 76, 187) : "DELETE = action directe sans confirmation". Plus actives, n'influencent plus le contexte Raya.
+- **Permissions ajustées sur les 9 connexions Couffrant Solar** :
+  - 6 boîtes mail perso/SCI (per1.guillaume, guillaume@couffrant-solar.fr, GPLH, Romagui, Gaucherie, MTBR) → `read_write_delete`
+  - contact@couffrant-solar.fr, SharePoint Commun, Odoo Openfire → `read`
+
+### Découvertes importantes
+
+1. **Le système permissions était inerte** depuis sa création le 18/04 : la table `permission_audit_log` était totalement vide. Le check n'était appelé que dans 5 endroits anciens (SEND_MAIL via balise + 4 dans Odoo). Le chemin moderne (tools agentiques) ne le vérifiait jamais.
+
+2. **Bug `_tool_type_for_action`** : pour SEND_MAIL il renvoyait `'mailbox'` mais `tenant_connections.tool_type` contient `'gmail'`/`'microsoft'`/`'outlook'`. Donc la lookup retournait toujours `None` → permission jamais bloquée.
+
+3. **Bootstrap contact@ jamais fait** : seulement 1 mail en `mail_memory` pour cette boîte (envoyé par Guillaume à 15:08 le 04/05, capturé par delta-sync). L'incident "100 mails disparus" est donc presque certainement une règle Outlook côté serveur, pas Raya. Mais sans bootstrap, on ne peut pas le vérifier en relisant les anciens mails.
+
+4. **Vision "débridage Raya" validée par Guillaume** : Raya bute sur des choses simples parce qu'elle n'a pas accès à la DB ni au code, contrairement à Claude qui aide Guillaume. Solution : donner à Raya des tools de lecture seule sur la DB et le code, encourager le doute légitime, améliorer les retours d'erreur. Chantier à attaquer dans une prochaine session.
+
+### Leçons retenues
+
+- **Privilégier Desktop Commander sur `postgres:query`** : `postgres:query` est instable, plante souvent. DC + `python3 + psycopg2` est plus fiable.
+- **Étapes courtes** : longues bloquent le MCP. Découper.
+- **Espacer les push sur Railway** : 5 push en 2h = startup en boucle, 502 perpétuel.
+- **Garder un revert prêt** en cas de doute sur Railway.
+- **Désactiver les règles `aria_rules` contradictoires** quand on supprime le code qui les sous-tend, sinon l'agent garde la croyance même si le code ne le permet plus.
+
+---
+
+
 ## Session 17/04/2026 soir (22h-23h) — Mermaid : schémas graphiques SVG
 
 **Objectif** : remplacer l'art ASCII illisible par de vrais schémas

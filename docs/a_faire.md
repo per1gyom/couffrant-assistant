@@ -1,8 +1,47 @@
 # À faire — Roadmap Raya
 
-> **📌 État système le plus à jour** : voir `docs/etat_04mai_2026.pdf` pour la photo réelle des connexions, du graphe et des problèmes ouverts.
+> **📌 État système le plus à jour** : voir `docs/prompt_reprise_05mai_matin.md` pour la photo complète post-session marathon sécurité du 04/05 soir.
 
 ---
+
+## ✅ Session 4 mai 2026 SOIR + 5 mai 00h — Marathon sécurité
+
+**Thème** : audit système permissions + suppression chemins dangereux + mur physique + UX pending actions.
+
+### Commits poussés sur main
+
+- `a9a40e3` — feat(mail) : cœur fonctionnel suppression Gmail/Outlook + purge 30j
+- `9874d6a` — fix(sécurité) : suppression chemins B dangereux (DELETE/ARCHIVE/REPLY/CREATEEVENT direct)
+- `dd2c9c2` — fix(ux) : pending actions sans rattachement → badge timestamp clair
+- `04a6fa3` puis `81e5f67` (revert) puis `b7801eb` (reapply) — feat(security) : MUR PHYSIQUE permissions sur tools agentiques + bug fix DELETE/ARCHIVE simples
+
+### Modifications en base (Couffrant Solar)
+
+- 3 règles `aria_rules` désactivées (id 71, 76, 187) qui poussaient à supprimer sans confirmation
+- Permissions ajustées :
+  - 6 boîtes mail perso/SCI (per1.guillaume, guillaume@couffrant-solar.fr, GPLH, Romagui, Gaucherie, MTBR) → `read_write_delete`
+  - contact@couffrant-solar.fr, SharePoint Commun, Odoo Openfire → `read`
+
+### Reste à faire en URGENCE après cette session
+
+1. **Bootstrap historique contact@** — Guillaume va le lancer ce soir/demain via panel super admin (1 seul mail en base actuellement, manque ~100 mails du dernier mois)
+2. **Exposer le `mail_id` dans `search_mail`** (5-10 min) — actuellement Raya ne peut pas appeler `delete_mail(mail_id="...")` car les IDs techniques ne sont pas dans le retour formaté de `search_mail`
+3. **Pré-créer `aria_memory` au début de la requête** (UX 1.2 backend) — pour que TOUTES les nouvelles pending actions aient un `conversation_id` et puissent être rattachées au bon message
+
+### Chantier "DÉBRIDAGE Raya" — vision validée
+
+**Objectif** : que Raya puisse diagnostiquer, auditer, sortir de ses tools métier comme Claude le fait avec Desktop Commander.
+
+À implémenter dans une prochaine session :
+- Tool `query_database` (lecture seule, périmètre filtré)
+- Tool `read_code` (lecture du repo)
+- Tool `web_search` étendu
+- Encourager le doute légitime dans le prompt système
+- Améliorer les retours d'erreur des tools (messages explicites)
+- **Sécurité** : JAMAIS d'écriture pour Raya. Si elle suggère, Guillaume valide, Claude implémente.
+
+---
+
 
 ## ✅ Session 4 mai 2026 — bilan rapide
 
