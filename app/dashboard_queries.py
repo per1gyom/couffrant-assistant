@@ -24,6 +24,7 @@ def get_dashboard(days: int = 2, username: str = None,
         WHERE username = %s
           AND (tenant_id = %s OR tenant_id IS NULL)
           AND received_at >= %s
+          AND deleted_at IS NULL
         ORDER BY received_at DESC
     """, (username, tenant_id, start_date))
     columns = [desc[0] for desc in c.description]

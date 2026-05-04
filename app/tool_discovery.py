@@ -389,6 +389,7 @@ def discover_contacts(tenant_id: str, username: str, connection_id: int = None) 
             WHERE username = %s
               AND (tenant_id = %s OR tenant_id IS NULL)
               AND from_email IS NOT NULL AND from_email != ''
+              AND deleted_at IS NULL
             GROUP BY from_email
             HAVING COUNT(*) >= 2
             ORDER BY MAX(received_at) DESC

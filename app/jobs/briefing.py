@@ -83,6 +83,7 @@ def _prepare_briefings(username: str):
             f"WHERE username = %s "
             f"  AND (tenant_id = %s OR tenant_id IS NULL) "
             f"  AND from_email IN ({placeholders}) "
+            f"  AND deleted_at IS NULL "
             f"ORDER BY received_at DESC LIMIT 5",
             [username, tenant_id] + attendee_emails,
         )

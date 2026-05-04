@@ -72,6 +72,7 @@ def rebuild_contacts(tenant_id: str = DEFAULT_TENANT) -> int:
             FROM mail_memory
             WHERE from_email IS NOT NULL AND from_email != ''
               AND username IN (SELECT username FROM users WHERE tenant_id = %s)
+              AND deleted_at IS NULL
             GROUP BY from_email HAVING COUNT(*) >= 2
             ORDER BY MAX(received_at) DESC LIMIT 50
         """, (tenant_id,))
@@ -90,6 +91,7 @@ def rebuild_contacts(tenant_id: str = DEFAULT_TENANT) -> int:
                 FROM mail_memory
                 WHERE from_email IS NOT NULL AND from_email != ''
                   AND tenant_id = %s
+                  AND deleted_at IS NULL
                 GROUP BY from_email HAVING COUNT(*) >= 2
                 ORDER BY MAX(received_at) DESC LIMIT 50
             """, (tenant_id,))
