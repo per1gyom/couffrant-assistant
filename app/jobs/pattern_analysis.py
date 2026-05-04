@@ -75,6 +75,7 @@ def _analyze_patterns(username: str):
         WHERE username = %s
           AND (tenant_id = %s OR tenant_id IS NULL)
           AND created_at > NOW() - INTERVAL '30 days'
+          AND deleted_at IS NULL
         ORDER BY created_at DESC LIMIT 100
     """, (username, tenant_id))
     mails = [

@@ -79,6 +79,7 @@ def _scan_user_inner(username: str, conn):
         WHERE username = %s
           AND (tenant_id = %s OR tenant_id IS NULL)
           AND priority = 'haute'
+          AND deleted_at IS NULL
           AND created_at::timestamp > NOW() - INTERVAL '48 hours'
           AND created_at::timestamp < NOW() - INTERVAL '2 hours'
           AND id NOT IN (
@@ -105,6 +106,7 @@ def _scan_user_inner(username: str, conn):
         WHERE username = %s
           AND (tenant_id = %s OR tenant_id IS NULL)
           AND needs_reply = 1 AND reply_status = 'pending'
+          AND deleted_at IS NULL
           AND created_at::timestamp < NOW() - INTERVAL '24 hours'
           AND created_at::timestamp > NOW() - INTERVAL '7 days'
           AND id NOT IN (

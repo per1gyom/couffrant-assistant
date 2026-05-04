@@ -116,6 +116,7 @@ def push_mail_to_graph(mail_id: int) -> Optional[int]:
                    mailbox_email, connection_id
             FROM mail_memory
             WHERE id = %s
+              AND deleted_at IS NULL
         """, (mail_id,))
         row = c.fetchone()
         if not row:
@@ -217,6 +218,7 @@ def push_all_mails_to_graph(tenant_id: str,
             SELECT id, subject, from_email, mailbox_email
             FROM mail_memory
             WHERE tenant_id = %s
+              AND deleted_at IS NULL
             ORDER BY id ASC
         """
         params = (tenant_id,)

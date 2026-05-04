@@ -87,6 +87,7 @@ def _check_user_anomalies(username: str):
         WHERE username = %s
           AND (tenant_id = %s OR tenant_id IS NULL)
           AND created_at > NOW() - INTERVAL '30 days'
+          AND deleted_at IS NULL
           AND (raw_body_preview ILIKE '%€%'
             OR raw_body_preview ILIKE '%EUR%'
             OR raw_body_preview ILIKE '%montant%'
