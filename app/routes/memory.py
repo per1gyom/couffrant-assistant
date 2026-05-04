@@ -194,6 +194,7 @@ def memory_list(request: Request, user: dict = Depends(require_user)):
             "SELECT message_id,received_at,from_email,subject,display_title,"
             "category,priority,analysis_status FROM mail_memory "
             "WHERE username=%s AND (tenant_id = %s OR tenant_id IS NULL) "
+            "  AND deleted_at IS NULL "
             "ORDER BY id DESC LIMIT 20",
             (username, tenant_id)
         )

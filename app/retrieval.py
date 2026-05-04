@@ -695,6 +695,7 @@ def _dense_search_mail(
             FROM mail_memory
             WHERE tenant_id = %s AND username = %s
               AND embedding IS NOT NULL
+              AND deleted_at IS NULL
             ORDER BY embedding <=> %s::vector
             LIMIT %s
         """, (vec_str, tenant_id, username, vec_str, limit))

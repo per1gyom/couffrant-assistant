@@ -40,6 +40,7 @@ def rebuild_hot_summary(username: str = None,
                    received_at, mailbox_source
             FROM mail_memory
             WHERE username = %s AND (tenant_id = %s OR tenant_id IS NULL)
+              AND deleted_at IS NULL
             ORDER BY received_at DESC NULLS LAST LIMIT 30
         """, (username, tenant_id))
         cols = [d[0] for d in c.description]

@@ -39,6 +39,7 @@ def load_db_context(username: str, tenant_id: str | None = None) -> dict:
             FROM mail_memory
             WHERE username = %s
               AND (tenant_id = %s OR tenant_id IS NULL)
+              AND deleted_at IS NULL
             ORDER BY received_at DESC NULLS LAST LIMIT 10
         """, (username, tenant_id))
         columns = [desc[0] for desc in c.description]
