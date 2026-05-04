@@ -675,9 +675,15 @@ def _dense_search_mail(
     username: str,
     query_embedding: list,
     limit: int = HYBRID_TOP_N,
+    mailbox: Optional[str] = None,
 ) -> list:
     """Recherche pgvector sur mail_memory.
     Scope : tenant_id + username (mails scopés par utilisateur).
+    Si mailbox est fourni (ex: 'guillaume@couffrant-solar.fr'),
+    restreint la recherche a cette boite uniquement (filtre
+    mailbox_email). Indispensable pour les actions ciblees type
+    'tri dans ma boite Couffrant Solar' qui ne doivent pas
+    remonter de mails d autres boites mail.
     text_content reconstruit = subject + short_summary + raw_body_preview
     pour que Cohere ait du contexte riche au reranking."""
     if not username:
@@ -687,7 +693,13 @@ def _dense_search_mail(
         conn = get_pg_conn()
         c = conn.cursor()
         vec_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
-        c.execute("""
+        mbx_clause = ""
+        params = [vec_str, tenant_id, username]
+        if mailbox:
+            mbx_clause = " AND mailbox_email = %s"
+            params.append(mailbox)
+        params.extend([vec_str, limit])
+        c.execute(f"""
             SELECT id, message_id, thread_id, from_email, subject,
                    short_summary, raw_body_preview, received_at,
                    category, mailbox_source, display_title,
@@ -696,9 +708,10 @@ def _dense_search_mail(
             WHERE tenant_id = %s AND username = %s
               AND embedding IS NOT NULL
               AND deleted_at IS NULL
+              {mbx_clause}
             ORDER BY embedding <=> %s::vector
             LIMIT %s
-        """, (vec_str, tenant_id, username, vec_str, limit))
+        """, params)
         results = []
         for idx, row in enumerate(c.fetchall()):
             subject = row[4] or ""
@@ -880,6 +893,7 @@ def unified_search(
     top_k_final: int = UNIFIED_FINAL_TOP_K,
     use_rerank: bool = True,
     enrich_graph: bool = True,
+    mailbox: Optional[str] = None,
 ) -> dict:
     """Recherche multi-source parallèle sur toutes les mémoires de Raya.
 
@@ -941,7 +955,7 @@ def unified_search(
                     _dense_search_drive, tenant_id, query_vec, top_n_fusion)
         if "mail" in sources and query_vec and username:
             futures["dn_mail"] = executor.submit(
-                _dense_search_mail, tenant_id, username, query_vec, top_n_fusion)
+                _dense_search_mail, tenant_id, username, query_vec, top_n_fusion, mailbox)
         if "conversation" in sources and query_vec and username:
             futures["dn_conv"] = executor.submit(
                 _dense_search_conversation, tenant_id, username, query_vec, top_n_fusion)

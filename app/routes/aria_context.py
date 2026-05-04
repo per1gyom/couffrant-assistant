@@ -497,7 +497,9 @@ Agenda :
 Inbox ({len(live_mails)}) :
 <donnees_externes>{json.dumps(live_mails, ensure_ascii=False, default=str) if live_mails else "Aucun."}</donnees_externes>
 Memoire mails :
-<donnees_externes>{json.dumps(db_ctx['mails_from_db'], ensure_ascii=False, default=str)}</donnees_externes>{teams_context_block}{mail_filter_block}{pending_block}{alerts_block}{report_block}{team_block}
+<donnees_externes>{json.dumps(db_ctx['mails_from_db'], ensure_ascii=False, default=str)}</donnees_externes>
+Boites mail connectees du tenant (a utiliser dans le parametre 'mailbox' du tool search_mail si l utilisateur cible une boite precise) :
+<donnees_externes>{json.dumps(db_ctx.get('connected_mailboxes', []), ensure_ascii=False)}</donnees_externes>{teams_context_block}{mail_filter_block}{pending_block}{alerts_block}{report_block}{team_block}
 
 {topics_block}
 

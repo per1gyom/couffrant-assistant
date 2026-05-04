@@ -63,7 +63,26 @@ def load_db_context(username: str, tenant_id: str | None = None) -> dict:
             "WHERE username = %s AND (tenant_id = %s OR tenant_id IS NULL)",
             (username, tenant_id))
         conv_count = c.fetchone()[0]
-        return {"mails_from_db": mails_from_db, "history": history, "conv_count": conv_count}
+
+        # Liste des boites mail connectees du tenant (pour que Raya puisse
+        # passer le bon mailbox_email au tool search_mail quand l utilisateur
+        # cible une boite precise type 'tri dans ma boite Couffrant Solar').
+        c.execute("""
+            SELECT DISTINCT mailbox_email
+            FROM mail_memory
+            WHERE (tenant_id = %s OR tenant_id IS NULL)
+              AND mailbox_email IS NOT NULL
+              AND deleted_at IS NULL
+            ORDER BY mailbox_email
+        """, (tenant_id,))
+        connected_mailboxes = [row[0] for row in c.fetchall()]
+
+        return {
+            "mails_from_db": mails_from_db,
+            "history": history,
+            "conv_count": conv_count,
+            "connected_mailboxes": connected_mailboxes,
+        }
     finally:
         if conn: conn.close()
 

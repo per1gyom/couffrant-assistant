@@ -125,13 +125,26 @@ TOOL_SEARCH_MAIL = {
     "name": "search_mail",
     "description": (
         "Recherche dans les mails analyses (Outlook et Gmail). Remonte les mails "
-        "dont le contenu, l objet ou l expediteur correspond a la requete."
+        "dont le contenu, l objet ou l expediteur correspond a la requete. "
+        "IMPORTANT : si l utilisateur cible une boite mail precise (ex: 'tri "
+        "dans ma boite Couffrant Solar', 'mes mails perso', 'la boite GPLH'), "
+        "passe le parametre mailbox avec l adresse exacte de la boite. La liste "
+        "des boites connectees du tenant est fournie dans le contexte initial."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
             "query": {"type": "string"},
             "max_results": {"type": "integer", "default": 10},
+            "mailbox": {
+                "type": "string",
+                "description": (
+                    "Adresse email exacte d une boite mail connectee pour "
+                    "restreindre la recherche a cette boite uniquement. "
+                    "Ex: 'guillaume@couffrant-solar.fr' ou 'per1.guillaume@gmail.com'. "
+                    "Laisser vide pour chercher sur toutes les boites."
+                ),
+            },
         },
         "required": ["query"],
     },

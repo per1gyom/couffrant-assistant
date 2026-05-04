@@ -203,6 +203,7 @@ def _execute_search_mail(inp: dict, username: str, tenant_id: str) -> dict:
 
     query = inp.get("query", "")
     max_results = inp.get("max_results", 10)
+    mailbox = inp.get("mailbox")  # filtre optionnel sur une boite mail precise
 
     data = unified_search(
         query=query,
@@ -210,9 +211,11 @@ def _execute_search_mail(inp: dict, username: str, tenant_id: str) -> dict:
         tenant_id=tenant_id,
         top_k_final=max_results,
         sources=["mail"],
+        mailbox=mailbox,
     )
     return {
         "query": query,
+        "mailbox": mailbox,
         "count": len(data.get("results", [])),
         "formatted": format_unified_results(data, max_items=max_results),
     }
