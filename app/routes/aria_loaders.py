@@ -64,18 +64,27 @@ def load_db_context(username: str, tenant_id: str | None = None) -> dict:
             (username, tenant_id))
         conv_count = c.fetchone()[0]
 
-        # Liste des boites mail connectees du tenant (pour que Raya puisse
-        # passer le bon mailbox_email au tool search_mail quand l utilisateur
-        # cible une boite precise type 'tri dans ma boite Couffrant Solar').
+        # Liste des boites mail connectees du tenant - SOURCE DE VERITE :
+        # tenant_connections.status='connected'. Ne pas se baser sur
+        # mail_memory : une boite recemment deconnectee garde ses mails
+        # historiques en base, et une boite recemment connectee n a pas
+        # encore de mails. La vraie liste vivante est dans tenant_connections.
         c.execute("""
-            SELECT DISTINCT mailbox_email
-            FROM mail_memory
-            WHERE (tenant_id = %s OR tenant_id IS NULL)
-              AND mailbox_email IS NOT NULL
-              AND deleted_at IS NULL
-            ORDER BY mailbox_email
+            SELECT connected_email, label
+            FROM tenant_connections
+            WHERE tenant_id = %s
+              AND tool_type IN ('gmail','microsoft','outlook')
+              AND status = 'connected'
+              AND connected_email IS NOT NULL
+            ORDER BY connected_email
         """, (tenant_id,))
-        connected_mailboxes = [row[0] for row in c.fetchall()]
+        # Format : [{"email": "...", "label": "..."}]
+        # Le label permet a Raya de matcher 'Romagui', 'Gaucherie', etc.
+        # vers la bonne adresse exacte.
+        connected_mailboxes = [
+            {"email": row[0], "label": row[1] or row[0]}
+            for row in c.fetchall()
+        ]
 
         return {
             "mails_from_db": mails_from_db,

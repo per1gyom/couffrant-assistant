@@ -498,7 +498,7 @@ Inbox ({len(live_mails)}) :
 <donnees_externes>{json.dumps(live_mails, ensure_ascii=False, default=str) if live_mails else "Aucun."}</donnees_externes>
 Memoire mails :
 <donnees_externes>{json.dumps(db_ctx['mails_from_db'], ensure_ascii=False, default=str)}</donnees_externes>
-Boites mail connectees du tenant (a utiliser dans le parametre 'mailbox' du tool search_mail si l utilisateur cible une boite precise) :
+Boites mail connectees du tenant (source de verite : tenant_connections.status='connected', mise a jour automatiquement). Format : liste d objets avec 'email' (a passer dans le parametre mailbox du tool search_mail si l utilisateur cible une boite precise) et 'label' (nom court ex: 'Romagui', 'GPLH', utilisable pour matcher ce que dit l utilisateur) :
 <donnees_externes>{json.dumps(db_ctx.get('connected_mailboxes', []), ensure_ascii=False)}</donnees_externes>{teams_context_block}{mail_filter_block}{pending_block}{alerts_block}{report_block}{team_block}
 
 {topics_block}
