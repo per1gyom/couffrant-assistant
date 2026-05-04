@@ -32,6 +32,36 @@ _SHARED_POOL=concurrent.futures.ThreadPoolExecutor(max_workers=6)
 logger=get_logger("raya.core")
 
 
+def _extract_suggestions(text: str) -> list:
+    """Extrait les balises [ACTION:SUGGEST:cat:texte] ou [ACTION:SUGGEST:texte].
+
+    Format attendu :
+      [ACTION:SUGGEST:texte clair de l action]
+      [ACTION:SUGGEST:delete:texte]   <- categorie pour choisir l icone
+      [ACTION:SUGGEST:info:texte]
+      [ACTION:SUGGEST:search:texte]
+      [ACTION:SUGGEST:reply:texte]
+
+    Retourne : [{"category": "delete"|"info"|"search"|"reply"|"default",
+                 "text": "..."}]
+    Les balises sont retirees du texte par _strip_action_tags() ensuite.
+    """
+    out = []
+    KNOWN_CATS = {"delete", "info", "search", "reply", "default"}
+    pattern = re.compile(r'`?\[ACTION:SUGGEST:([^\]]+)\]`?')
+    for m in pattern.finditer(text):
+        body = m.group(1).strip()
+        # Detecter une categorie eventuelle en prefixe (cat:texte)
+        if ":" in body:
+            head, tail = body.split(":", 1)
+            head = head.strip().lower()
+            if head in KNOWN_CATS:
+                out.append({"category": head, "text": tail.strip()})
+                continue
+        out.append({"category": "default", "text": body})
+    return out
+
+
 def _strip_action_tags(text: str) -> str:
     """Retire les tags [ACTION:...] en gérant les crochets imbriqués (domaines Odoo, JSON)."""
     result = []
@@ -177,6 +207,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
     #   crochets imbriqués correctement. Il n'y a plus besoin de regex
     #   agressives en filet de sécurité.
     _original_raya = raya_response
+    suggestions = _extract_suggestions(raya_response)
     clean_response = _strip_action_tags(raya_response)
     speak_speed = None
     speed_match = re.search(r'\[SPEAK_SPEED:([\d.]+)\]', clean_response)
@@ -368,6 +399,7 @@ def _raya_core(request: Request, payload: RayaQuery, username: str, tenant_id: s
         "answer":          clean_response,
         "actions":         actions_confirmed,
         "pending_actions": updated_pending,
+        "suggestions":     suggestions,
         "aria_memory_id":  aria_memory_id,
         "model_tier":      model_tier,
         "ask_choice":      ask_choice,

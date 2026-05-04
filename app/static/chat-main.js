@@ -243,6 +243,14 @@ async function sendMessage() {
       // Aide lutilisateur a juger si la reponse merite un clic "Approfondir".
       addModelBadge(msgRow, data.model_tier);
 
+      // ──── BOUTONS SUGGEST (suggestions de suite) ────
+      // Si Raya a ecrit [ACTION:SUGGEST:...] dans sa reponse, le backend
+      // les a extraits dans data.suggestions. On affiche des boutons
+      // cliquables qui re-soumettent le texte comme nouveau message.
+      if (data.suggestions && data.suggestions.length > 0) {
+        renderSuggestions(msgRow, data.suggestions);
+      }
+
       // ──── V2.4 : BOUTON "APPROFONDIR AVEC OPUS" ────
       // Si Sonnet a repondu (tier smart), on propose lapprofondissement Opus.
       // Conditions internes a renderDeepenButton : pas derreur, pas de

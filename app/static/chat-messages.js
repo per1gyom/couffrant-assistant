@@ -476,6 +476,48 @@ function renderAskChoice(choiceData) {
   if (!document.getElementById('raya-scroll-spacer')) scrollToBottom();
 }
 
+// --- SUGGESTIONS (boutons cliquables genere par [ACTION:SUGGEST:...]) ---
+// Mappe chaque categorie a un SVG Lucide inline. Pas d emoji.
+const _SUGGEST_ICONS = {
+  delete: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-2 14a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>',
+  info:   '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+  search: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+  reply:  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>',
+  default:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',
+};
+const _SUGGEST_CHEVRON = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+
+function renderSuggestions(msgRow, suggestions) {
+  if (!suggestions || !suggestions.length) return;
+  const zone = document.createElement('div');
+  zone.className = 'suggest-zone';
+  suggestions.forEach(sug => {
+    const btn = document.createElement('button');
+    btn.className = 'suggest-btn';
+    btn.dataset.text = sug.text;
+    const cat = (sug.category || 'default').toLowerCase();
+    const icon = _SUGGEST_ICONS[cat] || _SUGGEST_ICONS.default;
+    btn.innerHTML =
+      '<span class="suggest-ico">' + icon + '</span>' +
+      '<span class="suggest-text">' + (sug.text || '').replace(/[<>]/g, c => c === '<' ? '&lt;' : '&gt;') + '</span>' +
+      '<span class="suggest-chev">' + _SUGGEST_CHEVRON + '</span>';
+    btn.onclick = () => {
+      // Desactive toute la zone, re-soumet le texte comme nouveau message
+      zone.querySelectorAll('button').forEach(b => b.disabled = true);
+      zone.style.opacity = '0.6';
+      if (typeof inputEl !== 'undefined' && inputEl) {
+        inputEl.value = sug.text;
+        if (typeof sendMessage === 'function') sendMessage();
+      }
+    };
+    zone.appendChild(btn);
+  });
+  // Insere apres la bulle de Raya
+  const bubble = msgRow.querySelector('.bubble');
+  if (bubble) bubble.appendChild(zone);
+  else msgRow.appendChild(zone);
+}
+
 // --- ACTIONS EN ATTENTE (inline dans le chat) ---
 const _shownActionIds = new Set();
 
