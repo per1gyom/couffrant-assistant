@@ -672,6 +672,40 @@ def _execute_pending_action(
     action_type = ACTION_TYPE_MAP.get(tool_name, tool_name.upper())
     label = _generate_action_label(tool_name, tool_input)
 
+    # ── MUR PHYSIQUE PERMISSIONS (04/05/2026) ──
+    # Avant de creer la pending_action, on verifie que la connexion ciblee
+    # autorise ce niveau d action. Si refus -> on retourne a l agent un
+    # JSON clair, l agent ne reessaie pas et explique a l utilisateur.
+    try:
+        from app.permissions import check_permission_for_tool
+        verdict = check_permission_for_tool(
+            tenant_id=tenant_id, username=username,
+            tool_name=tool_name, tool_input=tool_input,
+            user_input_excerpt=label[:200],
+        )
+        if not verdict.get("allowed", True):
+            return _json.dumps({
+                "status": "permission_denied",
+                "reason": verdict.get("reason", "Action refusee"),
+                "details": verdict.get("details", {}),
+                "message": (
+                    "Cette action est BLOQUEE par le systeme de permissions. "
+                    "Ne reessaie pas. Explique a l utilisateur le refus en "
+                    "utilisant les details ci-dessus."
+                ),
+            }, ensure_ascii=False)
+    except Exception:
+        # En cas d erreur du systeme permissions, on bloque par securite
+        # plutot que d autoriser silencieusement.
+        logger.exception("[ToolExec] check_permission_for_tool a leve une exception")
+        return _json.dumps({
+            "status": "permission_check_error",
+            "message": (
+                "Le systeme de permissions a rencontre une erreur. "
+                "Action refusee par securite. Informe l utilisateur."
+            ),
+        }, ensure_ascii=False)
+
     conn = get_pg_conn()
     try:
         c = conn.cursor()

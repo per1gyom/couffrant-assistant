@@ -51,6 +51,63 @@ def _execute_confirmed_action(action: dict, outlook_token: str, tools: dict) -> 
     action_type = action["action_type"]
     payload = action["payload"]
     username = action.get("username", "")
+    tenant_id = action.get("tenant_id", "")
+
+    # ── MUR PHYSIQUE PERMISSIONS (defense en profondeur, 04/05/2026) ──
+    # Re-check au moment de l execution reelle. Meme si une carte avait
+    # ete creee en pending (ce qui ne devrait pas arriver depuis le check
+    # dans _execute_pending_action), on verifie une seconde fois ici. Si
+    # l admin a modifie la permission entre la creation et la confirmation,
+    # le verdict reflete l etat courant.
+    _ACTION_TYPE_TO_TOOL = {
+        "SEND_MAIL": "send_mail", "SEND_GMAIL": "send_mail",
+        "REPLY": "reply_to_mail",
+        "ARCHIVE": "archive_mail",
+        "DELETE": "delete_mail", "DELETE_GROUPED": "delete_mail",
+        "CREATE_EVENT": "create_calendar_event",
+        "CREATEEVENT":  "create_calendar_event",
+        "UPDATE_EVENT": "create_calendar_event",
+        "DELETE_EVENT": "create_calendar_event",
+        "TEAMS_MSG": "send_teams_message",
+        "TEAMS_REPLYCHAT": "send_teams_message",
+        "TEAMS_SENDCHANNEL": "send_teams_message",
+        "TEAMS_GROUPE": "send_teams_message",
+        "MOVEDRIVE": "move_drive_file",
+        "COPYFILE": "move_drive_file",
+    }
+    tool_name_eq = _ACTION_TYPE_TO_TOOL.get(action_type)
+    if tool_name_eq and tenant_id:
+        # Construire un tool_input minimal pour la resolution
+        if action_type == "DELETE_GROUPED":
+            ids = payload.get("message_ids", [])
+            check_input = {"mail_id": ids[0]} if ids else {}
+        elif action_type in ("DELETE", "ARCHIVE", "REPLY"):
+            check_input = {"mail_id": payload.get("message_id") or payload.get("mail_id", "")}
+        elif action_type in ("SEND_MAIL", "SEND_GMAIL"):
+            provider = "gmail" if action_type == "SEND_GMAIL" else (
+                payload.get("mailbox_hint") or payload.get("provider", "")
+            )
+            check_input = {"provider": provider}
+        else:
+            check_input = dict(payload) if isinstance(payload, dict) else {}
+        try:
+            from app.permissions import check_permission_for_tool
+            verdict = check_permission_for_tool(
+                tenant_id=tenant_id, username=username,
+                tool_name=tool_name_eq, tool_input=check_input,
+                user_input_excerpt=f"confirm action {action.get('id', '?')}",
+            )
+            if not verdict.get("allowed", True):
+                return {
+                    "ok": False,
+                    "error": verdict.get("reason", "Action refusee par les permissions"),
+                    "permission_denied": True,
+                    "details": verdict.get("details", {}),
+                }
+        except Exception:
+            # Erreur du systeme permissions -> on bloque par securite
+            return {"ok": False, "error": "Erreur systeme permissions, action bloquee par securite."}
+
     try:
         if action_type == "REPLY":
             r = perform_outlook_action("send_reply", {
@@ -83,6 +140,38 @@ def _execute_confirmed_action(action: dict, outlook_token: str, tools: dict) -> 
             return {"ok": ok,
                     "message": result.get("message", f"Mail envoyé à {payload.get('to_email','?')}" if ok else "Erreur envoi"),
                     "error": result.get("message", "") if not ok else ""}
+
+        if action_type == "DELETE":
+            # Suppression d UN mail (tool agentique delete_mail).
+            # Bug fix 04/05/2026 : avant, seul DELETE_GROUPED etait gere
+            # ce qui produisait "Type d action inconnu : DELETE" au clic
+            # sur la carte de confirmation.
+            mail_id = payload.get("mail_id") or payload.get("message_id", "")
+            if not mail_id:
+                return {"ok": False, "error": "mail_id manquant dans le payload"}
+            try:
+                r = perform_outlook_action("delete_message",
+                                           {"message_id": mail_id}, outlook_token)
+                if r.get("status") == "ok":
+                    return {"ok": True, "message": "Mail mis a la corbeille."}
+                return {"ok": False, "error": r.get("message", "echec suppression")}
+            except Exception as e:
+                return {"ok": False, "error": str(e)[:200]}
+
+        if action_type == "ARCHIVE":
+            # Archivage d UN mail (tool agentique archive_mail).
+            # Bug fix 04/05/2026 : handler manquant.
+            mail_id = payload.get("mail_id") or payload.get("message_id", "")
+            if not mail_id:
+                return {"ok": False, "error": "mail_id manquant dans le payload"}
+            try:
+                r = perform_outlook_action("archive_message",
+                                           {"message_id": mail_id}, outlook_token)
+                if r.get("status") == "ok":
+                    return {"ok": True, "message": "Mail archive."}
+                return {"ok": False, "error": r.get("message", "echec archivage")}
+            except Exception as e:
+                return {"ok": False, "error": str(e)[:200]}
 
         if action_type == "DELETE_GROUPED":
             ids = payload.get("message_ids", [])

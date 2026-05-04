@@ -495,3 +495,258 @@ def toggle_all_read_only(
     except Exception as e:
         logger.exception("[Permissions] toggle_all_read_only : %s", e)
         return {"action": "error", "message": str(e)[:200]}
+
+
+# ==========================================================================
+# MUR PHYSIQUE POUR LES TOOLS AGENTIQUES (04/05/2026)
+# Branche check_permission sur le chemin moderne (tools agentiques) qui
+# n etait pas couvert avant. Resout la connexion ciblee depuis le payload
+# du tool, recupere le niveau, log dans permission_audit_log, retourne un
+# verdict structure que l agent peut comprendre et relayer a l utilisateur.
+# ==========================================================================
+
+# Mapping tool_name agentique -> action_tag (pour ACTION_PERMISSION_MAP)
+_TOOL_NAME_TO_ACTION_TAG = {
+    "send_mail":             "SEND_MAIL",
+    "reply_to_mail":         "REPLY_MAIL",
+    "archive_mail":          "MARK_READ",         # archive ~ ranger, niveau read_write
+    "delete_mail":           "DELETE_MAIL",
+    "create_calendar_event": "CREATEEVENT",
+    "send_teams_message":    "SEND_TEAMS",
+    "move_drive_file":       "UPDATE_DOCUMENT",
+}
+
+_LEVEL_HUMAN = {
+    "read":               "Lire seul",
+    "read_write":         "Lire et ecrire",
+    "read_write_delete":  "Tout faire (incluant suppression)",
+}
+
+
+def _resolve_connection_id_for_tool(
+    tenant_id: str, username: str, tool_name: str, tool_input: dict,
+) -> Optional[int]:
+    """Determine la connexion ciblee par un appel de tool agentique.
+
+    Strategie selon le tool :
+    - delete_mail / archive_mail / reply_to_mail : on a 'mail_id', on
+      lookup mail_memory pour retrouver mailbox_email puis tenant_connections.
+    - send_mail : on a optionnellement 'provider' (outlook/gmail), on
+      retourne la premiere connexion correspondante du tenant.
+    - create_calendar_event / send_teams_message / move_drive_file :
+      on retourne la premiere connexion appropriee du tenant (mail
+      pour calendar, teams, drive pour drive).
+
+    Retourne le connection_id ou None si non resolvable.
+    """
+    from app.database import get_pg_conn
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+
+            # Cas 1 : tools mail avec mail_id -> lookup mail_memory
+            if tool_name in ("delete_mail", "archive_mail", "reply_to_mail"):
+                mail_id = tool_input.get("mail_id", "")
+                if mail_id:
+                    cur.execute(
+                        """SELECT mailbox_email FROM mail_memory
+                           WHERE message_id = %s AND tenant_id = %s
+                           LIMIT 1""",
+                        (mail_id, tenant_id),
+                    )
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        cur.execute(
+                            """SELECT id FROM tenant_connections
+                               WHERE tenant_id = %s AND connected_email = %s
+                                 AND status = 'connected'
+                               LIMIT 1""",
+                            (tenant_id, row[0]),
+                        )
+                        c = cur.fetchone()
+                        if c:
+                            return c[0]
+                # Pas trouve -> None (refus par securite cote appelant)
+                return None
+
+            # Cas 2 : send_mail avec provider hint
+            if tool_name == "send_mail":
+                provider = (tool_input.get("provider") or "").lower()
+                # provider = 'outlook' -> tool_type 'microsoft' ou 'outlook'
+                # provider = 'gmail'   -> tool_type 'gmail'
+                if provider in ("outlook", "microsoft"):
+                    tool_types = ("microsoft", "outlook")
+                elif provider == "gmail":
+                    tool_types = ("gmail",)
+                else:
+                    tool_types = ("microsoft", "outlook", "gmail")
+                cur.execute(
+                    """SELECT id FROM tenant_connections
+                       WHERE tenant_id = %s AND tool_type = ANY(%s)
+                         AND status = 'connected'
+                       ORDER BY id ASC LIMIT 1""",
+                    (tenant_id, list(tool_types)),
+                )
+                c = cur.fetchone()
+                return c[0] if c else None
+
+            # Cas 3 : create_calendar_event -> on prend une connexion
+            # mail (calendrier = meme connecteur)
+            if tool_name == "create_calendar_event":
+                cur.execute(
+                    """SELECT id FROM tenant_connections
+                       WHERE tenant_id = %s
+                         AND tool_type IN ('microsoft', 'outlook', 'gmail')
+                         AND status = 'connected'
+                       ORDER BY id ASC LIMIT 1""",
+                    (tenant_id,),
+                )
+                c = cur.fetchone()
+                return c[0] if c else None
+
+            # Cas 4 : send_teams_message
+            if tool_name == "send_teams_message":
+                cur.execute(
+                    """SELECT id FROM tenant_connections
+                       WHERE tenant_id = %s AND tool_type IN ('teams', 'microsoft')
+                         AND status = 'connected'
+                       ORDER BY id ASC LIMIT 1""",
+                    (tenant_id,),
+                )
+                c = cur.fetchone()
+                return c[0] if c else None
+
+            # Cas 5 : move_drive_file
+            if tool_name == "move_drive_file":
+                cur.execute(
+                    """SELECT id FROM tenant_connections
+                       WHERE tenant_id = %s
+                         AND tool_type IN ('drive', 'sharepoint', 'gdrive')
+                         AND status = 'connected'
+                       ORDER BY id ASC LIMIT 1""",
+                    (tenant_id,),
+                )
+                c = cur.fetchone()
+                return c[0] if c else None
+
+        return None
+    except Exception as e:
+        logger.exception("[Permissions] _resolve_connection_id_for_tool : %s", e)
+        return None
+
+
+def check_permission_for_tool(
+    tenant_id: str,
+    username: str,
+    tool_name: str,
+    tool_input: dict,
+    user_input_excerpt: str = "",
+) -> dict:
+    """Mur physique pour les tools agentiques (delete_mail, send_mail, etc.).
+
+    Appele par _execute_pending_action AVANT creation de pending_action et
+    par _execute_confirmed_action AVANT execution reelle (defense en
+    profondeur).
+
+    Retourne un dict :
+        {"allowed": True}  -> on continue
+        {"allowed": False, "reason": str, "details": dict}  -> on bloque
+            et l appelant relaie 'reason'/'details' a l agent (Raya).
+
+    L agent voit un retour structure qu il peut interpreter et relayer
+    a l utilisateur sans se perdre dans des hallucinations ou des
+    boucles de tentative.
+    """
+    action_tag = _TOOL_NAME_TO_ACTION_TAG.get(tool_name)
+    if not action_tag:
+        # Tool inconnu de la map -> pas de check (lecture, helpers, etc.)
+        return {"allowed": True}
+
+    required = get_required_permission(action_tag)
+
+    connection_id = _resolve_connection_id_for_tool(
+        tenant_id, username, tool_name, tool_input
+    )
+    if connection_id is None:
+        # On n a pas pu identifier la connexion ciblee -> refus par
+        # securite (impossible de garantir le niveau d acces).
+        reason = (
+            f"Action refusee : impossible d identifier la boite/connexion "
+            f"ciblee par '{tool_name}'. Refus par securite."
+        )
+        _log_audit(tenant_id, username, None, action_tag,
+                   "unknown", required, False, user_input_excerpt)
+        return {
+            "allowed": False, "reason": reason,
+            "details": {
+                "tool_blocked": tool_name,
+                "current_level": "inconnu",
+                "required_level": _LEVEL_HUMAN.get(required, required),
+                "remediation": (
+                    "Le mail/ressource ciblee n est pas trouvable en base. "
+                    "Verifie que le mail_id est correct ou demande a "
+                    "l utilisateur de preciser la boite."
+                ),
+            },
+        }
+
+    # Recupere les niveaux super_admin et tenant_admin pour cette connexion
+    from app.database import get_pg_conn
+    perm_row = None
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """SELECT super_admin_permission_level,
+                          tenant_admin_permission_level,
+                          label, connected_email
+                   FROM tenant_connections WHERE id = %s""",
+                (connection_id,),
+            )
+            perm_row = cur.fetchone()
+    except Exception as e:
+        logger.exception("[Permissions] lookup connexion %s : %s", connection_id, e)
+
+    if not perm_row:
+        reason = f"Action refusee : connexion {connection_id} introuvable."
+        _log_audit(tenant_id, username, connection_id, action_tag,
+                   "unknown", required, False, user_input_excerpt)
+        return {
+            "allowed": False, "reason": reason,
+            "details": {"tool_blocked": tool_name},
+        }
+
+    super_level = perm_row[0] or "read"
+    tenant_level = perm_row[1] or "read"
+    label = perm_row[2] or perm_row[3] or f"connexion {connection_id}"
+
+    # Niveau effectif = min entre plafond super_admin et niveau tenant_admin
+    effective = cap_level(tenant_level, super_level)
+    allowed = level_satisfies(effective, required)
+
+    _log_audit(tenant_id, username, connection_id, action_tag,
+               effective, required, allowed, user_input_excerpt)
+
+    if allowed:
+        return {"allowed": True}
+
+    # Refus : retour structure pour que l agent comprenne et relaie
+    reason = (
+        f"Action refusee par le systeme de permissions. "
+        f"Connexion '{label}' en niveau '{_LEVEL_HUMAN.get(effective, effective)}'. "
+        f"L action '{tool_name}' necessite '{_LEVEL_HUMAN.get(required, required)}'."
+    )
+    return {
+        "allowed": False, "reason": reason,
+        "details": {
+            "tool_blocked": tool_name,
+            "connection_label": label,
+            "current_level": _LEVEL_HUMAN.get(effective, effective),
+            "required_level": _LEVEL_HUMAN.get(required, required),
+            "remediation": (
+                f"Si l utilisateur veut autoriser cette action, il peut "
+                f"modifier le niveau de la connexion '{label}' dans le "
+                f"panneau admin. Ne tente pas de contournement."
+            ),
+        },
+    }
