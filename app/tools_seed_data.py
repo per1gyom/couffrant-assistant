@@ -5,10 +5,6 @@ Extrait de tools_registry.py -- SPLIT-3.
 
 _TOOLS = [
     # —— MAILS ——
-    {"name": "ARCHIVE", "label": "Archiver un mail", "category": "mail",
-     "action_code": "ACTION:ARCHIVE:id", "description": "Archive un mail dans Outlook",
-     "functional_description": "Ranger un mail traite pour garder une boite propre.",
-     "is_sensitive": False, "requires_confirmation": False, "default_enabled": True},
     {"name": "READ", "label": "Marquer lu", "category": "mail",
      "action_code": "ACTION:READ:id", "description": "Marque un mail comme lu",
      "functional_description": "Indiquer qu'un mail a ete lu sans avoir a l'ouvrir manuellement.",
@@ -17,21 +13,8 @@ _TOOLS = [
      "action_code": "ACTION:READBODY:id", "description": "Télécharge et lit le corps complet d'un mail",
      "functional_description": "Acceder au contenu integral d'un mail pour l'analyser en detail.",
      "is_sensitive": False, "requires_confirmation": False, "default_enabled": True},
-    {"name": "REPLY", "label": "Répondre à un mail", "category": "mail",
-     "action_code": "ACTION:REPLY:id:texte", "description": "Répond à un mail via Outlook",
-     "functional_description": "Repondre a un interlocuteur par mail. Raya redige le brouillon.",
-     "is_sensitive": True, "requires_confirmation": True, "default_enabled": True},
-    {"name": "DELETE", "label": "Supprimer un mail", "category": "mail",
-     "action_code": "ACTION:DELETE:id", "description": "Déplace un mail dans la corbeille (récupérable)",
-     "functional_description": "Supprimer un mail inutile. Reversible : le mail va en corbeille.",
-     "is_sensitive": True, "requires_confirmation": True, "default_enabled": False},
 
     # —— CALENDRIER ——
-    {"name": "CREATEEVENT", "label": "Créer un événement", "category": "calendar",
-     "action_code": "ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|participants",
-     "description": "Crée un événement dans le calendrier Outlook",
-     "functional_description": "Planifier un rendez-vous ou une reunion dans le calendrier.",
-     "is_sensitive": True, "requires_confirmation": True, "default_enabled": True},
     {"name": "CREATE_TASK", "label": "Créer une tâche", "category": "calendar",
      "action_code": "ACTION:CREATE_TASK:titre", "description": "Crée une tâche dans Microsoft To Do",
      "functional_description": "Ajouter un element a la liste de taches pour ne rien oublier.",

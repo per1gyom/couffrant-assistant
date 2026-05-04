@@ -98,52 +98,16 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
         except Exception as e:
             confirmed.append(f"📇 Recherche contact échouée : {str(e)[:80]}")
 
-    if mail_can_delete:
-        delete_ids = []
-        delete_subjects = []
-        for msg_id in re.findall(r'\[ACTION:DELETE:([^\]]+)\]', response):
-            msg_id = msg_id.strip()
-            if not is_valid_outlook_id(msg_id):
-                continue
-            if msg_id in processed_ids:
-                continue
-            orig = next((m for m in live_mails + mails_from_db if m.get('message_id') == msg_id), {})
-            delete_ids.append(msg_id)
-            delete_subjects.append(orig.get('subject', msg_id[:30]))
-            processed_ids.add(msg_id)
-        if delete_ids:
-            ok_count = 0
-            for msg_id in delete_ids:
-                try:
-                    r = perform_outlook_action("delete_message", {"message_id": msg_id}, token)
-                    if r.get("status") == "ok":
-                        ok_count += 1
-                        log_activity(username, "mail_delete", msg_id, delete_subjects[delete_ids.index(msg_id)][:100], tenant_id=tenant_id)
-                except Exception:
-                    pass
-            n = len(delete_ids)
-            if ok_count == n:
-                confirmed.append(
-                    f"\U0001f5d1\ufe0f {n} mail{'s' if n > 1 else ''} a la corbeille."
-                    if n > 1 else f"\U0001f5d1\ufe0f '{delete_subjects[0]}' a la corbeille."
-                )
-            else:
-                confirmed.append(f"\U0001f5d1\ufe0f {ok_count}/{n} mails a la corbeille ({n - ok_count} echoue(s)).")
+    # ── [ACTION:DELETE:id] supprimee 04/05/2026 ──
+    # L ancien chemin direct etait dangereux : il exécutait perform_outlook_action
+    # SANS confirmation utilisateur quand mail_can_delete=True. Tout DELETE doit
+    # maintenant passer par le tool agentique 'delete_mail' qui cree une
+    # pending_action avec carte de confirmation systematique.
 
-    for msg_id in re.findall(r'\[ACTION:ARCHIVE:([^\]]+)\]', response):
-        msg_id = msg_id.strip()
-        if not is_valid_outlook_id(msg_id): continue
-        if msg_id in processed_ids: continue
-        processed_ids.add(msg_id)
-        try:
-            r = perform_outlook_action("archive_message", {"message_id": msg_id}, token)
-            if r.get("status") == "ok":
-                confirmed.append("\u2705 Archive")
-                log_activity(username, "mail_archive", msg_id, "", tenant_id=tenant_id)
-            else:
-                confirmed.append(f"\u274c {r.get('message')}")
-        except Exception as e:
-            confirmed.append(f"\u274c {str(e)[:80]}")
+    # ── [ACTION:ARCHIVE:id] supprimee 04/05/2026 ──
+    # L ancien chemin direct exécutait sans confirmation. Tout ARCHIVE doit
+    # maintenant passer par le tool agentique 'archive_mail' avec carte
+    # de confirmation.
 
     for msg_id in re.findall(r'\[ACTION:READ:([^\]]+)\]', response):
         msg_id = msg_id.strip()
@@ -154,35 +118,9 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
         except Exception:
             pass
 
-    # Dédup REPLY par message_id pour éviter le double-queue si le LLM génère 2 tags
-    _seen_reply_ids = set()
-    for match in re.finditer(r'\[ACTION:REPLY:([^\:\]]{20,}):(.+?)\]', response, re.DOTALL):
-        msg_id = match.group(1).strip()
-        if msg_id in _seen_reply_ids:
-            continue
-        _seen_reply_ids.add(msg_id)
-        reply_text = match.group(2).strip()
-        # Normaliser les sauts de ligne (LLM ecrit parfois \n litteral)
-        reply_text = reply_text.replace('\\n', '\n')
-        if not is_valid_outlook_id(msg_id): continue
-        # Lookup tolerant : exact d'abord, puis par prefixe de 20 chars
-        orig = next((m for m in live_mails + mails_from_db if m.get('message_id') == msg_id), None)
-        if orig is None:
-            orig = next((m for m in live_mails + mails_from_db
-                         if m.get('message_id', '')[:20] == msg_id[:20]), {})
-        sender_name = orig.get('from_name') or orig.get('sender') or orig.get('from_email') or '?'
-        subject     = orig.get('subject', '')
-        to_email    = orig.get('from_email', orig.get('sender_email', ''))
-        label = f"Repondre a {sender_name}" + (f" — {subject[:50]}" if subject else "")
-        action_id = queue_action(
-            tenant_id=tenant_id, username=username, action_type="REPLY",
-            payload={"message_id": msg_id, "reply_text": reply_text,
-                     "subject": subject, "to": to_email,
-                     "sender_name": sender_name,
-                     "from_email": from_email},
-            label=label, conversation_id=conversation_id,
-        )
-        log_activity(username, "mail_reply_queued", msg_id, subject[:100], tenant_id=tenant_id)
+# ── [ACTION:REPLY:id:texte] supprimee 04/05/2026 ──
+    # Tout REPLY doit maintenant passer par le tool agentique 'reply_to_mail'
+    # avec carte de confirmation. Un seul systeme cohérent.
 
     for msg_id in re.findall(r'\[ACTION:READBODY:([^\]]+)\]', response):
         msg_id = msg_id.strip()
@@ -195,22 +133,9 @@ def _handle_mail_actions(response, token, mail_can_delete, mails_from_db, live_m
         except Exception:
             pass
 
-    for match in re.finditer(r'\[ACTION:CREATEEVENT:([^\]]+)\]', response):
-        parts = match.group(1).split('|')
-        if len(parts) >= 3:
-            attendees = parts[3].split(',') if len(parts) > 3 else []
-            label = f"Creer RDV '{parts[0]}' le {parts[1][:10]}"
-            action_id = queue_action(
-                tenant_id=tenant_id, username=username, action_type="CREATEEVENT",
-                payload={"subject": parts[0], "start": parts[1], "end": parts[2], "attendees": attendees},
-                label=label, conversation_id=conversation_id,
-            )
-            log_activity(username, "calendar_create", parts[0][:100], parts[1][:20], tenant_id=tenant_id)
-            confirmed.append(
-                f"\u23f8\ufe0f Action #{action_id} en attente : {label}\n"
-                f"   Participants : {', '.join(attendees) if attendees else 'aucun'}\n"
-                f"   Pour confirmer : dites \"confirme action {action_id}\""
-            )
+    # ── [ACTION:CREATEEVENT:...] supprimee 04/05/2026 ──
+    # Tout CREATEEVENT doit maintenant passer par le tool agentique
+    # 'create_calendar_event' avec carte de confirmation.
 
     for title in re.findall(r'\[ACTION:CREATE_TASK:([^\]]+)\]', response):
         try:

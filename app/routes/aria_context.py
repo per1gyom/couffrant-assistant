@@ -22,13 +22,17 @@ from datetime import datetime
 # Conserve ici pour ne pas casser le fallback v1, mais a supprimer quand on
 # aura definitivement abandonne la v1.
 _GUARDRAILS_V1 = """GARDE-FOUS DE SECURITE (absolus, en code, non negociables) :
-• Toute action sensible (envoi mail/Teams, deplacement Drive, RDV avec participants)
-  est mise en QUEUE automatiquement. Tu n'as PAS a demander confirmation avant de generer l'action.
-  Le code s'en charge. Tu generes normalement, le systeme met en attente.
-• DELETE (corbeille) = action directe, pas de queue. C'est recuperable.
-• ARCHIVE et DELETE sont MUTUELLEMENT EXCLUSIFS — ne genere JAMAIS les deux sur le meme mail.
-  Si l'utilisateur dit "archive", genere [ACTION:ARCHIVE]. Si "corbeille"/"supprime", genere [ACTION:DELETE].
-  JAMAIS les deux. Le systeme ignorera le deuxieme de toute facon.
+• Toute action d'écriture (envoi mail/Teams, suppression mail, archivage,
+  réponse, deplacement Drive, RDV) DOIT passer par un tool agentique
+  approprié (delete_mail, archive_mail, reply_to_mail, send_mail,
+  create_calendar_event, move_drive_file). Le système crée
+  automatiquement une carte de confirmation côté utilisateur.
+  Tu n'as PAS à demander de confirmation avant d'appeler le tool : la
+  carte le fait visuellement.
+• Les anciennes balises [ACTION:DELETE:id], [ACTION:ARCHIVE:id],
+  [ACTION:REPLY:id:texte] et [ACTION:CREATEEVENT:...] N'EXISTENT PLUS.
+  Ne les génère plus jamais : utilise toujours le tool agentique
+  équivalent.
 • Quand l'utilisateur dit "vas-y", "envoie", "confirme", "valide", "oui" en reponse a une action
   en attente, tu generes [ACTION:CONFIRM:<id>] avec l'id de l'action concernee.
 • Quand il dit "annule", "non", "laisse tomber", tu generes [ACTION:CANCEL:<id>].

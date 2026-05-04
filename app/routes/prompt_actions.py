@@ -15,10 +15,12 @@ Choix interactif :
   [ACTION:ASK_CHOICE:question|option1|option2|option3]""")
 
     if "mail" in domains:
-        delete_line = "\n  [ACTION:DELETE:id] -> corbeille recuperable (direct, pas de confirmation)" if tools.get("mail_can_delete") else ""
         sections.append(f"""Mails :
-  [ACTION:ARCHIVE:id] [ACTION:READ:id] [ACTION:READBODY:id]
-  [ACTION:REPLY:id:texte] [ACTION:CREATE_TASK:titre]{delete_line}
+  [ACTION:READ:id] [ACTION:READBODY:id] [ACTION:CREATE_TASK:titre]
+  Pour SUPPRIMER, ARCHIVER ou REPONDRE a un mail : utilise les tools
+  agentiques delete_mail, archive_mail, reply_to_mail (cartes de confirmation
+  systematiques). Les anciennes balises [ACTION:DELETE], [ACTION:ARCHIVE],
+  [ACTION:REPLY] n'existent plus.
   [ACTION:SEND_MAIL:boite|destinataire|sujet|corps]
     boite = adresse email exacte, 'gmail', 'microsoft', 'perso', 'pro', ou '' (auto)
     L'utilisateur dit "boite perso" / "Gmail" → 'gmail'
@@ -58,9 +60,9 @@ Teams — memoire (immediat) :
 
     if "calendar" in domains:
         sections.append("""Calendrier (toutes boites connectees) :
-  [ACTION:CREATEEVENT:sujet|debut_iso|fin_iso|lieu_opt|participants_opt|calendrier_opt]
-    calendrier_opt = 'microsoft' ou 'gmail' (vide = premier disponible)
-    Exemple : [ACTION:CREATEEVENT:Reunion Dupont|2026-04-17T14:00:00|2026-04-17T15:00:00|Paris|client@email.fr|microsoft]
+  Pour CREER un evenement : utilise le tool agentique 'create_calendar_event'
+  (carte de confirmation systematique). L'ancienne balise [ACTION:CREATEEVENT:...]
+  n'existe plus.
   [ACTION:UPDATE_EVENT:event_id|champ=valeur]
     Exemples : title=Nouveau titre  ou  start=2026-04-17T15:00:00  ou  location=Lyon
   [ACTION:DELETE_EVENT:event_id|calendrier_opt]
