@@ -714,16 +714,29 @@ function appendPendingActionToChat(action) {
       inserted = true;
     }
   }
-  if (!inserted && messagesEl) {
-    // Smart fallback : chercher le dernier message Raya du DOM
-    const rayaRows = messagesEl.querySelectorAll('.message-row.raya');
-    const lastRaya = rayaRows[rayaRows.length - 1];
-    if (lastRaya) {
-      lastRaya.insertAdjacentElement('afterend', row);
-      inserted = true;
-    }
+  if (!inserted) {
+    // Fallback : action sans rattachement possible (conversation_id null
+    // ou message Raya absent du DOM). On ajoute un badge timestamp clair
+    // ET on insere en bas du chat (PAS apres le dernier message Raya,
+    // ca donnait l illusion trompeuse que la carte venait de la derniere
+    // reponse - bug remarque par Guillaume le 04/05/2026).
+    const orphanBadge = document.createElement('div');
+    orphanBadge.className = 'pending-orphan-badge';
+    let dateStr = '';
+    try {
+      if (action.created_at) {
+        dateStr = new Date(action.created_at).toLocaleString('fr-FR', {
+          day: '2-digit', month: '2-digit',
+          hour: '2-digit', minute: '2-digit'
+        });
+      }
+    } catch (e) { /* ignore */ }
+    orphanBadge.textContent = dateStr
+      ? `Action en attente — créée le ${dateStr}`
+      : 'Action en attente — session précédente';
+    card.insertBefore(orphanBadge, card.firstChild);
+    appendToChat(row);
   }
-  if (!inserted) appendToChat(row);
   if (!document.getElementById('raya-scroll-spacer')) scrollToBottom();
 }
 
