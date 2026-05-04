@@ -66,6 +66,7 @@ def _prepare_daily_report(username: str):
         WHERE username = %s
           AND (tenant_id = %s OR tenant_id IS NULL)
           AND created_at > NOW() - INTERVAL '12 hours'
+          AND deleted_at IS NULL
     """, (username, tenant_id))
     stats = c.fetchone()
     total = stats[0] or 0

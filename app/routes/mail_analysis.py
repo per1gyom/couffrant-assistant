@@ -145,6 +145,7 @@ def analyze_raw_mails(
             FROM mail_memory WHERE username=%s
               AND (tenant_id = %s OR tenant_id IS NULL)
               AND analysis_status IN ('inbox_raw','archive_raw','gmail_raw')
+              AND deleted_at IS NULL
             ORDER BY received_at DESC NULLS LAST LIMIT %s
         """, (username, tenant_id, limit))
         rows = c.fetchall()
@@ -201,7 +202,8 @@ def analyze_raw_mails(
         c.execute(
             "SELECT COUNT(*) FROM mail_memory WHERE username=%s "
             "AND (tenant_id = %s OR tenant_id IS NULL) "
-            "AND analysis_status IN ('inbox_raw','archive_raw','gmail_raw')",
+            "AND analysis_status IN ('inbox_raw','archive_raw','gmail_raw') "
+            "AND deleted_at IS NULL",
             (username, tenant_id)
         )
         remaining = c.fetchone()[0]

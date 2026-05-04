@@ -299,6 +299,7 @@ def _fetch_client_mails(partner: dict, username: str, limit: int = 10) -> list:
                    category, priority
             FROM mail_memory
             WHERE {where}
+              AND deleted_at IS NULL
             ORDER BY received_at DESC NULLS LAST
             LIMIT %s
             """,
