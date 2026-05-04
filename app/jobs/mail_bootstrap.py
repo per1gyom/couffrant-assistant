@@ -334,13 +334,18 @@ def _bootstrap_gmail_label(token: str, label_id: str, after_str: str,
     stats = {"seen": 0, "processed": 0, "errors": 0,
              "duplicates": 0, "filtered_haiku": 0,
              "stored_simple": 0, "analyzed": 0}
-    query = f"label:{label_id}"
-    if after_str:
-        query += f" after:{after_str}"
+    # Fix 05/05 matin : utiliser labelIds (parametre dedie Gmail) au lieu
+    # de la search syntax q=label:XXX. La syntaxe q=label:SENT echoue avec
+    # status non-200 cote Gmail (alors que label:INBOX passait par chance).
+    # labelIds=SENT est la voie officielle, robuste pour tous les labels.
+    # Le filtre date after: reste dans q car c est un operateur de search.
+    query = f"after:{after_str}" if after_str else ""
     page_token = None
 
     while stats["seen"] < MAX_ITEMS_PER_RUN:
-        params = {"q": query, "maxResults": str(GMAIL_PAGE_SIZE)}
+        params = {"labelIds": label_id, "maxResults": str(GMAIL_PAGE_SIZE)}
+        if query:
+            params["q"] = query
         if page_token:
             params["pageToken"] = page_token
         try:
