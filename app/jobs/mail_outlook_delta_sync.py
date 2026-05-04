@@ -289,11 +289,53 @@ def _process_messages_via_pipeline(messages: list, username: str,
     skipped_removed = 0
     errors = 0
 
+    # Stats pour soft-delete (Chantier 1, commit 3b)
+    soft_deleted = 0
+    soft_delete_errors = 0
+
     for msg in messages:
         try:
-            # Skip les messages supprimes (delta peut retourner @removed)
+            # @removed : Outlook signale un mail supprime ou deplace hors
+            # du dossier suivi (ex: vers DeletedItems). On soft-delete en
+            # base + graphe pour que mail_memory reste fidele a la realite
+            # de la boite. Le mail reste recuperable via le champ deleted_at.
             if "@removed" in msg:
                 skipped_removed += 1
+                message_id = msg.get("id")
+                if message_id:
+                    try:
+                        from app.db_utils import get_pg_conn
+                        conn = get_pg_conn()
+                        cur = conn.cursor()
+                        cur.execute("""
+                            UPDATE mail_memory
+                            SET deleted_at = NOW()
+                            WHERE message_id = %s
+                              AND username = %s
+                              AND deleted_at IS NULL
+                            RETURNING id, tenant_id
+                        """, (message_id, username))
+                        rows = cur.fetchall()
+                        if rows:
+                            mail_db_id, mm_tenant = rows[0]
+                            # Soft-delete du noeud graphe
+                            cur.execute("""
+                                UPDATE semantic_graph_nodes
+                                SET deleted_at = NOW(), updated_at = NOW()
+                                WHERE node_type = 'Mail'
+                                  AND tenant_id = %s
+                                  AND source_record_id = %s
+                                  AND deleted_at IS NULL
+                            """, (mm_tenant, str(mail_db_id)))
+                            soft_deleted += 1
+                        conn.commit()
+                        conn.close()
+                    except Exception as e:
+                        soft_delete_errors += 1
+                        logger.warning(
+                            "[OutlookDelta][DELETE] echec soft-delete %s : %s",
+                            message_id, str(e)[:150],
+                        )
                 continue
 
             message_id = msg.get("id")
@@ -348,18 +390,20 @@ def _process_messages_via_pipeline(messages: list, username: str,
                 msg.get("id", "?")[:40], str(e)[:200],
             )
 
-    if processed > 0 or errors > 0:
+    if processed > 0 or errors > 0 or soft_deleted > 0:
         logger.info(
             "[OutlookDelta][WRITE] %s/%s : %d traites, %d existants, "
-            "%d removed, %d erreurs",
+            "%d removed (%d soft-deleted), %d erreurs",
             username, folder_name,
-            processed, skipped_existing, skipped_removed, errors,
+            processed, skipped_existing, skipped_removed, soft_deleted, errors,
         )
 
     return {
         "processed": processed,
         "skipped_existing": skipped_existing,
         "skipped_removed": skipped_removed,
+        "soft_deleted": soft_deleted,
+        "soft_delete_errors": soft_delete_errors,
         "errors": errors,
     }
 

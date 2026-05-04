@@ -71,6 +71,20 @@ def _register_jobs(scheduler: BackgroundScheduler):
     else:
         logger.info("[Scheduler] Job DÉSACTIVÉ : opus_audit")
 
+    # Purge mails dans la corbeille depuis plus de 30 jours
+    # (Chantier 1, commit 3c). Aligne sur le comportement Gmail/Outlook.
+    # Toujours actif : c est juste du nettoyage, pas de risque.
+    try:
+        from app.jobs.maintenance import _job_purge_trashed_mails
+        scheduler.add_job(func=_job_purge_trashed_mails,
+                          trigger=CronTrigger(hour=3, minute=15),
+                          id="purge_trashed_mails",
+                          name="Purge mails corbeille >30j",
+                          replace_existing=True)
+        logger.info("[Scheduler] Job enregistré : purge_trashed_mails (quotidien 03h15)")
+    except Exception as e:
+        logger.error(f"[Scheduler] Import échoué pour purge_trashed_mails: {e}")
+
     if _job_enabled("SCHEDULER_WEBHOOK_ENABLED"):
         try:
             from app.jobs.maintenance import _job_webhook_setup, _job_webhook_renewal

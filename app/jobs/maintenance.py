@@ -174,3 +174,73 @@ def _ensure_audit_table():
         conn.close()
     except Exception as e:
         logger.error(f"[Scheduler] ERREUR _ensure_audit_table : {e}")
+
+
+def _job_purge_trashed_mails():
+    """Convertit les mails dans la corbeille depuis plus de 30 jours en
+    soft-delete reel (deleted_at).
+
+    Logique :
+      - Un mail trashed_at IS NOT NULL et trashed_at < NOW() - 30 days
+        passe a deleted_at = NOW()
+      - Le noeud graphe correspondant est aussi soft-delete
+
+    Comportement aligne sur Gmail/Outlook qui purgent automatiquement la
+    corbeille a 30 jours. Ainsi mail_memory + graphe restent fideles
+    a la realite cote source.
+    """
+    try:
+        from app.database import get_pg_conn
+        conn = get_pg_conn()
+        c = conn.cursor()
+
+        # Recupere les mails a purger pour soft-delete les noeuds graphe
+        # avant de soft-delete les mail_memory (sinon perte du lien)
+        c.execute("""
+            SELECT id, tenant_id FROM mail_memory
+            WHERE trashed_at IS NOT NULL
+              AND trashed_at < NOW() - INTERVAL '30 days'
+              AND deleted_at IS NULL
+        """)
+        to_purge = c.fetchall()
+
+        if not to_purge:
+            conn.close()
+            return
+
+        purged = 0
+        graph_purged = 0
+        for mm_id, tenant_id in to_purge:
+            try:
+                # Soft-delete noeud graphe
+                c.execute("""
+                    UPDATE semantic_graph_nodes
+                    SET deleted_at = NOW(), updated_at = NOW()
+                    WHERE node_type = 'Mail'
+                      AND tenant_id = %s
+                      AND source_record_id = %s
+                      AND deleted_at IS NULL
+                """, (tenant_id, str(mm_id)))
+                if c.rowcount > 0:
+                    graph_purged += 1
+                # Soft-delete mail_memory
+                c.execute("""
+                    UPDATE mail_memory
+                    SET deleted_at = NOW()
+                    WHERE id = %s AND deleted_at IS NULL
+                """, (mm_id,))
+                if c.rowcount > 0:
+                    purged += 1
+            except Exception as e:
+                logger.warning(
+                    f"[Scheduler] purge_trashed echec mail {mm_id} : {e}"
+                )
+
+        conn.commit()
+        conn.close()
+        logger.info(
+            f"[Scheduler] purge_trashed_mails : {purged} mails purges, "
+            f"{graph_purged} noeuds graphe purges"
+        )
+    except Exception as e:
+        logger.error(f"[Scheduler] ERREUR purge_trashed_mails : {e}")

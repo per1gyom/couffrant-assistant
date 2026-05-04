@@ -290,42 +290,98 @@ def _poll_history(token: str, connection_id: int,
     # Extraction des messagesAdded (nouveaux mails)
     message_ids_new = []
     message_ids_modified = []
-    seen_ids = set()
+    message_ids_deleted = []
+    # Pour les modifications, on garde les labels ajoutes/retires explicitement
+    # pour pouvoir detecter TRASH (mise en corbeille) et restauration.
+    # Format : {msg_id: {"labels_added": [...], "labels_removed": [...], "current_labels": [...]}}
+    label_changes_by_msg = {}
+    seen_added = set()
+    seen_modified = set()
+    seen_deleted = set()
 
     for entry in history_entries:
         # messagesAdded : liste de {message: {id, threadId, labelIds}}
         for added in entry.get("messagesAdded", []):
             msg = added.get("message", {})
             msg_id = msg.get("id")
-            if msg_id and msg_id not in seen_ids:
+            if msg_id and msg_id not in seen_added:
                 message_ids_new.append({
                     "id": msg_id,
                     "thread_id": msg.get("threadId", ""),
                     "label_ids": msg.get("labelIds", []),
                 })
-                seen_ids.add(msg_id)
+                seen_added.add(msg_id)
 
-        # labelsAdded / labelsRemoved : modifications
-        for change_key in ("labelsAdded", "labelsRemoved"):
-            for change in entry.get(change_key, []):
-                msg = change.get("message", {})
-                msg_id = msg.get("id")
-                if msg_id and msg_id not in seen_ids:
-                    message_ids_modified.append({
-                        "id": msg_id,
-                        "thread_id": msg.get("threadId", ""),
-                        "label_ids": msg.get("labelIds", []),
-                    })
-                    seen_ids.add(msg_id)
+        # messagesDeleted : suppression definitive (vidage corbeille,
+        # ou SHIFT+Suppr direct dans Gmail). Le mail n existe plus
+        # cote Gmail, on doit le marquer deleted_at en base.
+        for deleted in entry.get("messagesDeleted", []):
+            msg = deleted.get("message", {})
+            msg_id = msg.get("id")
+            if msg_id and msg_id not in seen_deleted:
+                message_ids_deleted.append({
+                    "id": msg_id,
+                    "thread_id": msg.get("threadId", ""),
+                })
+                seen_deleted.add(msg_id)
+
+        # labelsAdded : ex deplace en TRASH = mise a la corbeille
+        for change in entry.get("labelsAdded", []):
+            msg = change.get("message", {})
+            msg_id = msg.get("id")
+            if not msg_id:
+                continue
+            added_labels = change.get("labelIds", [])
+            slot = label_changes_by_msg.setdefault(msg_id, {
+                "labels_added": [], "labels_removed": [], "current_labels": [],
+                "thread_id": msg.get("threadId", ""),
+            })
+            for lbl in added_labels:
+                if lbl not in slot["labels_added"]:
+                    slot["labels_added"].append(lbl)
+            slot["current_labels"] = msg.get("labelIds", [])
+            if msg_id not in seen_modified:
+                message_ids_modified.append({
+                    "id": msg_id,
+                    "thread_id": msg.get("threadId", ""),
+                    "label_ids": msg.get("labelIds", []),
+                })
+                seen_modified.add(msg_id)
+
+        # labelsRemoved : ex sortie de TRASH = restauration depuis corbeille
+        for change in entry.get("labelsRemoved", []):
+            msg = change.get("message", {})
+            msg_id = msg.get("id")
+            if not msg_id:
+                continue
+            removed_labels = change.get("labelIds", [])
+            slot = label_changes_by_msg.setdefault(msg_id, {
+                "labels_added": [], "labels_removed": [], "current_labels": [],
+                "thread_id": msg.get("threadId", ""),
+            })
+            for lbl in removed_labels:
+                if lbl not in slot["labels_removed"]:
+                    slot["labels_removed"].append(lbl)
+            slot["current_labels"] = msg.get("labelIds", [])
+            if msg_id not in seen_modified:
+                message_ids_modified.append({
+                    "id": msg_id,
+                    "thread_id": msg.get("threadId", ""),
+                    "label_ids": msg.get("labelIds", []),
+                })
+                seen_modified.add(msg_id)
 
     return {
         "status": "ok",
         "items_seen": len(history_entries),
         "items_new": len(message_ids_new),
         "items_modified": len(message_ids_modified),
+        "items_deleted": len(message_ids_deleted),
         "new_history_id": new_history_id,
         "message_ids": message_ids_new,
         "modified_message_ids": message_ids_modified,
+        "deleted_message_ids": message_ids_deleted,
+        "label_changes_by_msg": label_changes_by_msg,
         "has_more": response.get("nextPageToken") is not None,
         "error_detail": None,
     }
@@ -345,6 +401,119 @@ def _fetch_message_full(token: str, message_id: str) -> Optional[dict]:
     if response.get("_error"):
         return None
     return response
+
+
+def _apply_deletes_and_trash(deleted_msg_ids: list,
+                              label_changes: dict,
+                              tenant_id: str,
+                              connection_id: int) -> dict:
+    """Applique les suppressions et changements de label TRASH detectes
+    par l history Gmail au mail_memory et au graphe.
+
+    deleted_msg_ids : liste de {id, thread_id} pour messagesDeleted
+        -> soft-delete (deleted_at = NOW()) en mail_memory + graphe
+    label_changes : dict {gmail_msg_id: {labels_added, labels_removed, ...}}
+        -> si TRASH dans labels_added : trashed_at = NOW()
+        -> si TRASH dans labels_removed : trashed_at = NULL (restauration)
+
+    Le mail est identifie en base par message_id == gmail_msg_id ET
+    connection_id == celui de la connexion qui poll.
+
+    Retourne stats : {soft_deleted, trashed, untrashed, errors}
+    """
+    from app.db_utils import get_pg_conn
+    stats = {"soft_deleted": 0, "trashed": 0, "untrashed": 0, "errors": 0}
+    if not deleted_msg_ids and not label_changes:
+        return stats
+
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+
+        # 1. Soft-delete des mails purement supprimes (vidage corbeille
+        #    ou suppression directe)
+        for d in deleted_msg_ids:
+            gmail_id = d.get("id")
+            if not gmail_id:
+                continue
+            try:
+                # Soft-delete en mail_memory
+                c.execute("""
+                    UPDATE mail_memory
+                    SET deleted_at = NOW()
+                    WHERE message_id = %s
+                      AND connection_id = %s
+                      AND tenant_id = %s
+                      AND deleted_at IS NULL
+                    RETURNING id
+                """, (gmail_id, connection_id, tenant_id))
+                rows = c.fetchall()
+                if rows:
+                    mail_db_id = rows[0][0]
+                    # Soft-delete du noeud graphe correspondant
+                    c.execute("""
+                        UPDATE semantic_graph_nodes
+                        SET deleted_at = NOW(), updated_at = NOW()
+                        WHERE node_type = 'Mail'
+                          AND tenant_id = %s
+                          AND source_record_id = %s
+                          AND deleted_at IS NULL
+                    """, (tenant_id, str(mail_db_id)))
+                    stats["soft_deleted"] += 1
+            except Exception as e:
+                stats["errors"] += 1
+                logger.warning(
+                    "[GmailHistory][DELETE] echec soft-delete %s : %s",
+                    gmail_id, str(e)[:150],
+                )
+
+        # 2. Mise en corbeille / restauration via labels TRASH
+        for gmail_id, changes in label_changes.items():
+            added = changes.get("labels_added", [])
+            removed = changes.get("labels_removed", [])
+            try:
+                if "TRASH" in added:
+                    c.execute("""
+                        UPDATE mail_memory
+                        SET trashed_at = NOW()
+                        WHERE message_id = %s
+                          AND connection_id = %s
+                          AND tenant_id = %s
+                          AND deleted_at IS NULL
+                          AND trashed_at IS NULL
+                        RETURNING id
+                    """, (gmail_id, connection_id, tenant_id))
+                    if c.fetchall():
+                        stats["trashed"] += 1
+                if "TRASH" in removed:
+                    c.execute("""
+                        UPDATE mail_memory
+                        SET trashed_at = NULL
+                        WHERE message_id = %s
+                          AND connection_id = %s
+                          AND tenant_id = %s
+                          AND trashed_at IS NOT NULL
+                        RETURNING id
+                    """, (gmail_id, connection_id, tenant_id))
+                    if c.fetchall():
+                        stats["untrashed"] += 1
+            except Exception as e:
+                stats["errors"] += 1
+                logger.warning(
+                    "[GmailHistory][LABEL] echec maj %s : %s",
+                    gmail_id, str(e)[:150],
+                )
+
+        conn.commit()
+    except Exception as e:
+        logger.error("[GmailHistory][APPLY] crash : %s", str(e)[:200])
+        stats["errors"] += 1
+    finally:
+        if conn:
+            conn.close()
+
+    return stats
 
 
 def _process_messages_via_pipeline(token: str, messages_meta: list,
@@ -549,6 +718,35 @@ def _poll_user_gmail(connection_id: int, tenant_id: str,
             "(NON TRAITES, shadow mode)",
             username, email, items_new,
         )
+
+    # ── Suppression / mise en corbeille / restauration (Chantier 1, commit 3a) ──
+    # On applique TOUJOURS ces changements meme en shadow mode, parce qu ils
+    # representent des actions explicites de l utilisateur sur sa boite et
+    # qu il faut que mail_memory + graphe restent fideles a la realite.
+    delete_stats = {"soft_deleted": 0, "trashed": 0, "untrashed": 0, "errors": 0}
+    if result["status"] == "ok" and (
+        result.get("deleted_message_ids") or result.get("label_changes_by_msg")
+    ):
+        try:
+            delete_stats = _apply_deletes_and_trash(
+                deleted_msg_ids=result.get("deleted_message_ids", []),
+                label_changes=result.get("label_changes_by_msg", {}),
+                tenant_id=tenant_id,
+                connection_id=connection_id,
+            )
+            if (delete_stats["soft_deleted"] + delete_stats["trashed"] +
+                delete_stats["untrashed"] > 0):
+                logger.info(
+                    "[GmailHistory][DELETE] %s/%s : soft_deleted=%d, "
+                    "trashed=%d, untrashed=%d, errors=%d",
+                    username, email,
+                    delete_stats["soft_deleted"], delete_stats["trashed"],
+                    delete_stats["untrashed"], delete_stats["errors"],
+                )
+        except Exception as e:
+            logger.error(
+                "[GmailHistory][DELETE] crash apply : %s", str(e)[:200],
+            )
 
     # Logging dans connection_health_events
     try:
