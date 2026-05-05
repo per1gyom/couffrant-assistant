@@ -129,7 +129,12 @@ TOOL_SEARCH_MAIL = {
         "IMPORTANT : si l utilisateur cible une boite mail precise (ex: 'tri "
         "dans ma boite Couffrant Solar', 'mes mails perso', 'la boite GPLH'), "
         "passe le parametre mailbox avec l adresse exacte de la boite. La liste "
-        "des boites connectees du tenant est fournie dans le contexte initial."
+        "des boites connectees du tenant est fournie dans le contexte initial. "
+        "\n\n"
+        "RETOUR : chaque resultat affiche un identifiant technique sous la forme "
+        "📌 [mail_id: 1234]. Cet identifiant est REQUIS pour appeler les tools "
+        "read_mail, delete_mail, archive_mail, reply_to_mail. Tu DOIS le "
+        "reutiliser tel quel quand tu enchaines sur un de ces tools."
     ),
     "input_schema": {
         "type": "object",
@@ -306,7 +311,12 @@ TOOL_ARCHIVE_MAIL = {
 
 TOOL_DELETE_MAIL = {
     "name": "delete_mail",
-    "description": "Met un mail a la corbeille. Carte de confirmation avant execution.",
+    "description": (
+        "Met un mail a la corbeille. Carte de confirmation avant execution. "
+        "Le parametre mail_id provient OBLIGATOIREMENT d un search_mail "
+        "prealable (champ 📌 [mail_id: ...] des resultats). Si tu n as "
+        "pas l ID, lance d abord un search_mail."
+    ),
     "input_schema": {
         "type": "object",
         "properties": {

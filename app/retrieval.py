@@ -1083,6 +1083,31 @@ def format_unified_results(data: dict, max_items: int = 15) -> str:
         if meta:
             header += f"  [{meta}]"
         lines.append(header)
+
+        # Fix 05/05/2026 : ajoute l ID technique pour permettre a Raya
+        # d appeler les tools delete_mail, archive_mail, read_mail,
+        # read_drive_file etc. avec le bon ID. L id technique est dans
+        # le champ "id" du resultat sous la forme "mail-1234" / "drive-789"
+        # / "conv-456" / "odoo-..."  : on extrait la partie numerique.
+        # NOTE : pour les ressources Odoo, l identifiant pertinent est
+        # source_record_id (et pas l id du chunk).
+        record_id_for_tool = None
+        result_id = r.get("id", "")
+        if src == "mail" and result_id.startswith("mail-"):
+            record_id_for_tool = result_id[5:]  # strip "mail-"
+            lines.append(f"   📌 [mail_id: {record_id_for_tool}]")
+        elif src == "drive" and result_id.startswith("drive-"):
+            record_id_for_tool = result_id[6:]
+            lines.append(f"   📌 [file_id: {record_id_for_tool}]")
+        elif src == "conversation" and result_id.startswith("conv-"):
+            record_id_for_tool = result_id[5:]
+            lines.append(f"   📌 [conversation_id: {record_id_for_tool}]")
+        elif src == "odoo":
+            sm = r.get("source_model")
+            srid = r.get("source_record_id")
+            if sm and srid:
+                lines.append(f"   📌 [odoo_model: {sm} · odoo_id: {srid}]")
+
         # Afficher text_content seulement si different du label (sinon redondant)
         if text and text[:100] != label[:100]:
             lines.append(f"   {text}")
