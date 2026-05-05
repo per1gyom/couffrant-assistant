@@ -28,6 +28,7 @@ Endpoints super_admin — gestion globale (utilisateurs, tenants, outils, mémoi
 """
 import os
 import requests as http_requests
+from datetime import datetime
 from fastapi import APIRouter, Request, Body, Depends, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse
 
@@ -946,3 +947,167 @@ def admin_toggle_read_only_per_tenant(tenant_id: str, request: Request, _: dict 
         return {"status": "ok", **result}
     except Exception as e:
         return {"status": "error", "message": str(e)[:300]}
+
+
+# ──────────────────────────────────────────────────────────────────────
+# PAGE DIAGNOSTIQUE PERMISSIONS — Fix 05/05/2026 apres-midi
+# ──────────────────────────────────────────────────────────────────────
+# Permet a Guillaume (non-developpeur) de verifier sans SQL :
+#   1) le niveau actuel de chaque connexion (super_admin / tenant_admin)
+#   2) l historique des tentatives d action (mur permissions) avec
+#      autorise/refuse, niveau actuel, niveau requis, raison.
+# Tres utile pour valider que le mur fonctionne reellement.
+@router.get("/admin/permissions/audit-page", response_class=HTMLResponse)
+def admin_permissions_audit_page(request: Request, _: dict = Depends(require_admin)):
+    from app.database import get_pg_conn
+    
+    # 1. Permissions actuelles par connexion (toutes tenants)
+    perms_rows = []
+    audit_rows = []
+    nb_total = 0
+    nb_refused = 0
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """SELECT id, tenant_id, tool_type, label, connected_email,
+                          super_admin_permission_level, tenant_admin_permission_level
+                   FROM tenant_connections
+                   ORDER BY tenant_id, id"""
+            )
+            for r in cur.fetchall():
+                perms_rows.append({
+                    "id": r[0], "tenant": r[1], "tool": r[2],
+                    "label": r[3] or r[4] or f"#{r[0]}",
+                    "email": r[4] or "—",
+                    "super": r[5] or "read",
+                    "tenant": r[6] or "read",
+                })
+            
+            # 2. Audit log des 50 dernieres tentatives
+            cur.execute(
+                """SELECT pal.created_at, pal.username, pal.tenant_id,
+                          pal.action_tag, pal.connection_id,
+                          pal.current_permission_level,
+                          pal.required_permission_level,
+                          pal.allowed, pal.user_input_excerpt,
+                          tc.label, tc.connected_email
+                   FROM permission_audit_log pal
+                   LEFT JOIN tenant_connections tc ON tc.id = pal.connection_id
+                   ORDER BY pal.created_at DESC LIMIT 50"""
+            )
+            for r in cur.fetchall():
+                audit_rows.append({
+                    "when": r[0], "user": r[1], "tenant": r[2],
+                    "action": r[3], "conn_id": r[4],
+                    "current": r[5] or "?", "required": r[6] or "?",
+                    "allowed": bool(r[7]),
+                    "excerpt": (r[8] or "")[:80],
+                    "label": r[9] or r[10] or (f"conn #{r[4]}" if r[4] else "—"),
+                })
+            
+            cur.execute("SELECT COUNT(*), COUNT(*) FILTER (WHERE allowed=FALSE) FROM permission_audit_log")
+            row = cur.fetchone()
+            nb_total = row[0] or 0
+            nb_refused = row[1] or 0
+    except Exception as e:
+        return HTMLResponse(f"<pre>Erreur DB : {str(e)[:300]}</pre>", status_code=500)
+    
+    # Construction HTML
+    LEVEL_LABEL = {"read": "👁 Lire seul", "read_write": "✏️ Lire + Ecrire",
+                   "read_write_delete": "🗑 Tout faire"}
+    LEVEL_COLOR = {"read": "#3b82f6", "read_write": "#f59e0b", "read_write_delete": "#dc2626"}
+    
+    perms_html = ""
+    current_tenant = None
+    for p in perms_rows:
+        if p["tenant"] != current_tenant:
+            current_tenant = p["tenant"]
+            perms_html += f'<tr style="background:#1e293b"><td colspan="5" style="padding:8px;font-weight:bold;color:#60a5fa">📁 Tenant : {current_tenant}</td></tr>'
+        super_lvl = p["super"]
+        tenant_lvl = p["tenant"]
+        super_color = LEVEL_COLOR.get(super_lvl, "#666")
+        tenant_color = LEVEL_COLOR.get(tenant_lvl, "#666")
+        perms_html += f'''<tr style="border-bottom:1px solid #334155">
+            <td style="padding:8px">{p["label"]}</td>
+            <td style="padding:8px;color:#94a3b8;font-size:11px">{p["tool"]} · {p["email"]}</td>
+            <td style="padding:8px;text-align:center"><span style="background:{super_color};color:white;padding:2px 8px;border-radius:4px;font-size:11px">{LEVEL_LABEL.get(super_lvl, super_lvl)}</span></td>
+            <td style="padding:8px;text-align:center"><span style="background:{tenant_color};color:white;padding:2px 8px;border-radius:4px;font-size:11px">{LEVEL_LABEL.get(tenant_lvl, tenant_lvl)}</span></td>
+            <td style="padding:8px;color:#94a3b8;font-size:11px">id={p["id"]}</td>
+        </tr>'''
+    
+    audit_html = ""
+    if not audit_rows:
+        audit_html = '<tr><td colspan="6" style="padding:20px;text-align:center;color:#94a3b8">Aucune tentative enregistree pour le moment.<br>Le mur permissions s active uniquement sur les actions agentiques (delete_mail, archive_mail, send_mail, etc).</td></tr>'
+    else:
+        for a in audit_rows:
+            allowed = a["allowed"]
+            row_bg = "#0f1f15" if allowed else "#1f0f0f"
+            verdict = '<span style="color:#4ade80">✅ AUTORISE</span>' if allowed else '<span style="color:#f87171">❌ REFUSE</span>'
+            current_color = LEVEL_COLOR.get(a["current"], "#666") if a["current"] != "unknown" else "#666"
+            current_label = LEVEL_LABEL.get(a["current"], a["current"]) if a["current"] != "unknown" else "❓ Inconnu"
+            audit_html += f'''<tr style="background:{row_bg};border-bottom:1px solid #334155">
+                <td style="padding:6px;font-size:11px;color:#94a3b8">{a["when"].strftime("%Y-%m-%d %H:%M:%S")}</td>
+                <td style="padding:6px"><strong>{a["action"]}</strong><br><span style="font-size:11px;color:#94a3b8">{a["user"]} / {a["tenant"]}</span></td>
+                <td style="padding:6px">{a["label"]}</td>
+                <td style="padding:6px"><span style="background:{current_color};color:white;padding:2px 6px;border-radius:3px;font-size:11px">{current_label}</span></td>
+                <td style="padding:6px"><span style="background:#444;color:white;padding:2px 6px;border-radius:3px;font-size:11px">{LEVEL_LABEL.get(a["required"], a["required"])}</span></td>
+                <td style="padding:6px;text-align:center">{verdict}</td>
+            </tr>'''
+    
+    nb_allowed = nb_total - nb_refused
+    page_html = f'''<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Audit Permissions Raya</title>
+<style>
+  body {{ background:#0f172a; color:#e2e8f0; font-family:-apple-system,BlinkMacSystemFont,sans-serif; padding:20px; }}
+  h1 {{ color:#60a5fa; }} h2 {{ color:#94a3b8; margin-top:30px; }}
+  table {{ width:100%; border-collapse:collapse; background:#1e293b; border-radius:8px; overflow:hidden; margin-top:10px; }}
+  th {{ background:#334155; padding:10px; text-align:left; color:#cbd5e1; font-size:12px; text-transform:uppercase; }}
+  .summary {{ display:flex; gap:20px; margin:20px 0; }}
+  .stat {{ background:#1e293b; padding:15px 20px; border-radius:8px; }}
+  .stat-num {{ font-size:28px; font-weight:bold; }}
+  .stat-label {{ font-size:12px; color:#94a3b8; }}
+  .info {{ background:#1e3a8a; padding:12px; border-radius:6px; margin:20px 0; font-size:13px; }}
+</style></head><body>
+<h1>🔐 Audit du mur permissions</h1>
+<div class="info">
+  <strong>Comment lire cette page :</strong><br>
+  • <strong>Section 1</strong> liste le niveau de permission ACTUEL de chaque connexion par tenant.<br>
+  • <strong>Section 2</strong> liste les 50 dernières fois où Raya a essayé de faire une action (delete_mail, archive_mail, send_mail) — avec le résultat (autorisé ✅ ou refusé ❌).<br>
+  • <strong>Niveau effectif</strong> = min(plafond super_admin, niveau tenant_admin). C est ce qui est compare au niveau requis par l action.<br>
+  • Les actions de LECTURE (search_mail, read_mail) ne passent pas par le mur — elles ne s affichent donc pas ici.
+</div>
+
+<div class="summary">
+  <div class="stat"><div class="stat-num" style="color:#60a5fa">{len(perms_rows)}</div><div class="stat-label">Connexions configurees</div></div>
+  <div class="stat"><div class="stat-num" style="color:#4ade80">{nb_allowed}</div><div class="stat-label">Actions autorisees</div></div>
+  <div class="stat"><div class="stat-num" style="color:#f87171">{nb_refused}</div><div class="stat-label">Actions refusees</div></div>
+  <div class="stat"><div class="stat-num">{nb_total}</div><div class="stat-label">Total tentatives</div></div>
+</div>
+
+<h2>📋 Section 1 — Permissions actuelles par connexion</h2>
+<table>
+  <thead><tr>
+    <th>Connexion</th><th>Type / email</th>
+    <th style="text-align:center">Plafond super_admin</th>
+    <th style="text-align:center">Niveau tenant_admin</th>
+    <th>ID</th>
+  </tr></thead>
+  <tbody>{perms_html}</tbody>
+</table>
+
+<h2>🚨 Section 2 — Historique des 50 dernieres tentatives d action</h2>
+<table>
+  <thead><tr>
+    <th>Quand</th><th>Action / utilisateur</th><th>Connexion ciblee</th>
+    <th>Niveau effectif</th><th>Niveau requis</th><th style="text-align:center">Verdict</th>
+  </tr></thead>
+  <tbody>{audit_html}</tbody>
+</table>
+
+<p style="margin-top:30px;font-size:12px;color:#666">
+Page generee le {datetime.now().strftime("%Y-%m-%d %H:%M:%S")} · 
+Pour modifier les permissions, va dans /tenant/panel ou /admin/panel section "Permissions des connexions".
+</p>
+</body></html>'''
+    return HTMLResponse(content=page_html)
