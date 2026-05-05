@@ -82,6 +82,11 @@ const TOOL_META = {
 };
 let _pickerCtx = null; // { tenant_id, tool_type, selected }
 
+// Fix 05/05/2026 : flag global pour savoir si l utilisateur connecte
+// est super_admin. Determine si on affiche le dropdown permissions ou
+// le texte lecture seule. Recupere depuis /admin/connexions-data.
+let IS_SUPER_ADMIN = false;
+
 async function loadTenants() {
   const root = document.getElementById('tenants-root');
   try {
@@ -91,6 +96,7 @@ async function loadTenants() {
       root.innerHTML = '<div class="alert alert-err">Impossible de charger les tenants.</div>';
       return;
     }
+    IS_SUPER_ADMIN = !!data.is_super_admin;
     root.innerHTML = '';
     data.tenants.forEach(t => root.appendChild(renderTenantBlock(t)));
   } catch (e) {
@@ -162,7 +168,7 @@ function renderConnCard(tenant_id, tool, conn) {
     </div>
     <div class="conn-label">${conn.label || meta.label}</div>
     <div class="conn-meta">${conn.connected_email || conn.config_summary || '-'}</div>
-    <div class="conn-meta">Perm : ${conn.super_admin_permission_level || 'read'}</div>
+    <div class="conn-meta conn-perm">${renderPermissionField(conn)}</div>
     <div class="conn-actions">
       ${driveCfgBtn}
       <button class="btn btn-ghost btn-sm" onclick="launchConnect('${tenant_id}','${tool}',${conn.id})">Reconnecter</button>
@@ -170,6 +176,92 @@ function renderConnCard(tenant_id, tool, conn) {
     </div>
   `;
   return div;
+}
+
+function renderPermissionField(conn) {
+  // Fix 05/05/2026 : dropdown 3 niveaux pour super_admin, texte lecture
+  // seule pour tenant_admin. L endpoint backend (PUT /tenant/connections/{id})
+  // distingue deja les 2 cas : super_admin peut tout modifier, tenant_admin
+  // est restreint au label uniquement et recevra 403 s il tente le dropdown.
+  const lvl = conn.super_admin_permission_level || 'read';
+  const labels = {
+    'read': '👁 Lire seul',
+    'read_write': '✏️ Lire + Ecrire',
+    'read_write_delete': '🗑 Tout faire',
+  };
+  if (!IS_SUPER_ADMIN) {
+    // tenant_admin ou admin standard : lecture seule
+    return `Perm : ${labels[lvl] || lvl}`;
+  }
+  // super_admin : dropdown
+  return `
+    <span style="font-size:0.75rem;color:var(--text-muted)">Perm :</span>
+    <select class="conn-perm-select"
+            data-conn-id="${conn.id}"
+            data-current="${lvl}"
+            onchange="updatePermission(${conn.id}, this.value, this)"
+            style="font-size:0.85rem;padding:2px 4px;background:transparent;color:var(--text);border:1px solid var(--border);border-radius:4px;cursor:pointer">
+      <option value="read" ${lvl === 'read' ? 'selected' : ''}>${labels.read}</option>
+      <option value="read_write" ${lvl === 'read_write' ? 'selected' : ''}>${labels.read_write}</option>
+      <option value="read_write_delete" ${lvl === 'read_write_delete' ? 'selected' : ''}>${labels.read_write_delete}</option>
+    </select>
+  `;
+}
+
+async function updatePermission(connId, newLevel, selectEl) {
+  // Fix 05/05/2026 : appelle PUT /tenant/connections/{id} pour modifier
+  // super_admin_permission_level. Le backend verifie que l utilisateur
+  // est bien super_admin. Confirmation utilisateur avant tout passage
+  // a un niveau plus permissif (read_write_delete = irreversible).
+  const previousLevel = selectEl.dataset.current;
+  if (newLevel === previousLevel) return;
+  // Demande confirmation pour les passages "permissifs"
+  const isUpgrade = (
+    (previousLevel === 'read' && newLevel !== 'read') ||
+    (previousLevel === 'read_write' && newLevel === 'read_write_delete')
+  );
+  if (isUpgrade) {
+    const labels = {
+      'read': 'Lire seul',
+      'read_write': 'Lire + Ecrire',
+      'read_write_delete': 'Tout faire (incluant suppressions)'
+    };
+    const ok = confirm(
+      `Confirmer le passage de la permission :\n\n` +
+      `${labels[previousLevel]} -> ${labels[newLevel]}\n\n` +
+      `Raya pourra desormais executer des actions plus permissives ` +
+      `sur cette connexion. OK pour valider ?`
+    );
+    if (!ok) {
+      // Reset visuel sur l ancien niveau
+      selectEl.value = previousLevel;
+      return;
+    }
+  }
+  selectEl.disabled = true;
+  try {
+    const r = await fetch(`/tenant/connections/${connId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ super_admin_permission_level: newLevel }),
+    });
+    if (!r.ok) {
+      const errData = await r.json().catch(() => ({}));
+      alert(`Echec : ${errData.detail || r.statusText}`);
+      selectEl.value = previousLevel;
+      return;
+    }
+    selectEl.dataset.current = newLevel;
+    // Petit feedback visuel (vert 1s)
+    selectEl.style.borderColor = '#4ade80';
+    setTimeout(() => { selectEl.style.borderColor = ''; }, 1200);
+  } catch (e) {
+    alert(`Erreur reseau : ${e.message}`);
+    selectEl.value = previousLevel;
+  } finally {
+    selectEl.disabled = false;
+  }
 }
 
 function launchConnect(tenant_id, tool, connection_id) {
