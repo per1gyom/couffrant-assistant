@@ -280,9 +280,34 @@ def _run_bootstrap_outlook(run_id: int, connection_id: int,
                             tenant_id: str, username: str,
                             mailbox_email: str, months_back: int,
                             include_sent: bool) -> None:
-    from app.token_manager import get_valid_microsoft_token
+    # FIX 05/05/2026 : on passe par get_connection_token avec email_hint
+    # pour cibler la BONNE boite (V2 multi-boites).
+    # Avant : get_valid_microsoft_token(username) qui lit oauth_tokens
+    # legacy (un seul token par user) -> bootstrap de contact@ utilisait
+    # le token de guillaume@ -> 87% des mails etiquetes contact@ etaient
+    # en realite des mails de guillaume@.
+    # On recupere le tool_type reel de la connexion (microsoft ou outlook).
+    from app.connection_token_manager import get_connection_token
+    from app.database import get_pg_conn
+    _conn_lookup = None
+    real_tool_type = "microsoft"  # default
     try:
-        token = get_valid_microsoft_token(username)
+        _conn_lookup = get_pg_conn()
+        _c = _conn_lookup.cursor()
+        _c.execute("SELECT tool_type FROM tenant_connections WHERE id=%s",
+                   (connection_id,))
+        _r = _c.fetchone()
+        if _r and _r[0]:
+            real_tool_type = _r[0]
+    finally:
+        if _conn_lookup:
+            _conn_lookup.close()
+    try:
+        token = get_connection_token(
+            username, real_tool_type,
+            tenant_id=tenant_id,
+            email_hint=mailbox_email,
+        )
     except Exception as e:
         _update_run(run_id, status="error",
                     error_detail=f"Token Microsoft KO : {str(e)[:200]}",
@@ -290,7 +315,9 @@ def _run_bootstrap_outlook(run_id: int, connection_id: int,
         return
     if not token:
         _update_run(run_id, status="error",
-                    error_detail="Token Microsoft non disponible",
+                    error_detail=f"Token Microsoft non disponible pour "
+                                 f"{mailbox_email} (connection {connection_id}, "
+                                 f"tool_type={real_tool_type})",
                     finished_at=datetime.utcnow())
         return
 

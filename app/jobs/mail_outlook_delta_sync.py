@@ -422,38 +422,54 @@ def _poll_user_outlook(connection_id: int, tenant_id: str,
     poll_started = datetime.now()
     write_mode = _is_write_mode_enabled()
 
-    # Resolution de l adresse de boite reelle (fix 04/05/2026 : on ne veut
-    # plus mailbox_source generique 'outlook' ; on stocke l adresse exacte
-    # qui a recu le mail, pour eviter les confusions entre les 2 boites
-    # Outlook d un meme user).
+    # Resolution de l adresse de boite reelle ET du tool_type
+    # (fix 04/05/2026 + 05/05/2026) : on stocke l adresse exacte qui a
+    # recu le mail ET on recupere le tool_type pour lookup token V2 par
+    # connexion (les 2 boites Outlook ont tool_type microsoft VS outlook).
     mailbox_email = None
+    real_tool_type = "microsoft"
     _conn_mb = None
     try:
         _conn_mb = get_pg_conn()
         _c_mb = _conn_mb.cursor()
         _c_mb.execute(
-            "SELECT connected_email FROM tenant_connections WHERE id = %s",
+            "SELECT connected_email, tool_type FROM tenant_connections WHERE id = %s",
             (connection_id,),
         )
         _row_mb = _c_mb.fetchone()
-        if _row_mb and _row_mb[0]:
-            mailbox_email = _row_mb[0]
+        if _row_mb:
+            if _row_mb[0]:
+                mailbox_email = _row_mb[0]
+            if _row_mb[1]:
+                real_tool_type = _row_mb[1]
     except Exception as _e_mb:
         logger.warning(
-            "[OutlookDelta] Recuperation mailbox_email echouee conn=%d : %s",
+            "[OutlookDelta] Recuperation mailbox_email/tool_type echouee conn=%d : %s",
             connection_id, str(_e_mb)[:150],
         )
     finally:
         if _conn_mb:
             _conn_mb.close()
 
-    # Recupere le token utilisateur
+    # Recupere le token de la connexion CIBLE (fix 05/05/2026)
+    # Avant : get_valid_microsoft_token(username) qui lit oauth_tokens
+    # legacy (un seul token par user) -> les 2 boites Outlook utilisaient
+    # le meme token. Maintenant on cible la BONNE boite via email_hint
+    # et le BON tool_type (microsoft VS outlook).
+    from app.connection_token_manager import get_connection_token
     try:
-        token = get_valid_microsoft_token(username)
+        if mailbox_email:
+            token = get_connection_token(
+                username, real_tool_type,
+                tenant_id=tenant_id,
+                email_hint=mailbox_email,
+            )
+        else:
+            token = get_valid_microsoft_token(username)
     except Exception as e:
         logger.warning(
-            "[OutlookDelta] Token recup echec pour %s : %s",
-            username, str(e)[:200],
+            "[OutlookDelta] Token recup echec pour %s (mb=%s) : %s",
+            username, mailbox_email, str(e)[:200],
         )
         token = None
 
