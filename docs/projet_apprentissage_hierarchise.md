@@ -246,7 +246,7 @@ Modification (à identifier) du code qui sauve les règles :
 | 2 — Reclassement Opus | ✅ Fait | (voir branche feat/learning-hierarchy) | 05/05 19h00 | 164 régles classées (73 Behavior + 56 Fact dont 39 Static + 11 Dynamic + 1 Atemporal + 24 Knowledge + 16 Preference). 4 règles archivées (6, 85, 135, 275 obsoletes ou redondantes avec mur permissions). |
 | 3 — aria_rules dans graphe | ⏳ À faire | - | - | - |
 | 4 — Loader hiérarchisé | ✅ Fait | (voir branche feat/learning-hierarchy) | 05/05 19h30 | get_aria_rules_hierarchical() ajoutee dans memory_rules.py + aria_context.py modifie pour injecter 4 sections distinctes : COMPORTEMENTS / CONNAISSANCES DURABLES / INFOS A CONFIRMER / CULTURE METIER. Marqueur ⚠️ [A REVERIFIER] auto pour Dynamic > 30j. |
-| 5 — Prompt système | ⏳ À faire | - | - | - |
+| 5 — Prompt système | ✅ Fait | (voir branche feat/learning-hierarchy) | 05/05 19h45 | Regle d or ajoutee dans LES DEUX prompts (v1 build_system_prompt et v2 _build_agent_system_prompt). Texte : si une INFO A CONFIRMER ou regle ⚠️ [A REVERIFIER] contredit une donnee vivante, prefere la donnee vivante. Cherche avec tes outils avant de demander a l user. |
 | 6 — Pipeline capture RAG | ⏳ À faire | - | - | - |
 | 7 — Retrieval hybride | ⏳ À faire | - | - | - |
 | 8 — Renforcement passif | ⏳ À faire | - | - | - |
