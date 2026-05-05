@@ -70,7 +70,12 @@ WARNING_THRESHOLD_PCT = 50.0   # 30-50% = warning a surveiller
 # (exclusion SPAM cote Google + ajout filtres_haiku cote Raya).
 
 # Labels a compter cote Google (memes que PERIMETRE_LABELS du polling)
-LABELS_TO_COUNT = ["INBOX", "SENT", "SPAM"]
+# Fix 05/05/2026 : passe en "pommes vs pommes". Avant on comptait
+# INBOX+SENT+SPAM cote Google mais SPAM n est jamais bootstrape (le
+# pipeline filtre volontairement le spam Gmail). On compare donc
+# desormais juste INBOX+SENT cote Google, ce qui correspond a ce
+# que Raya pourrait theoriquement avoir en base.
+LABELS_TO_COUNT = ["INBOX", "SENT"]
 
 _GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me"
 
@@ -222,6 +227,10 @@ def _reconcile_user(tenant_id: str, username: str,
         }
 
     # 2. Compte cote Raya
+    # Fix 05/05/2026 : pommes vs pommes. On ajoute les mails filtres
+    # volontairement par Haiku au compteur Raya, pour ne pas comptabiliser
+    # comme "manquants" les mails que Raya a vu mais a sciemment ignore
+    # (newsletters, notifications, spam non-business).
     conn = None
     try:
         conn = get_pg_conn()
@@ -231,7 +240,30 @@ def _reconcile_user(tenant_id: str, username: str,
             WHERE username = %s
               AND mailbox_source IN ('gmail', 'gmail_perso')
         """, (username,))
-        count_raya = c.fetchone()[0] or 0
+        count_raya_base = c.fetchone()[0] or 0
+
+        # Somme des items_filtered_haiku du DERNIER bootstrap par mailbox
+        # (et non pas le cumul, sinon on double-compte les mails que les
+        # bootstraps successifs ont vu encore et encore).
+        c.execute("""
+            SELECT COALESCE(SUM(latest_filtered), 0) FROM (
+              SELECT DISTINCT ON (mailbox_email)
+                     mailbox_email, items_filtered_haiku AS latest_filtered
+              FROM mail_bootstrap_runs
+              WHERE username = %s
+                AND status = 'done'
+                AND mailbox_email IS NOT NULL
+                AND mailbox_email IN (
+                  SELECT DISTINCT mailbox_email FROM mail_memory
+                  WHERE mailbox_source IN ('gmail', 'gmail_perso')
+                    AND username = %s
+                )
+              ORDER BY mailbox_email, started_at DESC
+            ) sub
+        """, (username, username))
+        count_filtered = c.fetchone()[0] or 0
+
+        count_raya = count_raya_base + count_filtered
     except Exception as e:
         logger.error(
             "[GmailRecon] count_raya echec %s : %s",
