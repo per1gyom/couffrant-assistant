@@ -4,6 +4,105 @@
 
 ---
 
+## Session 05/05/2026 après-midi (13h-19h) — Mur permissions de bout en bout + V2 par-connexion + chantier apprentissage hiérarchisé lancé
+
+**Theme** : suite directe du matin. On termine la chaine V2 par-connexion (inventaire + recon + assignment auto). On corrige le mur permissions qui ne fonctionnait pas du tout depuis son deploiement (`permission_audit_log` totalement vide). On ajoute une page d audit lisible. Test final reussi : Raya tente delete_mail sur contact@ en lecture seule -> mur intercepte -> Raya explique a Guillaume. La derniere heure ouvre un nouveau chantier de fond : reflexion sur la hierarchisation des apprentissages (ex : la regle 124 obsolete a trompe Raya).
+
+### Commits poussés (chronologique)
+
+| Commit | Description |
+|---|---|
+| `32a660c` | ❌ feat(admin-ui): dropdown permissions modifiable pour super_admin — REVERTED (panneaux deja existants) |
+| `6f4c15e` | Revert `32a660c` |
+| `b1065ea` | **fix(perms) CRITIQUE** : aligne mur permissions et execution sur l id technique mail_memory |
+| `a43f904` | feat(admin-ui): page diagnostique permissions `/admin/permissions/audit-page` |
+| `46d4cf3` | fix(outlook): inventaire + recon nocturne utilisent token V2 par-connexion |
+| `19654c1` | fix(oauth): cree automatiquement l assignment apres callback OAuth (Microsoft + Gmail) |
+
+### 1. Mur permissions ne fonctionnait pas du tout (commit `b1065ea`)
+
+**Symptome** : `permission_audit_log` totalement VIDE depuis le deploiement de la securite (04/05 soir). Aucune trace ni d allow ni de deny.
+
+**Cause racine** : le commit `3056fe7` du matin a expose les `mail_id` techniques (entiers) de `mail_memory` a Raya. Mais `_resolve_connection_id_for_tool` cherchait toujours par `message_id` Microsoft Graph. Quand Raya appelait `delete_mail(mail_id=1349)`, la fonction ne trouvait rien -> retournait `current_level='unknown'` -> refusait TOUT delete_mail. Et en parallele, l execution dans `confirmations.py:DELETE` passait l id technique direct a `perform_outlook_action` qui aurait plante avec une 404 Microsoft Graph.
+
+**Fix** : 2 tentatives de lookup successives (`WHERE id=int(mail_id)` puis `WHERE message_id=mail_id`) + nouvelle fonction `_resolve_real_message_id` dans `confirmations.py` pour DELETE/ARCHIVE qui resout l id technique vers le vrai message_id Microsoft Graph avant d appeler `outlook_actions`.
+
+**Tests valides** : mail_id=1349 + boite read_write_delete -> ALLOWED. Meme mail_id + boite forcee read -> DENIED. Garbage halluciné (`fake_mail_id_xyz`) -> DENIED.
+
+**Note** : les pending_actions historiques contenaient des `mail_id` hallucines par Raya (format `"hello@studeria.fr_2026-03-29T08:32:51Z"` = expediteur + date ISO). Avant `3056fe7` du matin, Raya inventait ces IDs car n avait pas le vrai. L execution echouait silencieusement -> AUCUN delete_mail n a jamais reussi avant aujourd hui.
+
+### 2. Inventaire + recon Outlook V2 par-connexion (commit `46d4cf3`)
+
+**Symptome** : avec 2 boites Outlook, l inventaire boite mail (`/admin/mail/inventory/{conn_id}`) affichait EXACTEMENT les memes chiffres pour les 2 boites (1436 mails, Inbox 605, SentItems 446...). Les chiffres etaient ceux de guillaume@ pour les 2.
+
+**Cause racine** : 2 fichiers utilisaient encore le legacy V1 `get_valid_microsoft_token(username)` (table `oauth_tokens` : 1 token par user/provider) :
+- `app/routes/admin/admin_mail.py:admin_mail_inventory`
+- `app/jobs/mail_outlook_reconciliation.py:_reconcile_connection`
+
+Avec 2 boites Outlook, le legacy retournait toujours le token de la derniere connectee = guillaume@. Donc l API Microsoft Graph retournait l inbox de guillaume@ pour les 2 connexions.
+
+**Fix** : aligne sur le pattern du commit matin `8eb31ab` : iterer sur `get_all_user_connections(username)`, matcher sur `connection_id`, prendre le token V2 par-connexion.
+
+**Validation post-deploy** : inventaire de contact@ affiche maintenant 9961 mails (Inbox 3801, SentItems 2874, JunkEmail 88, Archive 1544, DeletedItems 1654) vs guillaume@ 1436 mails. Les 2 boites accedent enfin a leurs vraies donnees.
+
+**Restent 4 fichiers V2 a migrer** (chantier propre, non urgent) : `email_signature.py`, `external_observer.py`, `drive_delta_sync.py`, `drive_reconciliation.py`. Pour Couffrant pas observable (1 seul site SharePoint), mais bug latent pour multi-tenants.
+
+### 3. Création auto de l assignment au callback OAuth (commit `19654c1`)
+
+**Bug racine** : quand un super_admin connectait une nouvelle boite via `/admin/connections/{tenant}/oauth/{tool}/start`, la connexion etait creee dans `tenant_connections` avec son token, MAIS aucune ligne n etait inseree dans `connection_assignments`.
+
+Consequence : `get_all_user_connections()` filtre par `WHERE ca.enabled=true`, donc la nouvelle connexion etait INVISIBLE pour tous les jobs V2 (bootstrap, delta-sync, inventaire, reconciliation).
+
+**Bug observe** : la reconnexion de contact@ a 15:07 a cree conn#14 avec le bon token, mais le bouton "Inventaire" ne reagissait pas car `get_all_user_connections` ne retournait pas la connexion. Workaround : INSERT manuel de l assignment en SQL.
+
+**Fix** : nouvelle fonction `_ensure_assignment_for_admin(conn_id, request)` dans `app/routes/admin_oauth.py`, appelee depuis les 2 callbacks (Microsoft et Gmail). Recupere `username` depuis la session, recupere `tenant_id` de la connexion, INSERT avec `ON CONFLICT DO UPDATE SET enabled=true` (idempotent). Niveau par defaut `read_only` (le super_admin peut ensuite l elever via le panel).
+
+A partir de maintenant, toute nouvelle reconnexion OAuth (Outlook ou Gmail) est automatiquement visible sans intervention manuelle.
+
+### 4. Page diagnostique permissions (commit `a43f904`)
+
+Apres le fix b1065ea, on avait besoin d un moyen de verifier visuellement que le mur fonctionne sans toucher SQL.
+
+**Nouvelle page** : `/admin/permissions/audit-page` (accessible super_admin + admin Raya, lecture seule).
+
+- Section 1 : permissions actuelles par connexion (toutes tenants), niveau plafond super_admin et niveau tenant_admin. Codes couleur : bleu = read, orange = read_write, rouge = read_write_delete.
+- Section 2 : 50 dernieres tentatives d action (DELETE_MAIL, ARCHIVE_MAIL, etc.) avec date, user, tenant, connexion ciblee, niveau effectif, niveau requis, verdict (autorise vert / refuse rouge). Fond vert si autorise, rouge si refuse.
+- Stats en haut : nb connexions configurees, nb actions autorisees / refusees, total tentatives.
+
+### 5. Test bout-en-bout du mur permissions
+
+**Avant test** : reglage de la regle obsolete id=124 (qui disait "boite contact@ a connecter prochainement") -> texte mis a jour pour refleter "connectee depuis le 05/05/2026, 9961 mails cote Microsoft".
+
+**Test** : Guillaume demande a Raya dans une nouvelle conversation : *"Peux-tu mettre dans la corbeille le dernier mail recu sur la boite contact"*.
+
+**Resultat** : Raya repond *"Je peux lire la boite contact@couffrant-solar.fr mais pas y effectuer de suppressions — elle est configuree en mode 'Lire seul'. Pour que je puisse supprimer des mails dessus, il faut passer la connexion au niveau 'Tout faire'."*
+
+**Trace dans permission_audit_log** : `2026-05-05 16:42:12 guillaume DELETE_MAIL conn=14 curr=read req=read_write_delete REFUSE — excerpt: "Mettre a la corbeille mail 3632"`.
+
+Donc Raya a bien tente `delete_mail(mail_id=3632)`, le mur a intercepte en amont et refuse, Raya a reformule la reponse pour Guillaume en mode propre. Aboutissement de la chaine de securite mise en place 04/05 soir + 05/05.
+
+### 6. Chantier de fond identifié — Hiérarchisation des apprentissages (à attaquer maintenant)
+
+**Probleme observe** : la regle 124 (creee le 17/04 disant "boite contact@ a connecter prochainement") a trompe Raya. Bien que la liste vivante `connected_mailboxes` injectee dans son contexte affichait correctement contact@ comme connectee, Raya a fait confiance a la regle 124 plutot qu a la donnee vivante.
+
+**Diagnostic** : le systeme actuel `aria_rules` traite tous les apprentissages de la meme maniere :
+- **Toutes** les 200+ regles actives sont au niveau "moyenne" (champ `level` existe mais inutilise)
+- Pas de distinction entre fait stable, etat temporel, comportement, culture metier
+- Pas de notion d expiration ou de revalidation
+- Pas de hierarchie de priorisation entre donnee vivante et regle apprise
+
+**Vision Guillaume** : Raya doit apprendre comme un humain le ferait, avec :
+- Priorisation d importance entre sources (donnee vivante > declaration recente > observation > regle ancienne)
+- Categorisation entre regle, info generale, info passagere, culture generale, connaissance utilisateur
+- Reflex de re-verification quand une info est temporelle et ancienne
+- Auto-vérification autonome (Raya verifie elle-meme avant d affirmer ; ne demande a l user qu en dernier recours)
+
+**Architecture proposee** : voir `docs/projet_apprentissage_hierarchise.md` (a creer).
+
+S inscrit dans le systeme existant (`docs/architecture_memoire_regles_v2_final.md`) qui a deja un job nocturne `rules_optimizer`, decroissance par non-usage, anti-doublons, contradictions via LLM. La dimension manquante est **la nature de l info** (durable vs perissable).
+
+---
+
 ## Session 05/05/2026 matin (8h-12h) — Audit OAuth + filtre bulk + alertes + UX backend
 
 **Theme** : marathon de 4h qui a corrige des bugs en chaine. Demarre par "le bootstrap contact@ ne ramene que 111 mails sur 1418", revele un probleme architectural sur les tokens Outlook. En auditant on a aussi trouve un filtre bulk catastrophique qui jetait factures/commandes/livraisons. Termine par les chantiers prioritaires de la TODO (UX 1.2 backend, expose mail_id).
