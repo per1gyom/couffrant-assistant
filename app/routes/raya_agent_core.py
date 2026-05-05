@@ -520,6 +520,21 @@ def _raya_core_agent(
     # 4. Tools disponibles pour cet utilisateur
     tools = get_tools_for_user(username, tenant_id)
 
+    # 4.5. PRE-CREATION de aria_memory (Fix UX 1.2 backend - 05/05/2026)
+    # On cree la ligne maintenant (avec aria_response=NULL) pour avoir un
+    # aria_memory_id que execute_tool() pourra utiliser comme
+    # conversation_id quand il insere des pending_actions. Sinon les
+    # cartes de confirmation auraient conversation_id=NULL et ne
+    # pourraient pas etre rattachees au message Raya cote frontend.
+    # Note : pour les continuations, on cree quand meme une nouvelle
+    # ligne (memes que comportement avant ce fix : _save_conversation
+    # creait une ligne par tour). C est aligne avec le contrat actuel.
+    aria_memory_id_pre = _create_conversation_shell(
+        username=username,
+        tenant_id=tenant_id,
+        user_input=payload.query or "",
+    )
+
     # 5. Boucle agent
     # En mode continuation, iterations/total_*_tokens ont deja ete initialises
     # plus haut avec les valeurs accumulees des tours precedents.
@@ -620,7 +635,7 @@ def _raya_core_agent(
                     tool_input=tu["input"],
                     username=username,
                     tenant_id=tenant_id,
-                    conversation_id=None,  # pas encore cree
+                    conversation_id=aria_memory_id_pre,
                 )
 
                 # Injection d avertissement si boucle detectee
@@ -705,12 +720,25 @@ def _raya_core_agent(
         )
 
     # Sauvegarde dans aria_memory
-    aria_memory_id = _save_conversation(
-        username=username,
-        tenant_id=tenant_id,
-        user_input=payload.query or "",
-        aria_response=_strip_action_tags(final_text),
-    )
+    # Fix UX 1.2 backend (05/05/2026) : la ligne a deja ete pre-creee a
+    # l etape 4.5 avec aria_response=NULL. On la complete maintenant via
+    # UPDATE plutot que de creer une nouvelle ligne. En cas d echec de
+    # la pre-creation (peu probable mais defensif), fallback sur l ancien
+    # comportement INSERT.
+    if aria_memory_id_pre:
+        _update_conversation_response(
+            aria_memory_id=aria_memory_id_pre,
+            aria_response=_strip_action_tags(final_text),
+        )
+        aria_memory_id = aria_memory_id_pre
+    else:
+        # Fallback : la pre-creation a echoue, on fait l ancien INSERT
+        aria_memory_id = _save_conversation(
+            username=username,
+            tenant_id=tenant_id,
+            user_input=payload.query or "",
+            aria_response=_strip_action_tags(final_text),
+        )
 
     # ──── GRAPHAGE AUTO DE LA CONVERSATION (etape 1 - 27/04) ────
     # Cree le noeud Conversation + les edges mentioned_in vers toutes
@@ -927,5 +955,61 @@ def _save_conversation(username: str, tenant_id: str, user_input: str, aria_resp
     except Exception as e:
         logger.exception("[Agent] save_conversation error: %s", e)
         return None
+    finally:
+        conn.close()
+
+
+def _create_conversation_shell(username: str, tenant_id: str,
+                                user_input: str) -> int | None:
+    """Pre-cree la ligne aria_memory au DEBUT de la requete (avant la
+    boucle agentique) pour que les pending_actions creees pendant les
+    tool calls aient un conversation_id rattachable.
+
+    Fix UX 1.2 backend (05/05/2026) : avant ce fix, aria_memory etait
+    cree apres la boucle, donc execute_tool() recevait conversation_id=
+    None et toutes les pending_actions avaient conversation_id=NULL en
+    base (78%% des cas observes). Resultat : le frontend ne pouvait pas
+    rattacher les cartes au bon message Raya, fallback en bas du chat
+    avec un badge timestamp (commit dd2c9c2).
+
+    aria_response est laisse NULL ; il sera rempli par _update_conversation_response
+    a la fin de la boucle agentique."""
+    conn = get_pg_conn()
+    try:
+        c = conn.cursor()
+        c.execute(
+            "INSERT INTO aria_memory (username, tenant_id, user_input, aria_response) "
+            "VALUES (%s, %s, %s, NULL) RETURNING id",
+            (username, tenant_id, user_input),
+        )
+        row = c.fetchone()
+        conn.commit()
+        return row[0] if row else None
+    except Exception as e:
+        logger.exception("[Agent] create_conversation_shell error: %s", e)
+        return None
+    finally:
+        conn.close()
+
+
+def _update_conversation_response(aria_memory_id: int,
+                                   aria_response: str) -> bool:
+    """Complete la ligne aria_memory creee par _create_conversation_shell.
+    
+    Met a jour aria_response a la fin de la boucle agentique. La ligne
+    existe deja (id obtenu en debut de requete) donc les pending_actions
+    creees pendant les tool calls ont pu s y rattacher."""
+    conn = get_pg_conn()
+    try:
+        c = conn.cursor()
+        c.execute(
+            "UPDATE aria_memory SET aria_response = %s WHERE id = %s",
+            (aria_response, aria_memory_id),
+        )
+        conn.commit()
+        return c.rowcount > 0
+    except Exception as e:
+        logger.exception("[Agent] update_conversation_response error: %s", e)
+        return False
     finally:
         conn.close()
