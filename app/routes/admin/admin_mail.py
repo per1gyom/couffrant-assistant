@@ -329,3 +329,164 @@ def admin_mail_migrate_to_graph(conn_id: int,
     return {"status": "started",
             "message": f"Migration lancee en arriere-plan pour {len(missing_ids)} mails",
             "to_push": len(missing_ids)}
+
+
+# ─── DIAGNOSTIC IDENTITE TOKEN OAuth ─────────────────────────
+@router.get("/admin/mail/diag/token-identity/{conn_id}")
+def admin_mail_diag_token_identity(conn_id: int,
+                                    _: dict = Depends(require_admin)):
+    """Diagnostic critique 05/05/2026 :
+    Verifie a qui appartient REELLEMENT le token OAuth d une connexion mail.
+    
+    Appelle l API du provider (Microsoft Graph /me ou Gmail /profile) avec
+    le token stocke et compare avec connected_email en base.
+    
+    Si mismatch -> probleme : le token authentifie un AUTRE compte que celui
+    affiche, donc le bootstrap/polling lit la mauvaise boite.
+    
+    Cause typique : lors du flow OAuth, l utilisateur s est authentifie
+    avec son compte principal (qui a acces delegue) au lieu du compte
+    cible.
+    """
+    info = _lookup_connection(conn_id)
+    if not info:
+        return {"status": "error", "message": "connexion introuvable"}
+    
+    tool_type = info.get("tool_type")
+    expected_email = info.get("connected_email") or ""
+    label = info.get("label") or ""
+    
+    # Recupere les credentials chiffres
+    conn_db = None
+    try:
+        conn_db = get_pg_conn()
+        c = conn_db.cursor()
+        c.execute("SELECT credentials FROM tenant_connections WHERE id=%s",
+                   (conn_id,))
+        row = c.fetchone()
+        if not row or not row[0]:
+            return {"status": "error", "message": "credentials absents"}
+        creds = row[0]
+        if isinstance(creds, str):
+            import json as _json
+            creds = _json.loads(creds)
+    except Exception as e:
+        return {"status": "error", "message": f"db: {str(e)[:200]}"}
+    finally:
+        if conn_db:
+            conn_db.close()
+    
+    # Dechiffre l access_token
+    from app.crypto import decrypt_token
+    try:
+        access_token = decrypt_token(creds.get("access_token", ""))
+    except Exception as e:
+        return {"status": "error",
+                "message": f"dechiffrement token: {str(e)[:200]}"}
+    
+    if not access_token:
+        return {"status": "error", "message": "access_token vide"}
+    
+    # Refresh si expire (Outlook/Gmail)
+    import requests
+    
+    try:
+        if tool_type in ("microsoft", "outlook"):
+            # Microsoft Graph /me
+            r = requests.get(
+                "https://graph.microsoft.com/v1.0/me",
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10,
+            )
+            if r.status_code == 401:
+                return {"status": "error",
+                        "message": "token expire (401) - polling le refreshera"}
+            if r.status_code != 200:
+                return {"status": "error",
+                        "message": f"graph /me status {r.status_code}: "
+                                   f"{r.text[:200]}"}
+            data = r.json()
+            real_email = (data.get("userPrincipalName")
+                          or data.get("mail") or "")
+            real_name = data.get("displayName", "")
+            mismatch = real_email.lower() != expected_email.lower()
+            return {
+                "status": "ok",
+                "connection_id": conn_id,
+                "label": label,
+                "tool_type": tool_type,
+                "expected_email": expected_email,
+                "real_email_from_token": real_email,
+                "real_name_from_token": real_name,
+                "mismatch": mismatch,
+                "verdict": ("⚠️ MISMATCH - le token authentifie un autre compte"
+                            if mismatch else "✅ OK - token coherent"),
+            }
+        elif tool_type == "gmail":
+            # Gmail profile
+            r = requests.get(
+                "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10,
+            )
+            if r.status_code == 401:
+                return {"status": "error",
+                        "message": "token gmail expire (401) - polling le refreshera"}
+            if r.status_code != 200:
+                return {"status": "error",
+                        "message": f"gmail profile status {r.status_code}: "
+                                   f"{r.text[:200]}"}
+            data = r.json()
+            real_email = data.get("emailAddress", "")
+            mismatch = real_email.lower() != expected_email.lower()
+            return {
+                "status": "ok",
+                "connection_id": conn_id,
+                "label": label,
+                "tool_type": tool_type,
+                "expected_email": expected_email,
+                "real_email_from_token": real_email,
+                "mismatch": mismatch,
+                "verdict": ("⚠️ MISMATCH - le token authentifie un autre compte"
+                            if mismatch else "✅ OK - token coherent"),
+            }
+        else:
+            return {"status": "skip",
+                    "message": f"type {tool_type} non gere par ce diag"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)[:300]}
+
+
+@router.get("/admin/mail/diag/all-token-identities")
+def admin_mail_diag_all(_: dict = Depends(require_admin)):
+    """Audit toutes les connexions mail du tenant connecte."""
+    conn_db = None
+    try:
+        conn_db = get_pg_conn()
+        c = conn_db.cursor()
+        c.execute("""SELECT id FROM tenant_connections 
+                     WHERE tool_type IN ('microsoft','outlook','gmail')
+                       AND status='connected'
+                     ORDER BY id""")
+        ids = [r[0] for r in c.fetchall()]
+    finally:
+        if conn_db:
+            conn_db.close()
+    
+    results = []
+    for cid in ids:
+        try:
+            res = admin_mail_diag_token_identity(cid, _={"username":"system"})
+            results.append(res)
+        except Exception as e:
+            results.append({"connection_id": cid, "status": "error",
+                            "message": str(e)[:200]})
+    
+    nb_mismatch = sum(1 for r in results
+                      if r.get("mismatch") is True)
+    return {
+        "status": "ok",
+        "total": len(results),
+        "mismatches": nb_mismatch,
+        "results": results,
+    }
