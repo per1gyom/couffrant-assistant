@@ -242,7 +242,7 @@ Modification (à identifier) du code qui sauve les règles :
 
 | Phase | Statut | Commit | Date | Notes |
 |---|---|---|---|---|
-| 1 — Schéma SQL | ⏳ À faire | - | - | - |
+| 1 — Schéma SQL | ✅ Fait | (voir branche feat/learning-hierarchy) | 05/05 17h48 | 4 cols aria_rules + 2 cols semantic_graph_edges + 2 index. 168 regles defaultees Fact/Atemporal. Tests OK. |
 | 2 — Reclassement Opus | ⏳ À faire | - | - | - |
 | 3 — aria_rules dans graphe | ⏳ À faire | - | - | - |
 | 4 — Loader hiérarchisé | ⏳ À faire | - | - | - |
