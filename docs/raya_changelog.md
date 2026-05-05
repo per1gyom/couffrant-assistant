@@ -4,6 +4,63 @@
 
 ---
 
+## Session 05/05/2026 matin (8h-10h) — Audit identite tokens OAuth + nettoyage donnees
+
+**Theme** : suite a la session marathon du 04/05 soir, audit du bootstrap contact@ qui n avait remonte que 111 mails sur 1418 + diagnostic d un probleme architectural sur les tokens OAuth Outlook.
+
+**Declencheur** : Guillaume signale que contact@ n est pas a jour. Investigation revele que 87% des 111 mails enregistres sous mailbox_email='contact@couffrant-solar.fr' viennent de from_email='guillaume@'. Or une vraie boite contact@ devrait recevoir des mails DE prospects/clients.
+
+### Cause racine identifiee
+
+Le bootstrap utilisait `get_valid_microsoft_token(username)` qui lit la table legacy `oauth_tokens` (un seul token par user/provider). Avec 2 boites Outlook (guillaume@ et contact@), les 2 connexions utilisaient le MEME token (le dernier authentifie via OAuth = celui de guillaume@). Donc quand le bootstrap appelait `/me/mailFolders/Inbox`, /me retournait l inbox de guillaume@.
+
+Le systeme V2 (token par-connexion via `tenant_connections.credentials`) existait deja dans `connection_token_manager.py` mais les jobs Outlook ne l utilisaient pas. Gmail l utilisait deja correctement.
+
+### Commits pousses
+
+| Commit | Description |
+|---|---|
+| `ed68f77` | feat(diag): endpoints `/admin/mail/diag/token-identity/{id}` et `/all-token-identities` (lecture seule, appelle `/me` Microsoft Graph et `/profile` Gmail avec le token de chaque connexion pour verifier l identite reelle) |
+| `8eb31ab` | fix(outlook): bootstrap et delta-sync utilisent token V2 par-connexion via `get_connection_token(username, real_tool_type, email_hint=mailbox_email)`. Lookup du tool_type reel en base (microsoft VS outlook). |
+| `32b5ae8` | docs : script SQL nettoyage + procedure reconnexion contact@ |
+| `ed71b50` | feat(diag-ui): page HTML lisible `/admin/mail/diag/identities-page` pour Guillaume (non-developpeur, pas de console JS) |
+
+### Resultats du diagnostic
+
+7 connexions auditees, **0 mismatch** confirme cote OAuth :
+- 5 Gmail (per1.guillaume, GPLH, Romagui, Gaucherie, MTBR) : tokens coherents
+- guillaume@ (conn 6, Outlook) : token coherent
+- contact@ (conn 12, Outlook) : ERREUR token expire depuis le 28/04 (jamais utilise par le legacy)
+
+Le pattern bizarre des donnees venait donc bien de l utilisation du token de guillaume@ par le bootstrap (via le legacy), pas d un mismatch OAuth.
+
+### Nettoyage donnees execute
+
+UPDATE en base (mode dry-run d abord, validation Guillaume, puis COMMIT) :
+- 111 mails reetiquetes : `mailbox_email='contact@couffrant-solar.fr'` -> `mailbox_email='guillaume@couffrant-solar.fr'`, `connection_id=6`
+- 0 doublon exact (les `id` Microsoft Graph differaient)
+- 0 mail soft-deleted
+
+Etat post-nettoyage : guillaume@ passe de 1027 a 1138 mails, contact@ vide.
+
+### Suite
+
+Connexion 12 supprimee par Guillaume depuis son panel (probleme Microsoft Authenticator empechait la reconnexion immediate). Sera recreee plus tard.
+
+A faire au moment de la reconnexion :
+1. Authentification Microsoft avec le COMPTE contact@ directement (compte autonome, pas alias)
+2. Verification via /admin/mail/diag/identities-page (doit montrer mismatch=0)
+3. Bootstrap historique declenche depuis le panel super admin (devrait remonter ~1031 mails)
+
+### Lecons retenues
+
+- **Architecture systeme** : avoir 2 systemes de tokens en parallele (legacy `oauth_tokens` global + V2 `tenant_connections.credentials` par-connexion) sans migration complete cree des bugs subtils. Le code utilise le legacy par defaut et le V2 reste inerte.
+- **Verification empirique** : le pattern statistique des donnees (87% de mails contact@ de guillaume@) etait un signal plus fort que le diagnostic OAuth (qui disait OK). Toujours croiser plusieurs sources.
+- **Les fix architecturaux ont des effets de bord visibles** : apres mon fix `8eb31ab`, conn 12 est passee `down` parce qu elle utilisait enfin son vrai token (expire). Avant le fix, elle etait `healthy` mais lisait la mauvaise boite. Le passage en `down` est donc un PROGRES, pas une regression.
+
+---
+
+
 ## Session 04/05/2026 soir + 05/05/2026 minuit — Marathon sécurité (6 commits + 1 revert + 1 reapply)
 
 **Thème principal** : Audit complet du système de permissions, suppression des chemins d'exécution dangereux, mur physique branché sur les tools agentiques, UX pending actions, et début du chantier "débridage Raya".
