@@ -490,3 +490,217 @@ def admin_mail_diag_all(_: dict = Depends(require_admin)):
         "mismatches": nb_mismatch,
         "results": results,
     }
+
+
+# ─── PAGE HTML DIAGNOSTIC IDENTITE TOKEN ─────────────────────────
+@router.get("/admin/mail/diag/identities-page")
+def admin_mail_diag_identities_page(_: dict = Depends(require_admin)):
+    """Page HTML diagnostique - lecture seule.
+    
+    Affiche le resultat de admin_mail_diag_all dans une page lisible
+    pour les non-developpeurs. Pas besoin de console JS.
+    Accessible via /admin/mail/diag/identities-page
+    """
+    from fastapi.responses import HTMLResponse
+    
+    # Recupere les donnees
+    data = admin_mail_diag_all(_={"username": "system"})
+    results = data.get("results", [])
+    nb_mismatch = data.get("mismatches", 0)
+    total = data.get("total", 0)
+    
+    # Construit le tableau HTML
+    rows_html = ""
+    for r in results:
+        if r.get("status") == "error":
+            verdict_class = "row-error"
+            verdict_icon = "⚠️"
+            verdict_text = f"ERREUR : {r.get('message', '?')[:80]}"
+            attendu = r.get("expected_email", "?")
+            reel = "—"
+            label = r.get("label", "?")
+            cid = r.get("connection_id", "?")
+            ttype = "?"
+        elif r.get("mismatch") is True:
+            verdict_class = "row-mismatch"
+            verdict_icon = "🚨"
+            verdict_text = "MISMATCH - le token authentifie un AUTRE compte"
+            attendu = r.get("expected_email", "?")
+            reel = r.get("real_email_from_token", "?")
+            label = r.get("label", "?")
+            cid = r.get("connection_id", "?")
+            ttype = r.get("tool_type", "?")
+        else:
+            verdict_class = "row-ok"
+            verdict_icon = "✅"
+            verdict_text = "OK - token coherent"
+            attendu = r.get("expected_email", "?")
+            reel = r.get("real_email_from_token", "?")
+            label = r.get("label", "?")
+            cid = r.get("connection_id", "?")
+            ttype = r.get("tool_type", "?")
+        
+        rows_html += f"""
+        <tr class="{verdict_class}">
+          <td>{cid}</td>
+          <td>{label}</td>
+          <td><code>{ttype}</code></td>
+          <td>{attendu}</td>
+          <td>{reel}</td>
+          <td>{verdict_icon} {verdict_text}</td>
+        </tr>
+        """
+    
+    # Bandeau de synthese
+    if nb_mismatch == 0:
+        synthese_class = "synthese-ok"
+        synthese_text = (f"Tout est correct. Les {total} connexions mail "
+                         f"utilisent bien le token du compte qu elles affichent.")
+    else:
+        synthese_class = "synthese-mismatch"
+        synthese_text = (f"{nb_mismatch} connexion(s) sur {total} en MISMATCH. "
+                         f"Le token OAuth ne correspond pas au compte affiche. "
+                         f"Action requise : reconnecter ces boites avec le bon "
+                         f"compte.")
+    
+    html = f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Diagnostic identite OAuth - Raya</title>
+  <style>
+    * {{ box-sizing: border-box; }}
+    body {{
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0a0e1a;
+      color: #e8eaed;
+      margin: 0;
+      padding: 32px 24px;
+    }}
+    h1 {{
+      font-size: 22px;
+      margin: 0 0 8px 0;
+      color: #fff;
+    }}
+    .subtitle {{
+      color: #8b95a5;
+      font-size: 14px;
+      margin-bottom: 24px;
+    }}
+    .synthese {{
+      padding: 16px 20px;
+      border-radius: 12px;
+      margin-bottom: 24px;
+      font-size: 15px;
+      border: 1px solid;
+    }}
+    .synthese-ok {{
+      background: rgba(34, 197, 94, 0.1);
+      border-color: rgba(34, 197, 94, 0.4);
+      color: #86efac;
+    }}
+    .synthese-mismatch {{
+      background: rgba(239, 68, 68, 0.1);
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      background: #131826;
+      border-radius: 12px;
+      overflow: hidden;
+      font-size: 14px;
+    }}
+    th {{
+      background: #1a2030;
+      padding: 12px 14px;
+      text-align: left;
+      font-weight: 600;
+      color: #8b95a5;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border-bottom: 1px solid #2a3142;
+    }}
+    td {{
+      padding: 14px;
+      border-bottom: 1px solid #1f2533;
+    }}
+    tr:last-child td {{ border-bottom: none; }}
+    tr.row-ok td:last-child {{ color: #86efac; }}
+    tr.row-mismatch {{ background: rgba(239, 68, 68, 0.08); }}
+    tr.row-mismatch td:last-child {{
+      color: #fca5a5;
+      font-weight: 600;
+    }}
+    tr.row-error {{ background: rgba(245, 158, 11, 0.08); }}
+    tr.row-error td:last-child {{ color: #fcd34d; }}
+    code {{
+      background: #0a0e1a;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 12px;
+    }}
+    .footer {{
+      margin-top: 24px;
+      color: #5b6370;
+      font-size: 12px;
+    }}
+    .actions {{
+      margin-top: 16px;
+    }}
+    button {{
+      background: #2563eb;
+      color: white;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-right: 8px;
+    }}
+    button:hover {{ background: #1d4ed8; }}
+  </style>
+</head>
+<body>
+  <h1>🔍 Diagnostic identite OAuth des connexions mail</h1>
+  <div class="subtitle">
+    Verifie a qui appartient REELLEMENT le token OAuth de chaque connexion
+    en appelant l API Microsoft Graph et Gmail.
+  </div>
+  
+  <div class="synthese {synthese_class}">
+    {synthese_text}
+  </div>
+  
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Label</th>
+        <th>Type</th>
+        <th>Compte attendu</th>
+        <th>Compte reel (token)</th>
+        <th>Verdict</th>
+      </tr>
+    </thead>
+    <tbody>
+      {rows_html}
+    </tbody>
+  </table>
+  
+  <div class="actions">
+    <button onclick="location.reload()">🔄 Relancer le diagnostic</button>
+    <button onclick="history.back()">← Retour</button>
+  </div>
+  
+  <div class="footer">
+    Date du diagnostic : {data.get('status', '?')} - Total {total} connexions auditees
+    - {nb_mismatch} mismatches detectes.<br>
+    Page generee cote serveur, aucune action automatique.
+  </div>
+</body>
+</html>"""
+    
+    return HTMLResponse(content=html)
