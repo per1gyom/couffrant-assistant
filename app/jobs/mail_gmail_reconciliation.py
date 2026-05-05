@@ -58,6 +58,17 @@ DELTA_ALERT_THRESHOLD_PCT = 1.0
 # (evite de spammer pour des differences negligeables sur les petites boites)
 DELTA_ALERT_MIN_ABS = 50
 
+# Fix 05/05/2026 : seuils 3 niveaux. La reconciliation Gmail compare
+# Google (INBOX+SENT+SPAM brut) vs Raya (post-filtrage Haiku). Donc un
+# ecart eleve est ATTENDU et legitime (filtrage SPAM + newsletter +
+# anti-bulk volontaire). On ne crie au loup que si l ecart est vraiment
+# anormal apres prise en compte du filtrage typique (~20-30%).
+INFO_THRESHOLD_PCT = 30.0      # < 30% = info (filtrage Haiku normal)
+WARNING_THRESHOLD_PCT = 50.0   # 30-50% = warning a surveiller
+# > 50% = critical (probablement bug ingestion)
+# Note : sera affine au commit #3 avec comptage pommes vs pommes
+# (exclusion SPAM cote Google + ajout filtres_haiku cote Raya).
+
 # Labels a compter cote Google (memes que PERIMETRE_LABELS du polling)
 LABELS_TO_COUNT = ["INBOX", "SENT", "SPAM"]
 
@@ -310,12 +321,42 @@ def _raise_reconciliation_alert(tenant_id: str, username: str,
                                   delta_abs: int, delta_pct: float,
                                   boites_total: int,
                                   boites_failed: int) -> None:
-    """Leve une alerte WARNING via le dispatcher universel."""
+    """Leve une alerte avec severite calibree selon l ampleur de l ecart.
+    
+    Fix 05/05/2026 : 3 niveaux pour ne plus alerter en orange/rouge sur
+    le filtrage Haiku legitime (newsletters/spam ignores volontairement).
+    """
     try:
         from app.alert_dispatcher import send
 
+        delta_pct_abs = abs(delta_pct)
+        # Choix de severite
+        if delta_pct_abs >= WARNING_THRESHOLD_PCT:
+            severity = "critical"
+            verdict = (
+                "ECART CRITIQUE - meme apres prise en compte du filtrage "
+                "Haiku, l ecart depasse 50%. Probable bug d ingestion. "
+                "Inspecter /admin/health/page et /admin/health/connection/."
+            )
+        elif delta_pct_abs >= INFO_THRESHOLD_PCT:
+            severity = "warning"
+            verdict = (
+                "Ecart modere a surveiller. Le filtrage Haiku peut "
+                "expliquer une partie (newsletter/spam volontairement "
+                "ignores). Si l ecart persiste sur plusieurs jours, "
+                "investiguer."
+            )
+        else:
+            severity = "info"
+            verdict = (
+                "Ecart attendu cote Raya : le filtrage Haiku ignore "
+                "volontairement les newsletters, notifications et spam "
+                "pour ne garder que les mails business pertinents."
+            )
+
         title = (
-            f"Reconciliation Gmail : {delta_abs} mails manquants ({username})"
+            f"Reconciliation Gmail : {delta_abs} mails ({username}) - "
+            f"{delta_pct_abs:.1f}%"
         )
         message = (
             f"La reconciliation nocturne du "
@@ -327,14 +368,11 @@ def _raise_reconciliation_alert(tenant_id: str, username: str,
             f"Comptage Raya (mail_memory) : {count_raya}\n"
             f"Ecart : {delta_abs} ({delta_pct:.1f}%)\n"
             f"Boites en echec : {boites_failed}/{boites_total}\n\n"
-            f"Cause possible : crash Raya, bug logique de filtrage trop "
-            f"agressif, expiration historyId Gmail (>7j), webhook bug. "
-            f"Inspecte /admin/health/page pour voir si le polling delta "
-            f"est OK et /admin/health/connection/<id> pour les events."
+            f"{verdict}"
         )
 
         send(
-            severity="warning",
+            severity=severity,
             title=title,
             message=message,
             tenant_id=tenant_id,

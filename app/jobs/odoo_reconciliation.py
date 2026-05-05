@@ -37,7 +37,15 @@ from typing import Optional
 logger = logging.getLogger("raya.odoo_reconciliation")
 
 # Seuil au-dessus duquel on declenche l alerte (1%)
-DELTA_ALERT_THRESHOLD_PCT = 1.0
+DELTA_ALERT_THRESHOLD_PCT = 1.0  # legacy : seuil de detection ecart
+
+# Fix 05/05/2026 : seuils 3 niveaux pour ne pas alerter en orange/rouge
+# quand l ecart est petit ET le re-sync auto va le corriger au prochain
+# cycle de polling.
+INFO_THRESHOLD_PCT = 5.0       # < 5% = info verte (sera auto-rattrape)
+WARNING_THRESHOLD_PCT = 10.0   # 5-10% = warning orange
+# > 10% OU > 100 records = critical rouge
+CRITICAL_THRESHOLD_ABS = 100
 
 
 def run_odoo_reconciliation():
@@ -176,11 +184,31 @@ def _raise_reconciliation_alert(
     count_odoo: int, count_raya: int,
     delta_abs: int, delta_pct: float,
 ) -> None:
-    """Leve une alerte WARNING via le dispatcher universel."""
+    """Leve une alerte avec severite calibree selon l ampleur de l ecart.
+    
+    Fix 05/05/2026 : 3 niveaux pour ne plus crier au loup quand le re-sync
+    automatique va corriger l ecart au prochain cycle de polling.
+    """
     try:
         from app.alert_dispatcher import send
 
-        title = f"Reconciliation Odoo : {delta_abs} records manquants ({model})"
+        delta_pct_abs = abs(delta_pct)
+        # Choix de severite selon ampleur
+        if delta_pct_abs >= WARNING_THRESHOLD_PCT or delta_abs >= CRITICAL_THRESHOLD_ABS:
+            severity = "critical"
+            verdict = (f"ECART IMPORTANT - re-sync automatique va etre tente "
+                       f"mais une investigation manuelle est recommandee si "
+                       f"l ecart persiste apres 24h.")
+        elif delta_pct_abs >= INFO_THRESHOLD_PCT:
+            severity = "warning"
+            verdict = (f"Ecart modere - le re-sync automatique au prochain "
+                       f"cycle de polling devrait corriger.")
+        else:
+            severity = "info"
+            verdict = (f"Petit ecart attendu - le re-sync automatique au "
+                       f"prochain cycle de polling va corriger.")
+
+        title = f"Reconciliation Odoo : {delta_abs} records ({model}) - {delta_pct_abs:.1f}%"
         message = (
             f"La reconciliation nocturne du {datetime.now().strftime('%Y-%m-%d')} "
             f"a detecte {delta_abs} records manquants dans Raya pour le modele "
@@ -188,13 +216,11 @@ def _raise_reconciliation_alert(
             f"Comptage Odoo : {count_odoo}\n"
             f"Comptage Raya : {count_raya}\n"
             f"Ecart : {delta_abs} ({delta_pct:.1f}%)\n\n"
-            f"Cause possible : crash Raya, bug logique, modification Odoo "
-            f"sans changement de write_date. Un re-sync force du modele "
-            f"sera tente automatiquement au prochain cycle de polling."
+            f"{verdict}"
         )
 
         send(
-            severity="warning",
+            severity=severity,
             title=title,
             message=message,
             tenant_id=tenant_id,

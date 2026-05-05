@@ -39,7 +39,17 @@ WEBHOOKED_MODELS = [
     "of.custom.document",
 ]
 
-ALERT_THRESHOLD = 5  # si plus de 5 records manquants, on alerte
+ALERT_THRESHOLD = 5  # si plus de 5 records manquants, on alerte (legacy)
+
+# Fix 05/05/2026 : seuils refines pour ne plus alerter en orange/rouge
+# quand le filet de securite fait son boulot normalement.
+# Logique : si rattrapages == missing (= tout a ete enqueue avec succes
+# dans la queue), c est un signal POSITIF que le systeme s autorepare.
+# Severite info verte sauf si on detecte un vrai probleme.
+INFO_THRESHOLD_RATTRAPES_OK = 50    # jusqu a 50 rattrapages reussis = info verte
+WARNING_THRESHOLD_MISSING = 100      # >100 missing = warning
+CRITICAL_THRESHOLD_MISSING = 500     # >500 missing = critical
+CRITICAL_THRESHOLD_FAILED_RATIO = 0.2  # >20% des rattrapages en echec = critical
 
 
 def _list_odoo_modified_last_24h(model: str) -> set:
@@ -161,9 +171,42 @@ def run_night_patrol():
     with get_pg_conn() as conn:
         cur = conn.cursor()
         for tenant_id, tenant_report in report["tenants"].items():
-            severity = "warning" if tenant_report["missing"] > ALERT_THRESHOLD else "info"
-            msg = (f"Ronde de nuit : {tenant_report['missing']} records manquants "
-                   f"detectes, {tenant_report['rattrapes']} rattrapages enqueues.")
+            # Fix 05/05/2026 : refonte severite a 3 niveaux clairs.
+            # info verte : filet fait son boulot normalement
+            # warning orange : volume anormal a surveiller
+            # critical rouge : echecs significatifs ou volume critique
+            missing = tenant_report["missing"]
+            rattrapes = tenant_report["rattrapes"]
+            failed = max(0, missing - rattrapes)
+            failed_ratio = (failed / missing) if missing > 0 else 0
+
+            if missing == 0:
+                severity = "info"
+                msg = "Ronde de nuit : aucun record manquant detecte."
+            elif (missing <= INFO_THRESHOLD_RATTRAPES_OK and
+                  failed_ratio < CRITICAL_THRESHOLD_FAILED_RATIO):
+                severity = "info"
+                msg = (f"Ronde de nuit : {missing} records manquants detectes, "
+                       f"{rattrapes} rattrapages enqueues avec succes "
+                       f"(systeme s autorepare normalement).")
+            elif (missing >= CRITICAL_THRESHOLD_MISSING or
+                  failed_ratio >= CRITICAL_THRESHOLD_FAILED_RATIO):
+                severity = "critical"
+                msg = (f"Ronde de nuit : {missing} records manquants, "
+                       f"seulement {rattrapes} rattrapages reussis "
+                       f"({failed} echecs - {failed_ratio:.0%}). "
+                       f"Investigation requise.")
+            elif missing > WARNING_THRESHOLD_MISSING:
+                severity = "warning"
+                msg = (f"Ronde de nuit : volume anormal de {missing} records "
+                       f"manquants ({rattrapes} rattrapages enqueues). "
+                       f"A surveiller.")
+            else:
+                # Entre INFO_THRESHOLD et WARNING_THRESHOLD : info attentive
+                severity = "info"
+                msg = (f"Ronde de nuit : {missing} records manquants detectes, "
+                       f"{rattrapes} rattrapages enqueues "
+                       f"(volume modere, autoreparation en cours).")
             cur.execute(
                 """INSERT INTO system_alerts
                    (tenant_id, alert_type, severity, component, message, details, updated_at)
