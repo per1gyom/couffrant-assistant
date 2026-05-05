@@ -468,15 +468,8 @@ def admin_connexions_page(request: Request):
 
 
 @router.get("/admin/connexions-data")
-def admin_connexions_data(request: Request, user: dict = Depends(require_admin)):
-    """Retourne tous les tenants avec leurs connexions pour rendu UI.
-    
-    Fix 05/05/2026 : ajoute is_super_admin pour que le frontend sache
-    s il doit afficher le dropdown de modification des permissions ou
-    juste le texte lecture seule.
-    """
-    from app.app_security import SCOPE_SUPER_ADMIN
-    is_super_admin = user.get("scope") == SCOPE_SUPER_ADMIN
+def admin_connexions_data(request: Request, _: dict = Depends(require_admin)):
+    """Retourne tous les tenants avec leurs connexions pour rendu UI."""
     from app.database import get_pg_conn
     with get_pg_conn() as conn:
         cur = conn.cursor()
@@ -520,8 +513,7 @@ def admin_connexions_data(request: Request, user: dict = Depends(require_admin))
                     "config_summary": config_summary,
                 })
             tenants.append({"tenant_id": tid, "connections": conns})
-        return {"status": "ok", "tenants": tenants,
-                "is_super_admin": is_super_admin}
+        return {"status": "ok", "tenants": tenants}
 
 
 @router.delete("/admin/connections/{connection_id}")
