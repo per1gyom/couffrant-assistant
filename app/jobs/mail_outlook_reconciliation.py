@@ -107,20 +107,30 @@ def _reconcile_connection(connection_id: int, tenant_id: str,
           - count_microsoft, count_raya, delta_abs, delta_pct
           - alert_raised : bool
           - status : 'ok' / 'microsoft_error' / 'raya_error'
+
+    Fix 05/05/2026 : utilise le token V2 par-connexion via
+    get_all_user_connections au lieu du legacy V1 qui retournait un
+    seul token global par user. Sans ce fix, avec 2 boites Outlook,
+    la recon comptait la meme boite 2 fois et faussait le delta de
+    chacune. Aligne sur le fix bootstrap (8eb31ab) du matin.
     """
-    from app.token_manager import get_valid_microsoft_token
+    from app.connection_token_manager import get_all_user_connections
     from app.database import get_pg_conn
 
-    # 1. Recupere le token
+    # 1. Recupere le token specifique a CETTE connexion (V2)
+    token = None
     try:
-        token = get_valid_microsoft_token(username)
+        for c in get_all_user_connections(username):
+            if c.get("connection_id") == connection_id:
+                token = c.get("token")
+                break
     except Exception:
-        token = None
+        pass
 
     if not token:
         logger.debug(
-            "[OutlookRecon] %s/%s : pas de token, skip",
-            tenant_id, username,
+            "[OutlookRecon] %s/%s/conn#%d : pas de token V2, skip",
+            tenant_id, username, connection_id,
         )
         return {"status": "no_token", "alert_raised": False}
 

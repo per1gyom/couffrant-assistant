@@ -73,15 +73,28 @@ def admin_mail_inventory(conn_id: int, _: dict = Depends(require_admin)):
     folders_count = {}
 
     if tool_type in ("microsoft", "outlook"):
-        from app.token_manager import get_valid_microsoft_token
+        # Fix 05/05/2026 : utilise le token V2 par-connexion (memes que pour
+        # Gmail ci-dessous) au lieu du legacy get_valid_microsoft_token qui
+        # retournait un seul token par user (le dernier OAuth = guillaume@).
+        # Symptome avant fix : pour 2 boites Outlook differentes, l inventaire
+        # retournait les memes chiffres car il utilisait le meme token.
+        # Aligne sur le fix bootstrap commit 8eb31ab du matin.
+        from app.connection_token_manager import get_all_user_connections
         from app.jobs.mail_outlook_reconciliation import _count_folder_microsoft
+        token = None
         try:
-            token = get_valid_microsoft_token(username)
+            for c in get_all_user_connections(username):
+                if c.get("connection_id") == conn_id:
+                    token = c.get("token")
+                    break
         except Exception:
-            token = None
+            pass
         if not token:
             return {"status": "error",
-                    "message": "Token Microsoft non disponible"}
+                    "message": (
+                        f"Token Microsoft non disponible pour la connexion "
+                        f"{conn_id}. Reconnecter via /admin/connexions."
+                    )}
         for folder in ["Inbox", "SentItems", "JunkEmail", "Archive",
                         "DeletedItems"]:
             try:
