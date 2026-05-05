@@ -271,3 +271,22 @@ Modification (à identifier) du code qui sauve les règles :
 - **OpenAI cookbook "Temporal Agents with Knowledge Graphs"** : https://developers.openai.com/cookbook/examples/partners/temporal_agents_with_knowledge_graphs/temporal_agents
 - **Mem0 paper** : https://arxiv.org/abs/2504.19413
 - **Architecture mémoire existante chez nous** : `docs/architecture_memoire_regles_v2_final.md` (job nocturne rules_optimizer, décroissance par non-usage, contradictions)
+
+## ✅ MVP VALIDE EN PROD (05/05/2026 ~20h40)
+
+Test bout-en-bout effectue avec succes par Guillaume juste apres le merge sur main.
+
+**Question posee a Raya** : 'Bonjour Raya, est-ce que tu peux me dire ce que tu sais de la boite contact@couffrant-solar.fr ?'
+
+**Reponse de Raya** :
+- Connectee depuis le 05/05/2026 via Microsoft (Outlook/M365)
+- Boite principale de Couffrant Solar
+- 9961 mails au total
+- search_mail avec mailbox=contact@couffrant-solar.fr (donne l outil exact)
+- Mention des limites de permissions (auto-conscience du mur permissions teste le matin)
+
+**Validation** :
+- AVANT (le matin du 05/05) : Raya disait 'a connecter prochainement', refusait d utiliser la boite
+- APRES (le soir, post-MVP) : Raya affirme la connexion avec date precise, donne l outil exact
+
+Le bug de la regle 124 obsolete ne peut plus se reproduire. Quand Raya verra une regle dans INFOS A CONFIRMER (Fact + Dynamic) qui contredit une donnee vivante, elle privilegiera la donnee vivante (regle d or du prompt systeme v2 et v1).
