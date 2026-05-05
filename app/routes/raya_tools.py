@@ -101,15 +101,8 @@ TOOL_SEARCH_DRIVE = {
     "description": (
         "Recherche semantique dans les fichiers du Drive de l utilisateur "
         "(SharePoint, Google Drive ou OneDrive selon les connexions actives). "
-        "Remonte les fichiers (photos, PDF, docs techniques, plans, Excel) "
-        "dont le contenu ou le nom correspond a la requete.\n\n"
-        "IMPORTANT - APERCU TRONQUE : chaque resultat retourne un APERCU "
-        "limite a 300 caracteres du contenu du fichier, plus un identifiant "
-        "📌 [file_id: 1234]. Si tu vois que l apercu s arrete au milieu d une "
-        "liste, d un tableau ou d une phrase, c est NORMAL : appelle ENSUITE "
-        "read_drive_file avec le file_id pour obtenir le CONTENU COMPLET "
-        "(jusqu a 8000 caracteres). Ne dis JAMAIS au user que le contenu est "
-        "tronque sans avoir d abord tente read_drive_file."
+        "Remonte les fichiers (photos, PDF, docs techniques, plans) dont le "
+        "contenu ou le nom correspond a la requete."
     ),
     "input_schema": {
         "type": "object",
@@ -198,34 +191,14 @@ TOOL_READ_MAIL = {
 TOOL_READ_DRIVE_FILE = {
     "name": "read_drive_file",
     "description": (
-        "Lit le CONTENU COMPLET d un fichier du Drive (SharePoint, Google "
-        "Drive ou OneDrive) par son file_id. Retourne jusqu a 8000 "
-        "caracteres du fichier - le texte complet pour la majorite des "
-        "documents.\n\n"
-        "QUAND L UTILISER :\n"
-        "- Apres un search_drive si tu vois un apercu tronque ou si tu as "
-        "  besoin de plus que les 300 premiers caracteres\n"
-        "- Quand l utilisateur demande de LIRE / ANALYSER / PARCOURIR le "
-        "  contenu d un fichier specifique\n"
-        "- Pour les Excel : recupere la structure complete feuille par "
-        "  feuille, format pipe-delimited (col1 | col2 | col3)\n"
-        "- Pour les PDF : recupere le texte page par page\n"
-        "- Pour les DOCX : recupere le texte structure\n\n"
-        "IMPORTANT : ne JAMAIS dire au user que le contenu est tronque ou "
-        "que tu as une 'limite d extraction' sans avoir tente ce tool en "
-        "premier. Le snippet de search_drive est un APERCU - le contenu "
-        "complet vit ici."
+        "Lit le contenu d un fichier du Drive (SharePoint, Google Drive ou "
+        "OneDrive selon le tenant) par son ID. Supporte texte, "
+        "PDF, Office (avec extraction auto)."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "file_id": {
-                "type": "string",
-                "description": (
-                    "Identifiant interne du fichier, recupere depuis "
-                    "📌 [file_id: 1234] dans les resultats de search_drive."
-                ),
-            },
+            "file_id": {"type": "string"},
         },
         "required": ["file_id"],
     },
