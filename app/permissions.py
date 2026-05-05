@@ -545,23 +545,49 @@ def _resolve_connection_id_for_tool(
             cur = conn.cursor()
 
             # Cas 1 : tools mail avec mail_id -> lookup mail_memory
+            # Fix 05/05/2026 : depuis le commit 3056fe7 du matin, Raya recoit
+            # l id technique de mail_memory (entier, ex: "3490") au lieu du
+            # message_id Microsoft/Gmail (string longue, ex: "AAMkAGEw..."),
+            # ce qui est plus sur (cohabite avec read_mail qui utilise deja
+            # WHERE id = %s). On essaie d abord par id technique, puis on
+            # fallback sur message_id pour compatibilite avec d eventuelles
+            # pending_actions historiques.
             if tool_name in ("delete_mail", "archive_mail", "reply_to_mail"):
                 mail_id = tool_input.get("mail_id", "")
                 if mail_id:
-                    cur.execute(
-                        """SELECT mailbox_email FROM mail_memory
-                           WHERE message_id = %s AND tenant_id = %s
-                           LIMIT 1""",
-                        (mail_id, tenant_id),
-                    )
-                    row = cur.fetchone()
-                    if row and row[0]:
+                    # Tentative 1 : id technique (cas standard apres 3056fe7)
+                    mailbox_email = None
+                    try:
+                        mail_id_int = int(str(mail_id).strip())
+                        cur.execute(
+                            """SELECT mailbox_email FROM mail_memory
+                               WHERE id = %s AND tenant_id = %s
+                               LIMIT 1""",
+                            (mail_id_int, tenant_id),
+                        )
+                        row = cur.fetchone()
+                        if row and row[0]:
+                            mailbox_email = row[0]
+                    except (ValueError, TypeError):
+                        pass
+                    # Tentative 2 : message_id (compat historique)
+                    if not mailbox_email:
+                        cur.execute(
+                            """SELECT mailbox_email FROM mail_memory
+                               WHERE message_id = %s AND tenant_id = %s
+                               LIMIT 1""",
+                            (str(mail_id), tenant_id),
+                        )
+                        row = cur.fetchone()
+                        if row and row[0]:
+                            mailbox_email = row[0]
+                    if mailbox_email:
                         cur.execute(
                             """SELECT id FROM tenant_connections
                                WHERE tenant_id = %s AND connected_email = %s
                                  AND status = 'connected'
                                LIMIT 1""",
-                            (tenant_id, row[0]),
+                            (tenant_id, mailbox_email),
                         )
                         c = cur.fetchone()
                         if c:

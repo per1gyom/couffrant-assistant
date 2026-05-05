@@ -6,6 +6,53 @@ from app.routes.actions.mail_actions import is_valid_outlook_id
 from app.pending_actions import confirm_action, cancel_action, mark_executed, mark_failed
 
 
+def _resolve_real_message_id(mail_id_input, tenant_id: str):
+    """Resout le vrai message_id Microsoft/Gmail a partir d un mail_id qui
+    peut etre soit l id technique de mail_memory (entier, ex: "3490"),
+    soit le message_id direct (string longue, ex: "AAMkAGEw...").
+    
+    Fix 05/05/2026 : depuis le commit 3056fe7, Raya passe l id technique
+    de mail_memory comme mail_id (plus fiable que les message_id qu elle
+    inventait avant). Cette fonction fait la traduction inverse au moment
+    de l execution reelle de l action sur Microsoft Graph / Gmail API.
+    
+    Retourne le message_id reel ou None si introuvable.
+    """
+    if not mail_id_input:
+        return None
+    from app.database import get_pg_conn
+    mail_id_str = str(mail_id_input).strip()
+    # Tentative 1 : id technique entier
+    try:
+        mail_id_int = int(mail_id_str)
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT message_id FROM mail_memory WHERE id = %s AND tenant_id = %s LIMIT 1",
+                (mail_id_int, tenant_id),
+            )
+            row = cur.fetchone()
+            if row and row[0]:
+                return row[0]
+    except (ValueError, TypeError):
+        pass
+    # Tentative 2 : c est deja un message_id (compat ascendante)
+    # Verifier qu il existe en base pour ne pas envoyer du garbage a l API
+    try:
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT message_id FROM mail_memory WHERE message_id = %s AND tenant_id = %s LIMIT 1",
+                (mail_id_str, tenant_id),
+            )
+            row = cur.fetchone()
+            if row and row[0]:
+                return row[0]
+    except Exception:
+        pass
+    return None
+
+
 def _handle_confirmations(response, username, tenant_id, outlook_token, tools):
     confirmed = []
 
@@ -146,12 +193,23 @@ def _execute_confirmed_action(action: dict, outlook_token: str, tools: dict) -> 
             # Bug fix 04/05/2026 : avant, seul DELETE_GROUPED etait gere
             # ce qui produisait "Type d action inconnu : DELETE" au clic
             # sur la carte de confirmation.
+            # Fix 05/05/2026 : depuis le commit 3056fe7 du matin, mail_id
+            # peut etre l id technique de mail_memory (ex: "3490") au lieu
+            # du message_id Microsoft (ex: "AAMkAGEw..."). On resout le
+            # vrai message_id avant d appeler perform_outlook_action.
             mail_id = payload.get("mail_id") or payload.get("message_id", "")
             if not mail_id:
                 return {"ok": False, "error": "mail_id manquant dans le payload"}
+            real_message_id = _resolve_real_message_id(mail_id, tenant_id)
+            if not real_message_id:
+                return {"ok": False, "error": (
+                    f"Impossible de retrouver le message_id reel pour "
+                    f"mail_id={mail_id}. Le mail a peut-etre ete supprime "
+                    f"de la base ou l ID est invalide."
+                )}
             try:
                 r = perform_outlook_action("delete_message",
-                                           {"message_id": mail_id}, outlook_token)
+                                           {"message_id": real_message_id}, outlook_token)
                 if r.get("status") == "ok":
                     return {"ok": True, "message": "Mail mis a la corbeille."}
                 return {"ok": False, "error": r.get("message", "echec suppression")}
@@ -161,12 +219,19 @@ def _execute_confirmed_action(action: dict, outlook_token: str, tools: dict) -> 
         if action_type == "ARCHIVE":
             # Archivage d UN mail (tool agentique archive_mail).
             # Bug fix 04/05/2026 : handler manquant.
+            # Fix 05/05/2026 : meme resolution mail_id technique que DELETE.
             mail_id = payload.get("mail_id") or payload.get("message_id", "")
             if not mail_id:
                 return {"ok": False, "error": "mail_id manquant dans le payload"}
+            real_message_id = _resolve_real_message_id(mail_id, tenant_id)
+            if not real_message_id:
+                return {"ok": False, "error": (
+                    f"Impossible de retrouver le message_id reel pour "
+                    f"mail_id={mail_id}."
+                )}
             try:
                 r = perform_outlook_action("archive_message",
-                                           {"message_id": mail_id}, outlook_token)
+                                           {"message_id": real_message_id}, outlook_token)
                 if r.get("status") == "ok":
                     return {"ok": True, "message": "Mail archive."}
                 return {"ok": False, "error": r.get("message", "echec archivage")}
