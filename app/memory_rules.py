@@ -84,21 +84,13 @@ def get_aria_rules_hierarchical(username: str, tenant_id: str) -> dict:
 
     Phase 4 du chantier mini-Graphiti (05/05/2026 soir).
 
-    Returns un dict avec 4 cles :
+    Returns un dict avec 5 cles :
       - 'connaissances_durables' : Fact + Preference (Static/Atemporal)
-                                    -> faits stables sur le monde et
-                                       preferences user durables
-      - 'infos_a_confirmer'      : Fact + Dynamic (etat temporel actif)
-                                    -> avec marqueur [A REVERIFIER] si
-                                       valid_at < NOW - 30j
+      - 'infos_a_confirmer'      : Fact + Dynamic (avec marqueur si > 30j)
       - 'comportements'          : Behavior (Atemporal)
-                                    -> regles de comportement Raya
       - 'culture_metier'         : Knowledge (Atemporal/Static)
-                                    -> vocabulaire et concepts metier
-
-    Cette separation permet a Raya de raisonner differemment selon le
-    type d info, et de detecter si une 'info_a_confirmer' contredit
-    une donnee vivante (cas de la regle 124 obsolete).
+      - 'rule_ids'               : list[int] de tous les ids charges
+                                    (pour tracabilite feedback)
 
     Filtre : invalid_at IS NULL (regle encore vraie) ET active=true.
     """
@@ -114,6 +106,7 @@ def get_aria_rules_hierarchical(username: str, tenant_id: str) -> dict:
         "infos_a_confirmer": "",
         "comportements": "",
         "culture_metier": "",
+        "rule_ids": [],
     }
 
     conn = None
@@ -135,7 +128,6 @@ def get_aria_rules_hierarchical(username: str, tenant_id: str) -> dict:
         """, (username, tenant_id))
         rows = c.fetchall()
 
-        # Repartition par bloc
         from datetime import datetime, timedelta
         threshold_30j = datetime.now() - timedelta(days=30)
 
@@ -143,10 +135,11 @@ def get_aria_rules_hierarchical(username: str, tenant_id: str) -> dict:
         infos = []
         behaviors = []
         knowledge = []
+        all_ids = []
 
         for r in rows:
             rid, category, rule, rtype, tclass, valid_at, conf, reinf = r
-            # Format ligne : on reste compact pour economiser tokens
+            all_ids.append(rid)
             line = f"[id:{rid}][{category}] {rule}"
 
             if rtype == "Behavior":
@@ -157,21 +150,19 @@ def get_aria_rules_hierarchical(username: str, tenant_id: str) -> dict:
                 durables.append(line)
             elif rtype == "Fact":
                 if tclass == "Dynamic":
-                    # Marqueur A REVERIFIER si l info date de plus de 30j
                     if valid_at and valid_at < threshold_30j:
                         line = f"[id:{rid}][{category}] ⚠️ [A REVERIFIER] {rule}"
                     infos.append(line)
                 else:
-                    # Static ou Atemporal -> connaissance durable
                     durables.append(line)
             else:
-                # type inconnu ou NULL -> bucket durable par defaut
                 durables.append(line)
 
         result["connaissances_durables"] = "\n".join(durables) if durables else ""
         result["infos_a_confirmer"] = "\n".join(infos) if infos else ""
         result["comportements"] = "\n".join(behaviors) if behaviors else ""
         result["culture_metier"] = "\n".join(knowledge) if knowledge else ""
+        result["rule_ids"] = all_ids
 
         return result
     finally:

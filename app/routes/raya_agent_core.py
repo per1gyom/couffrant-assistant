@@ -146,52 +146,66 @@ Regles non negociables :
 
 def _load_user_preferences(username: str, tenant_id: str, query: str = "") -> tuple:
     """
-    Charge les preferences durables (niveau 3 de la memoire).
+    Charge les preferences durables (niveau 3 de la memoire) en 4 sections
+    hierarchisees (Phase 4 mini-Graphiti, 05/05/2026 soir).
 
-    V2.2 (22/04 aprem) : branchement sur le RAG semantique existant
-    (app.rag.retrieve_context + app.embedding.search_similar sur
-    aria_rules.embedding, pgvector).
+    AVANT (jusqu au 05/05 matin) : un seul bloc fourre-tout
+      "=== PREFERENCES APPRISES (top 10 pertinentes) ==="
 
-    V2.5 (27/04 soir) : retourne desormais un tuple (text, rule_ids, via_rag)
-    pour permettre le tracage des regles utilisees -> save_response_metadata
-    -> renforcement par feedback positif. Avant : retournait juste str et
-    le mode V2 ne savait pas quelles regles avaient ete injectees.
+    APRES (Phase 4 mini-Graphiti) : 4 sections distinctes injectees dans le
+    system prompt selon le type/temporal_class de chaque regle :
+      === TES COMPORTEMENTS                        (Behavior)
+      === TES CONNAISSANCES DURABLES               (Fact Static/Atemporal + Preference)
+      === INFOS A CONFIRMER                        (Fact Dynamic, peut perimer)
+      === CULTURE METIER                           (Knowledge)
 
-    Dégradation gracieuse :
-      - Si OpenAI indispo : fallback SQL avec la BONNE colonne (rule)
-      - Si erreur : retourne ("", [], False) et Raya continue sans regles
-
-    Filtres systematiques :
-      - username = l utilisateur courant
-      - tenant_id = tenant courant (evite pollution multi-tenant)
-      - active = true
-      - confidence >= 0.30 (deja filtre dans rag.retrieve_rules)
+    Combine avec la regle d or du prompt systeme ('donnee vivante > regle
+    ancienne'), Raya peut detecter qu une INFOS A CONFIRMER contredit une
+    donnee vivante et privilegier la donnee vivante.
 
     Returns:
         tuple (text, rule_ids, via_rag) :
-          - text : str avec les regles formatees (a injecter dans system prompt)
-          - rule_ids : list[int] des IDs de regles injectees (pour metadata)
-          - via_rag : bool, True si retrieval semantique a fonctionne
+          - text : str avec les 4 sections concatenees, prefixe par \\n\\n
+          - rule_ids : list[int] des IDs de regles injectees
+          - via_rag : bool, conserve par compatibilite (toujours False ici
+                      car on ne passe plus par le retrieval semantique :
+                      avec 164 regles actives chez Guillaume, on charge tout)
     """
-    # Tentative 1 : retrieval semantique via RAG existant
     try:
-        from app.rag import retrieve_context
-        rag_ctx = retrieve_context(query or "", username, tenant_id)
-        rules_text = rag_ctx.get("rules_text", "")
-        rule_ids = rag_ctx.get("rule_ids", []) or []
-        via_rag = bool(rag_ctx.get("via_rag", False))
-        if rules_text.strip():
-            return (
-                "\n\n=== PREFERENCES APPRISES (top 10 pertinentes) ===\n" + rules_text,
-                rule_ids,
-                via_rag,
+        from app.memory_rules import get_aria_rules_hierarchical
+        h = get_aria_rules_hierarchical(username, tenant_id)
+        sections = []
+        if h.get("comportements"):
+            sections.append(
+                "\n\n=== TES COMPORTEMENTS (regles a appliquer) ===\n"
+                + h["comportements"]
             )
+        if h.get("connaissances_durables"):
+            sections.append(
+                "\n\n=== TES CONNAISSANCES DURABLES "
+                "(faits stables sur le monde et preferences user) ===\n"
+                + h["connaissances_durables"]
+            )
+        if h.get("infos_a_confirmer"):
+            sections.append(
+                "\n\n=== INFOS A CONFIRMER "
+                "(etats temporels actifs - prefere les donnees vivantes "
+                "si contradiction) ===\n"
+                + h["infos_a_confirmer"]
+            )
+        if h.get("culture_metier"):
+            sections.append(
+                "\n\n=== CULTURE METIER (vocabulaire et concepts) ===\n"
+                + h["culture_metier"]
+            )
+        text = "".join(sections)
+        rule_ids = h.get("rule_ids", [])
+        return (text, rule_ids, False)
     except Exception as e:
-        logger.warning("[Agent] retrieve_context error, fallback SQL: %s", e)
+        logger.warning("[Agent] _load_user_preferences hierarchical error, "
+                       "fallback SQL plat : %s", e)
 
-    # Tentative 2 : fallback SQL avec la BONNE colonne (rule, pas rule_text)
-    # Utilise uniquement si retrieve_context a echoue (ex : OpenAI down).
-    # On recupere aussi les IDs pour traçabilite feedback meme en fallback.
+    # Fallback SQL ultra-simple si get_aria_rules_hierarchical echoue
     conn = None
     try:
         conn = get_pg_conn()
@@ -202,6 +216,7 @@ def _load_user_preferences(username: str, tenant_id: str, query: str = "") -> tu
             "  AND (tenant_id = %s OR tenant_id IS NULL) "
             "  AND active = true "
             "  AND category != 'Mémoire' "
+            "  AND (invalid_at IS NULL OR invalid_at > NOW()) "
             "ORDER BY confidence DESC, reinforcements DESC, id DESC "
             "LIMIT 30",
             (username, tenant_id),
