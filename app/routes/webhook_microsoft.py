@@ -46,12 +46,16 @@ logger=get_logger("raya.webhook.ms")
 # (residu de la migration SPLIT-R3). Les fonctions levaient donc NameError
 # a chaque appel. Maintenant elles sont au bon endroit.
 
+# Fix 05/05/2026 : retire alerts@/alert@/automated@/auto@/system@ qui
+# bloquaient des alertes critiques legitimes (Cloudflare site down, AWS,
+# GitHub security alerts, monitoring SAV onduleur...). Garde uniquement
+# les prefixes qui sont SUR a 100% du bruit transactionnel non-business.
 _NOREPLY_PREFIXES = (
     "noreply@", "no-reply@", "no_reply@", "donotreply@",
     "do-not-reply@", "mailer-daemon@", "postmaster@",
-    "bounce@", "bounces@", "notifications@", "notification@",
-    "newsletter@", "newsletters@", "alerts@", "alert@",
-    "automated@", "auto@", "system@", "support-noreply@",
+    "bounce@", "bounces@",
+    "newsletter@", "newsletters@",
+    "support-noreply@",
     "info@noreply.", "reply@",
 )
 
@@ -64,12 +68,17 @@ _BULK_DOMAINS = (
     "twitter.com", "notifications.google.com",
 )
 
+# Fix 05/05/2026 (CRITIQUE) : retire les keywords business qui jetaient
+# des factures clients/fournisseurs, commandes, confirmations, livraisons
+# et trackings legitimes. Pour un dirigeant ces mails sont CENTRAUX.
+# Constate : sur 14 cas business reels testes, 9 etaient jetes a tort
+# (factures SOCOTEC/Studeria/Vauvelle, commandes Adiwatt/STECO,
+#  trackings chantier Enedis, tracking interne Arlene, etc.).
+# Garde uniquement les vrais signaux de newsletter/transactionnel pur.
 _BULK_SUBJECT_KEYWORDS = (
-    "unsubscribe", "se désabonner", "newsletter", "digest",
+    "unsubscribe", "se désabonner",
+    "newsletter", "digest",
     "weekly recap", "rapport hebdomadaire", "monthly report",
-    "invoice #", "facture n°", "receipt for", "reçu de",
-    "your order", "votre commande", "order confirmation",
-    "confirmation de commande", "tracking", "livraison",
     "automated message", "message automatique",
     "do not reply", "ne pas répondre",
     "verification code", "code de vérification",
