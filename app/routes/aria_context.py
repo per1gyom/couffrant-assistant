@@ -379,6 +379,27 @@ def build_system_prompt(
         aria_insights = get_aria_insights(limit=8, username=username, tenant_id=tenant_id)
         conv_context  = ""
 
+    # Phase 4 mini-Graphiti (05/05/2026) : recuperation hierarchique
+    # des regles en 4 blocs distincts (connaissances durables / infos a
+    # confirmer / comportements / culture metier) en plus du RAG ci-dessus.
+    # Ces 4 blocs remplacent le fourre-tout '=== TA MEMOIRE ===' historique.
+    # Le RAG continue a remonter du contexte conversationnel et insights.
+    aria_durables_text = ""
+    aria_infos_text = ""
+    aria_behaviors_text = ""
+    aria_knowledge_text = ""
+    try:
+        from app.memory_rules import get_aria_rules_hierarchical
+        h = get_aria_rules_hierarchical(username, tenant_id=tenant_id)
+        aria_durables_text = h.get("connaissances_durables", "")
+        aria_infos_text = h.get("infos_a_confirmer", "")
+        aria_behaviors_text = h.get("comportements", "")
+        aria_knowledge_text = h.get("culture_metier", "")
+    except Exception:
+        # Si la fonction echoue, on retombe sur l ancien bloc TA MEMOIRE
+        # via aria_rules ci-dessus (deja recupere)
+        pass
+
     # Auto-découverte : connaissance vectorisée des outils connectés
     tool_knowledge = ""
     try:
@@ -529,7 +550,7 @@ Pour tout schéma (organigramme, flux, hiérarchie, timeline), utilise un bloc `
 
 {f"=== {display_name.upper()} ==={chr(10)}{hot_summary}" if hot_summary else f"Premiere conversation avec {display_name}. Observe et memorise."}{ton_block}{maturity_block}{patterns_block}{narrative_block}
 
-{f"=== TA MEMOIRE ==={chr(10)}{aria_rules}" if aria_rules else ""}{f"{chr(10)}{chr(10)}=== TES OBSERVATIONS ==={chr(10)}{aria_insights}" if aria_insights else ""}{f"{chr(10)}{chr(10)}=== CONNAISSANCE DES OUTILS CONNECTES ==={chr(10)}{tool_knowledge}" if tool_knowledge else ""}{f"{chr(10)}{chr(10)}=== {team_roster_block}" if team_roster_block else ""}{theme_context_block}{conv_context_block}
+{f"=== TES COMPORTEMENTS (regles a appliquer) ==={chr(10)}{aria_behaviors_text}" if aria_behaviors_text else (f"=== TA MEMOIRE ==={chr(10)}{aria_rules}" if aria_rules else "")}{f"{chr(10)}{chr(10)}=== TES CONNAISSANCES DURABLES (faits stables sur le monde et preferences user) ==={chr(10)}{aria_durables_text}" if aria_durables_text else ""}{f"{chr(10)}{chr(10)}=== INFOS A CONFIRMER (etats temporels actifs - prefere les donnees vivantes si contradiction) ==={chr(10)}{aria_infos_text}" if aria_infos_text else ""}{f"{chr(10)}{chr(10)}=== CULTURE METIER (vocabulaire et concepts) ==={chr(10)}{aria_knowledge_text}" if aria_knowledge_text else ""}{f"{chr(10)}{chr(10)}=== TES OBSERVATIONS ==={chr(10)}{aria_insights}" if aria_insights else ""}{f"{chr(10)}{chr(10)}=== CONNAISSANCE DES OUTILS CONNECTES ==={chr(10)}{tool_knowledge}" if tool_knowledge else ""}{f"{chr(10)}{chr(10)}=== {team_roster_block}" if team_roster_block else ""}{theme_context_block}{conv_context_block}
 
 {f"=== FICHE CONTACT ==={chr(10)}{contact_card}" if contact_card else ""}{f"{chr(10)}{chr(10)}=== STYLE REDACTIONNEL ==={chr(10)}{style_examples}" if style_examples else ""}
 

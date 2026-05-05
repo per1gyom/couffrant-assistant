@@ -41,7 +41,13 @@ def get_aria_rules(username: str, tenant_id: str) -> str:
     OBLIGATOIRE. La branche else legacy qui filtrait seulement par
     username (avec WARNING) est retiree apres verification que tous les
     callers actifs passent bien tenant_id. Si un nouveau caller oublie,
-    raise au lieu de fuiter."""
+    raise au lieu de fuiter.
+
+    NOTE 05/05/2026 : cette fonction est conservee pour retrocompat.
+    Le contexte de Raya utilise desormais get_aria_rules_hierarchical()
+    qui produit 4 blocs distincts (connaissances_durables, infos_a_confirmer,
+    comportements, culture_metier). Voir Phase 4 du chantier mini-Graphiti.
+    """
     if not username:
         raise ValueError("get_aria_rules : username obligatoire")
     if not tenant_id:
@@ -60,6 +66,7 @@ def get_aria_rules(username: str, tenant_id: str) -> str:
               AND username = %s
               AND (tenant_id = %s OR tenant_id IS NULL)
               AND category != 'Mémoire'
+              AND (invalid_at IS NULL OR invalid_at > NOW())
             ORDER BY confidence DESC, reinforcements DESC, created_at DESC
             LIMIT 60
         """, (username, tenant_id))
@@ -67,6 +74,106 @@ def get_aria_rules(username: str, tenant_id: str) -> str:
         if not rows:
             return ""
         return "\n".join([f"[id:{r[0]}][{r[1]}] {r[2]}" for r in rows])
+    finally:
+        if conn:
+            conn.close()
+
+
+def get_aria_rules_hierarchical(username: str, tenant_id: str) -> dict:
+    """Retourne les regles aria classees en 4 blocs hierarchiques.
+
+    Phase 4 du chantier mini-Graphiti (05/05/2026 soir).
+
+    Returns un dict avec 4 cles :
+      - 'connaissances_durables' : Fact + Preference (Static/Atemporal)
+                                    -> faits stables sur le monde et
+                                       preferences user durables
+      - 'infos_a_confirmer'      : Fact + Dynamic (etat temporel actif)
+                                    -> avec marqueur [A REVERIFIER] si
+                                       valid_at < NOW - 30j
+      - 'comportements'          : Behavior (Atemporal)
+                                    -> regles de comportement Raya
+      - 'culture_metier'         : Knowledge (Atemporal/Static)
+                                    -> vocabulaire et concepts metier
+
+    Cette separation permet a Raya de raisonner differemment selon le
+    type d info, et de detecter si une 'info_a_confirmer' contredit
+    une donnee vivante (cas de la regle 124 obsolete).
+
+    Filtre : invalid_at IS NULL (regle encore vraie) ET active=true.
+    """
+    if not username:
+        raise ValueError("get_aria_rules_hierarchical : username obligatoire")
+    if not tenant_id:
+        raise ValueError(
+            "get_aria_rules_hierarchical : tenant_id obligatoire"
+        )
+
+    result = {
+        "connaissances_durables": "",
+        "infos_a_confirmer": "",
+        "comportements": "",
+        "culture_metier": "",
+    }
+
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT id, category, rule, type, temporal_class,
+                   valid_at,
+                   confidence, reinforcements
+            FROM aria_rules
+            WHERE active = true
+              AND username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND category != 'Mémoire'
+              AND (invalid_at IS NULL OR invalid_at > NOW())
+            ORDER BY confidence DESC, reinforcements DESC, created_at DESC
+            LIMIT 200
+        """, (username, tenant_id))
+        rows = c.fetchall()
+
+        # Repartition par bloc
+        from datetime import datetime, timedelta
+        threshold_30j = datetime.now() - timedelta(days=30)
+
+        durables = []
+        infos = []
+        behaviors = []
+        knowledge = []
+
+        for r in rows:
+            rid, category, rule, rtype, tclass, valid_at, conf, reinf = r
+            # Format ligne : on reste compact pour economiser tokens
+            line = f"[id:{rid}][{category}] {rule}"
+
+            if rtype == "Behavior":
+                behaviors.append(line)
+            elif rtype == "Knowledge":
+                knowledge.append(line)
+            elif rtype == "Preference":
+                durables.append(line)
+            elif rtype == "Fact":
+                if tclass == "Dynamic":
+                    # Marqueur A REVERIFIER si l info date de plus de 30j
+                    if valid_at and valid_at < threshold_30j:
+                        line = f"[id:{rid}][{category}] ⚠️ [A REVERIFIER] {rule}"
+                    infos.append(line)
+                else:
+                    # Static ou Atemporal -> connaissance durable
+                    durables.append(line)
+            else:
+                # type inconnu ou NULL -> bucket durable par defaut
+                durables.append(line)
+
+        result["connaissances_durables"] = "\n".join(durables) if durables else ""
+        result["infos_a_confirmer"] = "\n".join(infos) if infos else ""
+        result["comportements"] = "\n".join(behaviors) if behaviors else ""
+        result["culture_metier"] = "\n".join(knowledge) if knowledge else ""
+
+        return result
     finally:
         if conn:
             conn.close()
