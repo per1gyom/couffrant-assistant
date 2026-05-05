@@ -55,9 +55,9 @@ Le **bi-temporal model** de Graphiti et la **classification orthogonale type/tem
 
 | Valeur | Description | Exemple |
 |---|---|---|
-| `Static` | Immuable, ne change quasi jamais | Date naissance, valeurs fondamentales |
-| `Dynamic` | Peut évoluer, a une fin probable | "Charlotte en arrêt jusqu'en mai", "boîte à connecter" |
-| `Atemporal` | Vrai sans cadre temporel | "CONSUEL = certificat", "Charlotte = compta" |
+| `Atemporal` | Vrai par essence, ne périme jamais | Date de naissance, "CONSUEL = certificat", règles de comportement Raya |
+| `Static` | Vrai aujourd'hui, peut périmer mais pas forcément | Parts sociales, équipe, clients, outils connectés |
+| `Dynamic` | Etat temporel actif, peut périmer à tout moment | "Romain en arrêt jusqu'en mai", "boîte à connecter" |
 
 ### Dimension C — Bi-temporal timestamps (quand c'est vrai)
 
@@ -243,7 +243,7 @@ Modification (à identifier) du code qui sauve les règles :
 | Phase | Statut | Commit | Date | Notes |
 |---|---|---|---|---|
 | 1 — Schéma SQL | ✅ Fait | (voir branche feat/learning-hierarchy) | 05/05 17h48 | 4 cols aria_rules + 2 cols semantic_graph_edges + 2 index. 168 regles defaultees Fact/Atemporal. Tests OK. |
-| 2 — Reclassement Opus | ⏳ À faire | - | - | - |
+| 2 — Reclassement Opus | ✅ Fait | (voir branche feat/learning-hierarchy) | 05/05 19h00 | 164 régles classées (73 Behavior + 56 Fact dont 39 Static + 11 Dynamic + 1 Atemporal + 24 Knowledge + 16 Preference). 4 règles archivées (6, 85, 135, 275 obsoletes ou redondantes avec mur permissions). |
 | 3 — aria_rules dans graphe | ⏳ À faire | - | - | - |
 | 4 — Loader hiérarchisé | ⏳ À faire | - | - | - |
 | 5 — Prompt système | ⏳ À faire | - | - | - |
