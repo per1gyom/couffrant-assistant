@@ -750,10 +750,28 @@ def _raya_core_agent(
     # UPDATE plutot que de creer une nouvelle ligne. En cas d echec de
     # la pre-creation (peu probable mais defensif), fallback sur l ancien
     # comportement INSERT.
+
+    # Fix bug reponse vide (05/05/2026 22h10) : si la reponse de Raya
+    # contenait UNIQUEMENT des balises [ACTION:...] (ex: REMEMBER pour
+    # memoriser une info), le strip les enlevait toutes, laissant une
+    # string vide -> message "fantome" cote front. On detecte ce cas
+    # et on fournit un message minimal qui confirme la prise en compte.
+    stripped_response = _strip_action_tags(final_text)
+    if not stripped_response.strip() and final_text.strip():
+        # Raya a produit du texte mais 100% dans des balises ACTION
+        # -> probablement un REMEMBER ou un noter+rien d autre.
+        logger.warning(
+            "[Agent] Reponse vide apres strip_action_tags, "
+            "raw_len=%d -> fallback message minimal",
+            len(final_text),
+        )
+        stripped_response = "OK, c est note. 👍"
+    final_text = stripped_response
+
     if aria_memory_id_pre:
         _update_conversation_response(
             aria_memory_id=aria_memory_id_pre,
-            aria_response=_strip_action_tags(final_text),
+            aria_response=stripped_response,
         )
         aria_memory_id = aria_memory_id_pre
     else:
@@ -762,7 +780,7 @@ def _raya_core_agent(
             username=username,
             tenant_id=tenant_id,
             user_input=payload.query or "",
-            aria_response=_strip_action_tags(final_text),
+            aria_response=stripped_response,
         )
 
     # ──── GRAPHAGE AUTO DE LA CONVERSATION (etape 1 - 27/04) ────
