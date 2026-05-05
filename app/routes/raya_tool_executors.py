@@ -274,7 +274,18 @@ def _execute_read_mail(inp: dict, username: str, tenant_id: str) -> dict:
 
 
 def _execute_read_drive_file(inp: dict, username: str, tenant_id: str) -> dict:
-    """Lit le contenu d un fichier SharePoint par son ID."""
+    """Lit le contenu d un fichier SharePoint/Drive par son ID.
+
+    Bug fix 05/05/2026 22h45 : la requete pointait sur 'drive_files' qui
+    n existe pas. La vraie table est 'drive_semantic_content'. Resultat :
+    Raya echouait silencieusement a chaque appel et se rabattait sur
+    l apercu RAG (~200 chars). Maintenant elle peut lire le contenu
+    complet pre-extrait par le scrape (jusqu a 8000 chars retournes).
+
+    Pour les .xlsx : extract_text_from_xlsx (openpyxl) a deja extrait
+    la structure feuille par feuille en format pipe-delimited. Pour les
+    PDF : pdfplumber + Vision Claude. Pour DOCX : python-docx.
+    """
     from app.database import get_pg_conn
 
     file_id = inp.get("file_id", "")
@@ -282,17 +293,28 @@ def _execute_read_drive_file(inp: dict, username: str, tenant_id: str) -> dict:
     try:
         c = conn.cursor()
         c.execute(
-            "SELECT file_name, folder_path, mime_type, text_content, "
-            "modified_at FROM drive_files "
+            "SELECT file_name, file_path, mime_type, text_content, "
+            "drive_modified_at FROM drive_semantic_content "
             "WHERE id = %s AND tenant_id = %s",
             (file_id, tenant_id),
         )
         row = c.fetchone()
         if not row:
-            return {"error": f"Fichier {file_id} introuvable"}
+            # Tentative complementaire : peut etre que file_id est un
+            # file_id externe (SharePoint/Google) plutot que l id interne.
+            c.execute(
+                "SELECT file_name, file_path, mime_type, text_content, "
+                "drive_modified_at FROM drive_semantic_content "
+                "WHERE file_id = %s AND tenant_id = %s "
+                "ORDER BY chunk_index ASC LIMIT 1",
+                (str(file_id), tenant_id),
+            )
+            row = c.fetchone()
+        if not row:
+            return {"error": f"Fichier {file_id} introuvable dans drive_semantic_content"}
         content = row[3] or ""
         if len(content) > 8000:
-            content = content[:8000] + "...(tronque)"
+            content = content[:8000] + "...(tronque, fichier plus long)"
         return {
             "file_name": row[0],
             "folder_path": row[1],
