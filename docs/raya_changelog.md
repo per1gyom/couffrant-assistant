@@ -4,62 +4,104 @@
 
 ---
 
-## Session 05/05/2026 matin (8h-10h) — Audit identite tokens OAuth + nettoyage donnees
+## Session 05/05/2026 matin (8h-12h) — Audit OAuth + filtre bulk + alertes + UX backend
 
-**Theme** : suite a la session marathon du 04/05 soir, audit du bootstrap contact@ qui n avait remonte que 111 mails sur 1418 + diagnostic d un probleme architectural sur les tokens OAuth Outlook.
+**Theme** : marathon de 4h qui a corrige des bugs en chaine. Demarre par "le bootstrap contact@ ne ramene que 111 mails sur 1418", revele un probleme architectural sur les tokens Outlook. En auditant on a aussi trouve un filtre bulk catastrophique qui jetait factures/commandes/livraisons. Termine par les chantiers prioritaires de la TODO (UX 1.2 backend, expose mail_id).
 
-**Declencheur** : Guillaume signale que contact@ n est pas a jour. Investigation revele que 87% des 111 mails enregistres sous mailbox_email='contact@couffrant-solar.fr' viennent de from_email='guillaume@'. Or une vraie boite contact@ devrait recevoir des mails DE prospects/clients.
-
-### Cause racine identifiee
-
-Le bootstrap utilisait `get_valid_microsoft_token(username)` qui lit la table legacy `oauth_tokens` (un seul token par user/provider). Avec 2 boites Outlook (guillaume@ et contact@), les 2 connexions utilisaient le MEME token (le dernier authentifie via OAuth = celui de guillaume@). Donc quand le bootstrap appelait `/me/mailFolders/Inbox`, /me retournait l inbox de guillaume@.
-
-Le systeme V2 (token par-connexion via `tenant_connections.credentials`) existait deja dans `connection_token_manager.py` mais les jobs Outlook ne l utilisaient pas. Gmail l utilisait deja correctement.
-
-### Commits pousses
+### Commits poussés (chronologique)
 
 | Commit | Description |
 |---|---|
-| `ed68f77` | feat(diag): endpoints `/admin/mail/diag/token-identity/{id}` et `/all-token-identities` (lecture seule, appelle `/me` Microsoft Graph et `/profile` Gmail avec le token de chaque connexion pour verifier l identite reelle) |
-| `8eb31ab` | fix(outlook): bootstrap et delta-sync utilisent token V2 par-connexion via `get_connection_token(username, real_tool_type, email_hint=mailbox_email)`. Lookup du tool_type reel en base (microsoft VS outlook). |
+| `ed68f77` | feat(diag): endpoints `/admin/mail/diag/token-identity/{id}` et `/all-token-identities` lecture seule |
+| `8eb31ab` | fix(outlook): bootstrap + delta-sync utilisent token V2 par-connexion via `get_connection_token(email_hint=mailbox_email)` |
 | `32b5ae8` | docs : script SQL nettoyage + procedure reconnexion contact@ |
-| `ed71b50` | feat(diag-ui): page HTML lisible `/admin/mail/diag/identities-page` pour Guillaume (non-developpeur, pas de console JS) |
+| `ed71b50` | feat(diag-ui): page HTML lisible `/admin/mail/diag/identities-page` (pas de console JS) |
+| `ace46b7` | docs : prompt reprise 05mai apresmidi + changelog mis a jour |
+| `0ff1b97` | **fix(filter) CRITIQUE** : retire keywords business (factures, commandes, livraisons, alertes) du filtre bulk |
+| `94d3ab7` | fix(alerts): refonte severite 3 niveaux (info/warning/critical) pour webhook+odoo+gmail recon |
+| `53272ad` | fix(gmail-recon): comptage pommes vs pommes (exclusion SPAM + ajout filtres Haiku) |
+| `3056fe7` | feat(raya): expose `mail_id` et autres IDs techniques dans search_mail |
+| `a60d31b` | fix(ux): pre-cree aria_memory au debut de la requete (UX 1.2 backend) |
 
-### Resultats du diagnostic
+### 1. Diagnostic OAuth tokens (commits `ed68f77`, `8eb31ab`, `ed71b50`, `32b5ae8`)
 
-7 connexions auditees, **0 mismatch** confirme cote OAuth :
-- 5 Gmail (per1.guillaume, GPLH, Romagui, Gaucherie, MTBR) : tokens coherents
-- guillaume@ (conn 6, Outlook) : token coherent
-- contact@ (conn 12, Outlook) : ERREUR token expire depuis le 28/04 (jamais utilise par le legacy)
+**Cause racine** : bootstrap utilisait `get_valid_microsoft_token(username)` (table legacy `oauth_tokens` : 1 token par user/provider). Avec 2 boites Outlook, elles utilisaient le MEME token (le dernier OAuth = guillaume@). Donc bootstrap de contact@ recuperait l inbox de guillaume@.
 
-Le pattern bizarre des donnees venait donc bien de l utilisation du token de guillaume@ par le bootstrap (via le legacy), pas d un mismatch OAuth.
+Le systeme V2 (token par-connexion via `tenant_connections.credentials`) existait deja mais n etait branche que sur Gmail. Outlook continuait sur le legacy.
 
-### Nettoyage donnees execute
+**Fix** : `get_connection_token(username, real_tool_type, email_hint=mailbox_email)` dans `mail_bootstrap.py` et `mail_outlook_delta_sync.py`. Lookup du `tool_type` reel en base (`microsoft` vs `outlook` historique).
 
-UPDATE en base (mode dry-run d abord, validation Guillaume, puis COMMIT) :
-- 111 mails reetiquetes : `mailbox_email='contact@couffrant-solar.fr'` -> `mailbox_email='guillaume@couffrant-solar.fr'`, `connection_id=6`
-- 0 doublon exact (les `id` Microsoft Graph differaient)
-- 0 mail soft-deleted
+**Diagnostic UI** : page `/admin/mail/diag/identities-page` qui appelle `/me` Microsoft Graph et `/profile` Gmail avec chaque token et compare avec `connected_email`. Resultat sur Couffrant Solar : 7 connexions OK, conn 12 (contact@) en erreur token expire (28/04, jamais utilise par le legacy).
 
-Etat post-nettoyage : guillaume@ passe de 1027 a 1138 mails, contact@ vide.
+**Nettoyage donnees** : 111 mails reetiquetes `contact@` -> `guillaume@`. Connexion 12 supprimee par Guillaume (probleme Microsoft Authenticator empechait la reconnexion immediate).
 
-### Suite
+### 2. Fix CRITIQUE filtre bulk (commit `0ff1b97`)
 
-Connexion 12 supprimee par Guillaume depuis son panel (probleme Microsoft Authenticator empechait la reconnexion immediate). Sera recreee plus tard.
+En auditant les filtres lors de l incident "1978 mails manquants", decouverte d un bug catastrophique. Le filtre `_is_bulk_heuristic` de `webhook_microsoft.py` jetait silencieusement TOUT mail dont :
+- prefixe expediteur `alerts@`, `automated@`, `system@`, `notifications@` -> bloquait alertes critiques (Cloudflare, AWS, monitoring SAV)
+- mot-cle sujet `facture n°`, `invoice #` -> bloquait factures clients/fournisseurs
+- mot-cle sujet `votre commande`, `confirmation de commande`, `order confirmation` -> bloquait confirmations
+- mot-cle sujet `tracking`, `livraison` -> bloquait livraisons (chantiers, internes Arlene)
 
-A faire au moment de la reconnexion :
-1. Authentification Microsoft avec le COMPTE contact@ directement (compte autonome, pas alias)
-2. Verification via /admin/mail/diag/identities-page (doit montrer mismatch=0)
-3. Bootstrap historique declenche depuis le panel super admin (devrait remonter ~1031 mails)
+**Test empirique** : sur 14 cas business reels d un dirigeant Couffrant Solar (panneaux solaires), 9 etaient JETES a tort. Estime que sur les 941 mails filtres du bootstrap per1.guillaume@gmail.com, une grande partie etaient des factures Stripe et confirmations legitimes.
+
+**Fix** : `_BULK_SUBJECT_KEYWORDS` reduit aux vrais signaux newsletter (unsubscribe, newsletter, digest, weekly recap, do not reply, automated message, verification code, one-time password). `_NOREPLY_PREFIXES` reduit aux 100%-srs (noreply@, mailer-daemon@, bounce@, newsletter@).
+
+**Verification post-fix** : memes 14 cas, 0 faux positif. Les 3 vraies newsletters (Enedis, LinkedIn, Medium digest) toujours filtrees.
+
+### 3. Refonte alertes 3 niveaux (commit `94d3ab7`)
+
+Demande Guillaume : "rouge/orange = vraies alertes graves. Vert = simple notification informative. Qu on essaye de ne plus avoir d alertes pas graves en orange et rouge."
+
+**Reclassement seuils** :
+- `webhook_night_patrol` : seuil >5 missing = warning -> seuil <=50 + autoreparation OK = info verte. Rouge si >=500 missing OU >=20% en echec.
+- `odoo_reconciliation` : tout >1% = warning -> info <5% (auto-rattrape), warning 5-10%, critical >=10% OU >=100 records.
+- `mail_gmail_reconciliation` : tout >1% = warning -> info <30% (filtrage Haiku legitime), warning 30-50%, critical >=50%.
+
+**Reclassification immediate** des 2 alertes existantes en base :
+- webhook_queue id=5202 (72 missing/72 rattrapes) : warning -> info
+- odoo_recon id=69700 (2.7% ecart) : warning -> info
+- gmail_recon id=75555 (47.8%) : reste warning, sera affine par commit suivant
+
+### 4. Pommes vs pommes Gmail recon (commit `53272ad`)
+
+L alerte Gmail comparait Google brut (INBOX+SENT+SPAM) vs Raya filtre (sans spam, sans newsletter) -> ecart artificiel important.
+
+**Fix** :
+- LABELS_TO_COUNT cote Google : retire SPAM (jamais bootstrape).
+- count_raya cote Raya : ajoute `items_filtered_haiku` du DERNIER bootstrap par mailbox (DISTINCT ON pour eviter double-comptage).
+
+**Resultat estime** : ancien delta 47.8% -> nouveau ~10% -> info verte au prochain run nocturne.
+
+### 5. Expose mail_id a Raya (commit `3056fe7`)
+
+Bug observe le 04/05 minuit : Raya repondait *"Je n ai pas l ID du mail necessaire pour le supprimer"*. La cause : `format_unified_results` n exposait pas l id technique de `mail_memory`.
+
+**Fix** :
+- `format_unified_results` ajoute `📌 [mail_id: 1234]` sous chaque resultat mail. Idem `[file_id: ...]`, `[conversation_id: ...]`, `[odoo_model: ... · odoo_id: ...]`.
+- Description du tool `search_mail` actualisee : "chaque resultat affiche un identifiant technique 📌 [mail_id: N]. Cet identifiant est REQUIS pour appeler les tools read_mail, delete_mail, archive_mail, reply_to_mail."
+- Description du tool `delete_mail` actualisee : "Le parametre mail_id provient OBLIGATOIREMENT d un search_mail prealable. Si tu n as pas l ID, lance d abord un search_mail."
+
+### 6. UX 1.2 backend - pre-creation aria_memory (commit `a60d31b`)
+
+Avant ce fix : `aria_memory` cree a la FIN de la boucle agentique. Les pending_actions inserees pendant les tool calls avaient donc `conversation_id=NULL` (82% des cas observes en base). Le frontend ne pouvait pas les rattacher au bon message Raya, fallback en bas du chat avec badge timestamp (commit `dd2c9c2` du 04/05).
+
+**Fix** :
+- Nouveau `_create_conversation_shell()` : INSERT aria_memory avec `aria_response=NULL`, retourne l ID.
+- Nouveau `_update_conversation_response()` : UPDATE pour completer aria_response a la fin.
+- `_raya_core_agent` appelle `_create_conversation_shell()` AVANT la boucle, passe l ID a `execute_tool()` comme `conversation_id`.
+- `_save_conversation()` conserve pour fallback defensif.
+
+**Effet** : toutes les nouvelles pending_actions auront conversation_id renseigne. Le badge timestamp du commit dd2c9c2 reste comme garde-fou.
 
 ### Lecons retenues
 
-- **Architecture systeme** : avoir 2 systemes de tokens en parallele (legacy `oauth_tokens` global + V2 `tenant_connections.credentials` par-connexion) sans migration complete cree des bugs subtils. Le code utilise le legacy par defaut et le V2 reste inerte.
-- **Verification empirique** : le pattern statistique des donnees (87% de mails contact@ de guillaume@) etait un signal plus fort que le diagnostic OAuth (qui disait OK). Toujours croiser plusieurs sources.
-- **Les fix architecturaux ont des effets de bord visibles** : apres mon fix `8eb31ab`, conn 12 est passee `down` parce qu elle utilisait enfin son vrai token (expire). Avant le fix, elle etait `healthy` mais lisait la mauvaise boite. Le passage en `down` est donc un PROGRES, pas une regression.
+- **Privilegier les tests empiriques** : on a decouvert le bug filtre bulk en testant 14 cas business reels au lieu de relire le code abstraitement.
+- **Audit avant fix** : Guillaume a explicitement demande "regarde si c est pas deja fait avant de toucher" -> a permis d eviter de defaire l UX 1.2 frontend qui etait deja en place.
+- **Recheck des chantiers de la TODO d origine** : les 2 chantiers urgents identifies hier soir (mail_id + aria_memory) ont fini par etre faits dans la meme session que l audit OAuth, en surveillant qu on ne casse rien d autre.
+- **2 systemes de tokens en parallele** = bug latent. Le legacy oauth_tokens devrait etre supprime dans une session future (chantier propre) pour eviter qu un futur job se branche dessus par erreur.
 
 ---
-
 
 ## Session 04/05/2026 soir + 05/05/2026 minuit — Marathon sécurité (6 commits + 1 revert + 1 reapply)
 
