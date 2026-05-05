@@ -22,6 +22,66 @@ router = APIRouter(tags=["admin_oauth"])
 _RETURN_URL = os.getenv("APP_BASE_URL", "https://app.raya-ia.fr").rstrip("/")
 
 
+def _ensure_assignment_for_admin(connection_id: int, request: Request):
+    """Cree un assignment dans connection_assignments pour l admin qui
+    vient de connecter une boite via OAuth.
+
+    Fix 05/05/2026 : sans cet assignment, get_all_user_connections() ne
+    retourne pas la connexion (filtre WHERE ca.enabled=true) et tous les
+    jobs V2 par-connexion ne la voient pas. Bug observe sur la
+    reconnexion contact@ le 05/05 (conn#14 invisible jusqu a creation
+    manuelle de l assignment).
+
+    Idempotent : si un assignment existe deja, ON CONFLICT DO NOTHING.
+    Niveau par defaut 'read_only' (le super_admin pourra ensuite l elever
+    via le panel de permissions a 'full' ou autre selon besoin).
+    """
+    try:
+        from app.database import get_pg_conn
+        admin_session = getattr(request, "session", {})
+        username = admin_session.get("username") if admin_session else None
+        if not username:
+            logger.warning(
+                "[AdminOAuth] Pas d username en session, "
+                "assignment connexion #%s skipped",
+                connection_id,
+            )
+            return
+        # Recupere le tenant_id de la connexion (pour cohérence cross-tenant)
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT tenant_id FROM tenant_connections WHERE id = %s",
+                (connection_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                logger.warning(
+                    "[AdminOAuth] Connexion #%s introuvable, "
+                    "assignment skipped", connection_id,
+                )
+                return
+            tenant_id = row[0]
+            cur.execute(
+                """INSERT INTO connection_assignments
+                   (connection_id, username, access_level, enabled, tenant_id)
+                   VALUES (%s, %s, 'read_only', true, %s)
+                   ON CONFLICT (connection_id, username) DO UPDATE
+                   SET enabled = true""",
+                (connection_id, username, tenant_id),
+            )
+            conn.commit()
+        logger.info(
+            "[AdminOAuth] Assignment cree/active : conn#%s -> %s (tenant %s)",
+            connection_id, username, tenant_id,
+        )
+    except Exception as e:
+        logger.warning(
+            "[AdminOAuth] Echec creation assignment conn#%s : %s",
+            connection_id, str(e)[:200],
+        )
+
+
 # ─── DÉMARRAGE DU FLUX OAUTH ────────────────────────────────────────
 
 @router.get("/admin/connections/{tenant_id}/oauth/microsoft/start")
@@ -164,6 +224,14 @@ def auth_connection_ms_callback(
         email=email,
         expires_in=result.get("expires_in", 3600),
     )
+    # Fix 05/05/2026 : auto-assigner la nouvelle connexion a l admin
+    # qui vient de la connecter. Sans cet assignment, get_all_user_connections
+    # ne retourne pas la connexion (filtre WHERE ca.enabled=true) et donc
+    # tous les jobs V2 par-connexion (bootstrap, delta-sync, inventaire,
+    # reconciliation) ne la voient pas. Bug observe le 05/05 sur la
+    # reconnexion contact@ : conn#14 creee mais sans assignment, inventaire
+    # plantait silencieusement.
+    _ensure_assignment_for_admin(conn_id, request)
     logger.info("[AdminOAuth] Microsoft connected: conn#%s email=%s tenant=%s", conn_id, email, tenant_id)
     return RedirectResponse(f"/admin/panel?oauth_ok=1&email={email}&view=companies")
 
@@ -199,6 +267,8 @@ def auth_connection_gmail_callback(
         email=tokens.get("email", ""),
         expires_in=3600,
     )
+    # Fix 05/05/2026 : meme auto-assignment que pour Microsoft callback.
+    _ensure_assignment_for_admin(conn_id, request)
     email = tokens.get("email", "")
     logger.info("[AdminOAuth] Gmail connected: conn#%s email=%s tenant=%s", conn_id, email, tenant_id)
     return RedirectResponse(f"/admin/panel?oauth_ok=1&email={email}&view=companies")
