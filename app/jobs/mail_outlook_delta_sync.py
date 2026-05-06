@@ -643,6 +643,18 @@ def _process_messages_via_pipeline(messages: list, username: str,
             # (le webhook actuel l a peut-etre deja traite, ou un cycle precedent)
             if mail_exists(message_id, username):
                 skipped_existing += 1
+                # Etape 3a fix (06/05/2026) : rattrapage des PJ. Le webhook
+                # ingere le mail mais N APPELLE PAS le pipeline attachments.
+                # Ici on rattrape : si has_attachments=False en base, on
+                # tente le fetch + index. Idempotent. Si pas de PJ : no-op.
+                if token and tenant_id:
+                    _maybe_rattrapage_attachments(
+                        message_id=message_id,
+                        tenant_id=tenant_id,
+                        username=username,
+                        connection_id=connection_id,
+                        token=token,
+                    )
                 continue
 
             # Extraction des champs pour process_incoming_mail
