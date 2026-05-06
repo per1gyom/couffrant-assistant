@@ -4,6 +4,112 @@
 
 ---
 
+## Session 06/05/2026 après-midi (12h-17h) — Refonte messages alertes + webhooks contact@ activés + audit Gmail Pub/Sub
+
+**Theme** : rendre le panel admin lisible (alertes en français clair, plus de jargon), réactiver le webhook Microsoft sur la 2e boîte Outlook (contact@couffrant-solar.fr), confirmer que le système Gmail Pub/Sub fonctionne déjà depuis quelques jours.
+
+**Bilan** : 6 commits poussés en 5h, 2 boîtes Outlook avec webhook temps réel, 5 boîtes Gmail avec watches Pub/Sub actives (renouvellement auto). Panel admin nettoyé. 0 erreur prod. 9/9 connexions saines.
+
+### Commits poussés (chronologique)
+
+| Commit | Description |
+|---|---|
+| `f9c57d4` | fix(oauth) Microsoft : `prompt=login` force re-saisie password (anti-SSO silencieux) |
+| `601ac15` | feat(alerts) refonte messages : français clair + nom humain + filtre non-alertes |
+| `dca8a91` | feat(admin) endpoint POST /admin/webhooks/ensure-now |
+| `408a1a9` | feat(admin-ui) bouton "Vérifier webhooks" dans onglet Maintenance + nettoyage 3 alertes obsolètes |
+| `288e2e7` | feat(admin) endpoint diagnostic webhook conn=14 + bouton test |
+| `8048259` | **fix(webhook) refresh token outlook + ensure_subs utilise token frais** (3 bugs corrigés en 1 commit) |
+| `3de2d78` | fix(admin) endpoint test-subscription idempotent (plus de doublons) |
+| `fc16724` | feat(gmail) endpoints + UI + guide setup Pub/Sub temps réel pour 5 boîtes Gmail |
+
+### 1. Reconnexion contact@couffrant-solar.fr (commit `f9c57d4`)
+
+**Contexte** : la boîte contact@ avait perdu sa connexion Outlook (token expiré, dernier poll OK il y a 2h35). Premières tentatives de reconnexion via le bouton OAuth tombaient sur le SSO Microsoft silencieux qui re-loggait sans demander le password (mauvais compte stocké le 28/04 — bug archivé dans `docs/procedure_reconnexion_contact_05mai.md`).
+
+**Fix** : `prompt=login` au lieu de `prompt=select_account` dans la conf OAuth Microsoft. Force la re-saisie du password à chaque tentative, donc impossible d'avoir un mauvais compte stocké via SSO transparent.
+
+**Validation** : 183 mails ingérés via conn=14 dans les 4h après reconnexion, tous correctement marqués `mailbox_email = contact@couffrant-solar.fr`. Pas de bug "mauvais compte" cette fois.
+
+### 2. Refonte messages alertes (commit `601ac15`)
+
+**Contexte** : le panel admin affichait des alertes imbuvables :
+- "connection_14" au lieu de "contact@couffrant-solar.fr"
+- "records", "rattrapages enqueues", "système s autorepare" = jargon technique
+- Pavés techniques pour des opérations parfaitement normales (écart Gmail 22% dû au filtrage Haiku, écart Odoo 2.7% auto-correctible au prochain cycle)
+
+**4 endroits modifiés** :
+1. `app/alert_dispatcher.py:dispatch_connection_alert` : nouvelle fonction `_get_connection_human_identity(conn_id)` qui SELECT `label, connected_email` pour afficher le nom humain de la boîte. Format durée humaine (125 min → "2h05"). Templates différenciés par tool_type (mail/drive/odoo).
+2. `app/jobs/webhook_night_patrol.py` : SKIP la création d'alerte panel si rattrapage 100% réussi ou missing=0. Juste log INFO.
+3. `app/jobs/mail_gmail_reconciliation.py` : SKIP si écart < INFO_THRESHOLD_PCT (35%) ET 0 boîte en échec. Plus de pavé sur le filtrage Haiku.
+4. `app/jobs/odoo_reconciliation.py` : SKIP TOUJOURS pour les écarts < 10%. Mapping technique → humain (`res.partner` → "Contacts", `sale.order` → "Devis et commandes", etc.)
+
+**Avant / Après** :
+- Avant : "connection_14 La connexion mail_outlook (id=14) n a pas reussi de poll depuis 125 min (seuil = 15 min)..."
+- Après : "Boîte contact@couffrant-solar.fr silencieuse depuis 2h05. Le système retente automatiquement toutes les 5 min..."
+
+### 3. Webhook contact@ : 3 bugs cascadés (commits `dca8a91` → `3de2d78`)
+
+**Sym ptôme initial** : après reconnexion contact@ (commit `f9c57d4`), le webhook Microsoft Graph ne se créait pas pour conn=14 (toujours juste conn=6 dans webhook_subscriptions).
+
+**Investigation par étapes** :
+
+1. **Endpoint `POST /admin/webhooks/ensure-now`** (`dca8a91`) ajouté pour pouvoir déclencher manuellement la création de subs sans attendre le cron 6h.
+2. **Carte UI dans Maintenance** (`408a1a9`) avec bouton "🔄 Vérifier / Créer les webhooks maintenant".
+3. Le bouton tournait en 1.8 sec mais ne créait pas la sub conn=14. Erreur silencieuse.
+4. **Endpoint diagnostic** (`288e2e7`) ajouté pour voir l'erreur exacte de Microsoft Graph. Bouton "🔬 Test diagnostic conn=14".
+5. **Diagnostic révélateur** : Microsoft Graph répond `401 InvalidAuthenticationToken — Lifetime validation failed, the token is expired.` Le token contact@ a expiré 28 min après la reconnexion (les access_tokens MS durent 1h).
+
+**3 bugs identifiés et corrigés en 1 commit** (`8048259`) :
+
+1. `app/connection_token_manager.py:_refresh_v2_token` : la fonction de refresh ne supportait QUE `tool_type='microsoft'` et `'gmail'/'google'`. Pour `tool_type='outlook'` (cas de conn=14) → `return None` direct. **Le refresh ne se déclenchait jamais pour les boîtes Outlook**. Fix : `if tool_type in ('microsoft', 'outlook')` (même API Graph).
+2. `app/connectors/microsoft_webhook.py:ensure_all_subscriptions` : prenait `conn_info['token']` brut depuis `get_all_user_connections()` sans appeler le refresh. Fix : appel à `get_connection_token()` (qui refresh auto) avant chaque tentative de création de sub.
+3. `app/routes/admin/health.py:admin_webhook_test_subscription` : même problème, fix similaire.
+
+**Bonus du commit** : étendre le filtre des users à `tool_type='outlook'` aussi (avant, seulement `'microsoft'`).
+
+**Idempotence** (`3de2d78`) : après les fix, plusieurs clics consécutifs ont créé 3 subs pour conn=14 (l'endpoint test ne vérifiait pas si une sub existait déjà). Fix : check en base avant création, retourner la sub existante au lieu d'en créer une nouvelle. Cleanup en base : DELETE des 2 doublons (id=5, 6, garde id=7).
+
+**État final** :
+- conn=6 (guillaume@) : 1 sub Inbox, expire 09/05 14:21
+- conn=14 (contact@) : 1 sub Inbox, expire 09/05 14:55
+
+### 4. Gmail Pub/Sub : déjà fonctionnel (commit `fc16724`)
+
+**Contexte** : Guillaume voulait activer Gmail Pub/Sub pour les 5 boîtes Gmail (per1.guillaume, GPLH, Romagui, Gaucherie, MTBR). Surprise au moment du setup GCP : tout était déjà configuré depuis quelques jours.
+
+**Découverte** :
+- Project GCP : `elyo-493519`
+- Topic : `projects/elyo-493519/topics/gmail-notifications`
+- Subscription Push : `gmail-notifications-push` (état actif)
+- Variables Railway déjà présentes
+- Job de renewal a tourné le 05/05 22:56 → les 5 watches sont actives, expirent dans 6.3 jours
+
+**Audit en base** : compteurs `pubsub_received_count` dans `connection_health.metadata` :
+- conn=4 (per1.guillaume@) : **106 notifications reçues**, dernière à 17:02 Paris (1h avant l'audit)
+- conn=7 (GPLH) : 2 notifs
+- conn=8 (Romagui) : 0 notifs (boîte très peu active, normal selon Guillaume)
+- conn=9 (Gaucherie) : 4 notifs
+- conn=10 (MTBR) : 5 notifs
+
+**Conclusion** : le système Gmail Pub/Sub MARCHE depuis plusieurs jours. Les 117 notifs reçues ne sont juste pas visibles dans le panel admin (pas d'UI dédiée à ces compteurs).
+
+**Code ajouté quand même** (commit `fc16724`, anticipatif) :
+- `POST /admin/gmail-watches/ensure-now` : équivalent du cron quotidien à la demande
+- `POST /admin/gmail-watches/test/{connection_id}` : diagnostic similaire au Microsoft pour Gmail
+- Carte UI "📨 Webhooks temps reel Gmail (Pub/Sub)" dans Maintenance avec 2 boutons
+- `docs/setup_gmail_pubsub_06mai.md` : guide setup GCP 150 lignes (pour future référence ou autre tenant)
+
+Utile pour : créer rapidement une watch sur un tenant futur, diagnostiquer une boîte Gmail qui ne reçoit pas, voir l'état des 5 watches sans aller en base.
+
+### 5. Nettoyage panel (en parallèle, hors commits)
+
+**Action manuelle** : DELETE en base des 3 alertes INFO obsolètes (id=75555 gmail_recon, id=69700 odoo_recon, id=5202 webhook_queue). Avec la refonte des messages (commit `601ac15`), ces alertes ne seront plus recréées par les jobs nocturnes (skip si écart normal). Il fallait juste virer les anciennes pour avoir un panel propre tout de suite.
+
+**Audit `auth_type`** : `auth_type='manual'` corrigé manuellement à `'oauth'` pour conn=14 (le callback OAuth ne mettait pas à jour ce champ après une reconnexion d'une connexion existante).
+
+---
+
 ## Session 06/05/2026 matin (8h-12h) — Refonte UI connexions + polling adaptatif jour/nuit + tool refresh pour Raya
 
 **Theme** : suite de la nuit (bootstrap historique des 7 boîtes mail terminé avec 7 boîtes done). Le matin a 3 axes principaux : 1) résoudre les fix bloquants identifiés hier soir (Drive read fail, alertes spam SMS), 2) refonte complète UI connexions avec source de vérité unique `effective_status`, 3) polling adaptatif intelligent (jour/nuit + user actif + tool exposé à Raya).
