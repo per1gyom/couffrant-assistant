@@ -205,11 +205,16 @@ def ensure_all_subscriptions():
     from app.connection_token_manager import (
         get_all_users_with_tool_connections,
         get_all_user_connections,
+        get_connection_token,
     )
     now = datetime.now(timezone.utc)
 
     try:
-        users = get_all_users_with_tool_connections("microsoft")
+        # Fix 06/05/2026 : on cherche aussi les users qui n auraient que des
+        # connexions 'outlook' (sans 'microsoft'). Avant, ils etaient ignores.
+        users_ms = set(get_all_users_with_tool_connections("microsoft") or [])
+        users_outlook = set(get_all_users_with_tool_connections("outlook") or [])
+        users = sorted(users_ms | users_outlook)
     except Exception as e:
         print(f"[Webhook] Erreur récupération users V2: {e}")
         return
@@ -232,8 +237,24 @@ def ensure_all_subscriptions():
 
             for conn_info in ms_conns:
                 conn_id = conn_info["connection_id"]
-                token = conn_info["token"]
+                # Fix 06/05/2026 : on prend un token FRAIS via
+                # get_connection_token (qui refresh automatiquement si
+                # expire). Avant : on prenait c.get('token') brut depuis
+                # get_all_user_connections, qui retournait le token
+                # decrypted mais potentiellement expire (1h). Resultat :
+                # creation de sub plantait avec 401 InvalidAuthenticationToken.
+                # Bug visible sur conn=14 contact@ ce matin (token expire
+                # 28 min apres reconnexion -> sub jamais creee).
+                tool_type_lower = conn_info.get("tool_type", "").lower()
                 email = conn_info.get("email", "?")
+                fresh_token = get_connection_token(
+                    username=username,
+                    tool_type=tool_type_lower,
+                    email_hint=email if email and email != "?" else None,
+                )
+                # Fallback sur le token brut si le refresh echoue (mieux
+                # que pas de token du tout, mais peu probable de marcher)
+                token = fresh_token or conn_info["token"]
                 try:
                     sub = subs_by_conn.get(conn_id)
                     if not sub and orphan_subs:

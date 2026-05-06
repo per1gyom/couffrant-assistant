@@ -361,7 +361,13 @@ def _get_v2_email(username: str, tool_type: str,
 def _refresh_v2_token(connection_id: int, tool_type: str, refresh_token: str, creds: dict) -> str | None:
     """Rafraîchit le token et met à jour tenant_connections.credentials."""
     try:
-        if tool_type == "microsoft":
+        if tool_type in ("microsoft", "outlook"):
+            # Fix 06/05/2026 : 'outlook' utilise la meme API Microsoft Graph
+            # que 'microsoft', donc meme mecanisme de refresh. Avant ce fix,
+            # tool_type='outlook' tombait dans le else final et retournait
+            # None -> les tokens des boites Outlook (ex: contact@) ne se
+            # refreshaient JAMAIS, empechant la creation de subscriptions
+            # Microsoft Graph (401 InvalidAuthenticationToken).
             from app.auth import refresh_microsoft_token
             result = refresh_microsoft_token(refresh_token)
             if not result or "access_token" not in result:

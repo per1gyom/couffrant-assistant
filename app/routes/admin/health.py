@@ -664,7 +664,18 @@ def admin_webhook_test_subscription(
         if not token_enc:
             raise HTTPException(500, "Pas d access_token en base pour cette connexion")
 
-        token = decrypt_token(token_enc)
+        # Fix 06/05/2026 : utilise get_connection_token qui force le refresh
+        # automatique si le token est expire. Avant : decrypt_token brut
+        # retournait un access_token expire (1h), 401 garanti.
+        from app.connection_token_manager import get_connection_token
+        token = get_connection_token(
+            username=username,
+            tool_type=tool_type.lower(),
+            email_hint=connected_email,
+        )
+        if not token:
+            # Fallback decrypt brut si get_connection_token plante
+            token = decrypt_token(token_enc)
 
         # 2. Tester /me pour voir quel compte le token represente VRAIMENT
         me_resp = requests.get(
