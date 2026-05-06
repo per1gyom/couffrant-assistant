@@ -4,6 +4,126 @@
 
 ---
 
+## Session 06/05/2026 matin (8h-12h) — Refonte UI connexions + polling adaptatif jour/nuit + tool refresh pour Raya
+
+**Theme** : suite de la nuit (bootstrap historique des 7 boîtes mail terminé avec 7 boîtes done). Le matin a 3 axes principaux : 1) résoudre les fix bloquants identifiés hier soir (Drive read fail, alertes spam SMS), 2) refonte complète UI connexions avec source de vérité unique `effective_status`, 3) polling adaptatif intelligent (jour/nuit + user actif + tool exposé à Raya).
+
+**Bilan** : 11 commits poussés en 4h, 0 erreur prod, 9/9 connexions saines à l'arrivée. Voir `docs/audit_connexions_fraicheur_06mai.md` pour l'analyse globale fraîcheur/stabilité réalisée à la fin de session.
+
+### Commits poussés (chronologique)
+
+| Commit | Description |
+|---|---|
+| `2cff74a` | fix(drive) read_drive_file table drive_files → drive_semantic_content |
+| `4888f28` | revert 0e7bceb (descriptions tools alourdies = +290 tokens/appel inutiles) |
+| `a642818` | fix(drive) auto-fallback level=1 → level=2 dans `_execute_read_drive_file` (Excel files) |
+| `d643a49` | fix(alerts) UPSERT acknowledged ne se remet plus FALSE à chaque cycle 60sec |
+| `ae5168d` | fix(alerts) cooldown 4h sur SMS/WhatsApp/Email pour éviter spam (65 SMS en 7h !) |
+| `973b97d` | feat(admin) endpoint /admin/health/connection/{id}/poll : test live de la connexion |
+| `4d96286` | **feat(connection-health) etape 3** : `effective_status` calculé depuis connection_health (vraie santé) |
+| `20134d6` | feat(admin-ui) etape 4 : page séparée `/admin/connexions` avec badges (conservée mais cachée) |
+| `9f1da7b` | feat(admin-companies) etape 4bis : badge sur l'onglet Sociétés + retire bouton header |
+| `c7a6730` | **feat(polling) etape 5** : adaptatif jour ouvré 5min / nuit+weekend 30min (-57% charge nuit) |
+| `d12b74a` | **feat(polling) etape 6** : smart adaptive (user actif aria_memory) + tool `refresh_connections` exposé à Raya |
+
+### 1. Drive read_drive_file table+level fallback (commits `2cff74a`, `a642818`)
+
+**Symptôme** : Raya ne pouvait plus lire le contenu des fichiers SharePoint. L'extraction renvoyait soit du vide soit des métadonnées sans contenu.
+
+**Cause #1** : `_execute_read_drive_file` cherchait dans la table `drive_files` qui n'existe plus depuis la refonte de fin avril. Le bon nom est `drive_semantic_content`.
+
+**Cause #2** : pour les fichiers Excel/Sheets, le contenu est splitté en 2 chunks RAG : `level=1` (522 chars de métadonnées : nom, dossier, sheet names) et `level=2` (jusqu'à 7548 chars de contenu réel). Le code ne récupérait que level=1 → métadonnées sans contenu réel.
+
+**Fix** : 1) corriger le nom de table, 2) si level=1 trouvé mais contenu trop court, retry avec level=2 automatiquement.
+
+**Test validé** : Raya peut maintenant lire le fichier "S21 SOCOTEC.xlsx" et retourner le détail des onglets.
+
+### 2. Spam SMS Twilio + bouton Acquitter cassé (commits `d643a49`, `ae5168d`)
+
+**Symptômes** :
+- 65 SMS + 65 WhatsApp envoyés en 7h pour la même alerte (boîte contact@ en panne dans la nuit)
+- L'admin clique "Acquitter" sur une alerte → 60 sec plus tard l'alerte se ré-ouvre toute seule
+
+**Cause acknowledged** : la fonction `_persist_alert` faisait un UPSERT qui forçait `acknowledged = FALSE` à chaque cycle. Donc dès que l'admin acquittait, le prochain tick la rouvrait.
+
+**Cause spam SMS** : la fonction `_send_on_channel` n'avait aucune dédup. Le job d'alertes tournant toutes les 60sec, dès qu'une alerte critique était active, on envoyait 1 SMS toutes les 60sec.
+
+**Fix acknowledged** : UPSERT avec CASE qui ne remet `acknowledged=FALSE` QUE si on passe de warning à critical (escalade légitime). Sinon on garde la valeur précédente.
+
+**Fix spam** : nouvelle constante `EXTERNAL_COOLDOWN_HOURS = 4` + 2 fonctions `_should_skip_external_send` / `_record_external_sent` qui stockent `last_external_sent_at` dans `system_alerts.details::jsonb`. Effet : 1 seul SMS par alerte par 4h, mais le badge in-app reste à jour en continu.
+
+### 3. Refonte UI connexions — source de vérité unique (commits `4d96286`, `20134d6`, `9f1da7b`)
+
+**Problème de fond** : 3 sources de "vérité" qui se contredisaient :
+- Bandeau alerte rouge en haut de l'onglet Sociétés (lit `system_alerts`)
+- Pastille verte ✅ "connecté" sur chaque carte de connexion (lit `tenant_connections.status`)
+- Le polling delta_sync qui plante depuis 8h (vérité métier, mais invisible)
+
+Résultat : Guillaume voyait simultanément "Couffrant Solar a une alerte rouge" en haut et "9/9 connexions vertes" en bas. La pastille mentait.
+
+**Solution étape 3** (commit `4d96286`) : nouveau module `app.connection_health` avec :
+- `get_effective_connection_status(connection_id)` : retourne `{state: green/amber/red/unknown, reason: "OK il y a 3 min", minutes_since_ok, consecutive_failures, ...}`
+- `get_effective_status_for_tenant(tenant_id)` : version bulk pour toutes les connexions d'un tenant en 1 query SQL
+- Seuils relatifs : `GREEN_FACTOR=1.5x` interval, `RED_FACTOR=3x`, `RED_FAILURES_THRESHOLD=3` consécutifs
+
+**Étape 4** (commit `20134d6`) : modifie la page `/admin/connexions` (page séparée découverte par Guillaume ce matin) pour utiliser ces nouveaux badges. Mais Guillaume a explicitement dit qu'il ne voulait pas de cette page → on laisse mais on cache l'accès.
+
+**Étape 4bis** (commit `9f1da7b`) : LA vraie cible. Modifie l'onglet **Sociétés** du panel principal :
+- Backend : `app/connections.py:list_connections()` enrichit chaque connexion avec `effective_status`
+- Frontend : `admin-panel.js:loadConnections()` ajoute un badge 🟢/🟡/🔴/⚪ "OK / Attention / Panne / Inconnu" à côté du badge OAuth original (qu'on conserve)
+- Pastille de résumé en haut de chaque carte tenant : compte les saines via `effective_status.state` au lieu de `status==='connected'`
+- Header : retire le bouton "🔌 Connexions" pour ne plus avoir 2 endroits où chercher l'info
+
+Test live à 11h51 : 9/9 badges 🟢 OK pour Couffrant Solar (la conn=14 contact@ s'est rétablie spontanément après le refresh OAuth de la nuit pendant le bootstrap).
+
+### 4. Polling adaptatif jour/nuit (commit `c7a6730` — étape 5)
+
+**Constat** : 9 connexions × 1 poll par 5 min = 2592 polls/jour, dont la moitié la nuit où personne ne bosse. Charge inutile sur Railway et sur les APIs Microsoft Graph + Gmail.
+
+**Solution** : nouveau module `app/polling_schedule.py` avec 3 fonctions clés :
+- `is_business_hours(now)` : True si lundi-vendredi 7h30-18h30 heure de Paris (zoneinfo Europe/Paris)
+- `get_expected_poll_interval(now)` : retourne 300s en heures ouvrées, 1800s sinon
+- `should_skip_poll_now(connection_id, now)` : True si on doit skipper ce cycle (= hors heures + dernier poll < 30 min)
+
+Architecture : on **NE TOUCHE PAS au scheduler APScheduler** (toujours IntervalTrigger 5 min). Les **jobs eux-mêmes** appellent `should_skip_poll_now` au début de leur boucle sur chaque connexion. Avantages : reversible, granulaire, 0 risque scheduler.
+
+4 jobs modifiés avec le pattern uniforme :
+- `mail_outlook_delta_sync.py:run_outlook_delta_sync`
+- `mail_gmail_history_sync.py:run_gmail_history_sync`
+- `drive_delta_sync.py:run_drive_delta_sync`
+- `odoo_polling.py:run_odoo_polling`
+
+Bonus : `connection_health._compute_effective_status` utilise désormais `get_expected_poll_interval()` à la volée → les seuils green/amber/red s'adaptent automatiquement à l'heure (la nuit, un silence de 45 min n'est plus une "panne" car c'est juste 1.5× l'intervalle attendu).
+
+### 5. Smart adaptive : user actif + tool refresh pour Raya (commit `d12b74a` — étape 6)
+
+**Trous restants après étape 5** : 1) Guillaume bosse parfois jusqu'à 22h → il rate les mails arrivés à 21h45 pendant 30 min, 2) Raya répond avec des données qui peuvent avoir 28 min de retard.
+
+**Niveau 2 — détection user actif** : `should_skip_poll_now` est étendu pour checker `aria_memory.created_at` du tenant. Si quelqu'un a discuté avec Raya dans les 15 dernières min → bypass du skip → mode 5 min réactivé sur tout le tenant. Transparent pour Guillaume.
+
+**Niveau 3 — tool `refresh_connections` exposé à Raya** : approche sémantique élégante au lieu d'une regex de mots-clés fragile. Description du tool dit clairement à Raya : "à utiliser quand l'user a clairement besoin d'info fraîche (récence, urgence, 'y a-t-il quelque chose de nouveau ?'). NE PAS appeler pour les questions historiques ou théoriques. Coût ~1-3 sec." Raya décide elle-même.
+
+Implémentation executor : `_execute_refresh_connections` appelle synchrone les 4 jobs `run_outlook_delta_sync`, `run_gmail_history_sync`, `run_drive_delta_sync`, `run_odoo_polling`, mesure le delta de mails ingérés, retourne `{status, duration_ms, reason, connections_refreshed, new_mails_seen, jobs_run, partial_errors}`.
+
+### 6. Audit fraîcheur/stabilité connexions (doc créée fin de session)
+
+À la demande de Guillaume après les push : audit complet pour vérifier qu'on ne crée pas de redondance avec les webhooks qu'il pensait avoir mis en place. Voir doc dédiée `docs/audit_connexions_fraicheur_06mai.md`.
+
+**Constat principal** : 1 webhook Microsoft actif sur 9 connexions (conn=6 Inbox seulement, expire 7/05 5h35), 0 watch Gmail Pub/Sub (job désactivé en prod via env var). Le polling reste donc la voie principale d'ingestion pour 8/9 connexions. Aucune redondance avec étapes 5+6.
+
+Recommandations dans le doc : étendre la sub Microsoft conn=6 aux 3 dossiers (Inbox+SentItems+JunkEmail) en 30 min de code, reconnecter conn=14 en OAuth complet pour avoir un webhook dessus, possiblement activer Gmail Pub/Sub (ROI marginal).
+
+### TODOs reportés
+
+- Tester en prod après 18h30 ce soir : passage automatique en mode 30 min puis bascule 5 min si Guillaume écrit à Raya
+- Tester demain matin 7h30 : retour automatique en mode 5 min
+- 74 erreurs SENT folder per1.guillaume@gmail.com lors bootstrap nuit (~12% taux erreur, à investiguer)
+- contact@ : 2550 mails / ~9961 attendus → relancer bootstrap avec months_back=24 si Guillaume veut historique complet
+- Évaluer reconnexion OAuth complète conn=14 pour avoir webhook
+- Considérer extension sub Microsoft conn=6 aux 3 dossiers
+
+---
+
 ## Session 05/05/2026 après-midi (13h-19h) — Mur permissions de bout en bout + V2 par-connexion + chantier apprentissage hiérarchisé lancé
 
 **Theme** : suite directe du matin. On termine la chaine V2 par-connexion (inventaire + recon + assignment auto). On corrige le mur permissions qui ne fonctionnait pas du tout depuis son deploiement (`permission_audit_log` totalement vide). On ajoute une page d audit lisible. Test final reussi : Raya tente delete_mail sur contact@ en lecture seule -> mur intercepte -> Raya explique a Guillaume. La derniere heure ouvre un nouveau chantier de fond : reflexion sur la hierarchisation des apprentissages (ex : la regle 124 obsolete a trompe Raya).
