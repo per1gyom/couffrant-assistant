@@ -192,6 +192,41 @@ def send(
     return persisted
 
 
+def _get_connection_human_identity(connection_id: Optional[int]) -> tuple:
+    """Retourne (label, connected_email) d'une connexion pour affichage humain.
+
+    Refonte 06/05/2026 : permet aux alertes d'afficher
+    'contact@couffrant-solar.fr' au lieu de 'connection_14'.
+
+    En cas d'echec DB ou connexion absente : retourne (None, None) pour
+    que le caller puisse fallback sur l'ID brut sans planter.
+    """
+    if not connection_id:
+        return (None, None)
+    from app.database import get_pg_conn
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            "SELECT label, connected_email FROM tenant_connections WHERE id = %s",
+            (connection_id,),
+        )
+        row = c.fetchone()
+        if row:
+            return (row[0], row[1])
+        return (None, None)
+    except Exception as e:
+        logger.warning(
+            "[AlertDispatch] _get_connection_human_identity failed for conn=%s : %s",
+            connection_id, str(e)[:200],
+        )
+        return (None, None)
+    finally:
+        if conn:
+            conn.close()
+
+
 def dispatch_connection_alert(conn_alert: dict) -> bool:
     """Helper specifique pour les alertes de connexion (depuis connection_health).
 
@@ -217,30 +252,66 @@ def dispatch_connection_alert(conn_alert: dict) -> bool:
         severity = "attention"
 
     connection_type = conn_alert.get("connection_type", "connexion")
-    title = f"Connexion {connection_type} silencieuse depuis {silence_min} min"
+    connection_id = conn_alert.get("connection_id")
 
-    message = (
-        f"La connexion {connection_type} (id={conn_alert.get('connection_id')}) "
-        f"n a pas reussi de poll depuis {silence_min} min "
-        f"(seuil = {threshold_min} min). "
-        f"Echecs consecutifs : {conn_alert.get('consecutive_failures', 0)}. "
-        f"Statut : {conn_alert.get('status', 'unknown')}."
-    )
+    # Refonte 06/05/2026 : message en francais clair avec email/label
+    # de la boite plutot que "connection_14" (jargon technique).
+    boite_label, boite_email = _get_connection_human_identity(connection_id)
+    boite_display = boite_email or boite_label or f"connexion #{connection_id}"
+
+    # Format duree humaine : 125 min -> "2h05"
+    if silence_min >= 60:
+        h = silence_min // 60
+        m = silence_min % 60
+        duree_humaine = f"{h}h{m:02d}"
+    else:
+        duree_humaine = f"{silence_min} min"
+
+    # Verbe selon le type de source (mail vs autre)
+    if connection_type.startswith("mail_") or connection_type in ("mail_outlook", "mail_gmail"):
+        title = f"Boite {boite_display} silencieuse depuis {duree_humaine}"
+        message = (
+            f"La boite {boite_display} ne repond plus depuis {duree_humaine}. "
+            f"Le systeme retente automatiquement toutes les 5 min. "
+            f"Si l'alerte persiste, verifie la connexion dans le panel Societes."
+        )
+    elif connection_type == "drive":
+        title = f"Drive '{boite_display}' silencieux depuis {duree_humaine}"
+        message = (
+            f"Le drive '{boite_display}' ne repond plus depuis {duree_humaine}. "
+            f"Le systeme retente automatiquement. "
+            f"Si l'alerte persiste, verifie la connexion dans le panel Societes."
+        )
+    elif connection_type == "odoo":
+        title = f"Odoo '{boite_display}' silencieux depuis {duree_humaine}"
+        message = (
+            f"La connexion Odoo '{boite_display}' ne repond plus depuis {duree_humaine}. "
+            f"Le systeme retente automatiquement. "
+            f"Si l'alerte persiste, verifie l'API key dans le panel Societes."
+        )
+    else:
+        # Generique pour types inconnus
+        title = f"Connexion '{boite_display}' silencieuse depuis {duree_humaine}"
+        message = (
+            f"La connexion '{boite_display}' ne repond plus depuis {duree_humaine}. "
+            f"Le systeme retente automatiquement. "
+            f"Si l'alerte persiste, verifie dans le panel Societes."
+        )
 
     actions = [
         {
-            "label": f"Voir details connexion #{conn_alert.get('connection_id')}",
-            "url": f"/admin/health/connection/{conn_alert.get('connection_id')}",
+            "label": "Voir la connexion",
+            "url": f"/admin/health/connection/{connection_id}",
         },
     ]
 
     # Suggestion d action selon le type de connexion
-    if connection_type.startswith("mail_outlook"):
+    if connection_type.startswith("mail_outlook") or connection_type == "outlook":
         actions.append({
             "label": "Reconnecter Outlook",
             "url": "/login?provider=microsoft",
         })
-    elif connection_type.startswith("mail_gmail"):
+    elif connection_type.startswith("mail_gmail") or connection_type == "gmail":
         actions.append({
             "label": "Reconnecter Gmail",
             "url": "/login?provider=google",

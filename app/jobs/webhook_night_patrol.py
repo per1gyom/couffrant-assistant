@@ -180,33 +180,50 @@ def run_night_patrol():
             failed = max(0, missing - rattrapes)
             failed_ratio = (failed / missing) if missing > 0 else 0
 
+            # Refonte 06/05/2026 : messages en francais clair + on
+            # n'affiche PAS l'alerte INFO si tout s est bien passe (evite
+            # le bruit dans le panel admin pour des operations normales).
+            should_skip_alert = False  # par defaut : on cree l alerte
+
             if missing == 0:
+                # Cas 'tout va bien' : pas d alerte du tout, juste log
+                should_skip_alert = True
                 severity = "info"
-                msg = "Ronde de nuit : aucun record manquant detecte."
+                msg = "Aucun mail rattrapage cette nuit (tout est arrive en temps reel)."
             elif (missing <= INFO_THRESHOLD_RATTRAPES_OK and
                   failed_ratio < CRITICAL_THRESHOLD_FAILED_RATIO):
+                # Cas 'autoreparation normale' : on log mais on n affiche
+                # PAS dans le panel - aucune action requise de l admin
+                should_skip_alert = True
                 severity = "info"
-                msg = (f"Ronde de nuit : {missing} records manquants detectes, "
-                       f"{rattrapes} rattrapages enqueues avec succes "
-                       f"(systeme s autorepare normalement).")
+                msg = (f"{rattrapes} mails rattrapes cette nuit "
+                       f"(arrivees sans webhook, recuperees automatiquement).")
             elif (missing >= CRITICAL_THRESHOLD_MISSING or
                   failed_ratio >= CRITICAL_THRESHOLD_FAILED_RATIO):
+                # Vraie alerte critique : echecs trop nombreux
                 severity = "critical"
-                msg = (f"Ronde de nuit : {missing} records manquants, "
-                       f"seulement {rattrapes} rattrapages reussis "
-                       f"({failed} echecs - {failed_ratio:.0%}). "
-                       f"Investigation requise.")
+                msg = (f"Probleme grave de rattrapage cette nuit : "
+                       f"{missing} mails arrivés sans webhook, dont {failed} "
+                       f"({failed_ratio:.0%}) n'ont pas pu etre recuperes. "
+                       f"Verifie les logs du job webhook_night_patrol.")
             elif missing > WARNING_THRESHOLD_MISSING:
+                # Volume anormal : a surveiller
                 severity = "warning"
-                msg = (f"Ronde de nuit : volume anormal de {missing} records "
-                       f"manquants ({rattrapes} rattrapages enqueues). "
-                       f"A surveiller.")
+                msg = (f"Volume inhabituel cette nuit : {missing} mails "
+                       f"manquants detectes, {rattrapes} rattrapes. "
+                       f"Verifier si une boite mail a un probleme.")
             else:
-                # Entre INFO_THRESHOLD et WARNING_THRESHOLD : info attentive
+                # Entre INFO_THRESHOLD et WARNING_THRESHOLD : info attentive,
+                # on garde dans le panel (volume non negligeable)
                 severity = "info"
-                msg = (f"Ronde de nuit : {missing} records manquants detectes, "
-                       f"{rattrapes} rattrapages enqueues "
-                       f"(volume modere, autoreparation en cours).")
+                msg = (f"{missing} mails manquants cette nuit, "
+                       f"{rattrapes} ont ete rattrapes automatiquement.")
+
+            # Si should_skip_alert : on log sans creer d'alerte panel
+            if should_skip_alert:
+                logger.info("[NightPatrol] %s tenant=%s : %s",
+                            severity.upper(), tenant_id, msg)
+                continue
             cur.execute(
                 """INSERT INTO system_alerts
                    (tenant_id, alert_type, severity, component, message, details, updated_at)

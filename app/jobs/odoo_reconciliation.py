@@ -188,35 +188,73 @@ def _raise_reconciliation_alert(
     
     Fix 05/05/2026 : 3 niveaux pour ne plus crier au loup quand le re-sync
     automatique va corriger l ecart au prochain cycle de polling.
+
+    Refonte 06/05/2026 : message en francais clair sans jargon technique
+    (plus de "modele res.partner"), nom humain des modeles, et SI ecart
+    < 10% on ne cree plus d alerte INFO du tout (juste log) - le re-sync
+    automatique va corriger sans qu il faille acquitter manuellement.
     """
     try:
         from app.alert_dispatcher import send
+
+        # Mapping modele technique Odoo -> nom humain
+        # Refonte 06/05/2026 : evite le jargon "res.partner" / "sale.order"
+        model_label = {
+            "res.partner": "Contacts",
+            "sale.order": "Devis et commandes",
+            "purchase.order": "Bons de commande",
+            "account.move": "Factures",
+            "crm.lead": "Opportunites CRM",
+            "product.template": "Produits",
+            "stock.picking": "Bons de livraison",
+        }.get(model, model)
 
         delta_pct_abs = abs(delta_pct)
         # Choix de severite selon ampleur
         if delta_pct_abs >= WARNING_THRESHOLD_PCT or delta_abs >= CRITICAL_THRESHOLD_ABS:
             severity = "critical"
-            verdict = (f"ECART IMPORTANT - re-sync automatique va etre tente "
-                       f"mais une investigation manuelle est recommandee si "
-                       f"l ecart persiste apres 24h.")
+            should_skip_alert = False
+            verdict = (
+                f"L'ecart de {delta_pct_abs:.0f}% depasse les seuils. "
+                f"Le re-sync automatique va etre tente mais si l'ecart "
+                f"persiste apres 24h, investigation manuelle recommandee."
+            )
         elif delta_pct_abs >= INFO_THRESHOLD_PCT:
             severity = "warning"
-            verdict = (f"Ecart modere - le re-sync automatique au prochain "
-                       f"cycle de polling devrait corriger.")
+            should_skip_alert = False
+            verdict = (
+                f"Ecart modere de {delta_pct_abs:.0f}% a surveiller. "
+                f"Le re-sync automatique au prochain cycle de polling "
+                f"devrait corriger sous 30 min."
+            )
         else:
+            # Cas 'petit ecart auto-correctible' : skip
             severity = "info"
-            verdict = (f"Petit ecart attendu - le re-sync automatique au "
-                       f"prochain cycle de polling va corriger.")
+            should_skip_alert = True
+            verdict = (
+                f"{delta_abs} {model_label.lower()} a synchroniser au "
+                f"prochain cycle (sous 30 min). Aucune action requise."
+            )
 
-        title = f"Reconciliation Odoo : {delta_abs} records ({model}) - {delta_pct_abs:.1f}%"
+        if should_skip_alert:
+            logger.info(
+                "[OdooRecon] %s tenant=%s model=%s : %s",
+                severity.upper(), tenant_id, model, verdict,
+            )
+            return
+
+        # Refonte titre + message : francais clair, nom humain du modele.
+        if severity == "critical":
+            title = f"{model_label} Odoo : ecart anormal {delta_pct_abs:.0f}%"
+        elif severity == "warning":
+            title = f"{model_label} Odoo : ecart {delta_pct_abs:.0f}% a surveiller"
+        else:
+            title = f"{model_label} Odoo : {delta_abs} a synchroniser"
+
         message = (
-            f"La reconciliation nocturne du {datetime.now().strftime('%Y-%m-%d')} "
-            f"a detecte {delta_abs} records manquants dans Raya pour le modele "
-            f"{model} (tenant {tenant_id}).\n\n"
-            f"Comptage Odoo : {count_odoo}\n"
-            f"Comptage Raya : {count_raya}\n"
-            f"Ecart : {delta_abs} ({delta_pct:.1f}%)\n\n"
-            f"{verdict}"
+            f"{verdict}\n\n"
+            f"Details : Odoo a {count_odoo} {model_label.lower()}, Raya en "
+            f"connait {count_raya} (ecart de {delta_abs}, {delta_pct_abs:.0f}%)."
         )
 
         send(

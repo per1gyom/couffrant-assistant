@@ -357,6 +357,11 @@ def _raise_reconciliation_alert(tenant_id: str, username: str,
     
     Fix 05/05/2026 : 3 niveaux pour ne plus alerter en orange/rouge sur
     le filtrage Haiku legitime (newsletters/spam ignores volontairement).
+
+    Refonte 06/05/2026 : message en francais clair sans jargon, et SI
+    l ecart est dans la zone normale ET 0 boite en echec, on ne cree
+    plus d alerte INFO du tout (juste log) - evite de polluer le panel
+    avec des operations parfaitement normales.
     """
     try:
         from app.alert_dispatcher import send
@@ -365,42 +370,55 @@ def _raise_reconciliation_alert(tenant_id: str, username: str,
         # Choix de severite
         if delta_pct_abs >= WARNING_THRESHOLD_PCT:
             severity = "critical"
+            should_skip_alert = False
             verdict = (
-                "ECART CRITIQUE - meme apres prise en compte du filtrage "
-                "Haiku, l ecart depasse 50%. Probable bug d ingestion. "
-                "Inspecter /admin/health/page et /admin/health/connection/."
+                f"L'ecart de {delta_pct_abs:.0f}% depasse les seuils normaux. "
+                f"Le filtrage Haiku ne suffit pas a l'expliquer. "
+                f"Probable probleme d'ingestion : verifier /admin/health."
             )
         elif delta_pct_abs >= INFO_THRESHOLD_PCT:
             severity = "warning"
+            should_skip_alert = False
             verdict = (
-                "Ecart modere a surveiller. Le filtrage Haiku peut "
-                "expliquer une partie (newsletter/spam volontairement "
-                "ignores). Si l ecart persiste sur plusieurs jours, "
-                "investiguer."
+                f"Ecart modere de {delta_pct_abs:.0f}% a surveiller. "
+                f"Une partie est due au filtrage Haiku (newsletter/spam "
+                f"volontairement ignores). Si l'ecart persiste plusieurs "
+                f"jours, investiguer."
             )
         else:
+            # Cas 'ecart normal du au filtrage' : skip si rien d anormal
             severity = "info"
+            should_skip_alert = (boites_failed == 0)
             verdict = (
-                "Ecart attendu cote Raya : le filtrage Haiku ignore "
-                "volontairement les newsletters, notifications et spam "
-                "pour ne garder que les mails business pertinents."
+                f"Filtrage Gmail normal : {delta_abs} newsletters/spam "
+                f"ignores ({delta_pct_abs:.0f}% des mails). "
+                f"Raya ne garde que les mails business utiles."
             )
 
-        title = (
-            f"Reconciliation Gmail : {delta_abs} mails ({username}) - "
-            f"{delta_pct_abs:.1f}%"
-        )
+        if should_skip_alert:
+            logger.info(
+                "[GmailRecon] %s tenant=%s user=%s : %s",
+                severity.upper(), tenant_id, username, verdict,
+            )
+            return
+
+        # Refonte titre + message : francais clair, sans jargon technique.
+        # On utilise le verdict comme phrase principale et on met les
+        # chiffres bruts en details secondaires.
+        if severity == "critical":
+            title = f"Reconciliation Gmail anormale : {delta_pct_abs:.0f}% d'ecart"
+        elif severity == "warning":
+            title = f"Reconciliation Gmail : ecart {delta_pct_abs:.0f}% a surveiller"
+        else:
+            title = f"Filtrage Gmail : {delta_abs} mails ignores ({delta_pct_abs:.0f}%)"
+
         message = (
-            f"La reconciliation nocturne du "
-            f"{datetime.now().strftime('%Y-%m-%d')} a detecte {delta_abs} "
-            f"mails manquants dans Raya pour {username} "
-            f"(tenant {tenant_id}).\n\n"
-            f"Comptage Google (somme des {boites_total} boites Gmail, "
-            f"labels INBOX+SENT+SPAM) : {count_google}\n"
-            f"Comptage Raya (mail_memory) : {count_raya}\n"
-            f"Ecart : {delta_abs} ({delta_pct:.1f}%)\n"
-            f"Boites en echec : {boites_failed}/{boites_total}\n\n"
-            f"{verdict}"
+            f"{verdict}\n\n"
+            f"Details : Gmail compte {count_google} mails (sur {boites_total} "
+            f"boites), Raya en a garde {count_raya}, soit {delta_abs} de "
+            f"moins ({delta_pct_abs:.0f}%)."
+            + (f"\n\nAttention : {boites_failed}/{boites_total} boites en echec."
+               if boites_failed > 0 else "")
         )
 
         send(
