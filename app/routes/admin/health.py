@@ -82,22 +82,263 @@ def admin_health_force_poll(
     connection_id: int,
     _: dict = Depends(require_admin),
 ):
-    """Force un poll immediat sur une connexion (bouton 'Tester' dans l UI).
+    """Test rapide d une connexion (bouton 'Tester' dans l UI).
 
-    Pour l instant retourne juste un message : l implementation reelle
-    necessite que les connecteurs exposent une fonction force_poll().
-    Sera implemente Semaines 2-6 quand les connecteurs seront branches
-    sur l architecture commune.
+    Effectue UN appel API minimal au service distant (Microsoft Graph /me,
+    Gmail users.getProfile, etc.) avec gestion du refresh token. Retourne
+    le resultat sans declencher un poll complet.
+
+    Implementation 06/05/2026 (apres un mois d alerte spam sur conn_14
+    et impossibilite de tester l etat sans reconnecter manuellement).
+
+    En cas de succes : enregistre via record_poll_attempt(status='ok')
+    -> declenche l auto-resolution des alertes connection_silence
+    deja en place dans connection_health.py.
+
+    En cas d echec : enregistre via record_poll_attempt(status='auth_error'
+    ou 'api_error') -> permet le tracking historique des pannes.
+
+    Reponse :
+      {
+        "ok": True/False,
+        "http_code": 200/401/...,
+        "reason": "OK - connecte a contact@..." ou "Token expire...",
+        "duration_ms": 234,
+        "tool_type": "microsoft",
+        "connection_id": 14
+      }
     """
-    return {
-        "status": "not_implemented",
-        "message": (
-            "Force poll pas encore disponible. "
-            "Sera operationnel quand les connecteurs seront branches "
-            "sur l architecture commune (Semaines 2-6 de la roadmap)."
-        ),
-        "connection_id": connection_id,
-    }
+    import time, json
+    from app.database import get_pg_conn
+    from app.connection_health import record_poll_attempt
+
+    started = time.time()
+
+    # 1. Recuperer la connexion
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            "SELECT tool_type, credentials, connected_email "
+            "FROM tenant_connections WHERE id = %s",
+            (connection_id,),
+        )
+        row = c.fetchone()
+    finally:
+        if conn: conn.close()
+
+    if not row:
+        return {
+            "ok": False, "http_code": 404, "duration_ms": 0,
+            "reason": f"Connexion {connection_id} introuvable",
+            "connection_id": connection_id,
+        }
+
+    tool_type, credentials_raw, connected_email = row[0], row[1], row[2]
+
+    # Parse credentials (peut etre dict ou str selon postgres driver)
+    if isinstance(credentials_raw, str):
+        try:
+            creds = json.loads(credentials_raw)
+        except Exception:
+            creds = {}
+    elif isinstance(credentials_raw, dict):
+        creds = credentials_raw
+    else:
+        creds = {}
+
+    # 2. Dispatch selon tool_type
+    if tool_type in ("microsoft", "outlook", "drive"):
+        result = _test_microsoft_connection(connection_id, tool_type, creds, started)
+    elif tool_type in ("gmail", "google"):
+        result = _test_gmail_connection(connection_id, creds, started)
+    elif tool_type == "odoo":
+        result = {
+            "ok": False, "http_code": 0,
+            "reason": "Test pas encore implemente pour Odoo (a venir)",
+            "duration_ms": int((time.time() - started) * 1000),
+        }
+    else:
+        result = {
+            "ok": False, "http_code": 0,
+            "reason": f"Test pas encore implemente pour tool_type={tool_type}",
+            "duration_ms": int((time.time() - started) * 1000),
+        }
+
+    result["tool_type"] = tool_type
+    result["connection_id"] = connection_id
+    result["connected_email"] = connected_email
+    return result
+
+
+def _test_microsoft_connection(
+    connection_id: int, tool_type: str, creds: dict, started: float
+) -> dict:
+    """Test Microsoft Graph : refresh token + appel /me.
+
+    Si le refresh token est expire/revoque -> retourne 401.
+    Si l API plante (ex: 503 Microsoft) -> retourne le code reel.
+    Sinon -> 200 OK + email du compte connecte (du retour Graph).
+    """
+    import time
+    from app.connection_token_manager import _refresh_v2_token
+    from app.connection_health import record_poll_attempt
+    from app.crypto import decrypt_token
+
+    # 1. Decrypt refresh_token (les credentials V2 sont chiffres)
+    refresh_token = creds.get("refresh_token")
+    if refresh_token:
+        try:
+            refresh_token = decrypt_token(refresh_token)
+        except Exception:
+            pass  # peut-etre pas chiffre (legacy)
+
+    if not refresh_token:
+        try:
+            record_poll_attempt(connection_id, status="auth_error",
+                                error_detail="refresh_token absent")
+        except Exception:
+            pass
+        return {
+            "ok": False, "http_code": 401,
+            "reason": "Pas de refresh_token en base - reconnexion requise",
+            "duration_ms": int((time.time() - started) * 1000),
+        }
+
+    # 2. Tenter le refresh (= ce que fait un poll normal)
+    new_access_token = _refresh_v2_token(connection_id, "microsoft",
+                                          refresh_token, creds)
+    if not new_access_token:
+        try:
+            record_poll_attempt(connection_id, status="auth_error",
+                                error_detail="refresh OAuth a echoue")
+        except Exception:
+            pass
+        return {
+            "ok": False, "http_code": 401,
+            "reason": "Refresh token expire ou revoque - reconnexion OAuth requise",
+            "duration_ms": int((time.time() - started) * 1000),
+        }
+
+    # 3. Mini appel /me pour valider le token frais
+    from app.graph_client import graph_get
+    try:
+        data = graph_get(new_access_token, "/me")
+        try:
+            record_poll_attempt(connection_id, status="ok")
+        except Exception:
+            pass
+        upn = data.get("userPrincipalName") or data.get("mail") or "?"
+        return {
+            "ok": True, "http_code": 200,
+            "reason": f"OK - connecte a {upn}",
+            "duration_ms": int((time.time() - started) * 1000),
+        }
+    except Exception as e:
+        msg = str(e)[:200]
+        try:
+            record_poll_attempt(connection_id, status="api_error",
+                                error_detail=msg[:500])
+        except Exception:
+            pass
+        # Detection des erreurs courantes
+        if "401" in msg or "Unauthorized" in msg or "AADSTS" in msg:
+            human_msg = "Token Microsoft expire - reconnexion OAuth requise"
+            http_code = 401
+        elif "403" in msg or "Forbidden" in msg:
+            human_msg = "Permissions Microsoft revoquees - reconnexion requise"
+            http_code = 403
+        elif "503" in msg or "ServiceUnavailable" in msg:
+            human_msg = "Microsoft Graph indisponible (503) - reessayer plus tard"
+            http_code = 503
+        else:
+            human_msg = f"Erreur API Microsoft Graph : {msg[:120]}"
+            http_code = 0
+        return {
+            "ok": False, "http_code": http_code,
+            "reason": human_msg,
+            "duration_ms": int((time.time() - started) * 1000),
+        }
+
+
+def _test_gmail_connection(
+    connection_id: int, creds: dict, started: float
+) -> dict:
+    """Test Gmail : refresh token + appel users.getProfile."""
+    import time, requests
+    from app.connection_token_manager import _refresh_v2_token
+    from app.connection_health import record_poll_attempt
+    from app.crypto import decrypt_token
+
+    refresh_token = creds.get("refresh_token")
+    if refresh_token:
+        try:
+            refresh_token = decrypt_token(refresh_token)
+        except Exception:
+            pass
+
+    if not refresh_token:
+        try:
+            record_poll_attempt(connection_id, status="auth_error",
+                                error_detail="refresh_token absent")
+        except Exception:
+            pass
+        return {
+            "ok": False, "http_code": 401,
+            "reason": "Pas de refresh_token en base - reconnexion requise",
+            "duration_ms": int((time.time() - started) * 1000),
+        }
+
+    new_access_token = _refresh_v2_token(connection_id, "gmail",
+                                          refresh_token, creds)
+    if not new_access_token:
+        try:
+            record_poll_attempt(connection_id, status="auth_error",
+                                error_detail="refresh OAuth Gmail echoue")
+        except Exception:
+            pass
+        return {
+            "ok": False, "http_code": 401,
+            "reason": "Refresh token Gmail expire/revoque - reconnexion OAuth requise",
+            "duration_ms": int((time.time() - started) * 1000),
+        }
+
+    try:
+        r = requests.get(
+            "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+            headers={"Authorization": f"Bearer {new_access_token}"},
+            timeout=15,
+        )
+        if r.status_code == 200:
+            try:
+                record_poll_attempt(connection_id, status="ok")
+            except Exception:
+                pass
+            data = r.json()
+            return {
+                "ok": True, "http_code": 200,
+                "reason": f"OK - connecte a {data.get('emailAddress', '?')} "
+                          f"({data.get('messagesTotal', 0)} mails)",
+                "duration_ms": int((time.time() - started) * 1000),
+            }
+        else:
+            try:
+                record_poll_attempt(connection_id, status="api_error",
+                                    error_detail=f"HTTP {r.status_code}")
+            except Exception:
+                pass
+            return {
+                "ok": False, "http_code": r.status_code,
+                "reason": f"Erreur Gmail HTTP {r.status_code} - {r.text[:100]}",
+                "duration_ms": int((time.time() - started) * 1000),
+            }
+    except Exception as e:
+        return {
+            "ok": False, "http_code": 0,
+            "reason": f"Erreur reseau Gmail : {str(e)[:150]}",
+            "duration_ms": int((time.time() - started) * 1000),
+        }
 
 
 @router.post("/admin/health/test-alert")
