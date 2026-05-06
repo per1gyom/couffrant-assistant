@@ -540,3 +540,70 @@ def admin_health_page(
             content=f"<h1>Erreur</h1><pre>{str(e)[:500]}</pre>",
             status_code=500,
         )
+
+
+# ─── ENDPOINT POUR DECLENCHER LA CREATION/RENOUVELLEMENT DES WEBHOOKS ───
+# Ajoute le 06/05/2026 pour pouvoir creer immediatement la subscription
+# Microsoft Graph apres reconnexion d une boite (sans attendre le cron 6h).
+# Aussi utile pour le chantier 'extension aux 3 dossiers' a venir.
+
+@router.post("/admin/webhooks/ensure-now")
+def admin_webhooks_ensure_now(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Declenche immediatement ensure_all_subscriptions() pour Microsoft.
+
+    Equivalent du cron _job_webhook_renewal mais a la demande. Cree les
+    subscriptions manquantes et renouvelle celles qui expirent dans <24h.
+
+    Reservé super_admin.
+    """
+    try:
+        from app.connectors.microsoft_webhook import ensure_all_subscriptions
+        from app.database import get_pg_conn
+        import time
+
+        # Snapshot AVANT pour mesurer le delta
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT connection_id FROM webhook_subscriptions")
+            subs_before = set(r[0] for r in cur.fetchall() if r[0])
+
+        started = time.time()
+        ensure_all_subscriptions()
+        duration_ms = int((time.time() - started) * 1000)
+
+        # Snapshot APRES
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT ws.connection_id, ws.subscription_id, ws.expires_at, ws.resource,
+                       tc.label, tc.connected_email
+                FROM webhook_subscriptions ws
+                LEFT JOIN tenant_connections tc ON tc.id = ws.connection_id
+                ORDER BY ws.connection_id
+            """)
+            subs_after_raw = cur.fetchall()
+            subs_after = set(r[0] for r in subs_after_raw if r[0])
+
+        new_subs = subs_after - subs_before
+        return {
+            "status": "ok",
+            "duration_ms": duration_ms,
+            "subscriptions_total": len(subs_after_raw),
+            "subscriptions_new": list(new_subs),
+            "subscriptions": [
+                {
+                    "connection_id": r[0],
+                    "subscription_id": r[1],
+                    "expires_at": r[2].isoformat() if r[2] else None,
+                    "resource": r[3],
+                    "label": r[4],
+                    "email": r[5],
+                }
+                for r in subs_after_raw
+            ],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Echec ensure_all_subscriptions : {str(e)[:200]}")
