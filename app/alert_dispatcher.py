@@ -78,6 +78,14 @@ DEFAULT_CHANNELS_BY_SEVERITY = {
 }
 
 
+# ─── COOLDOWN ENVOI EXTERNE ───
+# Pour empecher le spam SMS/WhatsApp/Email quand une alerte reste active
+# longtemps (ex: connection_silence qui ne se resout pas pendant 7h).
+# La persistance dans system_alerts (UPSERT) deduplique deja en base, mais
+# le canal externe ne checkait rien -> Twilio etait sollicite a chaque cycle.
+EXTERNAL_COOLDOWN_HOURS = 4
+
+
 # ─── API PRINCIPALE ───
 
 def send(
@@ -139,8 +147,25 @@ def send(
         severity, tenant_id, username, channels, title,
     )
 
-    # 3. Envoi sur chaque canal (best effort, on ne fail pas si un canal echoue)
+    # 3. Cooldown externe : check si on a deja envoye SMS/WhatsApp/Email
+    #    pour cette meme alerte (tenant+type+component) recemment.
+    component_real = component or (source_id or "unknown")
+    alert_type_real = alert_type or source_type
+    EXTERNAL_CHANNELS = {"sms", "whatsapp", "email"}
+    skip_external = _should_skip_external_send(
+        tenant_id, alert_type_real, component_real,
+        cooldown_hours=EXTERNAL_COOLDOWN_HOURS,
+    )
+
+    # 4. Envoi sur chaque canal (best effort, on ne fail pas si un canal echoue)
+    sent_external_at_least_once = False
     for channel in channels:
+        if channel in EXTERNAL_CHANNELS and skip_external:
+            logger.info(
+                "[Dispatch] Cooldown %dh actif pour %s/%s, skip canal %s",
+                EXTERNAL_COOLDOWN_HOURS, alert_type_real, component_real, channel,
+            )
+            continue
         try:
             _send_on_channel(
                 channel=channel,
@@ -151,11 +176,18 @@ def send(
                 tenant_id=tenant_id,
                 username=username,
             )
+            if channel in EXTERNAL_CHANNELS:
+                sent_external_at_least_once = True
         except Exception as e:
             logger.error(
                 "[Dispatch] Canal %s echoue : %s",
                 channel, str(e)[:200],
             )
+
+    # 5. Si au moins un envoi externe a reussi, on enregistre le timestamp
+    #    pour appliquer le cooldown au prochain cycle.
+    if sent_external_at_least_once:
+        _record_external_sent(tenant_id, alert_type_real, component_real)
 
     return persisted
 
@@ -383,6 +415,82 @@ def _smtp_available() -> bool:
 
 
 # ─── ENVOI PAR CANAL ───
+
+def _should_skip_external_send(
+    tenant_id: str,
+    alert_type: str,
+    component: str,
+    cooldown_hours: int = EXTERNAL_COOLDOWN_HOURS,
+) -> bool:
+    """Verifie si on doit skipper l envoi externe (SMS/WhatsApp/Email).
+
+    Lit details->>'last_external_sent_at' dans system_alerts. Si l envoi
+    externe est plus recent que cooldown_hours, on skippe.
+
+    Returns True si on doit skipper (cooldown actif), False sinon.
+    """
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT details->>'last_external_sent_at'
+            FROM system_alerts
+            WHERE tenant_id = %s
+              AND alert_type = %s
+              AND component = %s
+        """, (tenant_id, alert_type, component))
+        row = c.fetchone()
+        if not row or not row[0]:
+            return False  # jamais envoye -> on envoie
+        last_sent = row[0]
+        # Parse l ISO timestamp (peut etre avec ou sans timezone)
+        try:
+            last_dt = datetime.fromisoformat(last_sent.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            return False  # parse impossible -> on envoie par securite
+        delta = datetime.now(last_dt.tzinfo) - last_dt
+        return delta < timedelta(hours=cooldown_hours)
+    except Exception as e:
+        logger.warning("[Dispatch] _should_skip_external_send echoue : %s",
+                       str(e)[:200])
+        return False  # en cas d erreur -> on envoie (mieux louper le cooldown
+                      # que rater une alerte critique)
+    finally:
+        if conn: conn.close()
+
+
+def _record_external_sent(
+    tenant_id: str,
+    alert_type: str,
+    component: str,
+) -> None:
+    """Enregistre dans details que l envoi externe a eu lieu maintenant.
+
+    UPDATE atomique de system_alerts.details->>'last_external_sent_at'.
+    """
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            UPDATE system_alerts
+            SET details = jsonb_set(
+                COALESCE(details, '{}'::jsonb),
+                '{last_external_sent_at}',
+                to_jsonb(NOW()::text)
+            )
+            WHERE tenant_id = %s
+              AND alert_type = %s
+              AND component = %s
+        """, (tenant_id, alert_type, component))
+        conn.commit()
+    except Exception as e:
+        logger.warning("[Dispatch] _record_external_sent echoue : %s",
+                       str(e)[:200])
+    finally:
+        if conn: conn.close()
+
 
 def _send_on_channel(
     channel: str,
