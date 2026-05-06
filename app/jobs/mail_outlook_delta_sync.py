@@ -260,10 +260,249 @@ def _poll_folder_delta(token: str, folder_name: str,
     }
 
 
+def _fetch_outlook_attachments(token: str, message_id: str,
+                                 max_size_mb: int = 10) -> list:
+    """Recupere les pieces jointes d un mail Outlook via Microsoft Graph.
+
+    Etape 3a (chantier B PJ, 06/05/2026).
+
+    Strategie en 2 calls par mail qui a des PJ :
+      1. GET /messages/{id}/attachments?$select=id,name,contentType,size,isInline
+         -> liste les meta sans les bytes (rapide)
+      2. Pour chaque PJ retenue (fileAttachment, non-inline, <= max_size_mb)
+         -> GET /messages/{id}/attachments/{att_id}/$value
+         -> bytes raw
+
+    On retourne aussi les PJ trop grosses avec content_bytes=None et
+    too_large=True. Etape 6 utilisera cette info pour la notification
+    user. Etape 3a actuelle ne les telecharge pas.
+
+    Args:
+        token: access_token frais Microsoft Graph
+        message_id: id Outlook du mail
+        max_size_mb: limite (default 10 MB)
+
+    Returns:
+        Liste de dicts. Liste vide si aucune PJ ou erreur.
+    """
+    import requests
+
+    max_size_bytes = max_size_mb * 1024 * 1024
+    attachments = []
+
+    try:
+        # Step 1 : list les meta
+        url = f"https://graph.microsoft.com/v1.0/me/messages/{message_id}/attachments"
+        params = {"$select": "id,name,contentType,size,isInline"}
+        resp = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            params=params,
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            if resp.status_code != 404:  # 404 = mail sans PJ, normal
+                logger.warning(
+                    "[OutlookPJ] List attachments mail=%s : HTTP %s",
+                    message_id[:30], resp.status_code,
+                )
+            return []
+
+        data = resp.json()
+        items = data.get("value", [])
+        if not items:
+            return []
+
+        for item in items:
+            # Skip itemAttachment (mail forwarde) et referenceAttachment
+            # (lien cloud genre OneDrive). On ne traite que fileAttachment.
+            odata_type = item.get("@odata.type", "")
+            if odata_type and "fileAttachment" not in odata_type:
+                continue
+            # Skip images inline (signatures)
+            if item.get("isInline"):
+                continue
+
+            att_id = item.get("id")
+            att_name = item.get("name", "unknown")
+            att_size = item.get("size", 0)
+            att_mime = item.get("contentType", "")
+
+            too_large = att_size > max_size_bytes
+            content_bytes = None
+
+            if not too_large and att_id:
+                # Step 2 : download les bytes raw
+                try:
+                    dl_url = (
+                        f"https://graph.microsoft.com/v1.0/me/messages/"
+                        f"{message_id}/attachments/{att_id}/$value"
+                    )
+                    dl_resp = requests.get(
+                        dl_url,
+                        headers={"Authorization": f"Bearer {token}"},
+                        timeout=60,
+                    )
+                    if dl_resp.status_code == 200:
+                        content_bytes = dl_resp.content
+                    else:
+                        logger.warning(
+                            "[OutlookPJ] Download %s mail=%s : HTTP %s",
+                            att_name, message_id[:30], dl_resp.status_code,
+                        )
+                except Exception as e:
+                    logger.warning(
+                        "[OutlookPJ] Download %s exception : %s",
+                        att_name, str(e)[:100],
+                    )
+
+            attachments.append({
+                "id": att_id,
+                "name": att_name,
+                "size": att_size,
+                "content_type": att_mime,
+                "content_bytes": content_bytes,
+                "too_large": too_large,
+            })
+
+        return attachments
+    except Exception as e:
+        logger.error(
+            "[OutlookPJ] Fetch attachments mail=%s exception : %s",
+            message_id[:30], str(e)[:200],
+        )
+        return []
+
+
+def _process_attachments_for_mail(message_id: str, tenant_id: str,
+                                     username: str, connection_id: int,
+                                     token: str) -> dict:
+    """Pour un mail Outlook deja insere, fetch et indexe ses PJ.
+
+    Etape 3a (chantier B, 06/05/2026).
+
+    Workflow :
+      1. List les PJ via _fetch_outlook_attachments
+      2. Pour chaque PJ <= 10 MB : process_attachment (extract + index +
+         attachment_chunks). UPSERT sur (source_type, source_ref) donc
+         idempotent en cas de re-trigger.
+      3. Pour chaque PJ > 10 MB : skip (sera gere a l etape 6 avec
+         notification user). On note dans large_pjs_meta pour le retour.
+      4. UPDATE mail_memory.has_attachments=TRUE si au moins 1 PJ
+         indexee (pas pour les > 10 MB seules - on attend la decision
+         de l etape 6).
+
+    Returns:
+        Dict {indexed, skipped_large, errors, large_pjs_meta}
+    """
+    from app.attachment_pipeline import process_attachment
+
+    attachments = _fetch_outlook_attachments(token, message_id, max_size_mb=10)
+    if not attachments:
+        return {
+            "indexed": 0, "skipped_large": 0, "errors": 0,
+            "large_pjs_meta": [],
+        }
+
+    indexed = 0
+    skipped_large = 0
+    errors = 0
+    large_pjs_meta = []
+
+    for att in attachments:
+        if att["too_large"]:
+            skipped_large += 1
+            large_pjs_meta.append({
+                "name": att["name"],
+                "size": att["size"],
+                "content_type": att["content_type"],
+                "outlook_attachment_id": att["id"],
+            })
+            logger.info(
+                "[OutlookPJ] Skip grosse PJ %s (%.1f MB) sur mail %s "
+                "(etape 6 a venir)",
+                att["name"], att["size"] / (1024 * 1024), message_id[:30],
+            )
+            continue
+
+        if not att["content_bytes"]:
+            errors += 1
+            continue
+
+        try:
+            result = process_attachment(
+                tenant_id=tenant_id,
+                username=username,
+                source_type="mail_attachment",
+                source_ref=f"{message_id}:{att['id']}",
+                file_name=att["name"],
+                file_bytes=att["content_bytes"],
+                mime_type=att["content_type"],
+                connection_id=connection_id,
+            )
+            if result.get("status") == "ok":
+                indexed += 1
+            else:
+                errors += 1
+        except Exception as e:
+            errors += 1
+            logger.warning(
+                "[OutlookPJ] process_attachment %s echoue : %s",
+                att["name"], str(e)[:100],
+            )
+
+    if indexed > 0 or skipped_large > 0:
+        logger.info(
+            "[OutlookPJ] mail=%s : %d indexees, %d trop grosses, %d erreurs",
+            message_id[:30], indexed, skipped_large, errors,
+        )
+
+    return {
+        "indexed": indexed,
+        "skipped_large": skipped_large,
+        "errors": errors,
+        "large_pjs_meta": large_pjs_meta,
+    }
+
+
+def _mark_mail_has_attachments(message_id: str, username: str) -> bool:
+    """UPDATE mail_memory.has_attachments=TRUE pour ce mail.
+
+    Etape 3a (chantier B, 06/05/2026). On marque seulement quand au
+    moins 1 PJ a ete reellement indexee (pas pour les > 10 MB seules,
+    qui seront traitees par etape 6).
+    """
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            """
+            UPDATE mail_memory
+            SET has_attachments = TRUE
+            WHERE message_id = %s AND username = %s
+            """,
+            (message_id, username),
+        )
+        conn.commit()
+        return c.rowcount > 0
+    except Exception as e:
+        logger.warning(
+            "[OutlookPJ] _mark_mail_has_attachments echec : %s",
+            str(e)[:100],
+        )
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
 def _process_messages_via_pipeline(messages: list, username: str,
                                      folder_name: str,
                                      connection_id: int = None,
-                                     mailbox_email: str = None) -> dict:
+                                     mailbox_email: str = None,
+                                     tenant_id: str = None,
+                                     token: str = None) -> dict:
     """Mode WRITE : traite chaque message via process_incoming_mail.
 
     Reutilise le pipeline source-agnostic existant qui :
@@ -374,6 +613,35 @@ def _process_messages_via_pipeline(messages: list, username: str,
 
             if result in ("done_ai", "stored_simple", "fallback"):
                 processed += 1
+                # Etape 3a (chantier B PJ, 06/05/2026) : si le mail a
+                # des PJ, on les traite via le pipeline attachment.
+                # Conditions : on a token + tenant_id (passes par le
+                # caller mode WRITE), le mail a hasAttachments=True.
+                # Si hasAttachments absent du payload (delta_link
+                # ancien $select sans hasAttachments) : on appelle
+                # quand meme _fetch_outlook_attachments qui ne fait
+                # rien si la liste est vide (1 call API safe).
+                if token and tenant_id:
+                    try:
+                        att_result = _process_attachments_for_mail(
+                            message_id=message_id,
+                            tenant_id=tenant_id,
+                            username=username,
+                            connection_id=connection_id,
+                            token=token,
+                        )
+                        if att_result["indexed"] > 0:
+                            _mark_mail_has_attachments(message_id, username)
+                        # Note : large_pjs_meta sera utilise en etape 6
+                        # pour la notification user. Pour l instant on
+                        # log juste leur existence.
+                    except Exception as e_att:
+                        # On ne bloque pas l ingestion du mail si le
+                        # pipeline PJ plante. Le mail est deja en base.
+                        logger.warning(
+                            "[OutlookDelta][PJ] %s/%s echec : %s",
+                            username, message_id[:30], str(e_att)[:200],
+                        )
             elif result in ("duplicate",):
                 skipped_existing += 1
             elif result in ("ignored",):
@@ -522,6 +790,8 @@ def _poll_user_outlook(connection_id: int, tenant_id: str,
                         result["messages"], username, folder_name,
                         connection_id=connection_id,
                         mailbox_email=mailbox_email,
+                        tenant_id=tenant_id,
+                        token=token,
                     )
                     total_processed += process_result["processed"]
                     total_skipped += process_result["skipped_existing"]
