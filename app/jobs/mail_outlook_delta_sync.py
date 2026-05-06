@@ -497,6 +497,64 @@ def _mark_mail_has_attachments(message_id: str, username: str) -> bool:
             conn.close()
 
 
+def _maybe_rattrapage_attachments(message_id: str, tenant_id: str,
+                                     username: str, connection_id: int,
+                                     token: str) -> None:
+    """Rattrapage des PJ pour un mail deja en base.
+
+    Etape 3a fix (06/05/2026) : le webhook Microsoft Graph (notif temps
+    reel) ingere les mails via process_incoming_mail mais N APPELLE PAS
+    le pipeline attachments. Resultat : sans rattrapage, les PJ des mails
+    ingerés via webhook ne sont jamais indexees (le delta_sync les voit
+    comme duplicates et skip).
+
+    Fix : pour CHAQUE mail vu en duplicate par le delta_sync, on regarde
+    si has_attachments=False en base. Si oui, on tente le pipeline
+    attachments (qui ne fait rien si pas de PJ via Microsoft Graph).
+    Si ca traite des PJ : on UPDATE has_attachments=TRUE.
+
+    Idempotent : process_attachment fait UPSERT donc pas de doublon.
+    """
+    try:
+        # Check has_attachments actuel : si deja TRUE, skip (deja traite)
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT has_attachments FROM mail_memory
+            WHERE message_id = %s AND username = %s LIMIT 1
+            """,
+            (message_id, username),
+        )
+        row = c.fetchone()
+        conn.close()
+        if not row:
+            return  # mail introuvable
+        if row[0]:
+            return  # deja traite, skip
+
+        # On tente le fetch + index
+        att_result = _process_attachments_for_mail(
+            message_id=message_id,
+            tenant_id=tenant_id,
+            username=username,
+            connection_id=connection_id,
+            token=token,
+        )
+        if att_result["indexed"] > 0:
+            _mark_mail_has_attachments(message_id, username)
+            logger.info(
+                "[OutlookPJ-rattrap] mail=%s : %d PJ rattrapees (etait en "
+                "duplicate, ingere via webhook)",
+                message_id[:30], att_result["indexed"],
+            )
+    except Exception as e:
+        logger.debug(
+            "[OutlookPJ-rattrap] %s echec : %s",
+            message_id[:30], str(e)[:100],
+        )
+
+
 def _process_messages_via_pipeline(messages: list, username: str,
                                      folder_name: str,
                                      connection_id: int = None,
