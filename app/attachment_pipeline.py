@@ -178,6 +178,22 @@ def process_attachment(
     if attachment_id and chunks_data:
         _store_chunks(attachment_id, chunks_data)
 
+    # ETAPE 4 (chantier B 3b - 06/05/2026) : push dans le graphe semantique.
+    # Pour chaque attachment indexe, on cree :
+    #   - 1 node Attachment dans semantic_graph_nodes
+    #   - Edge Attachment -> Mail (si vient d un mail)
+    #   - Edge Attachment -> Mailbox (si vient d un mail)
+    #   - Edges fuzzy vers Person/Company/Project/Folder existants
+    #     via matching du nom de fichier + texte extrait.
+    # Idempotent (UPSERT). Si plante : log et continue (pas de blocage).
+    if attachment_id:
+        try:
+            from app.attachment_to_graph import push_attachment_to_graph
+            push_attachment_to_graph(attachment_id)
+        except Exception as e:
+            logger.warning("[Pipeline] push_attachment_to_graph %s echec : %s",
+                            attachment_id, str(e)[:200])
+
     return {
         "status": "ok" if attachment_id else "error",
         "attachment_id": attachment_id,
