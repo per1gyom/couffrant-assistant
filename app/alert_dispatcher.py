@@ -287,7 +287,12 @@ def _persist_alert(
               severity = EXCLUDED.severity,
               message = EXCLUDED.message,
               details = EXCLUDED.details,
-              acknowledged = FALSE,
+              acknowledged = CASE
+                  WHEN EXCLUDED.severity = 'critical'
+                       AND system_alerts.severity = 'warning'
+                  THEN FALSE
+                  ELSE system_alerts.acknowledged
+              END,
               updated_at = NOW()
         """, (
             tenant_id, alert_type, severity_db, component, message[:1000],
