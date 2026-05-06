@@ -489,3 +489,247 @@ def get_recent_events(connection_id: int, limit: int = 50) -> list:
         return []
     finally:
         if conn: conn.close()
+
+
+# ─── ETAT EFFECTIF UNIFIE PAR CONNEXION ───
+# Ajoute le 06/05/2026 — fournit UNE source de verite unique pour
+# l UI (panel admin connexions, alertes, badges) au lieu des 3 sources
+# divergentes precedentes (tenant_connections.status / system_alerts /
+# connection_health). Rapproche le comportement utilisateur du
+# heartbeat reel : un poll OK = vert, pas de poll OK depuis X = rouge.
+
+# Seuils relatifs au expected_poll_interval :
+#   < 1.5x intervalle  -> 'green'  (poll OK ou un cycle rate au max)
+#   1.5x a 3x          -> 'amber'  (warning silencieux, pas de SMS)
+#   > 3x OU >=3 echecs -> 'red'    (vraie panne)
+# Avantage : quand on passe en mode 30min/nuit (etape 5), les seuils
+# s adaptent automatiquement (vert <45min, rouge >90min).
+
+GREEN_FACTOR = 1.5
+RED_FACTOR = 3.0
+RED_FAILURES_THRESHOLD = 3
+
+
+def get_effective_connection_status(connection_id: int) -> dict:
+    """Retourne l etat effectif d une connexion (state, reason, ...).
+
+    Source de verite UNIQUE pour l UI et les alertes. Lit
+    connection_health (la table qui sait vraiment) plutot que
+    tenant_connections.status (qui n est mis a jour qu au moment de
+    l OAuth initial et reste 'connected' meme quand la connexion est
+    cassee depuis 8h).
+
+    Returns:
+        {
+          'connection_id': int,
+          'tool_type': str,
+          'connected_email': str | None,
+          'state': 'green' / 'amber' / 'red' / 'unknown',
+          'reason': 'OK il y a 3 min' / 'Pas de poll OK depuis 8h' / ...,
+          'last_ok_at': datetime | None,
+          'minutes_since_ok': float | None,
+          'consecutive_failures': int,
+          'expected_interval_min': float,  # interval attendu en minutes
+          'health_status': str,   # status brut depuis connection_health
+        }
+    """
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        # IMPORTANT : le calcul minutes_since_ok est fait COTE SQL avec
+        # NOW() pour eviter les bugs de fuseau (datetime.now() Python =
+        # heure locale machine, pas forcement UTC comme la DB).
+        c.execute("""
+            SELECT tc.tool_type, tc.connected_email,
+                   ch.last_successful_poll_at, ch.last_poll_attempt_at,
+                   ch.consecutive_failures, ch.status,
+                   ch.expected_poll_interval_seconds,
+                   EXTRACT(EPOCH FROM (NOW() - ch.last_successful_poll_at))/60
+                     AS minutes_since_ok
+            FROM tenant_connections tc
+            LEFT JOIN connection_health ch ON ch.connection_id = tc.id
+            WHERE tc.id = %s
+        """, (connection_id,))
+        row = c.fetchone()
+        if not row:
+            return {
+                "connection_id": connection_id,
+                "state": "unknown",
+                "reason": "Connexion introuvable",
+            }
+        return _compute_effective_status(connection_id, row)
+    except Exception as e:
+        logger.error("[Health] get_effective_connection_status echoue : %s",
+                     str(e)[:200])
+        return {
+            "connection_id": connection_id,
+            "state": "unknown",
+            "reason": f"Erreur calcul etat : {str(e)[:80]}",
+        }
+    finally:
+        if conn: conn.close()
+
+
+def get_effective_status_for_tenant(tenant_id: str) -> list:
+    """Retourne l etat effectif de TOUTES les connexions d un tenant.
+
+    Optimise : 1 seule requete SQL avec JOIN, calcul Python ensuite.
+    Conserve l ordre par connection_id pour cohenence d affichage.
+
+    Utilise par admin_connexions.html pour afficher les badges
+    🟢/🟡/🔴 sur chaque carte de connexion.
+    """
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT tc.id, tc.tool_type, tc.connected_email,
+                   ch.last_successful_poll_at, ch.last_poll_attempt_at,
+                   ch.consecutive_failures, ch.status,
+                   ch.expected_poll_interval_seconds,
+                   EXTRACT(EPOCH FROM (NOW() - ch.last_successful_poll_at))/60
+                     AS minutes_since_ok
+            FROM tenant_connections tc
+            LEFT JOIN connection_health ch ON ch.connection_id = tc.id
+            WHERE tc.tenant_id = %s
+            ORDER BY tc.id
+        """, (tenant_id,))
+        rows = c.fetchall()
+
+        result = []
+        for r in rows:
+            connection_id = r[0]
+            # r[1:] = (tool_type, connected_email, last_ok, last_attempt,
+            #         fails, ch_status, expected_interval_seconds,
+            #         minutes_since_ok)
+            result.append(_compute_effective_status(connection_id, r[1:]))
+        return result
+    except Exception as e:
+        logger.error("[Health] get_effective_status_for_tenant echoue : %s",
+                     str(e)[:200])
+        return []
+    finally:
+        if conn: conn.close()
+
+
+def _compute_effective_status(connection_id: int, row: tuple) -> dict:
+    """Calcule l etat effectif a partir d une ligne SQL.
+
+    Helper interne : factorise la logique entre la version solo
+    (get_effective_connection_status) et la version bulk
+    (get_effective_status_for_tenant).
+
+    Attend une tuple :
+      (tool_type, connected_email, last_ok, last_attempt, fails,
+       ch_status, expected_interval_seconds, minutes_since_ok)
+    """
+    (tool_type, connected_email, last_ok, last_attempt, fails,
+     ch_status, expected_interval_s, minutes_since_ok) = row
+
+    # Interval attendu (avec fallback 5 min si non renseigne)
+    expected_interval_s = expected_interval_s or 300
+    expected_interval_min = expected_interval_s / 60.0
+
+    # Cas 1 : aucune connection_health enregistree
+    if last_ok is None and last_attempt is None:
+        return {
+            "connection_id": connection_id,
+            "tool_type": tool_type,
+            "connected_email": connected_email,
+            "state": "unknown",
+            "reason": "Pas encore de monitoring (jamais polle)",
+            "last_ok_at": None,
+            "minutes_since_ok": None,
+            "consecutive_failures": 0,
+            "expected_interval_min": expected_interval_min,
+            "health_status": ch_status or "unregistered",
+        }
+
+    # Cas 2 : circuit ouvert (connecteur disable apres trop d echecs)
+    if ch_status == "circuit_open":
+        return {
+            "connection_id": connection_id,
+            "tool_type": tool_type,
+            "connected_email": connected_email,
+            "state": "red",
+            "reason": "Circuit breaker ouvert (trop d echecs)",
+            "last_ok_at": last_ok,
+            "minutes_since_ok": float(minutes_since_ok) if minutes_since_ok is not None else None,
+            "consecutive_failures": fails or 0,
+            "expected_interval_min": expected_interval_min,
+            "health_status": ch_status,
+        }
+
+    # Cas 3 : jamais de poll reussi
+    if last_ok is None:
+        return {
+            "connection_id": connection_id,
+            "tool_type": tool_type,
+            "connected_email": connected_email,
+            "state": "red",
+            "reason": f"Aucun poll reussi (echecs : {fails or 0})",
+            "last_ok_at": None,
+            "minutes_since_ok": None,
+            "consecutive_failures": fails or 0,
+            "expected_interval_min": expected_interval_min,
+            "health_status": ch_status or "unknown",
+        }
+
+    # Cas 4 : trop d echecs consecutifs
+    if (fails or 0) >= RED_FAILURES_THRESHOLD:
+        return {
+            "connection_id": connection_id,
+            "tool_type": tool_type,
+            "connected_email": connected_email,
+            "state": "red",
+            "reason": f"{fails} echecs consecutifs depuis le dernier OK",
+            "last_ok_at": last_ok,
+            "minutes_since_ok": float(minutes_since_ok) if minutes_since_ok is not None else None,
+            "consecutive_failures": fails,
+            "expected_interval_min": expected_interval_min,
+            "health_status": ch_status or "unhealthy",
+        }
+
+    # Cas 5 : calcul normal base sur le delai depuis le dernier OK
+    minutes_since_ok = float(minutes_since_ok)
+    threshold_green = expected_interval_min * GREEN_FACTOR
+    threshold_red = expected_interval_min * RED_FACTOR
+
+    if minutes_since_ok <= threshold_green:
+        state = "green"
+        reason = f"OK il y a {_format_minutes(minutes_since_ok)}"
+    elif minutes_since_ok <= threshold_red:
+        state = "amber"
+        reason = (f"Pas de poll OK depuis {_format_minutes(minutes_since_ok)} "
+                  f"(seuil rouge : {_format_minutes(threshold_red)})")
+    else:
+        state = "red"
+        reason = (f"Pas de poll OK depuis {_format_minutes(minutes_since_ok)} "
+                  f"- seuil rouge depasse")
+
+    return {
+        "connection_id": connection_id,
+        "tool_type": tool_type,
+        "connected_email": connected_email,
+        "state": state,
+        "reason": reason,
+        "last_ok_at": last_ok,
+        "minutes_since_ok": minutes_since_ok,
+        "consecutive_failures": fails or 0,
+        "expected_interval_min": expected_interval_min,
+        "health_status": ch_status or "healthy",
+    }
+
+
+def _format_minutes(minutes: float) -> str:
+    """Format lisible : '3 min', '1h30', '2j', etc."""
+    if minutes < 60:
+        return f"{minutes:.0f} min"
+    elif minutes < 1440:
+        h = int(minutes // 60)
+        m = int(minutes % 60)
+        return f"{h}h{m:02d}" if m > 0 else f"{h}h"
+    else:
+        return f"{int(minutes / 1440)}j"
