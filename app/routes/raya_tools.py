@@ -204,6 +204,103 @@ TOOL_READ_DRIVE_FILE = {
     },
 }
 
+
+# === Pieces jointes (chantier B - 06/05/2026) ===
+
+TOOL_LIST_MAIL_ATTACHMENTS = {
+    "name": "list_mail_attachments",
+    "description": (
+        "Liste les pieces jointes d un mail specifique. A utiliser quand "
+        "tu sais qu un mail a des PJ (search_mail indique 📎) et que "
+        "l utilisateur veut savoir ce qu il y a dedans avant de lire le "
+        "contenu d une PJ specifique. "
+        "\n\n"
+        "RETOUR : chaque PJ a un identifiant 📎 [attachment_id: NNN] que tu "
+        "DOIS reutiliser tel quel pour appeler read_attachment ensuite."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "mail_id": {
+                "type": "string",
+                "description": (
+                    "L id du mail (mail_id retourne par search_mail). "
+                    "Ex: '4968'."
+                ),
+            },
+        },
+        "required": ["mail_id"],
+    },
+}
+
+TOOL_READ_ATTACHMENT = {
+    "name": "read_attachment",
+    "description": (
+        "Lit le contenu texte extrait d une piece jointe (PDF, Word, Excel, "
+        "etc). A utiliser apres list_mail_attachments ou search_attachments "
+        "pour obtenir le texte complet d une PJ et l analyser/resumer/citer. "
+        "\n\n"
+        "Le texte retourne est limite a 50000 caracteres (cap d extraction). "
+        "Pour les images sans texte extrait, le retour est vide - dans ce cas "
+        "explique a l utilisateur que la PJ est une image et que l analyse "
+        "Vision IA est desactivee (cas par defaut pour economie)."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "attachment_id": {
+                "type": "string",
+                "description": (
+                    "L id de l attachment (attachment_id retourne par "
+                    "list_mail_attachments ou search_attachments). Ex: '5'."
+                ),
+            },
+        },
+        "required": ["attachment_id"],
+    },
+}
+
+TOOL_SEARCH_ATTACHMENTS = {
+    "name": "search_attachments",
+    "description": (
+        "Recherche semantique dans le CONTENU des pieces jointes mail "
+        "(PDF, Word, Excel, etc) du tenant. Trouve les PJ dont le texte "
+        "interieur correspond a la requete, meme si le mail parent n a pas "
+        "le mot dans son sujet. "
+        "\n\n"
+        "Exemples d usage : 'devis SOCOTEC pour Lusigny', 'attestation "
+        "ENR S21', 'CERFA voirie', 'bordereau de livraison Sonepar'. "
+        "\n\n"
+        "RETOUR : chaque resultat affiche 📎 [attachment_id: NNN] reutilisable "
+        "pour read_attachment. Inclut aussi le mail parent si dispo (pour "
+        "que tu puisses contextualiser : qui l a envoye, quand)."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "query": {
+                "type": "string",
+                "description": "Mots-cles ou phrase decrivant ce qu on cherche.",
+            },
+            "max_results": {
+                "type": "integer",
+                "default": 5,
+                "description": "Nombre max de PJ retournees (default 5).",
+            },
+            "file_types": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": (
+                    "Filtre optionnel sur les extensions. Ex: ['pdf'] pour "
+                    "ne ramener que des PDF, ['docx', 'xlsx'] pour Office. "
+                    "Laisser vide pour tous types."
+                ),
+            },
+        },
+        "required": ["query"],
+    },
+}
+
 TOOL_WEB_SEARCH = {
     "name": "web_search",
     "description": (
@@ -604,6 +701,10 @@ RAYA_TOOLS: list[dict[str, Any]] = [
     TOOL_SEARCH_CONVERSATIONS,
     TOOL_READ_MAIL,
     TOOL_READ_DRIVE_FILE,
+    # Pieces jointes mails (chantier B - 06/05/2026)
+    TOOL_LIST_MAIL_ATTACHMENTS,
+    TOOL_READ_ATTACHMENT,
+    TOOL_SEARCH_ATTACHMENTS,
     TOOL_WEB_SEARCH,
     # TOOL_GET_WEATHER desactive en v2 initiale (pas de connecteur meteo)
     # Action mail
@@ -675,6 +776,9 @@ _TOOL_DEPENDENCIES = {
     # Mail : tools qui necessitent au moins une boite mail connectee
     "search_mail":            {"outlook", "gmail", "microsoft"},
     "read_mail":              {"outlook", "gmail", "microsoft"},
+    "list_mail_attachments":  {"outlook", "gmail", "microsoft"},
+    "read_attachment":        {"outlook", "gmail", "microsoft"},
+    "search_attachments":     {"outlook", "gmail", "microsoft"},
     "send_mail":              {"outlook", "gmail", "microsoft"},
     "reply_to_mail":          {"outlook", "gmail", "microsoft"},
     "archive_mail":           {"outlook", "gmail", "microsoft"},

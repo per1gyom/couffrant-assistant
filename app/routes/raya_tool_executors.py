@@ -360,6 +360,298 @@ def _execute_read_drive_file(inp: dict, username: str, tenant_id: str) -> dict:
         conn.close()
 
 
+def _execute_list_mail_attachments(inp: dict, username: str, tenant_id: str) -> dict:
+    """Liste les pieces jointes d un mail par son mail_id.
+
+    Etape 5 (chantier B - 06/05/2026). Utilise par Raya quand un mail a
+    des PJ et que l user veut savoir lesquelles.
+    """
+    from app.database import get_pg_conn
+
+    mail_id = inp.get("mail_id", "")
+    if not mail_id:
+        return {"error": "mail_id requis"}
+
+    conn = get_pg_conn()
+    try:
+        c = conn.cursor()
+        # On retrouve le message_id du mail_id, puis on liste les
+        # attachments dont le source_ref commence par "{message_id}:"
+        c.execute(
+            """
+            SELECT id, message_id, subject, from_email, mailbox_email,
+                   has_attachments
+            FROM mail_memory
+            WHERE id = %s AND username = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND deleted_at IS NULL
+            """,
+            (mail_id, username, tenant_id),
+        )
+        mail_row = c.fetchone()
+        if not mail_row:
+            return {"error": f"Mail {mail_id} introuvable"}
+        if not mail_row[5]:
+            return {
+                "mail_id": mail_id,
+                "subject": mail_row[2],
+                "count": 0,
+                "attachments": [],
+                "info": "Ce mail n a pas de PJ indexees.",
+            }
+
+        message_id = mail_row[1]
+        c.execute(
+            """
+            SELECT id, file_name, file_size, mime_type,
+                   LEFT(text_content, 200) AS preview,
+                   summary_content, vision_processed
+            FROM attachment_index
+            WHERE source_type = 'mail_attachment'
+              AND source_ref LIKE %s
+              AND tenant_id = %s
+              AND deleted_at IS NULL
+            ORDER BY id ASC
+            """,
+            (f"{message_id}:%", tenant_id),
+        )
+        rows = c.fetchall()
+
+        attachments = []
+        for r in rows:
+            size_kb = (r[2] or 0) / 1024
+            size_str = (
+                f"{size_kb:.0f} KB" if size_kb < 1024
+                else f"{size_kb/1024:.1f} MB"
+            )
+            attachments.append({
+                "attachment_id": str(r[0]),
+                "file_name": r[1],
+                "size": size_str,
+                "mime_type": r[3],
+                "preview": (r[4] or "")[:200],
+                "summary": r[5],
+                "vision_processed": r[6],
+            })
+
+        return {
+            "mail_id": mail_id,
+            "subject": mail_row[2],
+            "from": mail_row[3],
+            "mailbox": mail_row[4],
+            "count": len(attachments),
+            "attachments": attachments,
+        }
+    finally:
+        conn.close()
+
+
+def _execute_read_attachment(inp: dict, username: str, tenant_id: str) -> dict:
+    """Lit le contenu texte extrait d une PJ par son attachment_id.
+
+    Etape 5 (chantier B - 06/05/2026).
+    """
+    from app.database import get_pg_conn
+
+    attachment_id = inp.get("attachment_id", "")
+    if not attachment_id:
+        return {"error": "attachment_id requis"}
+
+    conn = get_pg_conn()
+    try:
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT id, file_name, file_size, mime_type, text_content,
+                   summary_content, source_type, source_ref,
+                   vision_processed, created_at
+            FROM attachment_index
+            WHERE id = %s
+              AND (tenant_id = %s OR tenant_id IS NULL)
+              AND deleted_at IS NULL
+            """,
+            (attachment_id, tenant_id),
+        )
+        row = c.fetchone()
+        if not row:
+            return {"error": f"Attachment {attachment_id} introuvable"}
+
+        size_kb = (row[2] or 0) / 1024
+        size_str = (
+            f"{size_kb:.0f} KB" if size_kb < 1024
+            else f"{size_kb/1024:.1f} MB"
+        )
+
+        # Si pas de texte (image sans Vision), donner un message clair
+        text_content = row[4] or ""
+        if not text_content or text_content.startswith("[IMAGE:"):
+            text_info = (
+                "Pas de texte extrait (image ou type non supporte). "
+                "L analyse Vision IA est desactivee par defaut pour economie."
+            )
+        else:
+            text_info = None
+
+        # Si la PJ vient d un mail, recuperer le contexte
+        mail_context = None
+        if row[6] == "mail_attachment" and ":" in (row[7] or ""):
+            message_id = row[7].rsplit(":", 1)[0]
+            c.execute(
+                """
+                SELECT id, subject, from_email, received_at
+                FROM mail_memory
+                WHERE message_id = %s
+                  AND deleted_at IS NULL
+                LIMIT 1
+                """,
+                (message_id,),
+            )
+            mr = c.fetchone()
+            if mr:
+                mail_context = {
+                    "mail_id": str(mr[0]),
+                    "subject": mr[1],
+                    "from": mr[2],
+                    "received_at": str(mr[3]) if mr[3] else None,
+                }
+
+        return {
+            "attachment_id": str(row[0]),
+            "file_name": row[1],
+            "size": size_str,
+            "mime_type": row[3],
+            "text_content": text_content,
+            "text_info": text_info,
+            "summary": row[5],
+            "vision_processed": row[8],
+            "mail_context": mail_context,
+        }
+    finally:
+        conn.close()
+
+
+def _execute_search_attachments(inp: dict, username: str, tenant_id: str) -> dict:
+    """Recherche semantique dans le contenu des PJ via embedding_global.
+
+    Etape 5 (chantier B - 06/05/2026). Utilise pgvector HNSW index.
+    """
+    from app.database import get_pg_conn
+    from app.attachment_pipeline import compute_embedding
+
+    query = inp.get("query", "").strip()
+    if not query:
+        return {"error": "query requise"}
+    max_results = min(inp.get("max_results", 5), 20)
+    file_types = inp.get("file_types") or []
+    # Normaliser les extensions
+    file_types_lower = [
+        f".{ft.lstrip('.').lower()}" for ft in file_types if ft
+    ]
+
+    # Calcul embedding du query
+    try:
+        query_embedding = compute_embedding(query)
+    except Exception as e:
+        return {"error": f"echec calcul embedding : {str(e)[:100]}"}
+    if not query_embedding:
+        return {"error": "embedding indisponible (OPENAI_API_KEY ?)"}
+
+    conn = get_pg_conn()
+    try:
+        c = conn.cursor()
+        # Filtre file_types
+        sql_filter = ""
+        params = [tenant_id, query_embedding]
+        if file_types_lower:
+            placeholders = ",".join(["%s"] * len(file_types_lower))
+            sql_filter = (
+                "AND (" + " OR ".join(
+                    [f"LOWER(file_name) LIKE %s" for _ in file_types_lower]
+                ) + ")"
+            )
+            params = [tenant_id] + [f"%{ft}" for ft in file_types_lower] + [query_embedding]
+
+        sql = f"""
+            SELECT id, file_name, file_size, mime_type,
+                   LEFT(text_content, 400) AS preview,
+                   summary_content,
+                   source_type, source_ref,
+                   embedding_global <=> %s::vector AS distance
+            FROM attachment_index
+            WHERE tenant_id = %s
+              AND deleted_at IS NULL
+              AND embedding_global IS NOT NULL
+              {sql_filter}
+            ORDER BY embedding_global <=> %s::vector
+            LIMIT %s
+        """
+        # Reconstruction params (ordre important : embedding pour SELECT,
+        # tenant pour WHERE, files pour filter, embedding pour ORDER, limit)
+        if file_types_lower:
+            ordered_params = (
+                [query_embedding, tenant_id] +
+                [f"%{ft}" for ft in file_types_lower] +
+                [query_embedding, max_results]
+            )
+        else:
+            ordered_params = [
+                query_embedding, tenant_id, query_embedding, max_results,
+            ]
+
+        c.execute(sql, ordered_params)
+        rows = c.fetchall()
+
+        results = []
+        for r in rows:
+            size_kb = (r[2] or 0) / 1024
+            size_str = (
+                f"{size_kb:.0f} KB" if size_kb < 1024
+                else f"{size_kb/1024:.1f} MB"
+            )
+
+            # Contexte mail parent si dispo
+            mail_context = None
+            if r[6] == "mail_attachment" and ":" in (r[7] or ""):
+                message_id = r[7].rsplit(":", 1)[0]
+                c.execute(
+                    """
+                    SELECT id, subject, from_email
+                    FROM mail_memory
+                    WHERE message_id = %s
+                      AND deleted_at IS NULL
+                    LIMIT 1
+                    """,
+                    (message_id,),
+                )
+                mr = c.fetchone()
+                if mr:
+                    mail_context = {
+                        "mail_id": str(mr[0]),
+                        "subject": mr[1],
+                        "from": mr[2],
+                    }
+
+            results.append({
+                "attachment_id": str(r[0]),
+                "file_name": r[1],
+                "size": size_str,
+                "mime_type": r[3],
+                "preview": (r[4] or "")[:400],
+                "summary": r[5],
+                "relevance_score": round(1.0 - float(r[8]), 3),
+                "mail_context": mail_context,
+            })
+
+        return {
+            "query": query,
+            "file_types_filter": file_types_lower or None,
+            "count": len(results),
+            "attachments": results,
+        }
+    finally:
+        conn.close()
+
+
 def _execute_web_search(inp: dict, username: str, tenant_id: str) -> dict:
     """
     Recherche web.
@@ -967,6 +1259,10 @@ _EXECUTORS: dict[str, Any] = {
     "search_conversations": _execute_search_conversations,
     "read_mail": _execute_read_mail,
     "read_drive_file": _execute_read_drive_file,
+    # Pieces jointes mails (chantier B - 06/05/2026)
+    "list_mail_attachments": _execute_list_mail_attachments,
+    "read_attachment": _execute_read_attachment,
+    "search_attachments": _execute_search_attachments,
     "web_search": _execute_web_search,
     # "get_weather": retire en v2 initiale (pas de connecteur meteo)
     # Creation de contenu (sans confirmation)
