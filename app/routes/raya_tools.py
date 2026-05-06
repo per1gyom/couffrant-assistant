@@ -554,6 +554,40 @@ TOOL_LIST_MY_CONNECTIONS = {
 }
 
 
+# Etape 6 (06/05/2026) : tool refresh_connections expose a Raya pour
+# qu elle force un poll immediat des connexions du tenant quand elle
+# juge avoir besoin de donnees fraiches. Approche plus elegante qu une
+# regex de mots-cles : Raya comprend la semantique de la question.
+TOOL_REFRESH_CONNECTIONS = {
+    "name": "refresh_connections",
+    "description": (
+        "Force un refresh immediat de toutes les connexions du tenant "
+        "(mails, drive, odoo). A utiliser SEULEMENT quand l utilisateur "
+        "a clairement besoin d info fraiche : mention de recence (\""
+        "aujourd hui\", \"a l instant\", \"viens de recevoir\", \"recemment\""
+        "), urgence (\"urgent\", \"important\"), ou question sur \"y a-t-il "
+        "quelque chose de nouveau ?\". NE PAS appeler pour les questions "
+        "historiques (mois dernier, l annee derniere) ou theoriques "
+        "(definitions, explications). Prend ~1-3 sec. Apres le refresh, "
+        "refais ta search_mail/search_drive habituelle pour avoir les "
+        "donnees fraiches."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "reason": {
+                "type": "string",
+                "description": (
+                    "Raison courte (ex: 'user demande mails recents', "
+                    "'check si nouveau mail SOCOTEC'). Pour traceability."
+                ),
+            },
+        },
+        "required": ["reason"],
+    },
+}
+
+
 # ==========================================================================
 # REGISTRE CENTRAL DES TOOLS v2
 # ==========================================================================
@@ -593,6 +627,8 @@ RAYA_TOOLS: list[dict[str, Any]] = [
     TOOL_FORGET_PREFERENCE,
     # Meta-info (sources/connexions/capacites)
     TOOL_LIST_MY_CONNECTIONS,
+    # Refresh on-demand (Etape 6 du 06/05/2026)
+    TOOL_REFRESH_CONNECTIONS,
 ]
 
 

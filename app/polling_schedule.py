@@ -92,12 +92,14 @@ def should_skip_poll_now(connection_id: int,
                          now: Optional[datetime] = None) -> bool:
     """Vrai si le job de polling doit skipper ce cycle pour connection_id.
 
-    Logique :
-    - En heures ouvrees Paris : retourne toujours False (on polle)
-    - Hors ouvrees : on skip si dernier poll attempt < 30 min
-      (l intervalle attendu hors ouvrees), pour respecter le rythme
-      d 1 poll / 30 min meme si APScheduler appelle le job toutes
-      les 5 min.
+    Logique (Etape 5 + 6 du 06/05/2026) :
+    1. En heures ouvrees Paris : retourne toujours False (on polle)
+    2. Hors ouvrees ET user actif recemment dans le tenant (chat avec
+       Raya dans les 15 dernieres min) : retourne False (= mode 5 min
+       active automatiquement, peu importe l heure)
+    3. Hors ouvrees ET user inactif : on skip si dernier poll < 30 min
+       (rythme de 1 poll / 30 min meme si APScheduler appelle toutes
+       les 5 min)
 
     Args:
         connection_id: ID de la connexion (tenant_connections.id)
@@ -110,7 +112,15 @@ def should_skip_poll_now(connection_id: int,
     if is_business_hours(now):
         return False
 
-    # Hors heures ouvrees : on regarde quand etait le dernier poll
+    # Niveau 2 (Etape 6) : detection user actif sur le tenant
+    # Si quelqu un a ecrit a Raya dans les 15 dernieres min, on bascule
+    # en mode 5 min meme la nuit/weekend. Permet a Guillaume de bosser
+    # tard sans rater des mails urgents.
+    if _user_active_recently(connection_id, minutes=15):
+        return False
+
+    # Hors heures ouvrees ET user inactif : on regarde quand etait
+    # la derniere tentative de poll
     expected_s = INTERVAL_OFF_HOURS_S
 
     from app.database import get_pg_conn
@@ -139,6 +149,74 @@ def should_skip_poll_now(connection_id: int,
             connection_id, str(e)[:200])
         # En cas de doute : on polle (mieux louper le throttle qu une
         # vraie alerte / qu un mail pas detecte)
+        return False
+    finally:
+        if conn: conn.close()
+
+
+def _user_active_recently(connection_id: int, minutes: int = 15) -> bool:
+    """True si un user du tenant a discute avec Raya recemment.
+
+    Source : aria_memory.created_at (table des conversations Raya).
+    On regarde le tenant_id de la connection_id, puis on cherche la
+    derniere conversation non archivee de ce tenant.
+
+    Note : on ne se base PAS sur les requetes HTTP du panel admin
+    (consultation passive). Le signal 'actif' = 'user a parle avec
+    Raya', ce qui est le cas d usage qui necessite des donnees
+    fraiches.
+    """
+    from app.database import get_pg_conn
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT EXTRACT(EPOCH FROM (NOW() - MAX(am.created_at))) AS seconds_since
+            FROM aria_memory am
+            JOIN tenant_connections tc ON tc.tenant_id = am.tenant_id
+            WHERE tc.id = %s
+              AND am.archived = false
+        """, (connection_id,))
+        row = c.fetchone()
+        if not row or row[0] is None:
+            return False  # jamais discute -> pas actif
+        seconds_since = float(row[0])
+        return seconds_since < (minutes * 60)
+    except Exception as e:
+        logger.warning(
+            "[PollingSchedule] _user_active_recently failed for conn=%s : %s",
+            connection_id, str(e)[:200])
+        return False
+    finally:
+        if conn: conn.close()
+
+
+def is_user_active_recently_for_tenant(tenant_id: str,
+                                        minutes: int = 15) -> bool:
+    """Version par tenant_id (pour des appels qui n ont pas connection_id).
+
+    Utile par exemple pour des modules qui veulent savoir 'le tenant X
+    est-il actif maintenant ?' sans avoir un connection_id sous la main.
+    """
+    from app.database import get_pg_conn
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute("""
+            SELECT EXTRACT(EPOCH FROM (NOW() - MAX(created_at))) AS seconds_since
+            FROM aria_memory
+            WHERE tenant_id = %s AND archived = false
+        """, (tenant_id,))
+        row = c.fetchone()
+        if not row or row[0] is None:
+            return False
+        return float(row[0]) < (minutes * 60)
+    except Exception as e:
+        logger.warning(
+            "[PollingSchedule] is_user_active_recently_for_tenant failed : %s",
+            str(e)[:200])
         return False
     finally:
         if conn: conn.close()

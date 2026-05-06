@@ -821,6 +821,142 @@ def _generate_action_label(tool_name: str, tool_input: dict) -> str:
 # Les tools d ecriture (dans TOOLS_REQUIRING_CONFIRMATION) ne figurent pas
 # ici : ils passent par _execute_pending_action.
 
+def _execute_refresh_connections(inp: dict, username: str, tenant_id: str) -> dict:
+    """Force un poll immediat des connexions du tenant.
+
+    Etape 6 (06/05/2026) : tool expose a Raya pour qu elle declenche
+    elle-meme un refresh quand elle juge avoir besoin de donnees fraiches.
+
+    Strategie : on appelle directement les jobs run_outlook_delta_sync(),
+    run_gmail_history_sync(), run_drive_delta_sync(), run_odoo_polling()
+    en synchrone. Comme ces jobs parcourent toutes les connexions actives
+    de tous les tenants, on filtre apres pour ne reporter que ce qui
+    concerne le tenant_id de l user.
+
+    Trade-off : c est un peu sur-puissant (on polle aussi les connexions
+    d autres tenants en passant), mais c est exactement ce que fait le
+    scheduler toutes les 5 min. Acceptable a 1 user/tenant. A optimiser
+    si on grossit (refactoriser pour exposer poll_one_connection).
+
+    Args:
+        inp: {'reason': str}  - raison pour traceability dans les logs
+        username: user qui appelle
+        tenant_id: tenant cible
+
+    Returns:
+        {
+          'status': 'ok',
+          'duration_ms': 1234,
+          'reason': '...',
+          'connections_refreshed': 9,
+          'new_mails_seen': 0,
+          'jobs_run': ['outlook', 'gmail', 'drive', 'odoo'],
+        }
+    """
+    import time
+    started = time.time()
+    reason = inp.get("reason", "")[:200]
+
+    logger.info(
+        "[ToolExec] refresh_connections by %s tenant=%s reason='%s'",
+        username, tenant_id, reason,
+    )
+
+    # Compte avant pour mesurer le delta
+    from app.database import get_pg_conn
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            "SELECT COUNT(*) FROM mail_memory WHERE tenant_id = %s",
+            (tenant_id,),
+        )
+        mails_before = c.fetchone()[0] or 0
+    except Exception:
+        mails_before = 0
+    finally:
+        if conn: conn.close()
+
+    jobs_run = []
+    errors = []
+
+    # Outlook delta sync
+    try:
+        from app.jobs.mail_outlook_delta_sync import run_outlook_delta_sync
+        run_outlook_delta_sync()
+        jobs_run.append("outlook")
+    except Exception as e:
+        errors.append(f"outlook: {str(e)[:100]}")
+
+    # Gmail history sync
+    try:
+        from app.jobs.mail_gmail_history_sync import run_gmail_history_sync
+        run_gmail_history_sync()
+        jobs_run.append("gmail")
+    except Exception as e:
+        errors.append(f"gmail: {str(e)[:100]}")
+
+    # Drive delta sync
+    try:
+        from app.jobs.drive_delta_sync import run_drive_delta_sync
+        run_drive_delta_sync()
+        jobs_run.append("drive")
+    except Exception as e:
+        errors.append(f"drive: {str(e)[:100]}")
+
+    # Odoo polling
+    try:
+        from app.jobs.odoo_polling import run_odoo_polling
+        run_odoo_polling()
+        jobs_run.append("odoo")
+    except Exception as e:
+        errors.append(f"odoo: {str(e)[:100]}")
+
+    # Compte apres
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            "SELECT COUNT(*) FROM mail_memory WHERE tenant_id = %s",
+            (tenant_id,),
+        )
+        mails_after = c.fetchone()[0] or 0
+
+        # Nombre de connexions actives du tenant (pour le report)
+        c.execute(
+            "SELECT COUNT(*) FROM tenant_connections WHERE tenant_id = %s",
+            (tenant_id,),
+        )
+        connections_count = c.fetchone()[0] or 0
+    except Exception:
+        mails_after = mails_before
+        connections_count = 0
+    finally:
+        if conn: conn.close()
+
+    duration_ms = int((time.time() - started) * 1000)
+    new_mails = max(0, mails_after - mails_before)
+
+    result = {
+        "status": "ok",
+        "duration_ms": duration_ms,
+        "reason": reason,
+        "connections_refreshed": connections_count,
+        "new_mails_seen": new_mails,
+        "jobs_run": jobs_run,
+    }
+    if errors:
+        result["partial_errors"] = errors
+
+    logger.info(
+        "[ToolExec] refresh_connections OK : %dms, %d nouveaux mails, jobs=%s",
+        duration_ms, new_mails, jobs_run,
+    )
+    return result
+
+
 _EXECUTORS: dict[str, Any] = {
     # Recherche / lecture
     "search_graph": _execute_search_graph,
@@ -843,4 +979,6 @@ _EXECUTORS: dict[str, Any] = {
     "forget_preference": _execute_forget_preference,
     # Meta-info
     "list_my_connections": _execute_list_my_connections,
+    # Refresh on-demand (Etape 6 du 06/05/2026)
+    "refresh_connections": _execute_refresh_connections,
 }
