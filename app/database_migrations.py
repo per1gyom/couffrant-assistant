@@ -1540,4 +1540,26 @@ MIGRATIONS = [
     # Charlotte / la femme de Guillaume / ses amis.
     "ALTER TABLE llm_usage ADD COLUMN IF NOT EXISTS trigger TEXT NULL",
     "CREATE INDEX IF NOT EXISTS idx_llm_usage_trigger ON llm_usage (trigger) WHERE trigger IS NOT NULL",
+
+    # -- Phase Pieces Jointes (chantier B, 06/05/2026) --
+    # Voir docs/bilan_session_06mai.md
+    #
+    # On va brancher le module attachment_pipeline.py (existant depuis
+    # 01/05 mais orphelin) sur les sync mail Outlook+Gmail. Le flag
+    # mail_memory.has_attachments permet de savoir rapidement quels
+    # mails ont des PJ indexees (sans avoir a faire un JOIN sur
+    # attachment_index a chaque requete).
+    #
+    # Default FALSE : les 4683 mails deja en base resteront FALSE car
+    # leurs PJ ne sont pas indexees (sera reglé par le backfill 24 mois
+    # de la Phase B - chantier separe).
+    #
+    # Index partiel : sert le tool search_mail avec filtre
+    # has_attachments=TRUE (ex: 'tous les mails avec PJ recus cette
+    # semaine'). Les mails sans PJ (majorite) ne peuplent pas l index
+    # -> tres compact en base.
+
+    # M-PJ01 : flag has_attachments sur mail_memory + index partiel
+    "ALTER TABLE mail_memory ADD COLUMN IF NOT EXISTS has_attachments BOOLEAN NOT NULL DEFAULT FALSE",
+    "CREATE INDEX IF NOT EXISTS idx_mm_has_attachments ON mail_memory (tenant_id, username, has_attachments) WHERE has_attachments = TRUE",
 ]
