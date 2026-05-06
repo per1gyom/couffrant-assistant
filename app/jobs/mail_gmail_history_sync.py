@@ -516,10 +516,293 @@ def _apply_deletes_and_trash(deleted_msg_ids: list,
     return stats
 
 
+def _extract_attachment_parts(payload_or_part: dict) -> list:
+    """Parse recursif des parts du payload Gmail pour extraire les
+    attachments (parts qui ont un filename + body.attachmentId).
+
+    Format Gmail : un mail peut avoir des parts imbriques (multipart/
+    alternative dans multipart/mixed pour mail HTML+texte+PJ).
+
+    Returns:
+        Liste de dicts {filename, mimeType, size, attachmentId}.
+    """
+    attachments = []
+    parts = payload_or_part.get("parts", []) if isinstance(payload_or_part, dict) else []
+
+    for part in parts:
+        # Si c est un attachment (a un filename + attachmentId)
+        filename = part.get("filename", "")
+        body = part.get("body", {}) or {}
+        attachment_id = body.get("attachmentId")
+        if filename and attachment_id:
+            attachments.append({
+                "filename": filename,
+                "mimeType": part.get("mimeType", "application/octet-stream"),
+                "size": body.get("size", 0),
+                "attachmentId": attachment_id,
+            })
+        # Recursion sur sous-parts
+        if part.get("parts"):
+            attachments.extend(_extract_attachment_parts(part))
+
+    return attachments
+
+
+def _fetch_gmail_attachments(token: str, message_id: str,
+                              max_size_mb: int = 10) -> list:
+    """Recupere les pieces jointes d un mail Gmail.
+
+    Etape 4 (chantier B PJ, 06/05/2026).
+
+    Strategie :
+      1. GET /messages/{id}?format=full -> payload complet avec parts
+      2. Parse recursif pour extraire les parts attachments
+      3. Pour chaque PJ <= max_size_mb : GET /messages/{id}/attachments/{att_id}
+         -> retourne les bytes en base64url-encoded
+      4. Decode les bytes
+
+    On retourne aussi les PJ trop grosses avec content_bytes=None pour
+    que l etape 6 (notification user grosses PJ) puisse les voir.
+
+    Args:
+        token: access_token Gmail (frais)
+        message_id: id Gmail du mail
+        max_size_mb: limite (default 10 MB)
+
+    Returns:
+        Liste de dicts. Liste vide si aucune PJ ou erreur.
+    """
+    import base64
+
+    # Step 1 : fetch en mode full pour avoir les parts
+    full_msg = _gmail_get(token, f"/messages/{message_id}", {"format": "full"})
+    if not full_msg or full_msg.get("_error"):
+        return []
+
+    payload = full_msg.get("payload", {}) or {}
+    attachments_meta = _extract_attachment_parts(payload)
+    if not attachments_meta:
+        return []
+
+    max_size_bytes = max_size_mb * 1024 * 1024
+    result = []
+    for att in attachments_meta:
+        too_large = att["size"] > max_size_bytes
+        content_bytes = None
+
+        if not too_large and att["attachmentId"]:
+            # Step 2 : download les bytes
+            try:
+                resp = _gmail_get(
+                    token,
+                    f"/messages/{message_id}/attachments/{att['attachmentId']}",
+                )
+                if resp and not resp.get("_error") and resp.get("data"):
+                    # Gmail retourne en base64url-encoded (pas le base64 standard)
+                    try:
+                        content_bytes = base64.urlsafe_b64decode(resp["data"])
+                    except Exception as e:
+                        logger.warning(
+                            "[GmailPJ] base64 decode %s : %s",
+                            att["filename"], str(e)[:100],
+                        )
+                else:
+                    logger.warning(
+                        "[GmailPJ] Download %s mail=%s : %s",
+                        att["filename"], message_id[:30],
+                        (resp or {}).get("_error", "no_data"),
+                    )
+            except Exception as e:
+                logger.warning(
+                    "[GmailPJ] Download %s exception : %s",
+                    att["filename"], str(e)[:100],
+                )
+
+        result.append({
+            "id": att["attachmentId"],
+            "name": att["filename"],
+            "size": att["size"],
+            "content_type": att["mimeType"],
+            "content_bytes": content_bytes,
+            "too_large": too_large,
+        })
+
+    return result
+
+
+def _process_attachments_for_gmail_mail(token: str, message_id: str,
+                                          tenant_id: str, username: str,
+                                          connection_id: int) -> dict:
+    """Pour un mail Gmail deja insere, fetch et indexe ses PJ.
+
+    Etape 4 (chantier B, 06/05/2026). Pattern aligne sur _process_attachments_for_mail
+    cote Outlook (mail_outlook_delta_sync.py) - duplication acceptee pour le MVP,
+    pourra etre extraite dans un module commun en etape 7.
+
+    Workflow :
+      1. List + download les PJ via _fetch_gmail_attachments
+      2. Pour chaque PJ <= 10 MB : process_attachment (extract + index +
+         attachment_chunks + push graphe + extraction entites). UPSERT donc
+         idempotent.
+      3. Pour chaque PJ > 10 MB : skip (sera gere a l etape 6 avec notif user).
+
+    Returns:
+        Dict {indexed, skipped_large, errors, large_pjs_meta}
+    """
+    from app.attachment_pipeline import process_attachment
+
+    attachments = _fetch_gmail_attachments(token, message_id, max_size_mb=10)
+    if not attachments:
+        return {
+            "indexed": 0, "skipped_large": 0, "errors": 0,
+            "large_pjs_meta": [],
+        }
+
+    indexed = 0
+    skipped_large = 0
+    errors = 0
+    large_pjs_meta = []
+
+    for att in attachments:
+        if att["too_large"]:
+            skipped_large += 1
+            large_pjs_meta.append({
+                "name": att["name"],
+                "size": att["size"],
+                "content_type": att["content_type"],
+                "gmail_attachment_id": att["id"],
+            })
+            logger.info(
+                "[GmailPJ] Skip grosse PJ %s (%.1f MB) sur mail %s "
+                "(etape 6 a venir)",
+                att["name"], att["size"] / (1024 * 1024), message_id[:30],
+            )
+            continue
+
+        if not att["content_bytes"]:
+            errors += 1
+            continue
+
+        try:
+            result = process_attachment(
+                tenant_id=tenant_id,
+                username=username,
+                source_type="mail_attachment",
+                source_ref=f"{message_id}:{att['id']}",
+                file_name=att["name"],
+                file_bytes=att["content_bytes"],
+                mime_type=att["content_type"],
+                connection_id=connection_id,
+            )
+            if result.get("status") == "ok":
+                indexed += 1
+            else:
+                errors += 1
+        except Exception as e:
+            errors += 1
+            logger.warning(
+                "[GmailPJ] process_attachment %s echoue : %s",
+                att["name"], str(e)[:100],
+            )
+
+    if indexed > 0 or skipped_large > 0:
+        logger.info(
+            "[GmailPJ] mail=%s : %d indexees, %d trop grosses, %d erreurs",
+            message_id[:30], indexed, skipped_large, errors,
+        )
+
+    return {
+        "indexed": indexed,
+        "skipped_large": skipped_large,
+        "errors": errors,
+        "large_pjs_meta": large_pjs_meta,
+    }
+
+
+def _mark_mail_has_attachments_gmail(message_id: str, username: str) -> bool:
+    """UPDATE mail_memory.has_attachments=TRUE pour ce mail.
+    Etape 4 (chantier B, 06/05/2026)."""
+    conn = None
+    try:
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            """
+            UPDATE mail_memory
+            SET has_attachments = TRUE
+            WHERE message_id = %s AND username = %s
+            """,
+            (message_id, username),
+        )
+        conn.commit()
+        return c.rowcount > 0
+    except Exception as e:
+        logger.warning(
+            "[GmailPJ] _mark_mail_has_attachments_gmail echec : %s",
+            str(e)[:100],
+        )
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
+def _maybe_rattrapage_attachments_gmail(token: str, message_id: str,
+                                         tenant_id: str, username: str,
+                                         connection_id: int) -> None:
+    """Rattrapage des PJ Gmail pour un mail deja en base.
+
+    Etape 4 fix (06/05/2026) : meme principe que cote Outlook. Le canal
+    primaire d ingestion Gmail est gmail_polling.py qui n appelle pas le
+    pipeline attachments. Au prochain cycle history_sync, on detecte les
+    duplicates et on tente le rattrapage si has_attachments=False.
+
+    Idempotent.
+    """
+    try:
+        # Check has_attachments actuel
+        conn = get_pg_conn()
+        c = conn.cursor()
+        c.execute(
+            """
+            SELECT has_attachments FROM mail_memory
+            WHERE message_id = %s AND username = %s LIMIT 1
+            """,
+            (message_id, username),
+        )
+        row = c.fetchone()
+        conn.close()
+        if not row:
+            return
+        if row[0]:
+            return  # deja traite
+
+        att_result = _process_attachments_for_gmail_mail(
+            token=token,
+            message_id=message_id,
+            tenant_id=tenant_id,
+            username=username,
+            connection_id=connection_id,
+        )
+        if att_result["indexed"] > 0:
+            _mark_mail_has_attachments_gmail(message_id, username)
+            logger.info(
+                "[GmailPJ-rattrap] mail=%s : %d PJ rattrapees (etait en "
+                "duplicate, ingere via gmail_polling)",
+                message_id[:30], att_result["indexed"],
+            )
+    except Exception as e:
+        logger.debug(
+            "[GmailPJ-rattrap] %s echec : %s",
+            message_id[:30], str(e)[:100],
+        )
+
+
 def _process_messages_via_pipeline(token: str, messages_meta: list,
                                      username: str,
                                      connection_id: int = None,
-                                     mailbox_email: str = None) -> dict:
+                                     mailbox_email: str = None,
+                                     tenant_id: str = None) -> dict:
     """Mode WRITE : pour chaque message_id, fetch et appelle process_incoming_mail.
 
     Reutilise le pipeline source-agnostic existant (cf gmail_polling.py)
@@ -556,6 +839,17 @@ def _process_messages_via_pipeline(token: str, messages_meta: list,
             # Anti-doublon
             if mail_exists(message_id, username):
                 skipped_existing += 1
+                # Etape 4 fix (06/05/2026) : rattrapage des PJ. gmail_polling
+                # ingere les mails sans appeler le pipeline attachments. Ici
+                # on tente le rattrapage si has_attachments=False en base.
+                if token and tenant_id:
+                    _maybe_rattrapage_attachments_gmail(
+                        token=token,
+                        message_id=message_id,
+                        tenant_id=tenant_id,
+                        username=username,
+                        connection_id=connection_id,
+                    )
                 continue
 
             # Fetch le message complet
@@ -607,6 +901,26 @@ def _process_messages_via_pipeline(token: str, messages_meta: list,
 
             if result in ("done_ai", "stored_simple", "fallback"):
                 processed += 1
+                # Etape 4 (chantier B PJ, 06/05/2026) : si on a token +
+                # tenant_id, on traite les PJ via le pipeline attachment.
+                # _fetch_gmail_attachments retourne [] si pas de PJ, donc
+                # safe (1 call API en plus pour mails sans PJ).
+                if token and tenant_id:
+                    try:
+                        att_result = _process_attachments_for_gmail_mail(
+                            token=token,
+                            message_id=message_id,
+                            tenant_id=tenant_id,
+                            username=username,
+                            connection_id=connection_id,
+                        )
+                        if att_result["indexed"] > 0:
+                            _mark_mail_has_attachments_gmail(message_id, username)
+                    except Exception as e_att:
+                        logger.warning(
+                            "[GmailHistory][PJ] %s/%s echec : %s",
+                            username, message_id[:30], str(e_att)[:200],
+                        )
             elif result in ("duplicate",):
                 skipped_existing += 1
             elif result in ("ignored",):
@@ -693,6 +1007,7 @@ def _poll_user_gmail(connection_id: int, tenant_id: str,
                 token, result["message_ids"], username,
                 connection_id=connection_id,
                 mailbox_email=email,
+                tenant_id=tenant_id,
             )
             processed = process_result["processed"]
             skipped = process_result["skipped_existing"]
