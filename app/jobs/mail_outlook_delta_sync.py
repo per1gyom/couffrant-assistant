@@ -662,6 +662,21 @@ def run_outlook_delta_sync():
     users_failed = 0
 
     for conn_info in connections:
+        # Etape 5 (06/05/2026) : polling adaptatif jour/nuit. En dehors
+        # des heures ouvrees Paris, on polle 1x toutes les 30 min au lieu
+        # de toutes les 5 min. Reduit la charge Railway + politesse APIs.
+        try:
+            from app.polling_schedule import should_skip_poll_now
+            if should_skip_poll_now(conn_info["connection_id"]):
+                logger.debug(
+                    "[OutlookDelta] skip conn=%s (hors heures ouvrees + dernier poll < 30 min)",
+                    conn_info["connection_id"],
+                )
+                continue
+        except Exception as _e_sk:
+            logger.warning("[OutlookDelta] should_skip check echoue : %s", str(_e_sk)[:120])
+            # En cas d erreur du check : on continue normalement (mieux
+            # polluer 1 fois de trop que rater une vraie panne)
         try:
             result = _poll_user_outlook(
                 connection_id=conn_info["connection_id"],

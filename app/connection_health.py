@@ -624,12 +624,28 @@ def _compute_effective_status(connection_id: int, row: tuple) -> dict:
     Attend une tuple :
       (tool_type, connected_email, last_ok, last_attempt, fails,
        ch_status, expected_interval_seconds, minutes_since_ok)
+
+    Etape 5 (06/05/2026) : l intervalle attendu est calcule
+    dynamiquement via polling_schedule.get_expected_poll_interval()
+    selon l heure courante (5 min en jour ouvre, 30 min sinon),
+    plutot que de lire la valeur stockee en DB. Comme ca les seuils
+    relatifs (1.5x green, 3x red) s adaptent automatiquement au mode
+    de polling. Exemple :
+      - En jour : seuils 7.5 min / 15 min (comme avant)
+      - La nuit/weekend : seuils 45 min / 90 min (plus tolerant
+        pour eviter les fausses alertes nocturnes)
     """
     (tool_type, connected_email, last_ok, last_attempt, fails,
      ch_status, expected_interval_s, minutes_since_ok) = row
 
-    # Interval attendu (avec fallback 5 min si non renseigne)
-    expected_interval_s = expected_interval_s or 300
+    # Interval attendu : on prend la valeur DYNAMIQUE selon l heure
+    # plutot que la valeur stockee en base. Fallback sur la base si
+    # le module n est pas disponible (tres rare).
+    try:
+        from app.polling_schedule import get_expected_poll_interval
+        expected_interval_s = get_expected_poll_interval()
+    except Exception:
+        expected_interval_s = expected_interval_s or 300
     expected_interval_min = expected_interval_s / 60.0
 
     # Cas 1 : aucune connection_health enregistree

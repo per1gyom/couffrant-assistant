@@ -831,6 +831,18 @@ def run_drive_delta_sync():
     total_processed = 0
 
     for conn_info in connections:
+        # Etape 5 (06/05/2026) : polling adaptatif jour/nuit. Skip si
+        # hors heures ouvrees Paris ET dernier poll < 30 min.
+        try:
+            from app.polling_schedule import should_skip_poll_now
+            if should_skip_poll_now(conn_info["connection_id"]):
+                logger.debug(
+                    "[DriveDelta] skip conn=%s (hors heures ouvrees + dernier poll < 30 min)",
+                    conn_info["connection_id"],
+                )
+                continue
+        except Exception as _e_sk:
+            logger.warning("[DriveDelta] should_skip check echoue : %s", str(_e_sk)[:120])
         try:
             stats = _sync_one_connection(conn_info)
             total_seen += stats.get("items_seen", 0)

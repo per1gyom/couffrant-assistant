@@ -300,6 +300,19 @@ def run_odoo_polling():
         if connection_id:
             _ensure_health_registered(tenant_id, connection_id)
 
+            # Etape 5 (06/05/2026) : polling adaptatif jour/nuit. Skip
+            # si hors heures ouvrees Paris ET dernier poll < 30 min.
+            try:
+                from app.polling_schedule import should_skip_poll_now
+                if should_skip_poll_now(connection_id):
+                    logger.debug(
+                        "[OdooPolling] skip tenant=%s (hors heures ouvrees + dernier poll < 30 min)",
+                        tenant_id,
+                    )
+                    continue
+            except Exception as _e_sk:
+                logger.warning("[OdooPolling] should_skip check echoue : %s", str(_e_sk)[:120])
+
         total_new = 0
         total_enq = 0
         errors = 0
