@@ -276,6 +276,7 @@
     </p>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
       <button class="btn btn-primary" onclick="triggerWebhookEnsure()">🔄 Verifier / Creer les webhooks maintenant</button>
+      <button class="btn btn-ghost" onclick="testSubscriptionConn14()" style="margin-left:8px">🔬 Test diagnostic conn=14 (contact@)</button>
     </div>
     <div id="webhook-ensure-result" style="margin-top:16px"></div>
   </div>
@@ -522,6 +523,40 @@
 })();
 
 // ==== Maintenance : webhooks Microsoft Graph ====
+async function testSubscriptionConn14(){
+  const resultDiv = document.getElementById('webhook-ensure-result');
+  resultDiv.innerHTML = '<div style="color:#6b7280;font-size:13px"><span class="loader"></span> Test diagnostic en cours (3-10 sec)...</div>';
+  try{
+    const r = await fetch('/admin/webhooks/test-subscription/14', {method:'POST', credentials:'include'});
+    const d = await r.json();
+    let html = '<div style="font-family:var(--mono);font-size:11px;background:#1a1a1a;padding:12px;border-radius:6px;border:1px solid var(--border);max-height:600px;overflow:auto">';
+    html += '<div style="color:#14b866;margin-bottom:8px">━━━ Diagnostic conn=14 (contact@couffrant-solar.fr) ━━━</div>';
+    html += '<div><strong>Email attendu :</strong> ' + (d.expected_email || '?') + '</div>';
+    html += '<div><strong>Username assigne :</strong> ' + (d.username_assigned || '?') + '</div>';
+    html += '<div><strong>Tool type :</strong> ' + (d.tool_type || '?') + '</div>';
+    html += '<div style="margin-top:10px;color:#ffaa00">━━━ COMPTE REEL DU TOKEN (appel /me) ━━━</div>';
+    html += '<div><strong>HTTP /me :</strong> ' + (d.me_call_status || '?') + '</div>';
+    if(d.token_real_account){
+      html += '<div><strong>userPrincipalName :</strong> ' + (d.token_real_account.userPrincipalName || '(null)') + '</div>';
+      html += '<div><strong>mail              :</strong> ' + (d.token_real_account.mail || '(null)') + '</div>';
+      html += '<div><strong>displayName       :</strong> ' + (d.token_real_account.displayName || '(null)') + '</div>';
+    }
+    if(d.me_call_error) html += '<div style="color:#e14747"><strong>Erreur /me :</strong> ' + d.me_call_error + '</div>';
+    html += '<div style="margin-top:10px;color:#ffaa00">━━━ CREATION SUBSCRIPTION ━━━</div>';
+    const okSub = d.subscription_created;
+    html += '<div><strong>HTTP subscription :</strong> <span style="color:' + (okSub?'#14b866':'#e14747') + '">' + (d.subscription_create_status || '?') + '</span></div>';
+    if(okSub){
+      html += '<div style="color:#14b866;margin-top:6px">✅ Subscription creee !</div>';
+    }
+    html += '<div style="margin-top:6px"><strong>Reponse Microsoft Graph :</strong></div>';
+    html += '<pre style="margin:4px 0 0 0;white-space:pre-wrap;word-break:break-word">' + JSON.stringify(d.subscription_create_response, null, 2) + '</pre>';
+    html += '</div>';
+    resultDiv.innerHTML = html;
+  }catch(e){
+    resultDiv.innerHTML = '<div class="alert err" style="display:block">❌ Erreur reseau : ' + e.message + '</div>';
+  }
+}
+
 async function triggerWebhookEnsure(){
   const resultDiv = document.getElementById('webhook-ensure-result');
   resultDiv.innerHTML = '<div style="color:#6b7280;font-size:13px"><span class="loader"></span> Verification en cours (peut prendre 5-15 sec)...</div>';

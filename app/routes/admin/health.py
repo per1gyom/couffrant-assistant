@@ -607,3 +607,137 @@ def admin_webhooks_ensure_now(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Echec ensure_all_subscriptions : {str(e)[:200]}")
+
+
+# ─── ENDPOINT DEBUG : tester la creation de sub pour une connexion ───
+# Ajoute le 06/05/2026 pour comprendre pourquoi conn=14 (contact@) ne
+# recoit pas de subscription Microsoft Graph alors que conn=6 oui.
+# Retourne le code HTTP et le message d erreur Microsoft Graph en clair.
+
+@router.post("/admin/webhooks/test-subscription/{connection_id}")
+def admin_webhook_test_subscription(
+    connection_id: int,
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Tente de creer une subscription Microsoft Graph pour une connexion
+    et retourne la reponse exacte de Microsoft (code + body).
+
+    Permet de comprendre pourquoi une creation echoue (scope manquant,
+    compte sans inbox personnelle, shared mailbox, etc.).
+    """
+    try:
+        from app.database import get_pg_conn
+        from app.connection_token_manager import decrypt_token
+        import requests
+        import json
+        import secrets
+        from datetime import datetime, timezone, timedelta
+
+        # 1. Recupere infos connexion + decrypted token
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT tc.tool_type, tc.label, tc.connected_email,
+                       tc.credentials, tc.tenant_id,
+                       ca.username
+                FROM tenant_connections tc
+                LEFT JOIN connection_assignments ca ON ca.connection_id = tc.id
+                WHERE tc.id = %s
+                LIMIT 1
+            """, (connection_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, f"Connexion #{connection_id} introuvable")
+            tool_type, label, connected_email, creds_raw, tenant_id, username = row
+
+        if tool_type not in ("microsoft", "outlook"):
+            raise HTTPException(
+                400,
+                f"Connexion #{connection_id} de type '{tool_type}' - les "
+                f"webhooks Microsoft Graph ne s appliquent qu aux "
+                f"types microsoft/outlook"
+            )
+
+        creds = creds_raw if isinstance(creds_raw, dict) else json.loads(creds_raw)
+        token_enc = creds.get("access_token", "")
+        if not token_enc:
+            raise HTTPException(500, "Pas d access_token en base pour cette connexion")
+
+        token = decrypt_token(token_enc)
+
+        # 2. Tester /me pour voir quel compte le token represente VRAIMENT
+        me_resp = requests.get(
+            "https://graph.microsoft.com/v1.0/me",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15,
+        )
+        me_data = {}
+        if me_resp.status_code == 200:
+            me_data = me_resp.json()
+
+        # 3. Tenter la creation de subscription EN MODE TEST (clientState random)
+        from app.connectors.microsoft_webhook import (
+            get_notification_url, get_lifecycle_notification_url, SUBSCRIPTION_DAYS
+        )
+
+        expiry = (datetime.now(timezone.utc) + timedelta(days=SUBSCRIPTION_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        client_state = secrets.token_hex(16)
+
+        sub_resp = requests.post(
+            "https://graph.microsoft.com/v1.0/subscriptions",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "changeType": "created",
+                "notificationUrl": get_notification_url(),
+                "lifecycleNotificationUrl": get_lifecycle_notification_url(),
+                "resource": "me/mailFolders/inbox/messages",
+                "expirationDateTime": expiry,
+                "clientState": client_state,
+            },
+            timeout=15,
+        )
+
+        sub_body = {}
+        try:
+            sub_body = sub_resp.json()
+        except Exception:
+            sub_body = {"raw_text": sub_resp.text[:500]}
+
+        # Si creation reussie, on l'enregistre + on cleanup la sub de test
+        # NON : si succes, on la GARDE car on en a besoin
+        if sub_resp.status_code in (200, 201):
+            from app.connectors.microsoft_webhook import _save_subscription
+            _save_subscription(
+                username or "unknown",
+                sub_body["id"],
+                sub_body["expirationDateTime"],
+                client_state,
+                connection_id=connection_id,
+            )
+
+        return {
+            "connection_id": connection_id,
+            "label": label,
+            "expected_email": connected_email,
+            "tool_type": tool_type,
+            "username_assigned": username,
+            "token_real_account": {
+                "userPrincipalName": me_data.get("userPrincipalName"),
+                "mail": me_data.get("mail"),
+                "displayName": me_data.get("displayName"),
+                "id": me_data.get("id"),
+            },
+            "me_call_status": me_resp.status_code,
+            "me_call_error": me_resp.text[:300] if me_resp.status_code != 200 else None,
+            "subscription_create_status": sub_resp.status_code,
+            "subscription_create_response": sub_body,
+            "subscription_created": sub_resp.status_code in (200, 201),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Erreur test : {str(e)[:200]}")
