@@ -692,6 +692,45 @@ def admin_webhook_test_subscription(
             get_notification_url, get_lifecycle_notification_url, SUBSCRIPTION_DAYS
         )
 
+        # 3. Idempotence : si une sub existe deja pour cette connexion, on
+        # la retourne au lieu d en creer une nouvelle. Evite les doublons
+        # quand on clique plusieurs fois sur le bouton de test.
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT subscription_id, expires_at, resource
+                FROM webhook_subscriptions
+                WHERE connection_id = %s
+                ORDER BY created_at DESC LIMIT 1
+            """, (connection_id,))
+            existing = cur.fetchone()
+
+        if existing:
+            return {
+                "connection_id": connection_id,
+                "label": label,
+                "expected_email": connected_email,
+                "tool_type": tool_type,
+                "username_assigned": username,
+                "token_real_account": {
+                    "userPrincipalName": me_data.get("userPrincipalName"),
+                    "mail": me_data.get("mail"),
+                    "displayName": me_data.get("displayName"),
+                    "id": me_data.get("id"),
+                },
+                "me_call_status": me_resp.status_code,
+                "me_call_error": me_resp.text[:300] if me_resp.status_code != 200 else None,
+                "subscription_create_status": 200,
+                "subscription_create_response": {
+                    "info": "Une subscription existe deja pour cette connexion - pas de nouvelle creation pour eviter les doublons.",
+                    "existing_subscription_id": existing[0],
+                    "existing_expires_at": existing[1].isoformat() if existing[1] else None,
+                    "existing_resource": existing[2],
+                },
+                "subscription_created": False,
+                "subscription_already_exists": True,
+            }
+
         expiry = (datetime.now(timezone.utc) + timedelta(days=SUBSCRIPTION_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
         client_state = secrets.token_hex(16)
 
