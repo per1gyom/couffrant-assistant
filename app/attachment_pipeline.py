@@ -193,11 +193,15 @@ def extract_text(file_bytes: bytes, file_name: str,
                  mime_type: str) -> str:
     """Extrait le texte d un fichier selon son type.
 
-    NOTE : implémentations binaires complètes (pdftotext, Tesseract,
-    python-docx, openpyxl) seront ajoutées au moment ou les connecteurs
-    reels (mail, drive) seront branches sur ce pipeline (Semaines 2-6).
-    Le squelette ci-dessous montre la dispatch logique mais retourne
-    actuellement une chaine vide pour les types binaires.
+    Branche le 06/05/2026 (chantier B - PJ mails) :
+      - PDF : migrate de pypdf -> pdfplumber (plus robuste sur layouts
+        complexes, deja installe dans requirements.txt vs pypdf absent).
+      - DOCX : python-docx (paragraphes + tables).
+      - XLSX : openpyxl (cells, formules ignorees).
+      - TXT/HTML : deja en place.
+      - Images : placeholder, Vision IA prend le relais a l etape 3.
+
+    Limite : 50000 chars pour eviter d exploser les embeddings et logs.
     """
     name_lower = file_name.lower()
 
@@ -216,26 +220,80 @@ def extract_text(file_bytes: bytes, file_name: str,
         except Exception:
             return file_bytes.decode("utf-8", errors="replace")[:50000]
 
-    # PDF
+    # PDF (pdfplumber - 06/05/2026 : migrate from pypdf qui n etait pas
+    # dans requirements.txt et aurait plante en prod)
     if name_lower.endswith(".pdf") or (mime_type and "pdf" in mime_type):
         try:
-            from pypdf import PdfReader
+            import pdfplumber
             from io import BytesIO
-            reader = PdfReader(BytesIO(file_bytes))
             text_parts = []
-            for page in reader.pages[:50]:  # limite a 50 pages
-                try:
-                    text_parts.append(page.extract_text() or "")
-                except Exception:
-                    pass
-            return "\n".join(text_parts)[:50000]
+            with pdfplumber.open(BytesIO(file_bytes)) as pdf:
+                for page in pdf.pages[:50]:  # limite 50 pages
+                    try:
+                        page_text = page.extract_text() or ""
+                        if page_text.strip():
+                            text_parts.append(page_text)
+                    except Exception:
+                        pass
+            return "\n\n".join(text_parts)[:50000]
         except Exception as e:
             logger.debug("[Pipeline] PDF extract echec %s : %s",
                          file_name, str(e)[:100])
             return ""
 
-    # Word (.docx) - implementation a brancher Semaines 2-6
-    # Excel (.xlsx) - implementation a brancher Semaines 2-6
+    # Word (.docx) - python-docx : paragraphes + tables
+    # Branche 06/05/2026 (avant : commente "a brancher Semaines 2-6")
+    if name_lower.endswith(".docx") or (mime_type and "wordprocessingml" in mime_type):
+        try:
+            from docx import Document
+            from io import BytesIO
+            doc = Document(BytesIO(file_bytes))
+            text_parts = []
+            # Paragraphes
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    text_parts.append(para.text)
+            # Tables (peuvent contenir des donnees cles : devis, factures)
+            for table in doc.tables:
+                for row in table.rows:
+                    cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                    if cells:
+                        text_parts.append(" | ".join(cells))
+            return "\n".join(text_parts)[:50000]
+        except Exception as e:
+            logger.debug("[Pipeline] DOCX extract echec %s : %s",
+                         file_name, str(e)[:100])
+            return ""
+
+    # Excel (.xlsx, .xls) - openpyxl : valeurs des cells, formules ignorees
+    # Branche 06/05/2026 (avant : commente "a brancher Semaines 2-6")
+    if name_lower.endswith((".xlsx", ".xlsm", ".xls")) or (
+        mime_type and "spreadsheetml" in mime_type
+    ):
+        try:
+            from openpyxl import load_workbook
+            from io import BytesIO
+            wb = load_workbook(BytesIO(file_bytes), read_only=True, data_only=True)
+            text_parts = []
+            for sheet_name in wb.sheetnames[:10]:  # limite 10 feuilles
+                ws = wb[sheet_name]
+                text_parts.append(f"=== Feuille : {sheet_name} ===")
+                row_count = 0
+                for row in ws.iter_rows(values_only=True):
+                    if row_count >= 1000:  # limite 1000 lignes par feuille
+                        text_parts.append("[...feuille tronquee...]")
+                        break
+                    cells = [str(c) for c in row if c is not None and str(c).strip()]
+                    if cells:
+                        text_parts.append(" | ".join(cells))
+                        row_count += 1
+            wb.close()
+            return "\n".join(text_parts)[:50000]
+        except Exception as e:
+            logger.debug("[Pipeline] XLSX extract echec %s : %s",
+                         file_name, str(e)[:100])
+            return ""
+
     # Images (jpg, png) - extraction EXIF + nom uniquement pour le moment
     if any(name_lower.endswith(ext) for ext in (".jpg", ".jpeg", ".png", ".heic", ".webp")):
         # Pour les images, le "texte" extrait = le nom du fichier + metadonnees
