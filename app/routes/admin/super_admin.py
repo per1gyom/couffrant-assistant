@@ -594,8 +594,15 @@ def admin_connexions_page(request: Request):
 
 @router.get("/admin/connexions-data")
 def admin_connexions_data(request: Request, _: dict = Depends(require_admin)):
-    """Retourne la liste des tenants avec leurs connexions actives."""
+    """Retourne la liste des tenants avec leurs connexions actives.
+
+    Etape 4 (06/05/2026) : enrichit chaque connexion avec son
+    'effective_status' calcule depuis connection_health, pour que l UI
+    affiche un badge unique 🟢/🟡/🔴/⚪ base sur la vraie sante du
+    polling (et non sur tenant_connections.status qui ment).
+    """
     from app.database import get_pg_conn
+    from app.connection_health import get_effective_status_for_tenant
     with get_pg_conn() as conn:
         cur = conn.cursor()
         cur.execute("SELECT DISTINCT tenant_id FROM users WHERE tenant_id IS NOT NULL ORDER BY tenant_id")
@@ -610,14 +617,47 @@ def admin_connexions_data(request: Request, _: dict = Depends(require_admin)):
                 ORDER BY tool_type, id
             """, (tid,))
             rows = cur.fetchall()
+
+            # Recupere l etat effectif de toutes les connexions du tenant
+            # (1 seule query SQL pour tout le tenant, performant)
+            try:
+                effective_list = get_effective_status_for_tenant(tid)
+                effective_by_id = {e["connection_id"]: e for e in effective_list}
+            except Exception as e:
+                # En cas d echec, on continue avec un dict vide :
+                # l UI affichera 'unknown' au lieu de planter
+                effective_by_id = {}
+
             conns = []
             for r in rows:
                 cfg = r[6] if isinstance(r[6], dict) else {}
                 summary = cfg.get("site_name") or cfg.get("folder_name") or ""
+                conn_id = r[0]
+                eff = effective_by_id.get(conn_id, {
+                    "state": "unknown",
+                    "reason": "Pas de monitoring",
+                    "minutes_since_ok": None,
+                    "consecutive_failures": 0,
+                    "expected_interval_min": None,
+                })
+                # Serialisation safe pour JSON (datetime -> str)
+                eff_serialized = {
+                    "state": eff.get("state", "unknown"),
+                    "reason": eff.get("reason", ""),
+                    "minutes_since_ok": eff.get("minutes_since_ok"),
+                    "consecutive_failures": eff.get("consecutive_failures", 0),
+                    "expected_interval_min": eff.get("expected_interval_min"),
+                    "last_ok_at": (
+                        eff["last_ok_at"].isoformat()
+                        if eff.get("last_ok_at") else None
+                    ),
+                    "health_status": eff.get("health_status"),
+                }
                 conns.append({
-                    "id": r[0], "tool_type": r[1], "label": r[2], "status": r[3],
+                    "id": conn_id, "tool_type": r[1], "label": r[2], "status": r[3],
                     "connected_email": r[4], "super_admin_permission_level": r[5],
                     "config_summary": summary,
+                    "effective_status": eff_serialized,
                 })
             out.append({"tenant_id": tid, "connections": conns})
     return {"tenants": out}

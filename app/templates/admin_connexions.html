@@ -20,6 +20,30 @@
   .btn-sm { padding:5px 10px; font-size:11px; border-radius:6px }
   .pastille { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle }
   .p-green { background:#14b866 } .p-red { background:#e14747 } .p-gray { background:#8a8a8a }
+  /* Etape 4 (06/05/2026) - Badge etat effectif unifie */
+  .conn-state-badge {
+    display:inline-flex; align-items:center; gap:4px;
+    padding:3px 8px; border-radius:6px; font-size:11px; font-weight:600;
+    border:1px solid var(--border); cursor:help;
+    white-space:nowrap;
+  }
+  .conn-state-badge.state-green {
+    background:rgba(20,184,102,0.12); color:#14b866; border-color:rgba(20,184,102,0.3);
+  }
+  .conn-state-badge.state-amber {
+    background:rgba(255,170,0,0.12); color:#ffaa00; border-color:rgba(255,170,0,0.3);
+  }
+  .conn-state-badge.state-red {
+    background:rgba(225,71,71,0.12); color:#e14747; border-color:rgba(225,71,71,0.4);
+  }
+  .conn-state-badge.state-unknown {
+    background:rgba(138,138,138,0.12); color:#8a8a8a; border-color:rgba(138,138,138,0.3);
+  }
+  .conn-state-detail {
+    font-size:11px; color:var(--text-muted);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+    cursor:help;
+  }
   .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.55); display:none; align-items:center; justify-content:center; z-index:100 }
   .modal-bg.open { display:flex }
   .modal-body { background:var(--bg2); border:1px solid var(--border); border-radius:14px; padding:24px; width:90%; max-width:600px; max-height:85vh; overflow-y:auto }
@@ -146,7 +170,20 @@ function renderConnCard(tenant_id, tool, conn) {
   const meta = TOOL_META[tool];
   const div = document.createElement('div');
   div.className = 'conn-card';
-  const statusCls = conn.status === 'connected' ? 'p-green' : (conn.status === 'error' ? 'p-red' : 'p-gray');
+  // ETAPE 4 (06/05/2026) : badge base sur effective_status (vraie sante
+  // du polling) au lieu de conn.status (qui ne reflete que l etat OAuth
+  // initial et reste 'connected' meme si la connexion est cassee).
+  const eff = conn.effective_status || { state: 'unknown', reason: 'Pas de monitoring' };
+  const stateMap = {
+    'green':   { cls: 'p-green',  icon: '🟢', short: 'OK' },
+    'amber':   { cls: 'p-amber',  icon: '🟡', short: 'Attention' },
+    'red':     { cls: 'p-red',    icon: '🔴', short: 'Panne' },
+    'unknown': { cls: 'p-gray',   icon: '⚪', short: 'Inconnu' },
+  };
+  const stateInfo = stateMap[eff.state] || stateMap['unknown'];
+  const tooltipText = (eff.reason || '') +
+                      (eff.minutes_since_ok != null ? ` (${Math.round(eff.minutes_since_ok)} min)` : '') +
+                      (eff.consecutive_failures > 0 ? ` - ${eff.consecutive_failures} echecs` : '');
   // NOUVEAU 02/05/2026 : bouton "Configurer dossiers" pour drive/sharepoint
   const isDrive = (tool === 'drive' || tool === 'sharepoint');
   const driveCfgBtn = isDrive
@@ -158,10 +195,11 @@ function renderConnCard(tenant_id, tool, conn) {
   div.innerHTML = `
     <div style="display:flex; justify-content:space-between; align-items:flex-start">
       <div class="conn-icon">${meta.icon}</div>
-      <span class="pastille ${statusCls}" title="${conn.status}"></span>
+      <span class="conn-state-badge state-${eff.state}" title="${tooltipText.replace(/"/g, '&quot;')}">${stateInfo.icon} ${stateInfo.short}</span>
     </div>
     <div class="conn-label">${conn.label || meta.label}</div>
     <div class="conn-meta">${conn.connected_email || conn.config_summary || '-'}</div>
+    <div class="conn-meta conn-state-detail" title="${tooltipText.replace(/"/g, '&quot;')}">${eff.reason || ''}</div>
     <div class="conn-meta">Perm : ${conn.super_admin_permission_level || 'read'}</div>
     <div class="conn-actions">
       ${driveCfgBtn}
