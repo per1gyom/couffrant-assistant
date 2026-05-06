@@ -263,6 +263,21 @@
       <button class="btn btn-warn" onclick="runMigrationDuplicates(false)">⚙️ Exécuter la fusion</button>
     </div>
     <div id="maint-dup-result" style="margin-top:16px"></div>
+  <div class="profile-card" style="max-width:720px;margin-top:16px">
+    <div class="profile-section-title">🔔 Webhooks temps reel (boites mail)</div>
+    <p style="color:#6b7280;font-size:13px;line-height:1.55;margin:8px 0 14px 0">
+      Pour les boites <strong>Outlook / Microsoft 365</strong>, on utilise les notifications
+      Microsoft Graph (webhooks) pour ingerer les nouveaux mails en temps reel sans
+      attendre le prochain cycle de polling. Les abonnements expirent au bout de 3 jours
+      max et sont renouveles automatiquement toutes les 6h.
+      <br><br>
+      Si tu viens de reconnecter une boite, ce bouton declenche immediatement
+      la creation/renouvellement des abonnements (sans attendre le cron 6h).
+    </p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+      <button class="btn btn-primary" onclick="triggerWebhookEnsure()">🔄 Verifier / Creer les webhooks maintenant</button>
+    </div>
+    <div id="webhook-ensure-result" style="margin-top:16px"></div>
   </div>
 </section>
 
@@ -505,6 +520,62 @@
     setTimeout(()=>{document.getElementById('profile-alert').className='alert';},5000);
   };
 })();
+
+// ==== Maintenance : webhooks Microsoft Graph ====
+async function triggerWebhookEnsure(){
+  const resultDiv = document.getElementById('webhook-ensure-result');
+  resultDiv.innerHTML = '<div style="color:#6b7280;font-size:13px"><span class="loader"></span> Verification en cours (peut prendre 5-15 sec)...</div>';
+  try{
+    const r = await fetch('/admin/webhooks/ensure-now', {method:'POST', credentials:'include'});
+    if(!r.ok){
+      const errTxt = await r.text();
+      resultDiv.innerHTML = '<div class="alert err" style="display:block">❌ Echec : ' + errTxt.substring(0, 200) + '</div>';
+      return;
+    }
+    const d = await r.json();
+
+    let html = '<div class="alert ok" style="display:block;margin-bottom:12px">';
+    html += '✅ Verification terminee en ' + d.duration_ms + 'ms';
+    html += ' — ' + d.subscriptions_total + ' abonnement(s) actif(s) au total';
+    if(d.subscriptions_new && d.subscriptions_new.length > 0){
+      html += ' — <strong>' + d.subscriptions_new.length + ' nouveau(x) cree(s)</strong>';
+    }
+    html += '</div>';
+
+    if(d.subscriptions && d.subscriptions.length > 0){
+      html += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+      html += '<thead><tr style="background:var(--bg2)">';
+      html += '<th style="padding:6px;text-align:left;border-bottom:1px solid var(--border)">Boite</th>';
+      html += '<th style="padding:6px;text-align:left;border-bottom:1px solid var(--border)">Email</th>';
+      html += '<th style="padding:6px;text-align:left;border-bottom:1px solid var(--border)">Dossier suivi</th>';
+      html += '<th style="padding:6px;text-align:left;border-bottom:1px solid var(--border)">Expire</th>';
+      html += '</tr></thead><tbody>';
+      for(const s of d.subscriptions){
+        const isNew = d.subscriptions_new && d.subscriptions_new.includes(s.connection_id);
+        const flag = isNew ? '🆕 ' : '';
+        // Resource lisible : me/mailFolders/inbox/messages -> "Inbox"
+        let resourceShort = s.resource || '?';
+        if(resourceShort.includes('/inbox/')) resourceShort = 'Inbox';
+        else if(resourceShort.includes('/sentitems/')) resourceShort = 'Envoyes';
+        else if(resourceShort.includes('/junkemail/')) resourceShort = 'Indesirables';
+        else if(resourceShort === 'me/messages') resourceShort = 'Tous dossiers';
+        // Expire lisible
+        const expDate = s.expires_at ? new Date(s.expires_at) : null;
+        const expStr = expDate ? expDate.toLocaleString('fr-FR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '?';
+        html += '<tr><td style="padding:6px;border-bottom:1px solid var(--border)">' + flag + (s.label || 'conn=' + s.connection_id) + '</td>';
+        html += '<td style="padding:6px;border-bottom:1px solid var(--border);color:var(--text3)">' + (s.email || '-') + '</td>';
+        html += '<td style="padding:6px;border-bottom:1px solid var(--border)">' + resourceShort + '</td>';
+        html += '<td style="padding:6px;border-bottom:1px solid var(--border);color:var(--text3)">' + expStr + '</td></tr>';
+      }
+      html += '</tbody></table>';
+    } else {
+      html += '<div style="color:var(--text3);font-size:13px">Aucun abonnement actif. Cela peut etre normal si aucune boite Microsoft n est connectee.</div>';
+    }
+    resultDiv.innerHTML = html;
+  }catch(e){
+    resultDiv.innerHTML = '<div class="alert err" style="display:block">❌ Erreur reseau : ' + e.message + '</div>';
+  }
+}
 
 // ==== Maintenance : migration categories auto ====
 async function runMigrationAutoTags(dryRun){
