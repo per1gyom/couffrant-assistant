@@ -89,7 +89,15 @@ def delete_connection(connection_id: int) -> dict:
 
 
 def list_connections(tenant_id: str) -> list:
-    """Liste toutes les connexions d'un tenant avec leurs assignments."""
+    """Liste toutes les connexions d'un tenant avec leurs assignments.
+
+    Enrichi 06/05/2026 (Etape 4 refonte UI) : ajoute effective_status a
+    chaque connexion pour que l UI puisse afficher le badge 🟢🟡🔴⚪
+    base sur la vraie sante du polling (pas sur tenant_connections.status
+    qui ne reflete que l etat OAuth initial).
+    """
+    from app.connection_health import get_effective_status_for_tenant
+
     conn = None
     try:
         conn = get_pg_conn()
@@ -101,6 +109,16 @@ def list_connections(tenant_id: str) -> list:
             WHERE tc.tenant_id = %s
             ORDER BY tc.tool_type, tc.label
         """, (tenant_id,))
+
+        # Recupere l etat effectif de toutes les connexions du tenant en
+        # 1 seule query SQL (performant, pas de N+1)
+        try:
+            effective_list = get_effective_status_for_tenant(tenant_id)
+            effective_by_id = {e["connection_id"]: e for e in effective_list}
+        except Exception as ex:
+            logger.warning("[Connections] effective_status echoue : %s", str(ex)[:200])
+            effective_by_id = {}
+
         connections = []
         for row in c.fetchall():
             cid = row[0]
@@ -109,6 +127,28 @@ def list_connections(tenant_id: str) -> list:
                 FROM connection_assignments WHERE connection_id = %s
             """, (cid,))
             assignments = [{"username": r[0], "access_level": r[1], "enabled": bool(r[2])} for r in c.fetchall()]
+
+            # Etat effectif depuis connection_health
+            eff = effective_by_id.get(cid, {
+                "state": "unknown",
+                "reason": "Pas de monitoring",
+                "minutes_since_ok": None,
+                "consecutive_failures": 0,
+                "expected_interval_min": None,
+            })
+            effective_status = {
+                "state": eff.get("state", "unknown"),
+                "reason": eff.get("reason", ""),
+                "minutes_since_ok": eff.get("minutes_since_ok"),
+                "consecutive_failures": eff.get("consecutive_failures", 0),
+                "expected_interval_min": eff.get("expected_interval_min"),
+                "last_ok_at": (
+                    eff["last_ok_at"].isoformat()
+                    if eff.get("last_ok_at") else None
+                ),
+                "health_status": eff.get("health_status"),
+            }
+
             connections.append({
                 "id": cid, "tool_type": row[1], "label": row[2],
                 "auth_type": row[3], "config": row[4] or {},
@@ -117,6 +157,7 @@ def list_connections(tenant_id: str) -> list:
                 "connected_email": row[8] or "",
                 "assignments": assignments,
                 "user_count": len(assignments),
+                "effective_status": effective_status,
             })
         return connections
     except Exception as e:

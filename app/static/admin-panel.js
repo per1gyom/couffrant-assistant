@@ -302,14 +302,19 @@ async function loadConnections(tenantId,idx){
     const conns=await(await fetch(url)).json();
 
     // ── Résumé dans l'entête de la carte ──
+    // Etape 4 (06/05/2026) : compte les connexions saines via
+    // effective_status.state==='green' au lieu de status==='connected'
+    // (qui ne reflete que l etat OAuth initial, pas la vraie sante).
     if(summaryEl){
       const byType={};
       for(const c of conns){
         const grp = (c.tool_type==='gmail'||c.tool_type==='microsoft'||c.tool_type==='outlook') ? 'mail'
-                  : c.tool_type==='sharepoint'||c.tool_type==='google_drive' ? 'drive' : 'autre';
+                  : c.tool_type==='sharepoint'||c.tool_type==='google_drive'||c.tool_type==='drive' ? 'drive' : 'autre';
         if(!byType[grp]) byType[grp]={total:0,connected:0};
         byType[grp].total++;
-        if(c.status==='connected') byType[grp].connected++;
+        // 'green' = vraie sante OK / 'amber' encore vivant / 'red' panne
+        const effState = (c.effective_status && c.effective_status.state) || 'unknown';
+        if(effState==='green' || effState==='amber') byType[grp].connected++;
       }
       const pills = Object.entries(byType).map(([g,v])=>{
         const icon = g==='mail'?'📧': g==='drive'?'📁':'🔧';
@@ -340,6 +345,24 @@ async function loadConnections(tenantId,idx){
         :c.status==='expired'
         ?'<span class="badge badge-red" style="font-size:9px">⚠️ expiré</span>'
         :'<span class="badge badge-gray" style="font-size:9px">non connecté</span>';
+
+      // Etape 4 (06/05/2026) : badge VRAIE sante (effective_status) en
+      // plus du badge OAuth ci-dessus. Affiche 🟢/🟡/🔴/⚪ + raison
+      // courte au survol. La pastille OAuth originale est conservee
+      // pour distinguer "OAuth OK mais polling en panne" (cas reel
+      // de la connection 14 contact@ : OAuth connected, polling KO).
+      const eff = c.effective_status || { state: 'unknown', reason: 'Pas de monitoring' };
+      const effMap = {
+        'green':   { color:'#14b866', icon:'🟢', label:'OK' },
+        'amber':   { color:'#ffaa00', icon:'🟡', label:'Attention' },
+        'red':     { color:'#e14747', icon:'🔴', label:'Panne' },
+        'unknown': { color:'#8a8a8a', icon:'⚪', label:'Inconnu' },
+      };
+      const effInfo = effMap[eff.state] || effMap['unknown'];
+      const effTooltip = (eff.reason || '') +
+                         (eff.minutes_since_ok != null ? ` (${Math.round(eff.minutes_since_ok)} min)` : '') +
+                         (eff.consecutive_failures > 0 ? ` - ${eff.consecutive_failures} echecs` : '');
+      const healthBadge = `<span class="badge" style="font-size:9px;background:${effInfo.color}22;color:${effInfo.color};border:1px solid ${effInfo.color}55;cursor:help" title="${effTooltip.replace(/"/g,'&quot;')}">${effInfo.icon} ${effInfo.label}</span>`;
       let oauthBtn='';
       if(c.status!=='connected'){
         if(c.tool_type==='microsoft'||c.tool_type==='outlook') oauthBtn=`<a href="/admin/connections/${tenantId}/oauth/microsoft/start?connection_id=${c.id}" class="btn btn-primary" style="padding:2px 10px;font-size:10px;text-decoration:none">🔵 Connecter Microsoft</a>`;
@@ -356,7 +379,7 @@ async function loadConnections(tenantId,idx){
       return `<div style="padding:8px 12px;background:var(--bg1);border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <span style="font-size:16px">${icon}</span>
-          <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px;cursor:pointer;border-bottom:1px dashed var(--text3)" onclick="renameConn(${c.id},'${tenantId}',${idx},'${c.label.replace(/'/g,"\\'")}')" title="Cliquer pour renommer">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span>${helpBadge} ${statusBadge}</div>
+          <div style="flex:1;min-width:120px"><strong style="color:var(--text1);font-size:12px;cursor:pointer;border-bottom:1px dashed var(--text3)" onclick="renameConn(${c.id},'${tenantId}',${idx},'${c.label.replace(/'/g,"\\'")}')" title="Cliquer pour renommer">${c.label}</strong><br><span style="font-size:10px;color:var(--text3)">${c.tool_type}</span>${helpBadge} ${statusBadge} ${healthBadge}</div>
           ${oauthBtn}
           ${['microsoft','gmail','outlook'].includes(c.tool_type)?`<button class="btn btn-accent" style="padding:2px 10px;font-size:10px" onclick="discoverTool('${tenantId}','${c.tool_type}',this)">🔍 Découvrir</button>`:''}
           ${['microsoft','gmail','outlook'].includes(c.tool_type)?renderMailActions(tenantId, c.id):''}
