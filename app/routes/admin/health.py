@@ -791,3 +791,187 @@ def admin_webhook_test_subscription(
         raise
     except Exception as e:
         raise HTTPException(500, f"Erreur test : {str(e)[:200]}")
+
+
+# ─── ENDPOINTS GMAIL PUB/SUB WATCHES ───
+# Ajoutes le 06/05/2026 pour supporter le chantier B (activation Gmail
+# Pub/Sub). Equivalents des endpoints Microsoft mais pour Gmail.
+
+@router.post("/admin/gmail-watches/ensure-now")
+def admin_gmail_watches_ensure_now(
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Declenche immediatement run_gmail_watch_renewal() pour Gmail.
+
+    Equivalent du cron quotidien (6h UTC) mais a la demande. Cree les
+    watches manquants et renouvelle ceux qui expirent dans <2 jours.
+
+    Reservé super_admin.
+    """
+    try:
+        import os
+        topic = os.getenv("GMAIL_PUBSUB_TOPIC", "")
+        if not topic:
+            return {
+                "status": "no_topic",
+                "message": (
+                    "GMAIL_PUBSUB_TOPIC non defini en env Railway. "
+                    "Setup Google Cloud Pub/Sub requis avant. "
+                    "Voir docs/audit_connexions_fraicheur_06mai.md."
+                ),
+            }
+
+        from app.jobs.mail_gmail_watch import run_gmail_watch_renewal
+        from app.database import get_pg_conn
+        import time
+
+        # Snapshot avant
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT connection_id FROM connection_health
+                WHERE metadata::text ILIKE '%watch_expiration_ms%'
+            """)
+            watches_before = set(r[0] for r in cur.fetchall())
+
+        started = time.time()
+        run_gmail_watch_renewal()
+        duration_ms = int((time.time() - started) * 1000)
+
+        # Snapshot apres
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT ch.connection_id, tc.label, tc.connected_email,
+                       ch.metadata
+                FROM connection_health ch
+                LEFT JOIN tenant_connections tc ON tc.id = ch.connection_id
+                WHERE tc.tool_type = 'gmail'
+                  AND ch.metadata::text ILIKE '%watch_expiration_ms%'
+                ORDER BY ch.connection_id
+            """)
+            watches_after_raw = cur.fetchall()
+            watches_after = set(r[0] for r in watches_after_raw)
+
+        new_watches = watches_after - watches_before
+
+        from datetime import datetime, timezone
+        watches_list = []
+        for r in watches_after_raw:
+            cid, label, email, metadata = r
+            md = metadata if isinstance(metadata, dict) else {}
+            exp_ms = int(md.get("watch_expiration_ms", 0))
+            exp_iso = None
+            if exp_ms > 0:
+                exp_iso = datetime.fromtimestamp(exp_ms / 1000, tz=timezone.utc).isoformat()
+            watches_list.append({
+                "connection_id": cid,
+                "label": label,
+                "email": email,
+                "history_id": md.get("watch_history_id"),
+                "expires_at": exp_iso,
+            })
+
+        return {
+            "status": "ok",
+            "duration_ms": duration_ms,
+            "topic": topic,
+            "watches_total": len(watches_list),
+            "watches_new": list(new_watches),
+            "watches": watches_list,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Echec gmail_watch_renewal : {str(e)[:200]}")
+
+
+@router.post("/admin/gmail-watches/test/{connection_id}")
+def admin_gmail_watch_test(
+    connection_id: int,
+    request: Request,
+    _: dict = Depends(require_admin),
+):
+    """Tente de setup une watch Gmail pour une connexion specifique.
+
+    Retourne le detail de la reponse Gmail API + l identite reelle
+    du token via /profile (equivalent /me Microsoft).
+    """
+    try:
+        import os, requests
+        from app.database import get_pg_conn
+        from app.connection_token_manager import get_connection_token
+        from app.jobs.mail_gmail_watch import setup_gmail_watch
+
+        topic = os.getenv("GMAIL_PUBSUB_TOPIC", "")
+        if not topic:
+            raise HTTPException(
+                400,
+                "GMAIL_PUBSUB_TOPIC non defini - setup GCP requis avant"
+            )
+
+        # Recup info connexion
+        with get_pg_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT tc.tool_type, tc.label, tc.connected_email, tc.tenant_id,
+                       ca.username
+                FROM tenant_connections tc
+                LEFT JOIN connection_assignments ca ON ca.connection_id = tc.id
+                WHERE tc.id = %s LIMIT 1
+            """, (connection_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(404, f"Connexion #{connection_id} introuvable")
+            tool_type, label, connected_email, tenant_id, username = row
+
+        if tool_type not in ("gmail", "google"):
+            raise HTTPException(
+                400,
+                f"Connexion #{connection_id} de type '{tool_type}' - les "
+                f"watches Gmail ne s appliquent qu aux types gmail/google"
+            )
+
+        # Token frais (refresh automatique)
+        token = get_connection_token(
+            username=username,
+            tool_type="gmail",
+            tenant_id=tenant_id,
+            email_hint=connected_email,
+        )
+        if not token:
+            raise HTTPException(500, "Pas de token disponible apres refresh")
+
+        # Identite reelle du token via /profile
+        profile_resp = requests.get(
+            "https://gmail.googleapis.com/gmail/v1/users/me/profile",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=15,
+        )
+        profile_data = {}
+        if profile_resp.status_code == 200:
+            profile_data = profile_resp.json()
+
+        # Tenter le setup_gmail_watch
+        result = setup_gmail_watch(token=token, connection_id=connection_id)
+
+        return {
+            "connection_id": connection_id,
+            "label": label,
+            "expected_email": connected_email,
+            "tool_type": tool_type,
+            "username_assigned": username,
+            "topic_configured": topic,
+            "token_real_account": {
+                "emailAddress": profile_data.get("emailAddress"),
+                "messagesTotal": profile_data.get("messagesTotal"),
+                "threadsTotal": profile_data.get("threadsTotal"),
+            },
+            "profile_call_status": profile_resp.status_code,
+            "profile_call_error": profile_resp.text[:300] if profile_resp.status_code != 200 else None,
+            "watch_setup_status": result.get("status"),
+            "watch_setup_detail": result,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"Erreur test : {str(e)[:200]}")

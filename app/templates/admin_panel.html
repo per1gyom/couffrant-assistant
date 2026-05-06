@@ -280,6 +280,28 @@
     </div>
     <div id="webhook-ensure-result" style="margin-top:16px"></div>
   </div>
+
+  <div class="profile-card" style="max-width:720px;margin-top:16px">
+    <div class="profile-section-title">📨 Webhooks temps reel Gmail (Pub/Sub)</div>
+    <p style="color:#6b7280;font-size:13px;line-height:1.55;margin:8px 0 14px 0">
+      Pour les boites <strong>Gmail</strong>, on utilise Google Cloud
+      Pub/Sub : Gmail publie une notification dans un topic, qui POST
+      sur Raya. Permet de detecter les nouveaux mails en temps reel
+      sans attendre le polling. Les watches expirent au bout de 7 jours
+      max et sont renouveles automatiquement chaque jour a 6h.
+      <br><br>
+      Necessite un setup Google Cloud one-shot (topic + subscription
+      + permissions IAM). Une fois le setup fait + variables Railway
+      configurees, ce bouton declenche immediatement la creation/
+      renouvellement des watches sur toutes les boites Gmail
+      connectees.
+    </p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">
+      <button class="btn btn-primary" onclick="triggerGmailWatchEnsure()">🔄 Verifier / Creer les watches Gmail maintenant</button>
+      <button class="btn btn-ghost" onclick="testGmailWatchConn4()" style="margin-left:8px">🔬 Test diagnostic conn=4 (per1.guillaume@gmail.com)</button>
+    </div>
+    <div id="gmail-watch-result" style="margin-top:16px"></div>
+  </div>
 </section>
 
 <!-- CORBEILLE — comptes soft-deletés -->
@@ -606,6 +628,92 @@ async function triggerWebhookEnsure(){
     } else {
       html += '<div style="color:var(--text3);font-size:13px">Aucun abonnement actif. Cela peut etre normal si aucune boite Microsoft n est connectee.</div>';
     }
+    resultDiv.innerHTML = html;
+  }catch(e){
+    resultDiv.innerHTML = '<div class="alert err" style="display:block">❌ Erreur reseau : ' + e.message + '</div>';
+  }
+}
+
+// ==== Maintenance : Gmail Pub/Sub watches ====
+async function triggerGmailWatchEnsure(){
+  const resultDiv = document.getElementById('gmail-watch-result');
+  resultDiv.innerHTML = '<div style="color:#6b7280;font-size:13px"><span class="loader"></span> Verification en cours (peut prendre 5-30 sec si nouvelles watches a creer)...</div>';
+  try{
+    const r = await fetch('/admin/gmail-watches/ensure-now', {method:'POST', credentials:'include'});
+    if(!r.ok){
+      const errTxt = await r.text();
+      resultDiv.innerHTML = '<div class="alert err" style="display:block">❌ Echec : ' + errTxt.substring(0, 200) + '</div>';
+      return;
+    }
+    const d = await r.json();
+
+    if(d.status === 'no_topic'){
+      resultDiv.innerHTML = '<div class="alert" style="display:block;background:rgba(255,170,0,0.12);color:#ffaa00;border:1px solid rgba(255,170,0,0.3)">⚠️ ' + d.message + '</div>';
+      return;
+    }
+
+    let html = '<div class="alert ok" style="display:block;margin-bottom:12px">';
+    html += '✅ Verification terminee en ' + d.duration_ms + 'ms';
+    html += ' — ' + d.watches_total + ' watch(s) actif(s) au total';
+    if(d.watches_new && d.watches_new.length > 0){
+      html += ' — <strong>' + d.watches_new.length + ' nouvelle(s) cree(s)</strong>';
+    }
+    html += '</div>';
+
+    if(d.watches && d.watches.length > 0){
+      html += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+      html += '<thead><tr style="background:var(--bg2)">';
+      html += '<th style="padding:6px;text-align:left;border-bottom:1px solid var(--border)">Boite</th>';
+      html += '<th style="padding:6px;text-align:left;border-bottom:1px solid var(--border)">Email</th>';
+      html += '<th style="padding:6px;text-align:left;border-bottom:1px solid var(--border)">History ID</th>';
+      html += '<th style="padding:6px;text-align:left;border-bottom:1px solid var(--border)">Expire</th>';
+      html += '</tr></thead><tbody>';
+      for(const w of d.watches){
+        const isNew = d.watches_new && d.watches_new.includes(w.connection_id);
+        const flag = isNew ? '🆕 ' : '';
+        const expDate = w.expires_at ? new Date(w.expires_at) : null;
+        const expStr = expDate ? expDate.toLocaleString('fr-FR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}) : '?';
+        html += '<tr><td style="padding:6px;border-bottom:1px solid var(--border)">' + flag + (w.label || 'conn=' + w.connection_id) + '</td>';
+        html += '<td style="padding:6px;border-bottom:1px solid var(--border);color:var(--text3)">' + (w.email || '-') + '</td>';
+        html += '<td style="padding:6px;border-bottom:1px solid var(--border);color:var(--text3);font-family:var(--mono);font-size:10px">' + (w.history_id || '-') + '</td>';
+        html += '<td style="padding:6px;border-bottom:1px solid var(--border);color:var(--text3)">' + expStr + '</td></tr>';
+      }
+      html += '</tbody></table>';
+    } else {
+      html += '<div style="color:var(--text3);font-size:13px">Aucune watch active. Si Pub/Sub est configure, recliquer dans 30 sec (le job fait des appels Google qui peuvent prendre du temps).</div>';
+    }
+    resultDiv.innerHTML = html;
+  }catch(e){
+    resultDiv.innerHTML = '<div class="alert err" style="display:block">❌ Erreur reseau : ' + e.message + '</div>';
+  }
+}
+
+async function testGmailWatchConn4(){
+  const resultDiv = document.getElementById('gmail-watch-result');
+  resultDiv.innerHTML = '<div style="color:#6b7280;font-size:13px"><span class="loader"></span> Test diagnostic en cours (3-10 sec)...</div>';
+  try{
+    const r = await fetch('/admin/gmail-watches/test/4', {method:'POST', credentials:'include'});
+    const d = await r.json();
+    let html = '<div style="font-family:var(--mono);font-size:11px;background:#1a1a1a;padding:12px;border-radius:6px;border:1px solid var(--border);max-height:600px;overflow:auto">';
+    html += '<div style="color:#14b866;margin-bottom:8px">━━━ Diagnostic conn=4 (per1.guillaume@gmail.com) ━━━</div>';
+    html += '<div><strong>Email attendu :</strong> ' + (d.expected_email || '?') + '</div>';
+    html += '<div><strong>Topic configure :</strong> ' + (d.topic_configured || '?') + '</div>';
+    html += '<div style="margin-top:10px;color:#ffaa00">━━━ COMPTE REEL DU TOKEN (appel /profile) ━━━</div>';
+    html += '<div><strong>HTTP /profile :</strong> ' + (d.profile_call_status || '?') + '</div>';
+    if(d.token_real_account){
+      html += '<div><strong>emailAddress  :</strong> ' + (d.token_real_account.emailAddress || '(null)') + '</div>';
+      html += '<div><strong>messagesTotal :</strong> ' + (d.token_real_account.messagesTotal || '(null)') + '</div>';
+    }
+    if(d.profile_call_error) html += '<div style="color:#e14747"><strong>Erreur /profile :</strong> ' + d.profile_call_error + '</div>';
+    html += '<div style="margin-top:10px;color:#ffaa00">━━━ SETUP GMAIL WATCH ━━━</div>';
+    const okWatch = d.watch_setup_status === 'ok';
+    html += '<div><strong>Status :</strong> <span style="color:' + (okWatch?"#14b866":"#e14747") + '">' + (d.watch_setup_status || '?') + '</span></div>';
+    if(okWatch){
+      html += '<div style="color:#14b866;margin-top:6px">✅ Watch creee !</div>';
+    }
+    html += '<div style="margin-top:6px"><strong>Detail :</strong></div>';
+    html += '<pre style="margin:4px 0 0 0;white-space:pre-wrap;word-break:break-word">' + JSON.stringify(d.watch_setup_detail, null, 2) + '</pre>';
+    html += '</div>';
     resultDiv.innerHTML = html;
   }catch(e){
     resultDiv.innerHTML = '<div class="alert err" style="display:block">❌ Erreur reseau : ' + e.message + '</div>';
