@@ -114,17 +114,28 @@ def admin_oauth_microsoft_start(
     from app.config import GRAPH_SCOPES
     redirect_uri = f"{_RETURN_URL}/auth/connection/microsoft/callback"
     msal_app = build_msal_app()
-    # prompt="select_account" force l ecran de choix de compte Microsoft.
-    # Sans ce parametre, Microsoft reutilise silencieusement la session SSO
-    # active dans le navigateur (cookie de l admin) et stocke un token
-    # pointant vers la mauvaise boite. Bug constate le 28/04 sur la
-    # tentative de connexion contact@couffrant-solar.fr (la boite Guillaume
-    # etait deja loggee, le flow a abouti silencieusement avec son token).
+    # prompt="login" force Microsoft a redemander le mot de passe meme si
+    # une session SSO est active dans le navigateur. Plus robuste que
+    # "select_account" (utilise jusqu au 06/05) qui pouvait etre ignore par
+    # Microsoft quand un compte etait deja loggue avec consent valide :
+    # le flow aboutissait silencieusement avec le mauvais token.
+    #
+    # HISTORIQUE :
+    # - 28/04/2026 : bug initial sur la connexion de contact@couffrant-solar.fr
+    #   (la boite guillaume@ etait deja loggee, le flow a abouti
+    #   silencieusement avec son token).
+    # - Fix initial : prompt="select_account". Mais Microsoft fait quand
+    #   meme du SSO silencieux dans certains cas (quand le consent
+    #   precedent est encore valide).
+    # - 06/05/2026 : Guillaume tente de reconnecter contact@, la page se
+    #   ferme sans demander de code -> bug recurrent.
+    # - Fix definitif : prompt="login" force la re-saisie du mot de passe
+    #   systematique. Plus jamais de SSO silencieux.
     auth_url = msal_app.get_authorization_request_url(
         scopes=GRAPH_SCOPES,
         redirect_uri=redirect_uri,
         state=str(connection_id),
-        prompt="select_account",
+        prompt="login",
     )
     return RedirectResponse(auth_url)
 
